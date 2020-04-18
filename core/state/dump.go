@@ -105,6 +105,12 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, err
 		}
+		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, k)
+		if err != nil {
+			return false, err
+		}
+		acc.Root = common.BytesToHash(root)
+
 		var code []byte
 
 		if !acc.IsEmptyCodeHash() {

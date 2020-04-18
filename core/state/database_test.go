@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/state/contracts"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -958,12 +960,15 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	addrHash := crypto.Keccak256(contractAddress[:])
-	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
 	var acc accounts.Account
-	err = acc.DecodeForStorage(v)
+	ok, err := rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !ok {
+		t.Fatal(errors.New("acc not found"))
+	}
+
 	if acc.Incarnation != state.FirstContractIncarnation {
 		t.Fatal("Incorrect incarnation", acc.Incarnation)
 	}
@@ -984,10 +989,12 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
-	v, _ = db.Get(dbutils.AccountsBucket, addrHash)
-	err = acc.DecodeForStorage(v)
+	ok, err = rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal(errors.New("acc not found"))
 	}
 	if acc.Incarnation != state.FirstContractIncarnation {
 		t.Fatal("Incorrect incarnation", acc.Incarnation)
@@ -1118,14 +1125,13 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	addrHash := crypto.Keccak256(contractAddress[:])
-	v, err := db.Get(dbutils.AccountsBucket, addrHash)
+	var acc accounts.Account
+	ok, err := rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var acc accounts.Account
-	err = acc.DecodeForStorage(v)
-	if err != nil {
-		t.Fatal(err)
+	if !ok {
+		t.Fatal(errors.New("acc not found"))
 	}
 	if acc.Incarnation != state.FirstContractIncarnation {
 		t.Fatal("wrong incarnation")
@@ -1135,14 +1141,12 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v, err = db.Get(dbutils.AccountsBucket, addrHash)
+	ok, err = rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	err = acc.DecodeForStorage(v)
-	if err != nil {
-		t.Fatal(err)
+	if !ok {
+		t.Fatal(errors.New("acc not found"))
 	}
 	if acc.Incarnation != state.NonContractIncarnation {
 		t.Fatal("wrong incarnation", acc.Incarnation)

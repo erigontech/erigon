@@ -1,13 +1,11 @@
 package accounts
 
 import (
-	"bytes"
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common/pool"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -272,10 +270,6 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 
 	if dst.CodeHash != src.CodeHash {
 		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
-	}
-
-	if !bytes.Equal(dst.Root.Bytes(), src.Root.Bytes()) {
-		t.Fatal("cant decode the account Root", src.Root, dst.Root)
 	}
 
 	if dst.Balance.Cmp(&src.Balance) != 0 {

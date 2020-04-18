@@ -170,12 +170,21 @@ func (tr *ResolverStateful) RebuildTrie(
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
 
+	var getAccRoot = func(accHash []byte) ([]byte, error) {
+		val, err := db.Get(dbutils.IntermediateTrieHashBucket, accHash)
+		return val, err
+	}
+
+	var walkerAccounts = func(keyIdx int, k []byte, v []byte) error {
+		return tr.WalkerAccounts(keyIdx, k, v, getAccRoot)
+	}
+
 	var err error
 	if accounts {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
+			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, walkerAccounts)
 		}
 	} else {
 		if historical {
@@ -214,16 +223,20 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 	return nil
 }
 
-func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte) error {
-	return tr.Walker(true, keyIdx, k, v)
+func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, getAccRoot func(accHash []byte) ([]byte, error)) error {
+	root, err := getAccRoot(k)
+	if err != nil {
+		return err
+	}
+	return tr.Walker(true, keyIdx, k, v, root)
 }
 
 func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error {
-	return tr.Walker(false, keyIdx, k, v)
+	return tr.Walker(false, keyIdx, k, v, nil)
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte) error {
+func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte, accRoot []byte) error {
 	//fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -277,6 +290,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byt
 			if err := tr.a.DecodeForStorage(v); err != nil {
 				return err
 			}
+			tr.a.Root = common.BytesToHash(accRoot)
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.fieldSet = AccountFieldSetNotContract
 			} else {
@@ -289,7 +303,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byt
 				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
-				if err := tr.hb.hash(tr.a.Root[:]); err != nil {
+				if err := tr.hb.hash(accRoot); err != nil {
 					return err
 				}
 			}
