@@ -48,3 +48,5 @@ profile.cov
 
 **/yarn-error.log
 /timings.txt
+right_*.txt
+root_*.txt
