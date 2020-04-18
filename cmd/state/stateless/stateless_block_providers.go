@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
@@ -101,6 +102,7 @@ type ExportFileBlockProvider struct {
 	stream    *rlp.Stream
 	engine    consensus.Engine
 	headersDb ethdb.Database
+	batch     ethdb.DbWithPendingMutations
 	fh        io.Closer
 }
 
@@ -120,12 +122,43 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 	stream := rlp.NewStream(reader, 0)
 	engine := ethash.NewFullFaker()
 	// keeping all the past block headers in memory
-	headersDb := ethdb.NewMemDatabase()
-	return &ExportFileBlockProvider{stream, engine, headersDb, fh}, nil
+	headersDb := mustCreateTempDatabase()
+	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh}, nil
+}
+
+func getTempFileName() string {
+	tmpfile, err := ioutil.TempFile("", "headers.bolt")
+	if err != nil {
+		panic(fmt.Errorf("failed to create a temp file: %w", err))
+	}
+	tmpfile.Close()
+	fmt.Printf("creating a temp headers db @ %s\n", tmpfile.Name())
+	return tmpfile.Name()
+}
+
+func mustCreateTempDatabase() ethdb.Database {
+	db, err := ethdb.NewBoltDatabase(getTempFileName())
+	if err != nil {
+		panic(fmt.Errorf("failed to create a temp db for headers: %w", err))
+	}
+	return db
 }
 
 func (p *ExportFileBlockProvider) Close() error {
 	return p.fh.Close()
+}
+
+func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
+	if p.batch == nil {
+		p.batch = p.headersDb.NewBatch()
+	}
+
+	rawdb.WriteHeader(context.TODO(), p.batch, h)
+
+	if p.batch.BatchSize() > 1000 {
+		p.batch.Commit()
+		p.batch = nil
+	}
 }
 
 func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
@@ -136,7 +169,7 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 		} else if err != nil {
 			return fmt.Errorf("error fast fwd: %v", err)
 		} else {
-			rawdb.WriteHeader(context.TODO(), p.headersDb, b.Header())
+			p.WriteHeader(b.Header())
 			if b.NumberU64() >= to-1 {
 				return nil
 			}
@@ -152,7 +185,7 @@ func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {
 		return nil, fmt.Errorf("error fast fwd: %v", err)
 	}
 
-	rawdb.WriteHeader(context.TODO(), p.headersDb, b.Header())
+	p.WriteHeader(b.Header())
 	return &b, nil
 }
 
@@ -161,5 +194,8 @@ func (m *ExportFileBlockProvider) Engine() consensus.Engine {
 }
 
 func (m *ExportFileBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	if m.batch != nil {
+		return rawdb.ReadHeader(m.batch, h, i)
+	}
 	return rawdb.ReadHeader(m.headersDb, h, i)
 }
