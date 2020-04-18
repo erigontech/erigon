@@ -17,10 +17,10 @@
 package ethdb
 
 import (
+	//"bytes"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -55,13 +55,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				}
 				return nil
 			}
-			var innerErr error
-			if debug.IsThinHistory() {
-				innerErr = changeset.AccountChangeSetBytes(v).Walk(walker)
-			} else {
-				innerErr = changeset.Walk(v, walker)
-			}
-			if innerErr != nil {
+			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
 				return false, innerErr
 			}
 		}
@@ -90,14 +84,9 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				}
 				return nil
 			}
-			var innerErr error
 			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if debug.IsThinHistory() {
-				innerErr = changeset.StorageChangeSetBytes(v).Walk(walker)
-			} else {
-				innerErr = changeset.Walk(v, walker)
-			}
-			if innerErr != nil {
+
+			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
 				return false, innerErr
 			}
 		}
@@ -118,7 +107,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 }
 
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
-	var keys [][]byte
+	keys := make(map[common.Hash]struct{})
 	startCode := dbutils.EncodeTimestamp(startTimestamp)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		keyTimestamp, _ := dbutils.DecodeTimestamp(k)
@@ -127,17 +116,12 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 			return false, nil
 		}
 
-		walker := func(k, _ []byte) error {
-			keys = append(keys, k)
+		walker := func(addrHash, _ []byte) error {
+			keys[common.BytesToHash(addrHash)] = struct{}{}
 			return nil
 		}
-		var innerErr error
-		if debug.IsThinHistory() {
-			innerErr = changeset.AccountChangeSetBytes(v).Walk(walker)
-		} else {
-			innerErr = changeset.Walk(v, walker)
-		}
-		if innerErr != nil {
+
+		if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
 			return false, innerErr
 		}
 
@@ -152,8 +136,8 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 	accounts := make([]common.Address, len(keys))
 	idx := 0
 
-	for _, key := range keys {
-		value, err := db.Get(dbutils.PreimagePrefix, key)
+	for key := range keys {
+		value, err := db.Get(dbutils.PreimagePrefix, key[:])
 		if err != nil {
 			return nil, fmt.Errorf("could not get preimage for key %x", key)
 		}

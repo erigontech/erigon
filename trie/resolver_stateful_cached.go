@@ -7,13 +7,19 @@ import (
 	"math"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+)
+
+var (
+	trieResolveIHTimer = metrics.NewRegisteredTimer("trie/resolve/ih", nil)
 )
 
 type ResolverStatefulCached struct {
@@ -133,38 +139,12 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 		return true, k1
 	}
 
-	switch cmpWithoutIncarnation(k1, k2) {
+	switch bytes.Compare(k1, k2) {
 	case -1, 0:
 		return true, k1
 	default:
 		return false, k2
 	}
-}
-
-// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
-func cmpWithoutIncarnation(k1, k2 []byte) int {
-	if k1 == nil {
-		return 1
-	}
-
-	if k2 == nil {
-		return -1
-	}
-
-	if len(k2) <= common.HashLength {
-		return bytes.Compare(k1, k2)
-	}
-
-	if len(k2) <= common.HashLength+8 {
-		return bytes.Compare(k1, k2[:common.HashLength])
-	}
-
-	buf := pool.GetBuffer(256)
-	defer pool.PutBuffer(buf)
-	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
-	buf.B = append(buf.B, k2[common.HashLength+8:]...)
-
-	return bytes.Compare(k1, buf.B)
 }
 
 func (tr *ResolverStatefulCached) RebuildTrie(
@@ -173,6 +153,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	accounts bool,
 	historical bool,
 	trace bool) error {
+	defer trieResolveIHTimer.UpdateSince(time.Now())
+
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if db == nil {
 		var b strings.Builder
@@ -249,8 +231,8 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	if tr.trace {
-		fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, kAsNibbles, v, fromCache)
+	if tr.trace && fromCache {
+		fmt.Printf("Walker Cached: blockNr: %t, %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", isAccount, blockNr, keyIdx, kAsNibbles, v, fromCache)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -269,9 +251,6 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
-		if fromCache && skip > common.HashLength*2 {
-			skip -= 16 // no incarnation in hash bucket
-		}
 		tr.succ.Write(kAsNibbles[skip:])
 
 		if !fromCache {
@@ -334,6 +313,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
 	}
+
 	return nil
 }
 
@@ -348,53 +328,29 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	keyAsNibbles := pool.GetBuffer(256)
 	defer pool.PutBuffer(keyAsNibbles)
 
-	startKeyNoInc := pool.GetBuffer(common.HashLength * 2)
-	defer pool.PutBuffer(startKeyNoInc)
-
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 
-	startKeyNoInc.Reset()
-	dbutils.RemoveIncarnationFromKey(startkey, &startKeyNoInc.B)
-	if tr.trace {
-		fmt.Printf("RemoveInc startkey, startKeyNoInc.B = %x, %x\n", startkey, startKeyNoInc.B)
-	}
-
 	err := db.View(func(tx *bolt.Tx) error {
 		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		if cacheBucket == nil {
-			return nil
+		var cache *bolt.Cursor
+		if cacheBucket != nil {
+			cache = cacheBucket.Cursor()
 		}
-		cache := cacheBucket.Cursor()
-
-		b := tx.Bucket(bucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Bucket(bucket).Cursor()
 
 		k, v := c.Seek(startkey)
-		cacheK, cacheV := cache.Seek(startKeyNoInc.B)
+		var cacheK, cacheV []byte
+		if cache != nil {
+			cacheK, cacheV = cache.Seek(startkey)
+		}
 
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			if tr.trace {
 				fmt.Printf("For loop: %x, %x\n", cacheK, k)
-			}
-
-			// Special case: self-destructed accounts.
-			// self-destructed accounts may be marked in IH bucket by empty value
-			// in this case: skip all IH keys of given prefix
-			if cacheV != nil && len(cacheV) == 0 {
-				next, ok := nextSubtree(cacheK)
-				if !ok { // no siblings left
-					cacheK, cacheV = nil, nil
-					continue
-				}
-				cacheK, cacheV = cache.Seek(next)
-				continue
 			}
 
 			// for Address bucket, skip cache keys longer than 31 bytes
@@ -409,42 +365,12 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					startKeyIndex := 0
-					minKeyIndex := 0
-					startKeyIndexIsBigger := false
-
-					if fromCache && fixedbytes > 32 && fixedbytes <= 40 { // compare only part before incarnation
-						startKeyIndex = 31
-						minKeyIndex = minInt(len(minKey), 31)
-						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
-						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
-						if tr.trace {
-							fmt.Printf("cmp1 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
-						}
-					} else if fromCache && fixedbytes > 40 { // compare without incarnation
-						startKeyIndex = fixedbytes - 1 // will use it on startKey (which has incarnation) later
-						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
-						startKeyIndexIsBigger = startKeyIndex-8 > minKeyIndex
-						cmp = bytes.Compare(minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex-8])
-						if tr.trace {
-							fmt.Printf("cmp2 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex-8], startKeyNoInc.B, cmp, startKeyIndex-8, len(startKeyNoInc.B))
-						}
-					} else if fromCache {
-						startKeyIndex = fixedbytes - 1
-						minKeyIndex = minInt(len(minKey), fixedbytes-1)
-						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
-						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
-						if tr.trace {
-							fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
-						}
-					} else {
-						startKeyIndex = fixedbytes - 1
-						minKeyIndex = fixedbytes - 1
-						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
-						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
-						if tr.trace {
-							fmt.Printf("cmp4 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
-						}
+					startKeyIndex := fixedbytes - 1
+					minKeyIndex := minInt(len(minKey), fixedbytes-1)
+					startKeyIndexIsBigger := startKeyIndex > minKeyIndex
+					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					if tr.trace {
+						fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
 					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
@@ -466,10 +392,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
-						cacheK, cacheV = cache.SeekTo(startKeyNoInc.B)
+						cacheK, cacheV = cache.SeekTo(startkey)
 						if tr.trace {
 							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
-							fmt.Printf("[fromCache = %t], cache.SeekTo(%x) = %x\n", fromCache, startKeyNoInc.B, cacheK)
+							fmt.Printf("[fromCache = %t], cache.SeekTo(%x) = %x\n", fromCache, startkey, cacheK)
 							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
 						// for Address bucket, skip cache keys longer than 31 bytes
@@ -493,22 +419,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						}
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
-						startKeyNoInc.Reset()
-						dbutils.RemoveIncarnationFromKey(startkey, &startKeyNoInc.B)
-						if tr.trace {
-							fmt.Printf("RemoveInc2 startkey, startKeyNoInc.B = %x, %x\n", startkey, startKeyNoInc.B)
-						}
 					}
 				}
 			}
 
+			keyAsNibbles.Reset()
+			DecompressNibbles(minKey, &keyAsNibbles.B)
+
 			if !fromCache {
-				if len(v) > 0 {
-					keyAsNibbles.Reset()
-					DecompressNibbles(minKey, &keyAsNibbles.B)
-					if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
-						return err
-					}
+				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
+					return err
 				}
 				k, v = c.Next()
 				continue
@@ -519,8 +439,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 			currentRs := tr.rss[rangeIdx]
-			keyAsNibbles.Reset()
-			DecompressNibbles(minKey, &keyAsNibbles.B)
 
 			if len(keyAsNibbles.B) < currentReq.extResolvePos {
 				cacheK, cacheV = cache.Next() // go to children, not to sibling
@@ -538,7 +456,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			}
 
 			// skip subtree
-
 			next, ok := nextSubtree(cacheK)
 			if !ok { // no siblings left
 				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.
@@ -548,21 +465,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				continue
 			}
 
-			if isAccountBucket || len(cacheK) <= common.HashLength {
-				k, v = c.Seek(next)
-			} else {
-				// skip subtree - can't .Seek because storage bucket has incarnation in keys
-				for k, v = c.Next(); k != nil; k, v = c.Next() {
-					matchAcc := bytes.HasPrefix(k[:common.HashLength], next[:common.HashLength])
-					// don't check incarnation ...
-					matchStorage := bytes.HasPrefix(k[common.HashLength+8:], next[common.HashLength:])
-
-					if matchAcc && matchStorage {
-						break
-					}
-				}
-			}
-
+			k, v = c.Seek(next)
 			cacheK, cacheV = cache.Seek(next)
 		}
 		return nil

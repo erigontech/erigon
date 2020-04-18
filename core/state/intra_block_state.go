@@ -677,7 +677,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
-		sdb.setError(err)
+		sdb.setErrorUnsafe(err)
 		return nil
 	}
 	if account == nil {
@@ -729,7 +729,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	var original *accounts.Account
 	if previous == nil {
 		account = &accounts.Account{}
-		account.Root.SetBytes(trie.EmptyRoot[:])
 		if obj := sdb.stateObjects[addr]; obj != nil && obj.deleted {
 			original = &obj.original
 		} else {
@@ -740,6 +739,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		account.Incarnation = NonContractIncarnation
 		original = &previous.original
 	}
+	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {

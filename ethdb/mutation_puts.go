@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
 )
 
@@ -28,7 +27,7 @@ func (p puts) set(bucket, key, value []byte) {
 		bucketPuts = make(putsBucket)
 		p.mp[string(bucket)] = bucketPuts
 	}
-	if debug.IsThinHistory() && dbutils.IsIndexBucket(bucket) {
+	if dbutils.IsIndexBucket(bucket) {
 		keyWithoutID, ID := keyAndChunkID(key)
 		p.addChunkID(keyWithoutID, ID)
 	}
@@ -154,7 +153,7 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 }
 
 func keyAndChunkID(key []byte) ([]byte, uint64) {
-	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2+common.IncarnationLength+8 {
+	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2+8 {
 		return key[:len(key)-8], ^binary.BigEndian.Uint64(key[len(key)-8:])
 	}
 	panic(common.Bytes2Hex(key))

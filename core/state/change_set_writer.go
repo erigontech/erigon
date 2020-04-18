@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
@@ -54,7 +53,7 @@ func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if !accountsEqual(original, account) || w.storageChanged[address] {
-		w.accountChanges[address] = originalAccountData(original, debug.IsThinHistory())
+		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
 	return nil
 }

@@ -2006,6 +2006,31 @@ func indexSize(chaindata string) {
 	fmt.Println("storage over 4096 index:", storageOver4096)
 }
 
+func getModifiedAccounts(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
+	check(err)
+	fmt.Printf("Len(addrs)=%d\n", len(addrs))
+}
+
+func walkOverStorage(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	var startkey [32 + 8 + 32]byte
+	h, err := common.HashData(common.FromHex("0x109c4f2ccc82c4d77bde15f306707320294aea3f"))
+	check(err)
+	copy(startkey[:], h[:])
+	binary.BigEndian.PutUint64(startkey[32:], ^uint64(1))
+	fmt.Printf("startkey %x\n", startkey)
+	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey[:], 8*(32+8), 50796, func(k []byte, v []byte) (bool, error) {
+		fmt.Printf("%x: %x\n", k, v)
+		return true, nil
+	})
+	check(err)
+	fmt.Printf("Success\n")
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2128,5 +2153,11 @@ func main() {
 	}
 	if *action == "indexSize" {
 		indexSize(*chaindata)
+	}
+	if *action == "modiAccounts" {
+		getModifiedAccounts(*chaindata)
+	}
+	if *action == "storage" {
+		walkOverStorage(*chaindata)
 	}
 }

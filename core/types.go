@@ -19,6 +19,7 @@ package core
 import (
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -31,9 +32,11 @@ type Validator interface {
 	// ValidateBody validates the given block's content.
 	ValidateBody(ctx context.Context, block *types.Block) error
 
-	// ValidateState validates the given statedb and optionally the receipts and
-	// gas used.
-	ValidateState(block, parent *types.Block, state *state.IntraBlockState, tds *state.TrieDbState, receipts types.Receipts, usedGas uint64) error
+	// ValidateGasAndRoot validates the amount of used gas and the state root.
+	ValidateGasAndRoot(block *types.Block, root common.Hash, usedGas uint64, tds *state.TrieDbState) error
+
+	// ValidateReceipts validates block receipts.
+	ValidateReceipts(block *types.Block, receipts types.Receipts) error
 }
 
 // Prefetcher is an interface for pre-caching transaction signatures and state.
@@ -46,5 +49,6 @@ type Prefetcher interface {
 
 // Processor is an interface for processing blocks using a given initial state.
 type Processor interface {
-	Process(block *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
+	PreProcess(block *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (receipts types.Receipts, allLogs []*types.Log, usedGas uint64, root common.Hash, err error)
+	PostProcess(block *types.Block, tds *state.TrieDbState, receipts types.Receipts) error
 }

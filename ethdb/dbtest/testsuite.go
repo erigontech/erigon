@@ -22,6 +22,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -256,7 +257,7 @@ func iterateKeys(db ethdb.Database) []string {
 func iterateKeysFromKey(db ethdb.Database, fromKey []byte) []string {
 	keys := []string{}
 	db.Walk(nil, fromKey, 0, func(key, value []byte) (bool, error) {
-		keys = append(keys, string(key))
+		keys = append(keys, string(common.CopyBytes(key)))
 		return true, nil
 	})
 	sort.Strings(keys)

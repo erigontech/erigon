@@ -20,12 +20,20 @@ var (
 	statelessResolver bool
 	witnessDatabase   string
 	writeHistory      bool
+	blockSource       string
 )
 
+func withBlocksource(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&blockSource, "blockSource", "", "Path to the block source: `db:///path/to/chaindata` or `exportfile:///path/to/my/exportfile`")
+	if err := cmd.MarkFlagRequired("blockSource"); err != nil {
+		panic(err)
+	}
+}
+
 func init() {
-	withChaindata(statelessCmd)
 	withStatsfile(statelessCmd)
 	withBlock(statelessCmd)
+	withBlocksource(statelessCmd)
 
 	statelessCmd.Flags().StringVar(&statefile, "statefile", "state", "path to the file where the state will be periodically written during the analysis")
 	statelessCmd.Flags().Uint32Var(&triesize, "triesize", 4*1024*1024, "maximum size of a trie in bytes")
@@ -52,7 +60,6 @@ var statelessCmd = &cobra.Command{
 	Use:   "stateless",
 	Short: "Stateless Ethereum prototype",
 	RunE: func(cmd *cobra.Command, args []string) error {
-
 		createDb := func(path string) (ethdb.Database, error) {
 			return ethdb.NewBoltDatabase(path)
 		}
@@ -61,7 +68,7 @@ var statelessCmd = &cobra.Command{
 		stateless.Stateless(
 			ctx,
 			block,
-			chaindata,
+			blockSource,
 			statefile,
 			triesize,
 			preroot,

@@ -17,7 +17,7 @@ func RegisterIntermediateHashAPI(router *gin.RouterGroup, e *Env) error {
 }
 
 func (e *Env) FindIntermediateHash(c *gin.Context) {
-	results, err := findIntermediateHashByPrefix(c.Query("prefix"), c.Query("tombstones") == "on", e.DB)
+	results, err := findIntermediateHashByPrefix(c.Query("prefix"), e.DB)
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return
@@ -30,7 +30,7 @@ type IntermediateHashResponse struct {
 	Value  string `json:"value"`
 }
 
-func findIntermediateHashByPrefix(prefixS string, tombstones bool, remoteDB ethdb.KV) ([]*IntermediateHashResponse, error) {
+func findIntermediateHashByPrefix(prefixS string, remoteDB ethdb.KV) ([]*IntermediateHashResponse, error) {
 	var results []*IntermediateHashResponse
 	prefix := common.FromHex(prefixS)
 	if err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
@@ -40,13 +40,6 @@ func findIntermediateHashByPrefix(prefixS string, tombstones bool, remoteDB ethd
 		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
-			}
-
-			if tombstones && len(v) > 0 {
-				continue
-			}
-			if !tombstones && len(v) == 0 {
-				continue
 			}
 
 			results = append(results, &IntermediateHashResponse{

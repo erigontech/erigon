@@ -19,6 +19,7 @@ package eth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -182,26 +183,49 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 }
 
 func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	if number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash); number != nil {
-		block := rawdb.ReadBlock(b.eth.chainDb, hash, *number)
-		dbstate := state.NewDbState(b.eth.chainDb, *number-1)
-		statedb := state.New(dbstate)
-		header := block.Header()
-		var receipts types.Receipts
-		var usedGas = new(uint64)
-		var gp = new(core.GasPool).AddGas(block.GasLimit())
-		vmConfig := vm.Config{}
-		for i, tx := range block.Transactions() {
-			statedb.Prepare(tx.Hash(), block.Hash(), i)
-			receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
-			if err != nil {
-				return nil, err
-			}
-			receipts = append(receipts, receipt)
-		}
-		return receipts, nil
+	number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash)
+	if number == nil {
+		return nil, nil
 	}
-	return nil, nil
+
+	block := rawdb.ReadBlock(b.eth.chainDb, hash, *number)
+
+	if cached := b.tryGetReceiptsFromDb(block); cached != nil {
+		return cached, nil
+	}
+
+	return b.getReceiptsByReApplyingTransactions(block, *number)
+}
+
+func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
+	dbstate := state.NewDbState(b.eth.chainDb, number-1)
+	statedb := state.New(dbstate)
+	header := block.Header()
+	var receipts types.Receipts
+	var usedGas = new(uint64)
+	var gp = new(core.GasPool).AddGas(block.GasLimit())
+	vmConfig := vm.Config{}
+	for i, tx := range block.Transactions() {
+		statedb.Prepare(tx.Hash(), block.Hash(), i)
+
+		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+		if err != nil {
+			return nil, err
+		}
+
+		receipts = append(receipts, receipt)
+	}
+
+	return receipts, nil
+}
+
+func (b *EthAPIBackend) tryGetReceiptsFromDb(block *types.Block) types.Receipts {
+	return rawdb.ReadReceipts(
+		b.eth.chainDb,
+		block.Hash(),
+		block.NumberU64(),
+		b.eth.blockchain.Config(),
+	)
 }
 
 func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -211,7 +235,7 @@ func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*typ
 	}
 	receipts, err := b.GetReceipts(ctx, hash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
 	if receipts == nil {
 		return nil, nil

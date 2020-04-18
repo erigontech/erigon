@@ -148,11 +148,6 @@ func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, ti
 	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 
-func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.MultiWalkAsOf(bucket, hBucket, startkeys, fixedbits, timestamp, walker)
-}
-
 func (m *mutation) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
 	return RewindData(m, timestampSrc, timestampDst, df)
 }
@@ -306,10 +301,6 @@ func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedb
 func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.WalkAsOf, 1)
 	return d.Database.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
-}
-func (d *RWCounterDecorator) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	atomic.AddUint64(&d.DBCounterStats.MultiWalkAsOf, 1)
-	return d.Database.MultiWalkAsOf(bucket, hBucket, startkeys, fixedbits, timestamp, walker)
 }
 func (d *RWCounterDecorator) Delete(bucket, key []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Delete, 1)

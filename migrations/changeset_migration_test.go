@@ -2,12 +2,13 @@ package migrations
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"testing"
 )
 
 func TestChangeSetMigrationSuccess(t *testing.T) {
@@ -19,7 +20,7 @@ func TestChangeSetMigrationSuccess(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), enc)
+			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), common.CopyBytes(enc))
 			if err != nil {
 				t.Error(err)
 			}
@@ -29,7 +30,7 @@ func TestChangeSetMigrationSuccess(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.StorageHistoryBucket), enc)
+			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.StorageHistoryBucket), common.CopyBytes(enc))
 			if err != nil {
 				t.Error(err)
 			}
@@ -105,7 +106,7 @@ func TestChangeSetMigrationThinHistorySuccess(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), enc)
+			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), common.CopyBytes(enc))
 			if err != nil {
 				t.Error(err)
 			}
@@ -116,7 +117,7 @@ func TestChangeSetMigrationThinHistorySuccess(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.StorageHistoryBucket), enc)
+			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.StorageHistoryBucket), common.CopyBytes(enc))
 			if err != nil {
 				t.Error(err)
 			}
@@ -196,12 +197,12 @@ func TestChangeSetMigrationFail(t *testing.T) {
 		}
 		if i == 25 {
 			//incorrect value
-			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), enc[:5])
+			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), common.CopyBytes(enc[:5]))
 			if err != nil {
 				t.Error(err)
 			}
 		} else {
-			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), enc)
+			err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.AccountsHistoryBucket), common.CopyBytes(enc))
 			if err != nil {
 				t.Error(err)
 			}
@@ -213,7 +214,7 @@ func TestChangeSetMigrationFail(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.StorageHistoryBucket), enc)
+		err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(i)), dbutils.StorageHistoryBucket), common.CopyBytes(enc))
 		if err != nil {
 			t.Error(err)
 		}
@@ -236,7 +237,7 @@ func TestChangeSetMigrationFail(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(25)), dbutils.AccountsHistoryBucket), enc)
+	err = db.Put(ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(uint64(25)), dbutils.AccountsHistoryBucket), common.CopyBytes(enc))
 	if err != nil {
 		t.Error(err)
 	}

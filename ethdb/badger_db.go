@@ -425,10 +425,6 @@ func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits u
 	panic("Not implemented")
 }
 
-func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	panic("Not implemented")
-}
-
 func (db *BadgerDatabase) Keys() ([][]byte, error) {
 	panic("Not implemented")
 }

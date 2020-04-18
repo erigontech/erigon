@@ -10,7 +10,6 @@ import (
 )
 
 func init() {
-	withChaindata(gasLimitsCmd)
 	withRemoteDb(gasLimitsCmd)
 	rootCmd.AddCommand(gasLimitsCmd)
 }

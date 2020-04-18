@@ -280,7 +280,13 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 				traced += uint64(len(txs))
 			}
 			// Generate the next state snapshot fast without tracing
-			_, _, _, err := api.eth.blockchain.Processor().Process(block, statedb, tds, vm.Config{})
+			processor := api.eth.blockchain.Processor()
+			receipts, _, _, _, err := processor.PreProcess(block, statedb, tds, vm.Config{})
+			if err != nil {
+				failed = err
+				break
+			}
+			err = processor.PostProcess(block, tds, receipts)
 			if err != nil {
 				failed = err
 				break

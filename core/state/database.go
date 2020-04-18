@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -306,6 +305,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
 		hashBuilder:       trie.NewHashBuilder(false),
+		incarnationMap:    make(map[common.Hash]uint64),
 	}
 	tds.tMu.Unlock()
 
@@ -704,12 +704,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				continue
 			}
 			alreadyCreated[addrHash] = struct{}{}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				b.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
-			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
-				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
+
 			//fmt.Println("updateTrieRoots del subtree", addrHash.String())
 
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
@@ -738,7 +733,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-						_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -766,48 +760,24 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 
-			if forward || debug.IsThinHistory() {
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.t.DeepHash(addrHash[:])
-					if ok {
-						account.Root = root
-						//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
-					} else {
-						//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
-						account.Root = trie.EmptyRoot
-					}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				ok, root := tds.t.DeepHash(addrHash[:])
+				if ok {
+					account.Root = root
+					//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
+				} else {
+					//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
+					account.Root = trie.EmptyRoot
 				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.t.DeepHash(addrHash[:])
-					if ok {
-						account.Root = root
-						//fmt.Printf("Set %x root for addrHash %x\n", root, addrHash)
-					} else {
-						//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
-						account.Root = trie.EmptyRoot
-					}
-				}
-			} else {
-				// Simply comparing the correctness of the storageRoot computations
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.t.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-					}
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.t.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-					}
+			}
+			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				ok, root := tds.t.DeepHash(addrHash[:])
+				if ok {
+					account.Root = root
+					//fmt.Printf("Set %x root for addrHash %x\n", root, addrHash)
+				} else {
+					//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
+					account.Root = trie.EmptyRoot
 				}
 			}
 		}
@@ -835,7 +805,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
-			_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
@@ -859,6 +828,7 @@ func (tds *TrieDbState) GetBlockNr() uint64 {
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
+	//fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
@@ -873,7 +843,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					return err
 				}
 				// Fetch the code hash
-				if acc.Incarnation > 0 && debug.IsThinHistory() && acc.IsEmptyCodeHash() {
+				if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err == nil {
 						copy(acc.CodeHash[:], codeHash)
 					}
@@ -947,16 +917,15 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 
-	if debug.IsThinHistory() {
-		if len(changedAccounts) > 0 {
-			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
-				indexBytes, getErr := tds.db.GetIndexChunk(dbutils.AccountsHistoryBucket, kk, timestamp)
-				if getErr != nil {
-					if getErr == ethdb.ErrKeyNotFound {
-						return nil
-					}
-					return getErr
+	if len(changedAccounts) > 0 {
+		innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
+			indexBytes, getErr := tds.db.GetIndexChunk(dbutils.AccountsHistoryBucket, kk, timestamp)
+			if getErr != nil {
+				if getErr == ethdb.ErrKeyNotFound {
+					return nil
 				}
+				return getErr
+			}
 
 				index := dbutils.WrapHistoryIndex(indexBytes)
 				chunkKey, err := index.Key(kk)
@@ -1008,34 +977,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 				return err
 			}
 		}
-	} else {
-		if len(changedAccounts) > 0 {
-			innerErr := changeset.Walk(changedAccounts, func(kk, _ []byte) error {
-				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
-				return tds.db.Delete(dbutils.AccountsHistoryBucket, composite)
-			})
 
-			if innerErr != nil {
-				return innerErr
-			}
-			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
-				return err
-			}
-		}
-		if len(changedStorage) > 0 {
-			innerErr := changeset.Walk(changedStorage, func(kk, _ []byte) error {
-				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
-				return tds.db.Delete(dbutils.StorageHistoryBucket, composite)
-			})
-
-			if innerErr != nil {
-				return innerErr
-			}
-			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -1066,7 +1008,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 		return nil, err
 	}
 
-	if tds.historical && debug.IsThinHistory() && a.Incarnation > 0 {
+	if tds.historical && a.Incarnation > 0 {
 		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err == nil {
 			a.CodeHash = common.BytesToHash(codeHash)

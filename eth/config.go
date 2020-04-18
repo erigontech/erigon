@@ -25,8 +25,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -89,14 +87,13 @@ func init() {
 }
 
 type StorageMode struct {
-	History     bool
-	Receipts    bool
-	TxIndex     bool
-	Preimages   bool
-	ThinHistory bool
+	History   bool
+	Receipts  bool
+	TxIndex   bool
+	Preimages bool
 }
 
-var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true, ThinHistory: false}
+var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true}
 
 func (m StorageMode) ToString() string {
 	modeString := ""
@@ -111,9 +108,6 @@ func (m StorageMode) ToString() string {
 	}
 	if m.TxIndex {
 		modeString += "t"
-	}
-	if m.ThinHistory {
-		modeString += "n"
 	}
 	return modeString
 }
@@ -130,18 +124,9 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 			mode.TxIndex = true
 		case 'p':
 			mode.Preimages = true
-		case 'n':
-			mode.ThinHistory = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
-	}
-	if mode.ThinHistory {
-		debug.ThinHistory = true
-	}
-
-	if debug.IsThinHistory() {
-		mode.ThinHistory = true
 	}
 
 	return mode, nil

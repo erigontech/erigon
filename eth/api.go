@@ -438,7 +438,7 @@ func StorageRangeAt(dbstate *state.DbState, contractAddress common.Address, star
 	result := StorageRangeResult{Storage: StorageMap{}}
 	resultCount := 0
 
-	dbstate.ForEachStorage(contractAddress, start, func(key, seckey, value common.Hash) bool {
+	if err := dbstate.ForEachStorage(contractAddress, start, func(key, seckey, value common.Hash) bool {
 		if resultCount < maxResult {
 			result.Storage[seckey] = StorageEntry{Key: &key, Value: value}
 		} else {
@@ -446,7 +446,9 @@ func StorageRangeAt(dbstate *state.DbState, contractAddress common.Address, star
 		}
 		resultCount++
 		return resultCount <= maxResult
-	}, maxResult+1)
+	}, maxResult+1); err != nil {
+		return StorageRangeResult{}, fmt.Errorf("error walking over storage: %v", err)
+	}
 	return result, nil
 }
 

@@ -14,6 +14,8 @@ Z3_sort contract_code_sort;
 Z3_constructor account_constructor;
 // Account type
 Z3_sort account_sort;
+// Ethereum state type (array sort of accounts)
+Z3_sort state_sort;
 
 // Maximum number of terms in the sequence - constant for now to avoid dynamic memory allocation
 #define MAX_TERMS 1024*1024
@@ -82,6 +84,8 @@ void init() {
     Z3_constructor account_constructors[1];
     account_constructors[0] = account_constructor;
     account_sort = Z3_mk_datatype(ctx, Z3_mk_string_symbol(ctx, "account"), 1, account_constructors);
+    // state is the sort of accounts
+    state_sort = Z3_mk_array_sort(ctx, int_sort, account_sort);
 }
 
 // Initialises the sequence with given state root and transaction data

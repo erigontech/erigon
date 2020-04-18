@@ -209,7 +209,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.StorageMode.Receipts,
 		config.StorageMode.TxIndex,
 		config.StorageMode.Preimages,
-		config.StorageMode.ThinHistory,
+		true,
 	)
 	if err != nil {
 		return nil, err
@@ -664,11 +664,6 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 		return err
 	}
 
-	err = setModeOnEmpty(db, dbutils.StorageModeThinHistory, sm.ThinHistory)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -724,7 +719,6 @@ func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
 	if err != nil && err != ethdb.ErrKeyNotFound {
 		return StorageMode{}, err
 	}
-	sm.ThinHistory = len(v) > 0
 
 	return sm, nil
 }

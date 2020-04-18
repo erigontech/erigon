@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -73,11 +72,8 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 	if err := dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
-	if debug.IsThinHistory() {
-		//save contract to codeHash mapping
-		return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, incarnation), codeHash.Bytes())
-	}
-	return nil
+	//save contract to codeHash mapping
+	return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, incarnation), codeHash.Bytes())
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -124,11 +120,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		return err
 	}
 	var accountSerialised []byte
-	if debug.IsThinHistory() {
-		accountSerialised, err = changeset.EncodeAccounts(accountChanges)
-	} else {
-		accountSerialised, err = changeset.EncodeChangeSet(accountChanges)
-	}
+	accountSerialised, err = changeset.EncodeAccounts(accountChanges)
 	if err != nil {
 		return err
 	}
@@ -142,11 +134,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	}
 	var storageSerialized []byte
 	if storageChanges.Len() > 0 {
-		if debug.IsThinHistory() {
-			storageSerialized, err = changeset.EncodeStorage(storageChanges)
-		} else {
-			storageSerialized, err = changeset.EncodeChangeSet(storageChanges)
-		}
+		storageSerialized, err = changeset.EncodeStorage(storageChanges)
 		if err != nil {
 			return err
 		}
@@ -162,43 +150,35 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-
-	if debug.IsThinHistory() {
-		err = dsw.writeIndex(accountChanges, dbutils.AccountsHistoryBucket)
-		if err != nil {
-			return err
-		}
-	} else {
-		for _, change := range accountChanges.Changes {
-			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err = dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err != nil {
-				return err
-			}
-		}
+	err = dsw.writeIndex(accountChanges, dbutils.AccountsHistoryBucket)
+	if err != nil {
+		return err
 	}
+
 	storageChanges, err := dsw.csw.GetStorageChanges()
 	if err != nil {
 		return err
 	}
-	if debug.IsThinHistory() {
-		err = dsw.writeIndex(storageChanges, dbutils.StorageHistoryBucket)
-		if err != nil {
-			return err
-		}
-	} else {
-		for _, change := range storageChanges.Changes {
-			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err = dsw.tds.db.Put(dbutils.StorageHistoryBucket, composite, change.Value); err != nil {
-				return err
-			}
-		}
+	err = dsw.writeIndex(storageChanges, dbutils.StorageHistoryBucket)
+	if err != nil {
+		return err
 	}
+
 	return nil
 }
 
 func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
 	for _, change := range changes.Changes {
-		indexBytes, err := dsw.tds.db.GetIndexChunk(bucket, change.Key, dsw.tds.blockNr)
+		var key []byte
+		if len(change.Key) == common.HashLength {
+			key = common.CopyBytes(change.Key)
+		} else {
+			key := make([]byte, len(change.Key)-common.IncarnationLength)
+			copy(key, change.Key[:common.HashLength])
+			copy(key[common.HashLength:], change.Key[common.HashLength+common.IncarnationLength:])
+		}
+
+		indexBytes, err := dsw.tds.db.GetIndexChunk(bucket, key, dsw.tds.blockNr)
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
@@ -211,7 +191,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		}
 
 		index.Append(dsw.tds.blockNr)
-		indexKey, err := index.Key(change.Key)
+		indexKey, err := index.Key(key)
 		if err != nil {
 			return err
 		}
