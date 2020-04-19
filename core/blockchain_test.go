@@ -2714,8 +2714,6 @@ func TestDeleteCreateRevert(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
-	// FIXME: restore
-	t.Skip("restore for turbo-geth 1.0 release")
 	var (
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
@@ -2925,8 +2923,6 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
-	// FIXME: restore
-	t.Skip("restore for turbo-geth 1.0 release")
 	var (
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()

@@ -355,11 +355,6 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 	storageTouches := common.StorageKeys{}
 	var values [][]byte
 	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
-		if withValues {
-			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
-				continue
-			}
-		}
 		for keyHash := range m {
 			var storageKey common.StorageKey
 			copy(storageKey[:], addrHash[:])
