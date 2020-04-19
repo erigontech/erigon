@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -849,14 +850,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					}
 				}
 				b.accountUpdates[addrHash] = &acc
-				value = make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(value)
-				if err := tds.db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
+				if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
 					return err
 				}
 			} else {
 				b.accountUpdates[addrHash] = nil
-				if err := tds.db.Delete(dbutils.CurrentStateBucket, addrHash[:]); err != nil {
+				if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
 					return err
 				}
 			}
@@ -979,23 +978,25 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	// Not present in the trie, try the database
 	var err error
 	var enc []byte
+	var a accounts.Account
 	if tds.historical {
+		// TODO: do we need to get a.Root from IH here?
 		enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
 		}
-	} else {
-		enc, err = tds.db.Get(dbutils.CurrentStateBucket, addrHash[:])
-		if err != nil {
-			enc = nil
+		if len(enc) == 0 {
+			return nil, nil
 		}
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	var a accounts.Account
-	if err := a.DecodeForStorage(enc); err != nil {
-		return nil, err
+		if err := a.DecodeForStorage(enc); err != nil {
+			return nil, err
+		}
+	} else {
+		if ok, err := rawdb.ReadAccount(tds.db, addrHash, &a); err != nil {
+			return nil, err
+		} else if !ok {
+			return nil, nil
+		}
 	}
 
 	if tds.historical && a.Incarnation > 0 {

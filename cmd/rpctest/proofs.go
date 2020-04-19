@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -221,13 +222,12 @@ func fixState(chaindata string, url string) {
 		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {
-			if enc, _ := stateDb.Get(dbutils.CurrentStateBucket, addrHash[:]); enc == nil {
+			var account accounts.Account
+			if ok, err2 := rawdb.ReadAccount(stateDb, addrHash, &account); err2 != nil {
+				return false, err2
+			} else if !ok {
 				roots[addrHash] = nil
 			} else {
-				var account accounts.Account
-				if err = account.DecodeForStorage(enc); err != nil {
-					return false, err
-				}
 				roots[addrHash] = &account
 			}
 		}

@@ -104,9 +104,7 @@ func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uin
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx Tx) error {
 		{
-			hB := tx.Bucket(hBucket)
-			hC := hB.Cursor()
-			hK, hV, err := hC.Seek(composite)
+			hK, hV, err := tx.Bucket(hBucket).Cursor().Seek(composite)
 			if err != nil {
 				return err
 			}
@@ -118,18 +116,17 @@ func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uin
 			}
 		}
 		{
-			b := tx.Bucket(bucket)
-			c := b.Cursor()
-			k, v, err := c.Seek(key)
+			v, err := tx.Bucket(bucket).Get(key)
 			if err != nil {
 				return err
 			}
-
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-				return nil
+			if v == nil {
+				return ErrKeyNotFound
 			}
+
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			return nil
 		}
 
 		return ErrKeyNotFound

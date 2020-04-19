@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -41,13 +42,11 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil {
 		return nil, err
 	}
-	enc, err := tds.currentDb.Get(dbutils.CurrentStateBucket, buf[:])
-	if err != nil || enc == nil || len(enc) == 0 {
-		return nil, nil
-	}
 	var acc accounts.Account
-	if err := acc.DecodeForStorage(enc); err != nil {
+	if ok, err := rawdb.ReadAccount(tds.currentDb, buf, &acc); err != nil {
 		return nil, err
+	} else if !ok {
+		return nil, nil
 	}
 	return &acc, nil
 }
@@ -93,10 +92,7 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	if err != nil {
 		return err
 	}
-	dataLen := account.EncodingLengthForStorage()
-	data := make([]byte, dataLen)
-	account.EncodeForStorage(data)
-	return tds.currentDb.Put(dbutils.CurrentStateBucket, addrHash[:], data)
+	return rawdb.WriteAccount(tds.currentDb, addrHash, *account)
 }
 
 func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
@@ -104,7 +100,7 @@ func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address
 	if err != nil {
 		return err
 	}
-	return tds.currentDb.Delete(dbutils.CurrentStateBucket, addrHash[:])
+	return rawdb.DeleteAccount(tds.currentDb, addrHash)
 }
 
 func (tds *TraceDbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {

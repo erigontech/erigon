@@ -47,3 +47,6 @@ profile.cov
 /dashboard/assets/package-lock.json
 
 **/yarn-error.log
+/timings.txt
+right_*.txt
+root_*.txt

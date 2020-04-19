@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -105,23 +107,20 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	}
 
 	for i, addrHash := range addrHashes {
-		b, err := db.Get(dbutils.CurrentStateBucket, addrHash.Bytes())
-		if err != nil {
+		acc := accounts.NewAccount()
+		if ok, err := rawdb.ReadAccount(db, addrHash, &acc); err != nil {
 			t.Fatal("error on get account", i, err)
+		} else if !ok {
+			t.Fatal("error on get account", i)
 		}
 
-		acc := accounts.NewAccount()
-		err = acc.DecodeForStorage(b)
-		if err != nil {
-			t.Fatal("error on get account", i, err)
-		}
 		if !accState[i].Equals(&acc) {
 			spew.Dump("got", acc)
 			spew.Dump("expected", accState[i])
 			t.Fatal("Accounts not equals")
 		}
 
-		b, err = db.Get(dbutils.AccountsHistoryBucket, addrHash.Bytes())
+		b, err := db.Get(dbutils.AccountsHistoryBucket, addrHash.Bytes())
 		if err != nil {
 			t.Fatal("error on get account", i, err)
 		}
@@ -334,20 +333,20 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b, err := db.Get(dbutils.CurrentStateBucket, addrHash.Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
 	resAcc := new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
+	ok, err := rawdb.ReadAccount(db, addrHash, resAcc)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !ok {
+		t.Fatal(errors.New("acc not found"))
+	}
+
 	if !acc.Equals(resAcc) {
 		t.Fatal("Account from Get is incorrect")
 	}
 
-	b, err = db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
+	b, err := db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
 	if err != nil {
 		t.Fatal("incorrect value on block 1", err)
 	}
