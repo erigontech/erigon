@@ -232,6 +232,7 @@ func (s *Service) loop() {
 		}
 		// Keep sending status updates until the connection breaks
 		fullReport := time.NewTicker(15 * time.Second)
+		defer fullReport.Stop()
 
 		for err == nil {
 			select {

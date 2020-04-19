@@ -390,11 +390,13 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 		inner = ethash.NewFaker()
 	case "Ethash":
 		inner = ethash.New(ethash.Config{
-			CacheDir:       "ethash",
-			CachesInMem:    2,
-			CachesOnDisk:   3,
-			DatasetsInMem:  1,
-			DatasetsOnDisk: 2,
+			CacheDir:         "ethash",
+			CachesInMem:      2,
+			CachesOnDisk:     3,
+			CachesLockMmap:   false,
+			DatasetsInMem:    1,
+			DatasetsOnDisk:   2,
+			DatasetsLockMmap: false,
 		}, nil, false)
 	default:
 		return false, fmt.Errorf("unrecognised seal engine: %s", chainParams.SealEngine)
@@ -732,21 +734,17 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		}
 	*/
 
-	acchash := common.BigToHash((*big.Int)(addressHash))
-	rangeResult, err := eth.AccountRange(dbState, &acchash, int(maxResults))
-	if err != nil {
-		return result, err
-	}
+	/*
+		result.NextKey = rangeResult.Next
 
-	result.NextKey = rangeResult.Next
-
-	for k, v := range rangeResult.Accounts {
-		if v == nil {
-			result.AddressMap[k] = common.Address{}
-		} else {
-			result.AddressMap[k] = *v
+		for k, v := range rangeResult.Accounts {
+			if v == nil {
+				result.AddressMap[k] = common.Address{}
+			} else {
+				result.AddressMap[k] = *v
+			}
 		}
-	}
+	*/
 
 	return result, nil
 }
@@ -971,6 +969,14 @@ func retesteth(ctx *cli.Context) error {
 	vhosts := splitAndTrim(ctx.GlobalString(utils.RPCVirtualHostsFlag.Name))
 	cors := splitAndTrim(ctx.GlobalString(utils.RPCCORSDomainFlag.Name))
 
+	// register apis and create handler stack
+	srv := rpc.NewServer()
+	err := node.RegisterApisFromWhitelist(rpcAPI, []string{"test", "eth", "debug", "web3"}, srv, false)
+	if err != nil {
+		utils.Fatalf("Could not register RPC apis: %w", err)
+	}
+	handler := node.NewHTTPHandlerStack(srv, cors, vhosts)
+
 	// start http server
 	var RetestethHTTPTimeouts = rpc.HTTPTimeouts{
 		ReadTimeout:  120 * time.Second,
@@ -978,7 +984,7 @@ func retesteth(ctx *cli.Context) error {
 		IdleTimeout:  120 * time.Second,
 	}
 	httpEndpoint := fmt.Sprintf("%s:%d", ctx.GlobalString(utils.RPCListenAddrFlag.Name), ctx.Int(rpcPortFlag.Name))
-	listener, _, err := rpc.StartHTTPEndpoint(httpEndpoint, rpcAPI, []string{"test", "eth", "debug", "web3"}, cors, vhosts, RetestethHTTPTimeouts)
+	listener, err := node.StartHTTPEndpoint(httpEndpoint, RetestethHTTPTimeouts, handler)
 	if err != nil {
 		utils.Fatalf("Could not start RPC api: %v", err)
 	}

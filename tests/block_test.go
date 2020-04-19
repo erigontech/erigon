@@ -53,11 +53,10 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_Istanbul`, "Work in progress")
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		if err := bt.checkFailure(t, test.Run()); err != nil {
+		if err := bt.checkFailure(t, test.Run(false)); err != nil {
 			t.Error(err)
 		}
 	})
-
 	// There is also a LegacyTests folder, containing blockchain tests generated
 	// prior to Istanbul. However, they are all derived from GeneralStateTests,
 	// which run natively, so there's no reason to run them here.

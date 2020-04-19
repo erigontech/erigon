@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
@@ -299,7 +300,17 @@ func daemon(cmd *cobra.Command, cfg Config) {
 		}
 	}
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
-	listener, _, err := rpc.StartHTTPEndpoint(httpEndpoint, rpcAPI, enabledApis, cors, vhosts, rpc.DefaultHTTPTimeouts)
+
+	// register apis and create handler stack
+	srv := rpc.NewServer()
+	err = node.RegisterApisFromWhitelist(rpcAPI, enabledApis, srv, false)
+	if err != nil {
+		log.Error("Could not start register RPC apis", "error", err)
+		return
+	}
+	handler := node.NewHTTPHandlerStack(srv, cors, vhosts)
+
+	listener, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
 	if err != nil {
 		log.Error("Could not start RPC api", "error", err)
 		return
