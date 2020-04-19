@@ -195,12 +195,12 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		if historical {
 			return errors.New("historical resolver not supported yet")
 		}
-		err = tr.MultiWalk2(boltDb, blockNr, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
+		err = tr.MultiWalk2(boltDb, blockNr, dbutils.CurrentStateBucket, startkeys, fixedbits, tr.WalkerAccounts, true)
 	} else {
 		if historical {
 			return errors.New("historical resolver not supported yet")
 		}
-		err = tr.MultiWalk2(boltDb, blockNr, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
+		err = tr.MultiWalk2(boltDb, blockNr, dbutils.CurrentStateBucket, startkeys, fixedbits, tr.WalkerStorage, false)
 
 	}
 	if err != nil {
@@ -319,11 +319,10 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool, accRoot []byte) error) error {
+func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool, accRoot []byte) error, isAccount bool) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
-	isAccountBucket := bytes.Equal(bucket, dbutils.AccountsBucket)
 	maxAccountKeyLen := common.HashLength - 1
 
 	keyAsNibbles := pool.GetBuffer(256)
@@ -352,15 +351,24 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
-			if tr.trace {
-				fmt.Printf("For loop: %x, %x\n", cacheK, k)
-			}
-
 			// for Address bucket, skip cache keys longer than 31 bytes
-			if isAccountBucket {
+			if isAccount {
 				for len(cacheK) > maxAccountKeyLen {
 					cacheK, cacheV = cache.Next()
 				}
+				for len(k) > 32 {
+					k, v = c.Next()
+				}
+			} else {
+				for len(k) == 32 && k != nil {
+					k, v = c.Next()
+				}
+			}
+			if cacheK == nil && k == nil {
+				break
+			}
+			if tr.trace {
+				fmt.Printf("For loop: %x, %x\n", cacheK, k)
 			}
 
 			fromCache, minKey = keyIsBefore(cacheK, k)
@@ -402,9 +410,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
 						// for Address bucket, skip cache keys longer than 31 bytes
-						if isAccountBucket && len(cacheK) > maxAccountKeyLen {
+						if isAccount {
 							for len(cacheK) > maxAccountKeyLen {
 								cacheK, cacheV = cache.Next()
+							}
+							for len(k) > 32 {
+								k, v = c.Next()
+							}
+						} else {
+							for len(k) == 32 && k != nil {
+								k, v = c.Next()
 							}
 						}
 						if k == nil && cacheK == nil {
@@ -429,7 +444,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			keyAsNibbles.Reset()
 			DecompressNibbles(minKey, &keyAsNibbles.B)
 			if !fromCache {
-				if isAccountBucket {
+				if isAccount {
 					accRootKey, accRoot = accRoots.SeekTo(k)
 					if accRoot == nil || !bytes.Equal(k, accRootKey) {
 						return fmt.Errorf("acc root not found for %x", k)

@@ -281,7 +281,7 @@ func makeTokenBalances() {
 		if plen != 1 {
 			fmt.Printf(" balanceOf preimages: %d\n", plen)
 		}
-		err = ethDb.Walk(dbutils.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
 			var preimage []byte
@@ -519,7 +519,7 @@ func makeTokenAllowances() {
 			fmt.Printf("allowance base not found\n")
 			continue
 		}
-		err = ethDb.Walk(dbutils.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
 			var index2 common.Hash

@@ -20,7 +20,7 @@ func TestResolve1(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -44,7 +44,7 @@ func TestResolve2(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -69,7 +69,7 @@ func TestResolve2Keep(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -94,7 +94,7 @@ func TestResolve3Keep(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -120,7 +120,7 @@ func TestTrieResolver(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -165,14 +165,13 @@ func TestTwoStorageItems(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 
-	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5")
-	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7")
+	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5f5")
+	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7f5")
 	val1 := common.Hex2Bytes("02")
 	val2 := common.Hex2Bytes("03")
 
-	require.NoError(db.Put(dbutils.StorageBucket, key1, val1))
-	require.NoError(db.Put(dbutils.StorageBucket, key2, val2))
-
+	require.NoError(db.Put(dbutils.CurrentStateBucket, key1, val1))
+	require.NoError(db.Put(dbutils.CurrentStateBucket, key2, val2))
 	leaf1 := shortNode{Key: keybytesToHex(key1[1:]), Val: valueNode(val1)}
 	leaf2 := shortNode{Key: keybytesToHex(key2[1:]), Val: valueNode(val2)}
 	var branch fullNode
@@ -187,7 +186,7 @@ func TestTwoStorageItems(t *testing.T) {
 
 	// Resolve the root node
 
-	rootHash := common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8")
+	rootHash := common.HexToHash("85737b049107f866fedbd6d787077fc2c245f4748e28896a3e8ee82c377ecdcf")
 	assert.Equal(rootHash, crypto.Keccak256Hash(rootRlp))
 
 	req := &ResolveRequest{
@@ -343,7 +342,7 @@ func TestApiDetails(t *testing.T) {
 					HasStorageSize: len(storageV) > 0,
 				}
 				require.NoError(writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a))
-				require.NoError(db.Put(dbutils.StorageBucket, storageKey(incarnation, k), storageV))
+				require.NoError(db.Put(dbutils.CurrentStateBucket, storageKey(incarnation, k), storageV))
 			}
 		}
 	}
@@ -505,7 +504,7 @@ func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) e
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.AccountsBucket, addrHashBytes, value); err != nil {
+	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
 		return err
 	}
 	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHashBytes, acc.Root.Bytes()); err != nil {

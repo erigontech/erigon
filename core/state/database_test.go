@@ -581,7 +581,10 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	stats := BucketsStats{}
 
 	fmt.Println("==========================ACCOUNT===========================")
-	err = blockchain.ChainDb().Walk(dbutils.AccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = blockchain.ChainDb().Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		if len(k) > 32 {
+			return false, nil
+		}
 		acc := &accounts.Account{}
 		innerErr := acc.DecodeForStorage(v)
 		if innerErr != nil {
@@ -604,7 +607,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================STORAGE===========================")
-	err = blockchain.ChainDb().Walk(dbutils.StorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = blockchain.ChainDb().Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.Storage += uint64(len(v))
 		return true, nil
 	})
@@ -1002,7 +1005,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	var startKey [common.HashLength + 8 + common.HashLength]byte
 	copy(startKey[:], addrHash)
-	err = db.Walk(dbutils.StorageBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
+	err = db.Walk(dbutils.CurrentStateBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
 		fmt.Printf("%x: %x\n", k, v)
 		return true, nil
 	})

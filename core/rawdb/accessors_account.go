@@ -25,7 +25,7 @@ import (
 // ReadAccount retrieves the version number of the database.
 func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
-	enc, err := db.Get(dbutils.AccountsBucket, addrHashBytes)
+	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
 	if err != nil {
 		return false, err
 	}
@@ -47,7 +47,7 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.AccountsBucket, addrHashBytes, value); err != nil {
+	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
 		return err
 	}
 	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHashBytes, acc.Root.Bytes()); err != nil {
@@ -58,7 +58,7 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 
 func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
 	addrHashBytes := addrHash[:]
-	if err := db.Delete(dbutils.AccountsBucket, addrHashBytes); err != nil {
+	if err := db.Delete(dbutils.CurrentStateBucket, addrHashBytes); err != nil {
 		return err
 	}
 	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {

@@ -28,7 +28,7 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 	for !done {
 		var i uint
 		err := db.Update(func(tx *bolt.Tx) error {
-			var accountBucket *bolt.Bucket = tx.Bucket(dbutils.AccountsBucket)
+			var accountBucket *bolt.Bucket = tx.Bucket(dbutils.CurrentStateBucket)
 			c := accountBucket.Cursor()
 
 			if k == nil {
@@ -39,7 +39,9 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 			}
 
 			for ; k != nil; k, v = c.Next() {
-
+				if len(k) != 32 {
+					continue
+				}
 				enc, err := encodeToCBOR(v)
 				if err != nil {
 					return err

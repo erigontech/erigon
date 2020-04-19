@@ -63,11 +63,7 @@ func TestCopyDatabase(t *testing.T) {
 	doTestcase(t, map[string]testData{})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.AccountsBucket): generateData(string(dbutils.AccountsBucket)),
-	})
-
-	doTestcase(t, map[string]testData{
-		string(dbutils.StorageBucket): generateData(string(dbutils.StorageBucket)),
+		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
 	})
 
 	doTestcase(t, map[string]testData{
@@ -75,29 +71,22 @@ func TestCopyDatabase(t *testing.T) {
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.AccountsBucket): generateData(string(dbutils.AccountsBucket)),
-		string(dbutils.StorageBucket):  generateData(string(dbutils.StorageBucket)),
+		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
+		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.StorageBucket): generateData(string(dbutils.StorageBucket)),
-		string(dbutils.CodeBucket):    generateData(string(dbutils.CodeBucket)),
+		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
+		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.AccountsBucket): generateData(string(dbutils.AccountsBucket)),
-		string(dbutils.CodeBucket):     generateData(string(dbutils.CodeBucket)),
+		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
+		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.AccountsBucket): generateData(string(dbutils.AccountsBucket)),
-		string(dbutils.StorageBucket):  generateData(string(dbutils.StorageBucket)),
-		string(dbutils.CodeBucket):     generateData(string(dbutils.CodeBucket)),
-	})
-
-	doTestcase(t, map[string]testData{
-		string(dbutils.AccountsBucket):     generateData(string(dbutils.AccountsBucket)),
-		string(dbutils.StorageBucket):      generateData(string(dbutils.StorageBucket)),
+		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
 		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
 		string(dbutils.DatabaseInfoBucket): generateData(string(dbutils.DatabaseInfoBucket)),
 	})

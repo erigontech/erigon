@@ -61,7 +61,7 @@ func (tds *TraceDbState) ReadAccountStorage(address common.Address, incarnation 
 		return nil, err
 	}
 
-	enc, err := tds.currentDb.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, buf))
+	enc, err := tds.currentDb.Get(dbutils.CurrentStateBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -120,8 +120,8 @@ func (tds *TraceDbState) WriteAccountStorage(address common.Address, incarnation
 	vv := make([]byte, len(v))
 	copy(vv, v)
 	if len(v) == 0 {
-		return tds.currentDb.Delete(dbutils.StorageBucket, compositeKey)
+		return tds.currentDb.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return tds.currentDb.Put(dbutils.StorageBucket, compositeKey, vv)
+		return tds.currentDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }

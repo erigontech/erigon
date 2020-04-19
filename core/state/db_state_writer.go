@@ -101,9 +101,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
-		return dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
+		return dsw.tds.db.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
+		return dsw.tds.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }
 

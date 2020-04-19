@@ -135,7 +135,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -150,7 +150,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, acc.Incarnation, k), 1)
+			res, err := db.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, acc.Incarnation, k), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -346,7 +346,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from Get is incorrect")
 	}
 
-	b, err := db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
+	b, err := db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
 	if err != nil {
 		t.Fatal("incorrect value on block 1", err)
 	}
@@ -361,7 +361,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from GetAsOf(1) is incorrect")
 	}
 
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
+	b, err = db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from GetAsOf(2) is incorrect")
 	}
 
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 3)
+	b, err = db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from GetAsOf(2) is incorrect")
 	}
 
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 5)
+	b, err = db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from GetAsOf(4) is incorrect")
 	}
 
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 7)
+	b, err = db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +556,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [72]byte
-	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -568,7 +568,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -580,7 +580,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)

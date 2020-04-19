@@ -870,12 +870,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 			if len(value) > 0 {
 				m[keyHash] = value
-				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+				if err := tds.db.Put(dbutils.CurrentStateBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 					return err
 				}
 			} else {
 				m[keyHash] = nil
-				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+				if err := tds.db.Delete(dbutils.CurrentStateBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
 					return err
 				}
 			}
@@ -980,7 +980,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	var a accounts.Account
 	if tds.historical {
 		// TODO: do we need to get a.Root from IH here?
-		enc, err = tds.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
+		enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
 		}
@@ -1108,12 +1108,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
+			enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
 			if err != nil {
 				enc = nil
 			}
 		} else {
-			enc, err = tds.db.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+			enc, err = tds.db.Get(dbutils.CurrentStateBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 			if err != nil {
 				enc = nil
 			}
@@ -1225,7 +1225,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength+ethdb.MaxTimestampLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
-		if err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
+		if err := tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
 			copy(incarnationBytes[:], k[common.HashLength:])
 			found = true
 			return false, nil
@@ -1239,7 +1239,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
-		if err := tds.db.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 			copy(incarnationBytes[:], k[common.HashLength:])
 			found = true
 			return false, nil
