@@ -51,7 +51,7 @@ import (
 func main() {
 	const n = 5
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	fdlimit.Raise(512*n)
+	fdlimit.Raise(512 * n)
 
 	// Generate a batch of accounts to seal and fund with
 	faucets := make([]*ecdsa.PrivateKey, 128)
@@ -137,8 +137,8 @@ func main() {
 // makeGenesis creates a custom Ethash genesis block based on some pre-defined
 // faucet accounts.
 func makeGenesis(faucets []*ecdsa.PrivateKey) *core.Genesis {
-	genesis := core.DefaultTestnetGenesisBlock()
-	//genesis.Difficulty = params.MinimumDifficulty
+	genesis := core.DefaultRopstenGenesisBlock()
+	genesis.Difficulty = params.MinimumDifficulty
 	genesis.GasLimit = 25000000
 
 	genesis.Config.ChainID = big.NewInt(18)
@@ -191,8 +191,8 @@ func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 			Recommit: time.Second,
 		},
 		BlocksBeforePruning: 100,
-		BlocksToPrune:  10,
-		PruningTimeout: time.Second,
+		BlocksToPrune:       10,
+		PruningTimeout:      time.Second,
 	}
 
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {

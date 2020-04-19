@@ -346,7 +346,6 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	tds.t.Print(w)
-	fmt.Fprintln(w, "") //nolint
 }
 
 // Builds a map where for each address (of a smart contract) there is

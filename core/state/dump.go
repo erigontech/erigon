@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
-// DumpAccount represents an account in the state
+// DumpAccount represents an account in the state.
 type DumpAccount struct {
 	Balance     string            `json:"balance"`
 	Nonce       uint64            `json:"nonce"`
@@ -40,15 +40,22 @@ type DumpAccount struct {
 	SecureKey   hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
-// Dump represents the full dump in a collected format, as one large map
+// Dump represents the full dump in a collected format, as one large map.
 type Dump struct {
 	Root     string                         `json:"root"`
 	Accounts map[common.Address]DumpAccount `json:"accounts"`
 }
 
-// iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively
+// iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively.
 type iterativeDump struct {
 	*json.Encoder
+}
+
+// IteratorDump is an implementation for iterating over data.
+type IteratorDump struct {
+	Root     string                         `json:"root"`
+	Accounts map[common.Address]DumpAccount `json:"accounts"`
+	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
 }
 
 // Collector interface which the state trie calls during iteration
@@ -62,6 +69,13 @@ func (d *Dump) onRoot(root common.Hash) {
 }
 
 func (d *Dump) onAccount(addr common.Address, account DumpAccount) {
+	d.Accounts[addr] = account
+}
+func (d *IteratorDump) onRoot(root common.Hash) {
+	d.Root = fmt.Sprintf("%x", root)
+}
+
+func (d *IteratorDump) onAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 

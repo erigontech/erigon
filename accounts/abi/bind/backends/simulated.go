@@ -646,6 +646,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	})
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
+
 	return nil
 }
 

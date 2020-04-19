@@ -327,19 +327,22 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 	if err != nil {
 		return msg.errorResponse(&invalidParamsError{err.Error()})
 	}
+	start := time.Now()
+	answer := h.runMethod(cp.ctx, msg, callb, args)
 
-	res := h.runMethod(cp.ctx, msg, callb, args)
-
-	var resStr string
-	if res != nil {
-		var length = len(res.String())
-		if length > 200 {
-			length = 200
+	// Collect the statistics for RPC calls if metrics is enabled.
+	// We only care about pure rpc call. Filter out subscription.
+	if callb != h.unsubscribeCb {
+		rpcRequestGauge.Inc(1)
+		if answer.Error != nil {
+			failedReqeustGauge.Inc(1)
+		} else {
+			successfulRequestGauge.Inc(1)
 		}
-		resStr = res.String()[:length]
+		rpcServingTimer.UpdateSince(start)
+		newRPCServingTimer(msg.Method, answer.Error == nil).UpdateSince(start)
 	}
-	log.Debug("RPC call", "method", msg, "params", args, "result", resStr)
-	return res
+	return answer
 }
 
 // handleSubscribe processes *_subscribe method calls.
