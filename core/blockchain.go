@@ -986,9 +986,9 @@ func (bc *BlockChain) Rollback(chain []common.Hash) {
 	// Notably, it can happen that system crashes without truncating the ancient data
 	// but the head indicator has been updated in the active store. Regarding this issue,
 	// system will self recovery by truncating the extra data during the setup phase.
-	if err := bc.truncateAncient(bc.hc.CurrentHeader().Number.Uint64()); err != nil {
-		log.Crit("Truncate ancient store failed", "err", err)
-	}
+	//if err := bc.truncateAncient(bc.hc.CurrentHeader().Number.Uint64()); err != nil {
+	//	log.Crit("Truncate ancient store failed", "err", err)
+	//}
 }
 
 // truncateAncient rewinds the blockchain to the specified header and deletes all
@@ -1088,6 +1088,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	//
 	// this function only accepts canonical chain data. All side chain will be reverted
 	// eventually.
+	/*
 	writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		var (
 			previous = bc.CurrentFastBlock()
@@ -1161,6 +1162,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		}
 		return 0, nil
 	}
+	*/
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		batch := bc.db.NewBatch()
@@ -1205,6 +1207,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	}
 
 	// Write downloaded chain data and corresponding receipt chain data.
+	/*
 	if len(ancientBlocks) > 0 {
 		if n, err := writeAncient(ancientBlocks, ancientReceipts); err != nil {
 			if err == errInsertionInterrupted {
@@ -1213,6 +1216,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			return n, err
 		}
 	}
+	*/
 	if len(liveBlocks) > 0 {
 		if n, err := writeLive(liveBlocks, liveReceipts); err != nil {
 			if err == errInsertionInterrupted {
@@ -2092,14 +2096,8 @@ func (bc *BlockChain) rollbackBadBlock(block *types.Block, receipts types.Receip
 // because nonces can be verified sparsely, not needing to check each.
 func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (int, error) {
 	start := time.Now()
-	if bc.db == nil {
-		if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
-			return i, err
-		}
-	} else {
-		if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
-			return i, err
-		}
+	if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
+		return i, err
 	}
 
 	// Make sure only one thread manipulates the chain at once
@@ -2115,7 +2113,17 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 		_, err := bc.hc.WriteHeader(context.Background(), header)
 		return err
 	}
-	return bc.hc.InsertHeaderChain(chain, whFunc, start)
+	if i, err := bc.hc.InsertHeaderChain(chain, whFunc, start); err != nil {
+		return i, err
+	} else {
+		var written uint64
+		if written, err = bc.db.Commit(); err != nil {
+			log.Error("Could not commit chainDb", "error", err)
+			return 0, err
+		}
+		log.Info("Database", "size", bc.db.DiskSize(), "written", written)
+		return i, nil
+	}
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The

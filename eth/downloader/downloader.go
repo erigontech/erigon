@@ -698,6 +698,8 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 		localHeight = d.blockchain.CurrentBlock().NumberU64()
 	case FastSync:
 		localHeight = d.blockchain.CurrentFastBlock().NumberU64()
+	case StagedSync:
+		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
@@ -710,7 +712,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	}
 	// If we're doing a light sync, ensure the floor doesn't go below the CHT, as
 	// all headers before that point will be missing.
-	if d.mode == LightSync {
+	if d.mode == LightSync || d.mode == StagedSync {
 		// If we dont know the current CHT position, find it
 		if d.genesis == 0 {
 			header := d.lightchain.CurrentHeader()
@@ -986,7 +988,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 				if n := len(headers); n > 0 {
 					// Retrieve the current head we're at
 					var head uint64
-					if d.mode == LightSync {
+					if d.mode == LightSync || d.mode == StagedSync {
 						head = d.lightchain.CurrentHeader().Number.Uint64()
 					} else {
 						head = d.blockchain.CurrentFastBlock().NumberU64()
@@ -1355,13 +1357,13 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				hashes[i] = header.Hash()
 			}
 			lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
-			if d.mode != LightSync {
+			if d.mode != LightSync && d.mode != StagedSync {
 				lastFastBlock = d.blockchain.CurrentFastBlock().Number()
 				lastBlock = d.blockchain.CurrentBlock().Number()
 			}
 			d.lightchain.Rollback(hashes)
 			curFastBlock, curBlock := common.Big0, common.Big0
-			if d.mode != LightSync {
+			if d.mode != LightSync && d.mode != StagedSync {
 				curFastBlock = d.blockchain.CurrentFastBlock().Number()
 				curBlock = d.blockchain.CurrentBlock().Number()
 			}
@@ -1402,7 +1404,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				// L: Sync begins, and finds common ancestor at 11
 				// L: Request new headers up from 11 (R's TD was higher, it must have something)
 				// R: Nothing to give
-				if d.mode != LightSync {
+				if d.mode != LightSync && d.mode != StagedSync {
 					head := d.blockchain.CurrentBlock()
 					if !gotHeaders && td.Cmp(d.blockchain.GetTd(head.Hash(), head.NumberU64())) > 0 {
 						return errStallingPeer
@@ -1415,7 +1417,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				// This check cannot be executed "as is" for full imports, since blocks may still be
 				// queued for processing when the header download completes. However, as long as the
 				// peer gave us something useful, we're already happy/progressed (above check).
-				if d.mode == FastSync || d.mode == LightSync {
+				if d.mode == FastSync || d.mode == LightSync || d.mode == StagedSync {
 					head := d.lightchain.CurrentHeader()
 					if td.Cmp(d.lightchain.GetTd(head.Hash(), head.Number.Uint64())) > 0 {
 						return errStallingPeer
@@ -1441,7 +1443,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				}
 				chunk := headers[:limit]
 				// In case of header only syncing, validate the chunk immediately
-				if d.mode == FastSync || d.mode == LightSync {
+				if d.mode == FastSync || d.mode == LightSync || d.mode == StagedSync {
 					// Collect the yet unknown headers to mark them as uncertain
 					unknown := make([]*types.Header, 0, len(chunk))
 					for _, header := range chunk {

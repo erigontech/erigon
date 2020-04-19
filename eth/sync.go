@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -197,17 +196,7 @@ func (pm *ProtocolManager) synchronise(peer *peer) {
 		return
 	}
 	// Otherwise try to sync with the downloader
-	mode := downloader.FullSync
-	if atomic.LoadUint32(&pm.fastSync) == 1 {
-		// Fast sync was explicitly requested, and explicitly granted
-		mode = downloader.FastSync
-	}
-	if mode == downloader.FastSync {
-		// Make sure the peer's total difficulty we are synchronizing is higher.
-		if pm.blockchain.GetTdByHash(pm.blockchain.CurrentFastBlock().Hash()).Cmp(pTd) >= 0 {
-			return
-		}
-	}
+	mode := pm.mode
 	// Run the sync cycle, and disable fast sync if we've went past the pivot block
 	if err := pm.downloader.Synchronise(peer.id, pHead, pTd, mode); err != nil {
 		return

@@ -107,6 +107,9 @@ var (
 	StorageModeThinHistory = []byte("smThinHistory")
 	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
 	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
+
+	// Progress of sync stages
+	SyncStageProgress = []byte("SSP")
 )
 
 var Buckets = [][]byte{
