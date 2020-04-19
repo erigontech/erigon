@@ -63,7 +63,7 @@ func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, dbutils.AccountsBucket) {
+			if len(name) == 20 || bytes.Equal(name, dbutils.CurrentStateBucket) {
 				n := make([]byte, len(name))
 				copy(n, name)
 				bucketList = append(bucketList, n)
@@ -345,9 +345,12 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if len(k) != 32 {
+				continue
+			}
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
 				emptyRoots++
 			}
@@ -792,15 +795,19 @@ func dbSlice(chaindata string, prefix []byte) {
 	check(err)
 	defer db.Close()
 	err = db.View(func(tx *bolt.Tx) error {
-		ab := tx.Bucket(dbutils.AccountsBucket)
-		c := ab.Cursor()
+		st := tx.Bucket(dbutils.CurrentStateBucket)
+		c := st.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.AccountsBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			if len(k) != 32 {
+				continue
+			}
+			fmt.Printf("db.Put(dbutils.CurrentStateBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
 		}
-		sb := tx.Bucket(dbutils.StorageBucket)
-		c = sb.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.StorageBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			if len(k) == 32 {
+				continue
+			}
+			fmt.Printf("db.Put(dbutils.CurrentStateBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
 		}
 		ib := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		c = ib.Cursor()
@@ -1087,14 +1094,14 @@ func loadAccount() {
 	blockSuffix := dbutils.EncodeTimestamp(blockNr)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	accountData, err := ethDb.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
+	accountData, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
 	check(err)
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
+	if err := ethDb.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v)
@@ -1117,11 +1124,11 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
+		v, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		vOrig, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr)
+		vOrig, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
@@ -1229,7 +1236,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	var fixedbits uint = 8 * common.HashLength
 	copy(startkey, addrHash[:])
-	if err := ethDb.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
 		found = true
 		return false, nil
@@ -1252,18 +1259,21 @@ func repairCurrent() {
 	check(err)
 	defer currentDb.Close()
 	check(historyDb.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(dbutils.StorageBucket); err != nil {
+		if err := tx.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(dbutils.StorageBucket, true)
+		newB, err := tx.CreateBucket(dbutils.CurrentStateBucket, true)
 		if err != nil {
 			return err
 		}
 		count := 0
 		if err := currentDb.View(func(ctx *bolt.Tx) error {
-			b := ctx.Bucket(dbutils.StorageBucket)
+			b := ctx.Bucket(dbutils.CurrentStateBucket)
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
+				if len(k) == 32 {
+					continue
+				}
 				newB.Put(k, v)
 				count++
 				if count == 10000 {
@@ -1918,7 +1928,7 @@ func walkOverStorage(chaindata string) {
 	copy(startkey[:], h[:])
 	binary.BigEndian.PutUint64(startkey[32:], ^uint64(1))
 	fmt.Printf("startkey %x\n", startkey)
-	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey[:], 8*(32+8), 50796, func(k []byte, v []byte) (bool, error) {
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey[:], 8*(32+8), 50796, func(k []byte, v []byte) (bool, error) {
 		fmt.Printf("%x: %x\n", k, v)
 		return true, nil
 	})

@@ -22,12 +22,15 @@ func countDepths() {
 	var prev [32]byte
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if len(k) != 32 {
+				continue
+			}
 			if count == 0 {
 				for i := 0; i < 64; i++ {
 					occups[i] = 1
@@ -118,21 +121,20 @@ func countStorageDepths() {
 	var filtered int
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
-		if b == nil {
+		st := tx.Bucket(dbutils.CurrentStateBucket)
+		if st == nil {
 			return nil
 		}
-		ab := tx.Bucket(dbutils.AccountsBucket)
-		if ab == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := st.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			addr := k[:20]
 			sameAddr := bytes.Equal(addr, prevAddr[:])
 			if !sameAddr {
 				copy(prevAddr[:], addr)
-				v, _ := ab.Get(crypto.Keccak256(addr[:]))
+				v, _ := st.Get(crypto.Keccak256(addr[:]))
 				accountExists = v != nil
 				if !accountExists {
 					filtered++

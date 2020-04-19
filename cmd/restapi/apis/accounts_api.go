@@ -49,7 +49,7 @@ func findAccountByID(accountID string, remoteDB ethdb.KV) (*accounts.Account, er
 	var account *accounts.Account
 
 	err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
-		bucket := tx.Bucket(dbutils.AccountsBucket)
+		bucket := tx.Bucket(dbutils.CurrentStateBucket)
 
 		for _, key := range possibleKeys {
 			accountRlp, err := bucket.Get(key)

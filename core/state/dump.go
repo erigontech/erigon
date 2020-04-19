@@ -113,7 +113,10 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 	c.onRoot(h)
 	var acc accounts.Account
 	var prefix [32]byte
-	err := tds.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+	err := tds.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+		if len(k) > 32 {
+			return false, nil
+		}
 		addr := common.BytesToAddress(tds.GetKey(k))
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
@@ -164,7 +167,7 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 			return false, err
 		}
 
-		err = tds.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
+		err = tds.db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
 			key := tds.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
 
 			if !excludeStorage {

@@ -46,7 +46,7 @@ func setupDatabases() {
 	}
 
 	_ = boltOriginDb.Update(func(tx *bolt.Tx) error {
-		_, _ = tx.CreateBucketIfNotExists(dbutils.AccountsBucket, false)
+		_, _ = tx.CreateBucketIfNotExists(dbutils.CurrentStateBucket, false)
 		return nil
 	})
 
@@ -56,7 +56,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.AccountsBucket)
+			bucket := tx.Bucket(dbutils.CurrentStateBucket)
 			if err := bucket.Put(k, v); err != nil {
 				return err
 			}
@@ -73,8 +73,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.AccountsBucket)
-
+			bucket := tx.Bucket(dbutils.CurrentStateBucket)
 			if err := bucket.Put(k, v); err != nil {
 				panic(err)
 			}
@@ -92,7 +91,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.AccountsBucket)
+			bucket := tx.Bucket(dbutils.CurrentStateBucket)
 			if err := bucket.Put(k, v); err != nil {
 				panic(err)
 			}
@@ -110,7 +109,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			_ = tx.Set(append(dbutils.AccountsBucket, k...), v)
+			_ = tx.Set(append(dbutils.CurrentStateBucket, k...), v)
 		}
 
 		return nil
@@ -126,7 +125,7 @@ func BenchmarkCursor(b *testing.B) {
 	b.Run("abstract bolt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
-				c := tx.Bucket(dbutils.AccountsBucket).Cursor()
+				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 				for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 					if err != nil {
 						return err
@@ -170,7 +169,7 @@ func BenchmarkCursor(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 
 			if err := boltOriginDb.View(func(tx *bolt.Tx) error {
-				c := tx.Bucket(dbutils.AccountsBucket).Cursor()
+				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 
 				for k, v := c.First(); k != nil; k, v = c.Next() {
 					_ = v
