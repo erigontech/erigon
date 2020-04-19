@@ -410,9 +410,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
 						// for Address bucket, skip cache keys longer than 31 bytes
-						if isAccount && len(cacheK) > maxAccountKeyLen {
+						if isAccount {
 							for len(cacheK) > maxAccountKeyLen {
 								cacheK, cacheV = cache.Next()
+							}
+							for len(k) > 32 {
+								k, v = c.Next()
+							}
+						} else {
+							for len(k) == 32 && k != nil {
+								k, v = c.Next()
 							}
 						}
 						if k == nil && cacheK == nil {
