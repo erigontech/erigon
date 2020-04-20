@@ -130,7 +130,7 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 	numberOfResults := 0
 	err := tds.db.Walk(dbutils.CurrentStateBucket, start, 0, func(k, v []byte) (bool, error) {
 		nextKey = k
-		if numberOfResults >= maxResults {
+		if maxResults > 0 && numberOfResults >= maxResults {
 			return false, nil
 		}
 
