@@ -449,7 +449,7 @@ func TestMutationGetAsOfCheck(t *testing.T) {
 
 			checkNonceForBlock := func(blockNum, correctNonce uint64) {
 				t.Helper()
-				v, err := db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), blockNum)
+				v, err := db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), blockNum)
 				if err != nil {
 					t.Fatal(err)
 				}

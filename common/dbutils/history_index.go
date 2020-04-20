@@ -177,6 +177,8 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 		blockNumBytes = make([]byte, common.HashLength*2+8)
 		copy(blockNumBytes, key[:common.HashLength])
 		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+	default:
+		panic("unexpected length " + strconv.Itoa(len(key)))
 	}
 
 	return blockNumBytes

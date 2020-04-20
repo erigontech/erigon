@@ -730,7 +730,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	}
 
 	c := hB.Cursor()
-	k, v := c.Seek(dbutils.IndexChunkKey(keyF, timestamp))
+	k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 	if !bytes.HasPrefix(k, keyF) {
 		k, v = c.Prev()
 		if !bytes.HasPrefix(k, keyF) {
