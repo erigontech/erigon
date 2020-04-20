@@ -3,6 +3,8 @@ package stateless
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"image/color"
 	"math"
 	"math/big"
 	"time"
@@ -12,11 +14,7 @@ import (
 	"github.com/ledgerwatch/bolt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-
-	"image"
-	"image/color"
 
 	"github.com/llgcode/draw2d"
 	"github.com/llgcode/draw2d/draw2dimg"
@@ -36,19 +34,11 @@ func (a *KeyItem) Less(b llrb.Item) bool {
 func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
 	err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
-		if b == nil {
-			return fmt.Errorf("Could not find accounts bucket")
-		}
-		enc, _ := b.Get(crypto.Keccak256(contract[:]))
+		enc, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(crypto.Keccak256(contract[:]))
 		if enc == nil {
-			return fmt.Errorf("Could find account %x\n", contract)
+			return fmt.Errorf("could find account %x", contract)
 		}
-		var account accounts.Account
-		if err := account.DecodeForStorage(enc); err != nil {
-			return err
-		}
-		storageRoot = account.Root
+		storageRoot = common.BytesToHash(common.CopyBytes(enc))
 		return nil
 	})
 	return storageRoot, err
@@ -59,9 +49,12 @@ func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
 	copy(fk[:], contract[:])
 	actual := 0
 	if err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor()
 		for k, _ := c.Seek(fk[:]); k != nil && bytes.HasPrefix(k, contract[:]); k, _ = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			actual++
 		}
 		return nil
@@ -307,17 +300,16 @@ func estimate() {
 	count := 0
 	contractCount := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		a := tx.Bucket(dbutils.AccountsBucket)
-		b := tx.Bucket(dbutils.StorageBucket)
-		if b == nil {
+		st := tx.Bucket(dbutils.CurrentStateBucket)
+		if st == nil {
 			return nil
 		}
-		c := b.Cursor()
+		c := st.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				v, _ := a.Get(crypto.Keccak256(addr[:]))
+				v, _ := st.Get(crypto.Keccak256(addr[:]))
 				del = v == nil
 				deleted[addr] = del
 				if del {

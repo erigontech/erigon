@@ -53,7 +53,6 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.IntraBlock
 		header  = block.Header()
 		gaspool = new(GasPool).AddGas(block.GasLimit())
 	)
-	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		// If block precaching was interrupted, abort
 		if interrupt != nil && atomic.LoadUint32(interrupt) == 1 {

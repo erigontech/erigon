@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -41,16 +42,14 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err := dsw.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
-
-	dataLen := account.EncodingLengthForStorage()
-	data := make([]byte, dataLen)
-	account.EncodeForStorage(data)
-
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
-	return dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data)
+	if err := rawdb.WriteAccount(dsw.tds.db, addrHash, *account); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
@@ -61,7 +60,10 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err != nil {
 		return err
 	}
-	return dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:])
+	if err := rawdb.DeleteAccount(dsw.tds.db, addrHash); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
@@ -99,9 +101,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
-		return dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
+		return dsw.tds.db.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
+		return dsw.tds.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }
 

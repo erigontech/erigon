@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
-// DumpAccount represents an account in the state
+// DumpAccount represents an account in the state.
 type DumpAccount struct {
 	Balance     string            `json:"balance"`
 	Nonce       uint64            `json:"nonce"`
@@ -40,15 +40,22 @@ type DumpAccount struct {
 	SecureKey   hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
-// Dump represents the full dump in a collected format, as one large map
+// Dump represents the full dump in a collected format, as one large map.
 type Dump struct {
 	Root     string                         `json:"root"`
 	Accounts map[common.Address]DumpAccount `json:"accounts"`
 }
 
-// iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively
+// iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively.
 type iterativeDump struct {
 	*json.Encoder
+}
+
+// IteratorDump is an implementation for iterating over data.
+type IteratorDump struct {
+	Root     string                         `json:"root"`
+	Accounts map[common.Address]DumpAccount `json:"accounts"`
+	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
 }
 
 // Collector interface which the state trie calls during iteration
@@ -62,6 +69,13 @@ func (d *Dump) onRoot(root common.Hash) {
 }
 
 func (d *Dump) onAccount(addr common.Address, account DumpAccount) {
+	d.Accounts[addr] = account
+}
+func (d *IteratorDump) onRoot(root common.Hash) {
+	d.Root = fmt.Sprintf("%x", root)
+}
+
+func (d *IteratorDump) onAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
@@ -99,12 +113,21 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 	c.onRoot(h)
 	var acc accounts.Account
 	var prefix [32]byte
-	err := tds.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+	err := tds.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+		if len(k) > 32 {
+			return false, nil
+		}
 		addr := common.BytesToAddress(tds.GetKey(k))
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, err
 		}
+		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, k)
+		if err != nil {
+			return false, err
+		}
+		acc.Root = common.BytesToHash(root)
+
 		var code []byte
 
 		if !acc.IsEmptyCodeHash() {
@@ -144,7 +167,7 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 			return false, err
 		}
 
-		err = tds.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
+		err = tds.db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
 			key := tds.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
 
 			if !excludeStorage {

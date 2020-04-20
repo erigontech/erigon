@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -345,7 +346,6 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	tds.t.Print(w)
-	fmt.Fprintln(w, "") //nolint
 }
 
 // Builds a map where for each address (of a smart contract) there is
@@ -849,14 +849,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					}
 				}
 				b.accountUpdates[addrHash] = &acc
-				value = make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(value)
-				if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
+				if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
 					return err
 				}
 			} else {
 				b.accountUpdates[addrHash] = nil
-				if err := tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
+				if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
 					return err
 				}
 			}
@@ -872,12 +870,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 			if len(value) > 0 {
 				m[keyHash] = value
-				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+				if err := tds.db.Put(dbutils.CurrentStateBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 					return err
 				}
 			} else {
 				m[keyHash] = nil
-				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+				if err := tds.db.Delete(dbutils.CurrentStateBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
 					return err
 				}
 			}
@@ -989,23 +987,25 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	// Not present in the trie, try the database
 	var err error
 	var enc []byte
+	var a accounts.Account
 	if tds.historical {
-		enc, err = tds.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
+		// TODO: do we need to get a.Root from IH here?
+		enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
+		}
+		if len(enc) == 0 {
+			return nil, nil
+		}
+		if err := a.DecodeForStorage(enc); err != nil {
+			return nil, err
 		}
 	} else {
-		enc, err = tds.db.Get(dbutils.AccountsBucket, addrHash[:])
-		if err != nil {
-			enc = nil
+		if ok, err := rawdb.ReadAccount(tds.db, addrHash, &a); err != nil {
+			return nil, err
+		} else if !ok {
+			return nil, nil
 		}
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	var a accounts.Account
-	if err := a.DecodeForStorage(enc); err != nil {
-		return nil, err
 	}
 
 	if tds.historical && a.Incarnation > 0 {
@@ -1118,12 +1118,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
+			enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
 			if err != nil {
 				enc = nil
 			}
 		} else {
-			enc, err = tds.db.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+			enc, err = tds.db.Get(dbutils.CurrentStateBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 			if err != nil {
 				enc = nil
 			}
@@ -1235,7 +1235,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength+ethdb.MaxTimestampLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
-		if err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
+		if err := tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
 			copy(incarnationBytes[:], k[common.HashLength:])
 			found = true
 			return false, nil
@@ -1249,7 +1249,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
-		if err := tds.db.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 			copy(incarnationBytes[:], k[common.HashLength:])
 			found = true
 			return false, nil

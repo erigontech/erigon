@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -217,17 +218,16 @@ func fixState(chaindata string, url string) {
 		Timeout: time.Second * 600,
 	}
 
-	err = stateDb.Walk(dbutils.StorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+	err = stateDb.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
 		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {
-			if enc, _ := stateDb.Get(dbutils.AccountsBucket, addrHash[:]); enc == nil {
+			var account accounts.Account
+			if ok, err2 := rawdb.ReadAccount(stateDb, addrHash, &account); err2 != nil {
+				return false, err2
+			} else if !ok {
 				roots[addrHash] = nil
 			} else {
-				var account accounts.Account
-				if err = account.DecodeForStorage(enc); err != nil {
-					return false, err
-				}
 				roots[addrHash] = &account
 			}
 		}
@@ -277,11 +277,11 @@ func fixState(chaindata string, url string) {
 					copy(cKey[:], addrHash[:])
 					binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
 					copy(cKey[common.HashLength+common.IncarnationLength:], key[:])
-					dbValue, _ := stateDb.Get(dbutils.StorageBucket, cKey[:])
+					dbValue, _ := stateDb.Get(dbutils.CurrentStateBucket, cKey[:])
 					value := bytes.TrimLeft(entry.Value[:], "\x00")
 					if !bytes.Equal(dbValue, value) {
 						fmt.Printf("Key: %x, value: %x, dbValue: %x\n", key, value, dbValue)
-						if err = stateDb.Put(dbutils.StorageBucket, cKey[:], value); err != nil {
+						if err = stateDb.Put(dbutils.CurrentStateBucket, cKey[:], value); err != nil {
 							fmt.Printf("%v\n", err)
 						}
 					}
@@ -289,12 +289,12 @@ func fixState(chaindata string, url string) {
 				var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 				copy(cKey[:], addrHash[:])
 				binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
-				err = stateDb.Walk(dbutils.StorageBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
+				err = stateDb.Walk(dbutils.CurrentStateBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
 					var kh common.Hash
 					copy(kh[:], k[common.HashLength+common.IncarnationLength:])
 					if _, ok := sm[kh]; !ok {
 						fmt.Printf("Key: %x, dbValue: %x\n", kh, v)
-						if err = stateDb.Delete(dbutils.StorageBucket, k); err != nil {
+						if err = stateDb.Delete(dbutils.CurrentStateBucket, k); err != nil {
 							fmt.Printf("%v\n", err)
 						}
 					}

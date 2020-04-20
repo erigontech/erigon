@@ -301,7 +301,13 @@ func (w *worker) close() {
 
 // newWorkLoop is a standalone goroutine to submit new mining work upon received events.
 func (w *worker) newWorkLoop(recommit time.Duration) {
-	minRecommit := recommit // minimal resubmit interval specified by user.
+	var (
+		minRecommit = recommit // minimal resubmit interval specified by user.
+	)
+
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	<-timer.C // discard the initial tick
 
 	// recalcRecommit recalculates the resubmitting interval upon feedback.
 	recalcRecommit := func(target float64, inc bool) {
