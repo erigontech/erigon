@@ -153,16 +153,6 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil, nil, history)
-}
-func SetupGenesisBlockWithOverride(db ethdb.Database,
-	genesis *Genesis,
-	overrideIstanbul *big.Int,
-	overrideMuirGlacier *big.Int,
-	history bool,
-) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	var stateDB *state.IntraBlockState
-
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
 	}
@@ -176,6 +166,25 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 			log.Info("Writing custom genesis block")
 		}
 		block, stateDB1, err := genesis.Commit(db, history)
+		if err != nil {
+			return genesis.Config, common.Hash{}, err
+		}
+		return genesis.Config, block.Hash(), nil
+	}
+
+	// We have the genesis block in database(perhaps in ancient database)
+	// but the corresponding state is missing.
+	header := rawdb.ReadHeader(db, stored, 0)
+	if _, err := state.New(header.Root, state.NewDatabaseWithCache(db, 0), nil); err != nil {
+		if genesis == nil {
+			genesis = DefaultGenesisBlock()
+		}
+		// Ensure the stored genesis matches with the given one.
+		hash := genesis.ToBlock(nil).Hash()
+		if hash != stored {
+			return genesis.Config, hash, &GenesisMismatchError{stored, hash}
+		}
+		block, err := genesis.Commit(db)
 		if err != nil {
 			return nil, common.Hash{}, nil, err
 		}
@@ -196,12 +205,6 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
-	if overrideIstanbul != nil {
-		newcfg.IstanbulBlock = overrideIstanbul
-	}
-	if overrideMuirGlacier != nil {
-		newcfg.MuirGlacierBlock = overrideMuirGlacier
-	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}

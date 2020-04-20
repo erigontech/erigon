@@ -146,7 +146,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis)
 		chainDb,
 		config.Genesis,
 		config.OverrideIstanbul,
@@ -226,8 +226,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			BlocksToPrune:       config.BlocksToPrune,
 			PruneTimeout:        config.PruningTimeout,
 			TrieCleanLimit:      config.TrieCleanCache,
-			TrieDirtyLimit:      config.TrieDirtyCache,
 			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieDirtyLimit:      config.TrieDirtyCache,
+			TrieDirtyDisabled:   config.NoPruning,
 			TrieTimeLimit:       config.TrieTimeout,
 			DownloadOnly:        config.DownloadOnly,
 			NoHistory:           !config.StorageMode.History,
