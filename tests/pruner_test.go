@@ -707,7 +707,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 
 	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		if len(key) > 32 {
-			return false, nil
+			return true, nil
 		}
 		stat.AccountsInState++
 		return true, nil

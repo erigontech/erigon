@@ -1,15 +1,20 @@
 package dbutils
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
+	"strconv"
 
 	"github.com/ledgerwatch/turbo-geth/common/math"
 )
 
 const (
-	LenBytes = 4
-	ItemLen  = 8
+	LenBytes     = 4
+	ItemLen      = 8
+	MaxChunkSize = 1000
 )
 
 func NewHistoryIndex() *HistoryIndexBytes {
@@ -118,9 +123,9 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
 	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
 	elements := hi[LenBytes*2:]
-	idx := sort.Search(numOfElements, func (i int) bool {
+	idx := sort.Search(numOfElements, func(i int) bool {
 		if i > numOfUint32Elements {
-			return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4 + (i-numOfUint32Elements)*8:]) >= v
+			return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4+(i-numOfUint32Elements)*8:]) >= v
 		}
 		return uint64(binary.LittleEndian.Uint32(elements[i*4:])) >= v
 	})
@@ -128,8 +133,68 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 		return 0, false
 	}
 	if idx > numOfUint32Elements {
-		return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4 + (idx-numOfUint32Elements)*8:]), true
+		return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4+(idx-numOfUint32Elements)*8:]), true
 	}
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
+func (hi HistoryIndexBytes) Key(key []byte, first bool) ([]byte, error) {
+	if first {
+		IndexChunkKey(key, 0)
+	}
+	blockNum, ok := hi.FirstElement()
+	if !ok {
+		return nil, errors.New("empty index")
+	}
+	return IndexChunkKey(key, blockNum), nil
+}
+
+func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
+	if len(hi) < LenBytes*2+4 {
+		return 0, false
+	}
+	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
+	if numOfElements == 0 {
+		return 0, false
+	}
+
+	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
+	if numOfUint32Elements > 0 {
+		return uint64(binary.LittleEndian.Uint32(hi[2*LenBytes : 2*LenBytes+4])), true
+	}
+	return binary.LittleEndian.Uint64(hi[2*LenBytes : 2*LenBytes+8]), true
+}
+
+func IndexChunkKey(key []byte, blockNumber uint64) []byte {
+	var blockNumBytes []byte // make([]byte, len(key)+8)
+	switch len(key) {
+	case common.HashLength:
+		blockNumBytes = make([]byte, len(key)+8)
+		binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
+		copy(blockNumBytes[:len(key)], key)
+	case common.HashLength*2 + common.IncarnationLength:
+		//remove incarnation and add inversed block number
+		blockNumBytes = make([]byte, common.HashLength*2+8)
+		copy(blockNumBytes, key[:common.HashLength])
+		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+	default:
+		panic("unexpected length " + strconv.Itoa(len(key)))
+	}
+
+	return blockNumBytes
+}
+
+func IsIndexBucket(b []byte) bool {
+	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
+}
+func IsFirstChunk(b []byte) bool {
+	if len(b) == common.HashLength+8 {
+		return binary.BigEndian.Uint64(b[common.HashLength:]) == ^uint64(0)
+	} else if len(b) == common.HashLength*2+8 {
+		return binary.BigEndian.Uint64(b[common.HashLength*2:]) == ^uint64(0)
+	}
+	panic("unexpected length" + strconv.Itoa(len(b)))
+}
+func CheckNewIndexChunk(b []byte) bool {
+	return len(b)+8 > MaxChunkSize
+}

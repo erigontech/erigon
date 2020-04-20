@@ -152,34 +152,53 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	for _, change := range accountChanges.Changes {
-		value, err1 := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
-		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-			return fmt.Errorf("db.Get failed: %w", err1)
-		}
-		index := dbutils.WrapHistoryIndex(value)
-		index.Append(dsw.tds.blockNr)
-		if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, change.Key, *index); err2 != nil {
-			return err2
-		}
+	err = dsw.writeIndex(accountChanges, dbutils.AccountsHistoryBucket)
+	if err != nil {
+		return err
 	}
+
 	storageChanges, err := dsw.csw.GetStorageChanges()
 	if err != nil {
 		return err
 	}
-	for _, change := range storageChanges.Changes {
-		keyNoInc := make([]byte, len(change.Key)-common.IncarnationLength)
-		copy(keyNoInc, change.Key[:common.HashLength])
-		copy(keyNoInc[common.HashLength:], change.Key[common.HashLength+common.IncarnationLength:])
-		value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, keyNoInc)
-		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-			return fmt.Errorf("db.Get failed: %w", err1)
+	err = dsw.writeIndex(storageChanges, dbutils.StorageHistoryBucket)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
+	for _, change := range changes.Changes {
+		indexBytes, chunkKey, err := dsw.tds.db.GetIndexChunk(bucket, change.Key, dsw.tds.blockNr)
+		if err != nil && err != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("find chunk failed: %w", err)
 		}
-		index := dbutils.WrapHistoryIndex(value)
+
+		var index *dbutils.HistoryIndexBytes
+		var firstChunk bool
+		if len(indexBytes) == 0 {
+			firstChunk = true
+			index = dbutils.NewHistoryIndex()
+		} else if dbutils.CheckNewIndexChunk(indexBytes) {
+			index = dbutils.NewHistoryIndex()
+		} else {
+			index = dbutils.WrapHistoryIndex(indexBytes)
+			firstChunk = dbutils.IsFirstChunk(chunkKey)
+		}
+
 		index.Append(dsw.tds.blockNr)
-		if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, keyNoInc, *index); err != nil {
+
+		indexKey, err := index.Key(change.Key, firstChunk)
+		if err != nil {
+			return err
+		}
+
+		if err := dsw.tds.db.Put(bucket, indexKey, *index); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
