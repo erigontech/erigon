@@ -174,7 +174,7 @@ func (v *BlockValidator) ValidateGasAndRoot(block *types.Block, root common.Hash
 		if errorBuf.Len() > 0 {
 			errorBuf.WriteString("; ")
 		}
-		fmt.Fprintf(&errorBuf, "invalid merkle root (remote: %x local: %x)", block.Header().Root, root)
+		fmt.Fprintf(&errorBuf, "[pre-processed] invalid merkle root (remote: %x local: %x)", block.Header().Root, root)
 	} else if has, ok := v.dblks[block.NumberU64()]; ok && has {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		log.Warn("Generating deep snapshot of right tries...", "file", filename)
