@@ -110,10 +110,16 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 	tds.tMu.Lock()
 	h := tds.t.Hash()
 	tds.tMu.Unlock()
+
 	c.onRoot(h)
 	var acc accounts.Account
-	var prefix [32]byte
-	err := tds.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+	numberOfResults := 0
+	err := tds.db.Walk(dbutils.CurrentStateBucket, start, 0, func(k, v []byte) (bool, error) {
+		nextKey = k
+		if numberOfResults >= maxResults {
+			return false, nil
+		}
+
 		if len(k) > 32 {
 			return true, nil
 		}
@@ -180,6 +186,8 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 			return false, err
 		}
 		c.onAccount(addr, account)
+		numberOfResults++
+
 		return true, nil
 	})
 	if err != nil {
