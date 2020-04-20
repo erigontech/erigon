@@ -394,7 +394,6 @@ func (tds *TrieDbState) buildStorageReads() common.StorageKeys {
 // item updates would be inclided.
 func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	storageTouches := common.StorageKeys{}
-	var values [][]byte
 	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash := range m {
 			var storageKey common.StorageKey
@@ -406,6 +405,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	sort.Sort(storageTouches)
 	var addrHash common.Hash
 	var keyHash common.Hash
+	var values = make([][]byte, len(storageTouches))
 	for _, storageKey := range storageTouches {
 		copy(addrHash[:], storageKey[:])
 		copy(keyHash[:], storageKey[common.HashLength:])
