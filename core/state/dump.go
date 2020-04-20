@@ -115,14 +115,14 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 	var prefix [32]byte
 	err := tds.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
 		if len(k) > 32 {
-			return false, nil
+			return true, nil
 		}
-		addr := common.BytesToAddress(tds.GetKey(k))
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, err
 		}
-		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, k)
+		addr := common.BytesToAddress(tds.GetKey(k))
+		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(common.BytesToHash(k), acc.GetIncarnation()))
 		if err != nil {
 			return false, err
 		}

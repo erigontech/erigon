@@ -156,23 +156,23 @@ func (tr *ResolverStateful) finaliseRoot() error {
 func (tr *ResolverStateful) RebuildTrie(
 	db ethdb.Database,
 	blockNr uint64,
-	accounts bool,
+	isAccount bool,
 	historical bool) error {
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if db == nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "ResolveWithDb(db=nil), accounts: %t\n", accounts)
+		fmt.Fprintf(&b, "ResolveWithDb(db=nil), isAccount: %t\n", isAccount)
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
 
-	var getAccRoot = func(accHash []byte) ([]byte, error) {
-		val, err := db.Get(dbutils.IntermediateTrieHashBucket, accHash)
-		return val, err
+	var getAccRoot = func(addrHash []byte, a accounts.Account) ([]byte, error) {
+		accRootKey := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), a.Incarnation)
+		return db.Get(dbutils.IntermediateTrieHashBucket, accRootKey)
 	}
 
 	var walkerAccounts = func(keyIdx int, k []byte, v []byte) error {
@@ -180,7 +180,7 @@ func (tr *ResolverStateful) RebuildTrie(
 	}
 
 	var err error
-	if accounts {
+	if isAccount {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
@@ -222,15 +222,8 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 	return nil
 }
 
-func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, getAccRoot func(accHash []byte) ([]byte, error)) error {
-	if len(k) != 32 {
-		return nil
-	}
-	root, err := getAccRoot(k)
-	if err != nil {
-		return err
-	}
-	return tr.Walker(true, keyIdx, k, v, root)
+func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, getAccRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+	return tr.Walker(true, keyIdx, k, v, getAccRoot)
 }
 
 func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error {
@@ -241,7 +234,7 @@ func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error 
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte, accRoot []byte) error {
+func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte, getAccRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
 	//fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if isAccount && len(k) != 32 {
 		return nil
@@ -302,7 +295,11 @@ func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byt
 			if err := tr.a.DecodeForStorage(v); err != nil {
 				return err
 			}
-			tr.a.Root = common.BytesToHash(accRoot)
+			storageHash, err := getAccRoot(k, tr.a)
+			if err != nil {
+				return err
+			}
+			tr.a.Root.SetBytes(storageHash)
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.fieldSet = AccountFieldSetNotContract
 			} else {
@@ -315,7 +312,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byt
 				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
-				if err := tr.hb.hash(accRoot); err != nil {
+				if err := tr.hb.hash(storageHash); err != nil {
 					return err
 				}
 			}

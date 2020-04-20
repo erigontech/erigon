@@ -155,7 +155,7 @@ func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address
 		}
 
 		if len(ks) > 32 {
-			return false, nil
+			return true, nil
 		}
 		addrHash := common.BytesToHash(ks[:common.HashLength])
 		preimage, err := dbs.db.Get(dbutils.PreimagePrefix, addrHash[:])
@@ -276,7 +276,7 @@ func (dbs *DbState) dump(c collector, excludeCode, excludeStorage, excludeMissin
 	var prefix [32]byte
 	err := dbs.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, _ []byte) (bool, error) {
 		if len(k) > 32 {
-			return false, nil
+			return true, nil
 		}
 		addr := common.BytesToAddress(dbs.GetKey(k))
 		var err error
@@ -407,7 +407,7 @@ func (dbs *DbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walk
 	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			if len(key) > 32 {
-				return false, nil
+				return true, nil
 			}
 			if len(value) > 0 {
 				if err := acc.DecodeForStorage(value); err != nil {
