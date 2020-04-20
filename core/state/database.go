@@ -168,6 +168,7 @@ func (b *Buffer) merge(other *Buffer) {
 	}
 	for addrHash := range other.deleted {
 		b.deleted[addrHash] = struct{}{}
+		delete(b.storageUpdates, addrHash)
 	}
 	for addrHash := range other.created {
 		b.created[addrHash] = struct{}{}
@@ -355,11 +356,6 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 	storageTouches := common.StorageKeys{}
 	var values [][]byte
 	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
-		if withValues {
-			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
-				continue
-			}
-		}
 		for keyHash := range m {
 			var storageKey common.StorageKey
 			copy(storageKey[:], addrHash[:])
@@ -784,17 +780,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 		// For the contracts that got deleted
 		for addrHash := range b.deleted {
-			if _, ok := b.created[addrHash]; ok {
-				// In some rather artificial circumstances, an account can be recreated after having been self-destructed
-				// in the same block. It can only happen when contract is introduced in the genesis state with nonce 0
-				// rather than created by a transaction (in that case, its starting nonce is 1). The self-destructed
-				// contract actually gets removed from the state only at the end of the block, so if its nonce is not 0,
-				// it will prevent any re-creation within the same block. However, if the contract is introduced in
-				// the genesis state, its nonce is 0, and that means it can be self-destructed, and then re-created,
-				// all in the same block. In such cases, we must preserve storage modifications happening after the
-				// self-destruction
-				continue
-			}
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 				//fmt.Printf("(b)Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
