@@ -152,10 +152,12 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			data = &tr.accData
 			if !tr.a.IsEmptyCodeHash() || !tr.a.IsEmptyRoot() {
 				// the first item ends up deepest on the stack, the second item - on the top
-				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
+				err = tr.hb.hash(tr.a.CodeHash[:])
+				if err != nil {
 					return err
 				}
-				if err := tr.hb.hash(tr.a.Root[:]); err != nil {
+				err = tr.hb.hash(tr.a.Root[:])
+				if err != nil {
 					return err
 				}
 			}
@@ -192,7 +194,7 @@ func (tr *ResolverStateful) RebuildTrie(
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
 	if tr.trace {
-		fmt.Printf("RebuildTrie %d\n", len(startkeys))
+		fmt.Printf("RebuildTrie %d, blockNr %d\n", len(startkeys), blockNr)
 		for _, startkey := range startkeys {
 			fmt.Printf("%x\n", startkey)
 		}
@@ -212,13 +214,13 @@ func (tr *ResolverStateful) RebuildTrie(
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = tr.MultiWalk2(boltDB, blockNr, dbutils.CurrentStateBucket, startkeys, fixedbits, tr.WalkerAccounts, true)
+			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerAccounts, true)
 		}
 	} else {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = tr.MultiWalk2(boltDB, blockNr, dbutils.CurrentStateBucket, startkeys, fixedbits, tr.WalkerStorage, false)
+			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerStorage, false)
 		}
 	}
 	if err != nil {
@@ -258,18 +260,18 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 	return nil
 }
 
-func (tr *ResolverStateful) WalkerAccounts(keyIdx int, blockNr uint64, k []byte, v []byte, isIH bool, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
-	return tr.Walker(true, blockNr, isIH, keyIdx, k, v, accRoot)
+func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, isIH bool, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+	return tr.Walker(true, isIH, keyIdx, k, v, accRoot)
 }
 
-func (tr *ResolverStateful) WalkerStorage(keyIdx int, blockNr uint64, k []byte, v []byte, isIH bool, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
-	return tr.Walker(false, blockNr, isIH, keyIdx, k, v, accRoot)
+func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte, isIH bool, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+	return tr.Walker(false, isIH, keyIdx, k, v, accRoot)
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) Walker(isAccount bool, blockNr uint64, isIH bool, keyIdx int, k []byte, v []byte, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []byte, v []byte, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
 	if tr.trace {
-		fmt.Printf("Walker: %t, blockNr: %d, keyIdx: %d key:%x  value:%x, isIH: %v\n", isAccount, blockNr, keyIdx, k, v, isIH)
+		fmt.Printf("Walker: %t, keyIdx: %d key:%x  value:%x, isIH: %v\n", isAccount, keyIdx, k, v, isIH)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -323,10 +325,12 @@ func (tr *ResolverStateful) Walker(isAccount bool, blockNr uint64, isIH bool, ke
 				data = &tr.accData
 				if !tr.a.IsEmptyCodeHash() || !tr.a.IsEmptyRoot() {
 					// the first item ends up deepest on the stack, the second item - on the top
-					if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
+					err = tr.hb.hash(tr.a.CodeHash[:])
+					if err != nil {
 						return err
 					}
-					if err := tr.hb.hash(tr.a.Root[:]); err != nil {
+					err = tr.hb.hash(tr.a.Root[:])
+					if err != nil {
 						return err
 					}
 				}
@@ -375,7 +379,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, blockNr uint64, isIH bool, ke
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, isIH bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, isIH bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -392,7 +396,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 		if ihBucket != nil {
 			ih = ihBucket.Cursor()
 		}
-		c := tx.Bucket(bucket).Cursor()
+		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		accRoots := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 
 		k, v := c.Seek(startkey)
@@ -507,7 +511,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 			}
 
 			if !isIH {
-				if err := walker(rangeIdx, blockNr, minKey, v, false, getAccRoot); err != nil {
+				if err := walker(rangeIdx, minKey, v, false, getAccRoot); err != nil {
 					return err
 				}
 				k, v = c.Next()
@@ -533,7 +537,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 				continue
 			}
 
-			if err := walker(rangeIdx, blockNr, minKey, ihV, isIH, nil); err != nil {
+			if err := walker(rangeIdx, minKey, ihV, isIH, nil); err != nil {
 				return fmt.Errorf("waker err: %w", err)
 			}
 
