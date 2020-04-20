@@ -598,7 +598,7 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, isIH bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -610,10 +610,10 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.View(func(tx *bolt.Tx) error {
-		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		var cache *bolt.Cursor
-		if cacheBucket != nil {
-			cache = cacheBucket.Cursor()
+		ihBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		var ih *bolt.Cursor
+		if ihBucket != nil {
+			ih = ihBucket.Cursor()
 		}
 		c := tx.Bucket(bucket).Cursor()
 		accRoots := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
@@ -631,18 +631,18 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 			return accRoot, nil
 		}
 
-		var cacheK, cacheV []byte
-		if cache != nil {
-			cacheK, cacheV = cache.Seek(startkey)
+		var ihK, ihV []byte
+		if ih != nil {
+			ihK, ihV = ih.Seek(startkey)
 		}
 
 		var minKey []byte
-		var fromCache bool
-		for k != nil || cacheK != nil {
-			// for Address bucket, skip cache keys longer than 31 bytes
+		var isIH bool
+		for k != nil || ihK != nil {
+			// for Address bucket, skip ih keys longer than 31 bytes
 			if isAccount {
-				for len(cacheK) > 31 {
-					cacheK, cacheV = cache.Next()
+				for len(ihK) > 31 {
+					ihK, ihV = ih.Next()
 				}
 				for len(k) > 32 {
 					k, v = c.Next()
@@ -652,14 +652,14 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 					k, v = c.Next()
 				}
 			}
-			if cacheK == nil && k == nil {
+			if ihK == nil && k == nil {
 				break
 			}
 			if tr.trace {
-				fmt.Printf("For loop: %x, %x\n", cacheK, k)
+				fmt.Printf("For loop: %x, %x\n", ihK, k)
 			}
 
-			fromCache, minKey = keyIsBefore(cacheK, k)
+			isIH, minKey = keyIsBefore(ihK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
@@ -691,16 +691,16 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
-						cacheK, cacheV = cache.SeekTo(startkey)
+						ihK, ihV = ih.SeekTo(startkey)
 						if tr.trace {
 							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
-							fmt.Printf("[isIH = %t], cache.SeekTo(%x) = %x\n", fromCache, startkey, cacheK)
+							fmt.Printf("[isIH = %t], ih.SeekTo(%x) = %x\n", isIH, startkey, ihK)
 							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
-						// for Address bucket, skip cache keys longer than 31 bytes
+						// for Address bucket, skip ih keys longer than 31 bytes
 						if isAccount {
-							for len(cacheK) > 31 {
-								cacheK, cacheV = cache.Next()
+							for len(ihK) > 31 {
+								ihK, ihV = ih.Next()
 							}
 							for len(k) > 32 {
 								k, v = c.Next()
@@ -710,13 +710,13 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 								k, v = c.Next()
 							}
 						}
-						if k == nil && cacheK == nil {
+						if k == nil && ihK == nil {
 							return nil
 						}
 
-						fromCache, minKey = keyIsBefore(cacheK, k)
+						isIH, minKey = keyIsBefore(ihK, k)
 						if tr.trace {
-							fmt.Printf("isIH, minKey = %t, %x\n", fromCache, minKey)
+							fmt.Printf("isIH, minKey = %t, %x\n", isIH, minKey)
 						}
 					} else if cmp > 0 {
 						rangeIdx++
@@ -729,7 +729,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 				}
 			}
 
-			if !fromCache {
+			if !isIH {
 				if err := walker(rangeIdx, blockNr, minKey, v, false, getAccRoot); err != nil {
 					return err
 				}
@@ -737,41 +737,41 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 				continue
 			}
 
-			// cache part
-			canUseCache := false
+			// ih part
+			canUseIntermediateHash := false
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 			currentRs := tr.rss[rangeIdx]
 
 			if len(keyAsNibbles.B) < currentReq.extResolvePos {
-				cacheK, cacheV = cache.Next() // go to children, not to sibling
+				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
 			keyAsNibbles.Reset()
 			DecompressNibbles(minKey, &keyAsNibbles.B)
-			canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			if !canUseCache { // can't use cache as is, need go to children
-				cacheK, cacheV = cache.Next() // go to children, not to sibling
+			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			if !canUseIntermediateHash { // can't use ih as is, need go to children
+				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
-			if err := walker(rangeIdx, blockNr, minKey, cacheV, fromCache, nil); err != nil {
+			if err := walker(rangeIdx, blockNr, minKey, ihV, isIH, nil); err != nil {
 				return fmt.Errorf("waker err: %w", err)
 			}
 
 			// skip subtree
-			next, ok := nextSubtree(cacheK)
+			next, ok := nextSubtree(ihK)
 			if !ok { // no siblings left
-				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.
+				if canUseIntermediateHash { // last sub-tree was taken from IH, then nothing to look in the main bucket. Can stop.
 					break
 				}
-				cacheK, cacheV = nil, nil
+				ihK, ihV = nil, nil
 				continue
 			}
 
 			k, v = c.Seek(next)
-			cacheK, cacheV = cache.Seek(next)
+			ihK, ihV = ih.Seek(next)
 		}
 		return nil
 	})
