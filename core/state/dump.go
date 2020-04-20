@@ -137,11 +137,11 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 		if len(k) > 32 {
 			return true, nil
 		}
-		addr := common.BytesToAddress(tds.source.GetKey(k))
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, err
 		}
+		addr := common.BytesToAddress(tds.source.GetKey(k))
 		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(common.BytesToHash(k), acc.GetIncarnation()))
 		if err != nil {
 			return false, err
