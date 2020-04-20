@@ -22,9 +22,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
-// ReadAccount retrieves the version number of the database.
+// ReadAccount reading account object from multiple buckets of db
 func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
-	//fmt.Printf("ReadAccount: %x,%x\n ", addrHash, acc.Root.Bytes())
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
 	if err != nil {
@@ -46,7 +45,6 @@ func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account)
 }
 
 func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account) error {
-	//fmt.Printf("WriteAccount: %x,%x\n ", addrHash, acc.Root.Bytes())
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
@@ -65,8 +63,6 @@ type DatabaseReaderDeleter interface {
 }
 
 func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
-	//fmt.Printf("DeleteAccount: %x\n ", addrHash)
-
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
 	if err != nil && err.Error() != "db: key not found" {

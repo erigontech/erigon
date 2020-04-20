@@ -252,8 +252,6 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
 
-		//tr.succ.Write(kAsNibbles[skip:])
-
 		i := 0
 		for _, b := range k {
 			if i >= skip {
