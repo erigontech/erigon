@@ -488,6 +488,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			keyAsNibbles.Reset()
 			DecompressNibbles(minKey, &keyAsNibbles.B)
+			if len(keyAsNibbles.B) < currentReq.extResolvePos {
+				cacheK, cacheV = cache.Next() // go to children, not to sibling
+				continue
+			}
 			canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
 			if !canUseCache { // can't use cache as is, need go to children
 				cacheK, cacheV = cache.Next() // go to children, not to sibling
