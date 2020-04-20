@@ -24,44 +24,64 @@ import (
 
 // ReadAccount retrieves the version number of the database.
 func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+	//fmt.Printf("ReadAccount: %x,%x\n ", addrHash, acc.Root.Bytes())
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
 	if err != nil {
 		return false, err
 	}
-	root, err := db.Get(dbutils.IntermediateTrieHashBucket, addrHashBytes)
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return false, err
+	}
+	root, err := db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
 	if err != nil {
 		return false, err
 	}
 	if enc == nil || root == nil {
 		return false, nil
 	}
-	if err = acc.DecodeForStorage(enc); err != nil {
-		return false, err
-	}
 	acc.Root = common.BytesToHash(root)
+
 	return true, nil
 }
 
 func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account) error {
+	//fmt.Printf("WriteAccount: %x,%x\n ", addrHash, acc.Root.Bytes())
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
 	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
 		return err
 	}
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHashBytes, acc.Root.Bytes()); err != nil {
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), acc.Root.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
+type DBToDeleteAccount interface {
+	DatabaseReader
+	DatabaseDeleter
+}
+
+func DeleteAccount(db DBToDeleteAccount, addrHash common.Hash) error {
+	//fmt.Printf("DeleteAccount: %x\n ", addrHash)
+
 	addrHashBytes := addrHash[:]
+	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
+	if err != nil && err.Error() != "db: key not found" {
+		return err
+	}
+	acc := accounts.NewAccount()
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return err
+	}
+
 	if err := db.Delete(dbutils.CurrentStateBucket, addrHashBytes); err != nil {
 		return err
 	}
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
+
+	if err := db.Delete(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err != nil {
 		return err
 	}
 	return nil
