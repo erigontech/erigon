@@ -103,7 +103,7 @@ func (d iterativeDump) onRoot(root common.Hash) {
 		Root common.Hash `json:"root"`
 	}{root})
 }
-func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
+func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte) {
 	emptyAddress := common.Address{}
 	missingPreimages := 0
 
@@ -185,6 +185,8 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 	if err != nil {
 		panic(err)
 	}
+
+	return nextKey
 }
 
 // RawDump returns the entire state an a single large object
@@ -192,17 +194,8 @@ func (tds *TrieDbState) RawDump(excludeCode, excludeStorage, excludeMissingPreim
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
-	tds.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages)
+	tds.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 	return *dump
-}
-
-func (tds *TrieDbState) DefaultRawDump() Dump {
-	return tds.RawDump(false, false, false)
-}
-
-// DefaultDump returns a JSON string representing the state with the default params
-func (tds *TrieDbState) DefaultDump() []byte {
-	return tds.Dump(false, false, false)
 }
 
 // Dump returns a JSON string representing the entire state as a single json-object
@@ -217,5 +210,23 @@ func (tds *TrieDbState) Dump(excludeCode, excludeStorage, excludeMissingPreimage
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (tds *TrieDbState) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
-	tds.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages)
+	tds.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+}
+
+// IteratorDump dumps out a batch of accounts starts with the given start key
+func (tds *TrieDbState) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) IteratorDump {
+	iterator := &IteratorDump{
+		Accounts: make(map[common.Address]DumpAccount),
+	}
+	iterator.Next = tds.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	return *iterator
+}
+
+func (tds *TrieDbState) DefaultRawDump() Dump {
+	return tds.RawDump(false, false, false)
+}
+
+// DefaultDump returns a JSON string representing the state with the default params
+func (tds *TrieDbState) DefaultDump() []byte {
+	return tds.Dump(false, false, false)
 }

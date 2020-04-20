@@ -60,7 +60,7 @@ func (h resultHash) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h resultHash) Less(i, j int) bool { return bytes.Compare(h[i].Bytes(), h[j].Bytes()) < 0 }
 
 func TestAccountRange(t *testing.T) {
-	t.Skip("restore when accountRange is impemented")
+	t.Error("restore when accountRange is impemented")
 	/*
 		var (
 			db      = ethdb.NewMemDatabase()
@@ -134,21 +134,22 @@ func TestAccountRange(t *testing.T) {
 }
 
 func TestEmptyAccountRange(t *testing.T) {
-	t.Skip("restore when accountRange is impemented")
-	/*
-		var (
-			statedb = state.NewDbState(ethdb.NewMemDatabase(), 0)
-		)
-		state.Commit(true)
-		state.IntermediateRoot(true)
-		results := state.IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
-		if bytes.Equal(results.Next, (common.Hash{}).Bytes()) {
-			t.Fatalf("Empty results should not return a second page")
-		}
-		if len(results.Accounts) != 0 {
-			t.Fatalf("Empty state should not return addresses: %v", results.Accounts)
-		}
-	*/
+	var (
+		db  = ethdb.NewMemDatabase()
+		tds = state.NewTrieDbState(common.Hash{}, db, 1)
+	)
+	tds.StartNewBuffer()
+	_, err := tds.ComputeTrieRoots()
+	if err != nil {
+		t.Error(err)
+	}
+	results := tds.IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
+	if bytes.Equal(results.Next, (common.Hash{}).Bytes()) {
+		t.Fatalf("Empty results should not return a second page")
+	}
+	if len(results.Accounts) != 0 {
+		t.Fatalf("Empty state should not return addresses: %v", results.Accounts)
+	}
 }
 
 func TestStorageRangeAt(t *testing.T) {
