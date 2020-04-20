@@ -1198,6 +1198,7 @@ func bench3() {
 		} else {
 			page = sr.Result.Next
 			for k, v := range sr.Result.Accounts {
+				accRangeTG[k] = v
 			}
 		}
 	}
@@ -1208,8 +1209,38 @@ func bench3() {
 	}
 }
 
-func compareAccountRanges(tg, geth map[common.Hash]*common.Address) bool {
-	panic("implement me")
+func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
+	allAddresses := make(map[common.Address]struct{})
+	for k, _ := range tg {
+		allAddresses[k] = struct{}{}
+	}
+
+	for k, _ := range geth {
+		allAddresses[k] = struct{}{}
+	}
+
+	for addr, _ := range allAddresses {
+		tgAcc, tgOk := tg[addr]
+		if !tgOk {
+			fmt.Println("mising account in TurboGeth", addr)
+			return false
+		}
+
+		gethAcc, gethOk := geth[addr]
+		if !gethOk {
+			fmt.Println("mising account in Geth", addr)
+			return false
+		}
+
+		tgAccBytes, _ := json.Marshal(tgAcc)
+		gethAccBytes, _ := json.Marshal(gethAcc)
+
+		if !bytes.Equal(tgAccBytes, gethAccBytes) {
+			fmt.Printf("account mismatch:\n\ttg=%s\n\tgg=%s\n", string(tgAccBytes), string(gethAccBytes))
+			return false
+		}
+	}
+	return true
 }
 
 func bench4() {
@@ -1489,6 +1520,8 @@ func main() {
 		fixState(*chaindata, *url)
 	case "bench1":
 		bench1(true, true)
+	case "bench3":
+		bench3()
 	case "bench7":
 		bench7()
 	case "bench8":
