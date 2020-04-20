@@ -56,38 +56,48 @@ func (p puts) Size() int {
 	return size
 }
 
-func (p puts) ChunkByIDOrLastChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+func (p puts) ChunkByIDOrLastChunk(bucket, key []byte, timestamp uint64) ([]byte, []byte, error) {
 	chunkIDs, ok := p.chunkIDs[string(key)]
 	if !ok {
-		return nil, ErrKeyNotFound
+		return nil, nil, ErrKeyNotFound
 	}
 
+	var chunkKey []byte
 	for _, chunk := range chunkIDs {
 		if timestamp == chunk {
-			index, ok := p.get(bucket, dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))
+			chunkKey = dbutils.IndexChunkKey(key, chunk)
+			index, ok := p.get(bucket, chunkKey)
 			if !ok {
-				return nil, errors.New("incorrect mapping")
+				return nil, nil, errors.New("incorrect mapping")
 			}
-			return index, nil
+			return index, chunkKey, nil
 		}
+	}
+	if chunkIDs[len(chunkIDs)-1] == ^uint64(0) {
+		chunkKey = dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1])
+		index, ok := p.get(bucket, chunkKey)
+		if !ok {
+			return nil, nil, errors.New("incorrect mapping")
+		}
+		return index, chunkKey, nil
 	}
 
 	//inverted
 	if timestamp > chunkIDs[len(chunkIDs)-1] {
-		index, ok := p.get(bucket, dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))
+		chunkKey = dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1])
+		index, ok := p.get(bucket, chunkKey)
 		if !ok {
-			return nil, errors.New("incorrect mapping")
+			return nil, nil, errors.New("incorrect mapping")
 		}
-		return index, nil
-
+		return index, chunkKey, nil
 	}
 
-	return nil, ErrKeyNotFound
+	return nil, nil, ErrKeyNotFound
 }
 
 //key without blockNumber
 func (p puts) Put(mp putsBucket, key []byte, index *dbutils.HistoryIndexBytes) error {
-	indexKey, err := index.Key(key)
+	indexKey, err := index.Key(key, false)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
+	"strconv"
 
 	"github.com/ledgerwatch/turbo-geth/common/math"
 )
@@ -18,13 +20,6 @@ const (
 func NewHistoryIndex() *HistoryIndexBytes {
 	b := make(HistoryIndexBytes, LenBytes*2, 16)
 	return &b
-}
-
-func IsIndexBucket(b []byte) bool {
-	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
-}
-func CheckNewIndexChunk(b []byte) bool {
-	return len(b)+8 > MaxChunkSize
 }
 
 func WrapHistoryIndex(b []byte) *HistoryIndexBytes {
@@ -143,7 +138,10 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
-func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
+func (hi HistoryIndexBytes) Key(key []byte, first bool) ([]byte, error) {
+	if first {
+		IndexChunkKey(key, 0)
+	}
 	blockNum, ok := hi.FirstElement()
 	if !ok {
 		return nil, errors.New("empty index")
@@ -168,8 +166,33 @@ func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
 }
 
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
-	blockNumBytes := make([]byte, len(key)+8)
-	binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
-	copy(blockNumBytes[:len(key)], key)
+	var blockNumBytes []byte // make([]byte, len(key)+8)
+	switch len(key) {
+	case common.HashLength:
+		blockNumBytes = make([]byte, len(key)+8)
+		binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
+		copy(blockNumBytes[:len(key)], key)
+	case common.HashLength*2 + common.IncarnationLength:
+		//remove incarnation and add inversed block number
+		blockNumBytes = make([]byte, common.HashLength*2+8)
+		copy(blockNumBytes, key[:common.HashLength])
+		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+	}
+
 	return blockNumBytes
+}
+
+func IsIndexBucket(b []byte) bool {
+	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
+}
+func IsFirstChunk(b []byte) bool {
+	if len(b) == common.HashLength+8 {
+		return binary.BigEndian.Uint64(b[common.HashLength:]) == ^uint64(0)
+	} else if len(b) == common.HashLength*2+8 {
+		return binary.BigEndian.Uint64(b[common.HashLength*2:]) == ^uint64(0)
+	}
+	panic("unexpected length" + strconv.Itoa(len(b)))
+}
+func CheckNewIndexChunk(b []byte) bool {
+	return len(b)+8 > MaxChunkSize
 }

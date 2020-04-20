@@ -31,7 +31,12 @@ type IndexGenerator struct {
 	bucketToWrite []byte
 	fixedBits     uint
 	csWalker      func([]byte) ChangesetWalker
-	cache         map[string][]*dbutils.HistoryIndexBytes
+	cache         map[string][]IndexWithKey
+}
+
+type IndexWithKey struct {
+	IsFirst bool
+	Val     *dbutils.HistoryIndexBytes
 }
 
 func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) error {
@@ -39,29 +44,38 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		indexes, ok := ig.cache[string(k)]
 		if !ok || len(indexes) == 0 {
 
-			indexBytes, err := ig.db.GetIndexChunk(ig.bucketToWrite, k, blockNum)
+			indexBytes, chunkKey, err := ig.db.GetIndexChunk(ig.bucketToWrite, k, blockNum)
 			if err != nil && err != ethdb.ErrKeyNotFound {
 				return err
 			}
 			var index *dbutils.HistoryIndexBytes
 
-			if len(indexBytes) == 0 || dbutils.CheckNewIndexChunk(indexBytes) {
+			var firstChunk bool
+			if len(indexBytes) == 0 {
+				index = dbutils.NewHistoryIndex()
+				firstChunk = true
+			} else if dbutils.CheckNewIndexChunk(indexBytes) {
 				index = dbutils.NewHistoryIndex()
 			} else {
 				index = dbutils.WrapHistoryIndex(indexBytes)
+				firstChunk = dbutils.IsFirstChunk(chunkKey)
 			}
 
-			indexes = append(indexes, index)
+			indexes = append(indexes, IndexWithKey{
+				IsFirst: firstChunk,
+				Val:     index,
+			})
 			ig.cache[string(k)] = indexes
 		}
 
 		lastIndex := indexes[len(indexes)-1]
-		if dbutils.CheckNewIndexChunk(*lastIndex) {
-			lastIndex = dbutils.NewHistoryIndex()
+		if dbutils.CheckNewIndexChunk(*lastIndex.Val) {
+			lastIndex.Val = dbutils.NewHistoryIndex()
+			lastIndex.IsFirst = false
 			indexes = append(indexes, lastIndex)
 			ig.cache[string(k)] = indexes
 		}
-		lastIndex.Append(blockNum)
+		lastIndex.Val.Append(blockNum)
 		return nil
 	}
 }
@@ -77,7 +91,7 @@ func (ig *IndexGenerator) GenerateIndex() error {
 	startTime := time.Now()
 	batchSize := ig.db.IdealBatchSize() * 3
 	//addrHash - > index or addhash + inverted firshBlock for full chunk contracts
-	ig.cache = make(map[string][]*dbutils.HistoryIndexBytes, batchSize)
+	ig.cache = make(map[string][]IndexWithKey, batchSize)
 
 	//todo add truncate to all db
 	if bolt, ok := ig.db.(*ethdb.BoltDatabase); ok {
@@ -92,11 +106,20 @@ func (ig *IndexGenerator) GenerateIndex() error {
 		tuples := common.NewTuples(len(ig.cache), 3, 1)
 		for key, vals := range ig.cache {
 			for _, val := range vals {
-				chunkKey, err := val.Key([]byte(key))
+				var (
+					chunkKey []byte
+					err      error
+				)
+				if val.IsFirst {
+					chunkKey, err = val.Val.Key([]byte(key), true)
+				} else {
+					chunkKey, err = val.Val.Key([]byte(key), false)
+				}
 				if err != nil {
 					return err
 				}
-				if err := tuples.Append(ig.bucketToWrite, chunkKey, *val); err != nil {
+
+				if err := tuples.Append(ig.bucketToWrite, chunkKey, *val.Val); err != nil {
 					return err
 				}
 
@@ -107,7 +130,7 @@ func (ig *IndexGenerator) GenerateIndex() error {
 		if err != nil {
 			return err
 		}
-		ig.cache = make(map[string][]*dbutils.HistoryIndexBytes, batchSize)
+		ig.cache = make(map[string][]IndexWithKey, batchSize)
 		return nil
 	}
 

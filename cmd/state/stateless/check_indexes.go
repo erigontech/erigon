@@ -39,7 +39,7 @@ func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) er
 		}
 
 		err = walker(v).Walk(func(key, val []byte) error {
-			indexBytes, innerErr := db.GetIndexChunk(indexBucket, key, blockNum)
+			indexBytes, _, innerErr := db.GetIndexChunk(indexBucket, key, blockNum)
 			if err != nil {
 				return innerErr
 			}

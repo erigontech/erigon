@@ -175,27 +175,31 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 // GetIndexChunk returns proper index chunk or return error if index is not created.
 // key must contain inverted block number in the end
-func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, []byte, error) {
 
 	var dat []byte
+	var chunkKey []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b != nil {
 			c := b.Cursor()
 			k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
-			if bytes.HasPrefix(k, key) {
-				if v != nil {
-					dat = make([]byte, len(v))
-					copy(dat, v)
+			if !bytes.HasPrefix(k, key) {
+				k, v = c.Prev()
+				if !bytes.HasPrefix(k, key) {
+					return ErrKeyNotFound
 				}
 			}
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			chunkKey = common.CopyBytes(k)
 		}
 		return nil
 	})
 	if dat == nil {
-		return nil, ErrKeyNotFound
+		return nil, nil, ErrKeyNotFound
 	}
-	return dat, err
+	return dat, chunkKey, err
 }
 
 // getChangeSetByBlockNoLock returns changeset by block and bucket
@@ -715,7 +719,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	}
 	var keyF []byte
 	if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
-		keyF := make([]byte, len(key)-common.IncarnationLength)
+		keyF = make([]byte, len(key)-common.IncarnationLength)
 		copy(keyF, key[:common.HashLength])
 		copy(keyF[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
 	} else {

@@ -58,7 +58,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	indexBytes, innerErr := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 1)
+	indexBytes, _, innerErr := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 1)
 	if innerErr != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		indexBytes, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
+		indexBytes, _, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
 		if err != nil {
 			t.Fatal("error on get account", i, err)
 		}
@@ -319,15 +319,11 @@ func TestMutationIndexChunking(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				v, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), i)
+				v, k, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), i)
 				if err != nil && err != ethdb.ErrKeyNotFound {
 					t.Error(err)
 				}
 				index := dbutils.WrapHistoryIndex(v)
-				k, err := index.Key(addrHash.Bytes())
-				if err != nil {
-					t.Error(i, err)
-				}
 				m[string(k)] = *index
 			}
 
@@ -415,16 +411,12 @@ func TestMutationGetAsOfCheck(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				v, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), i)
+				v, chunkKey, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), i)
 				if err != nil && err != ethdb.ErrKeyNotFound {
 					t.Error(err)
 				}
 				index := dbutils.WrapHistoryIndex(v)
-				k, err := index.Key(addrHash.Bytes())
-				if err != nil {
-					t.Error(i, err)
-				}
-				m[string(k)] = *index
+				m[string(chunkKey)] = *index
 			}
 			if commiter, ok := db.(ethdb.DbWithPendingMutations); ok {
 				_, err := commiter.Commit()

@@ -40,7 +40,7 @@ type Getter interface {
 
 	// Get returns prober chunk of index or error if index is not created.
 	// Key must contain 8byte inverted block number in the end.
-	GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error)
+	GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, []byte, error)
 
 	// GetAsOf returns the value valid as of a given timestamp.
 	// timestamp == block number
