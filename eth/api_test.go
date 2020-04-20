@@ -38,7 +38,7 @@ import (
 var dumper = spew.ConfigState{Indent: "    "}
 
 func accountRangeTest(t *testing.T, trie *trie.Trie, tds *state.TrieDbState, sdb *state.IntraBlockState, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump {
-	result := tds.IteratorDump(true, true, false, start.Bytes(), requestedNum)
+	result := tds.Dumper().IteratorDump(true, true, false, start.Bytes(), requestedNum)
 
 	if len(result.Accounts) != expectedNum {
 		t.Fatalf("expected %d results, got %d", expectedNum, len(result.Accounts))
@@ -142,7 +142,7 @@ func TestEmptyAccountRange(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	results := tds.IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
+	results := tds.Dumper().IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
 	if bytes.Equal(results.Next, (common.Hash{}).Bytes()) {
 		t.Fatalf("Empty results should not return a second page")
 	}

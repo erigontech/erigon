@@ -523,7 +523,7 @@ func dump(ctx *cli.Context) error {
 			excludeCode := ctx.Bool(utils.ExcludeCodeFlag.Name)
 			excludeStorage := ctx.Bool(utils.ExcludeStorageFlag.Name)
 			includeMissing := ctx.Bool(utils.IncludeIncompletesFlag.Name)
-			fmt.Printf("%s\n", tds.Dump(excludeCode, excludeStorage, !includeMissing))
+			fmt.Printf("%s\n", tds.Dumper().Dump(excludeCode, excludeStorage, !includeMissing))
 		}
 	}
 	return nil
