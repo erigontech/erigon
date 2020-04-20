@@ -22,10 +22,17 @@ import "fmt"
 type SyncMode int
 
 const (
-	FullSync  SyncMode = iota // Synchronise the entire blockchain history from full blocks
-	FastSync                  // Quickly download the headers, full sync only at the chain head
-	LightSync                 // Download only the headers and terminate afterwards
-	StagedSync                // Full sync but done in stages
+	FullSync   SyncMode = iota // Synchronise the entire blockchain history from full blocks
+	FastSync                   // Quickly download the headers, full sync only at the chain head
+	LightSync                  // Download only the headers and terminate afterwards
+	StagedSync                 // Full sync but done in stages
+)
+
+const (
+	FullSyncName   = "full"
+	FastSyncName   = "fast"
+	LightSyncName  = "light"
+	StagedSyncName = "staged"
 )
 
 func (mode SyncMode) IsValid() bool {
@@ -36,13 +43,13 @@ func (mode SyncMode) IsValid() bool {
 func (mode SyncMode) String() string {
 	switch mode {
 	case FullSync:
-		return "full"
+		return FullSyncName
 	case FastSync:
-		return "fast"
+		return FastSyncName
 	case LightSync:
-		return "light"
+		return LightSyncName
 	case StagedSync:
-		return "staged"
+		return StagedSyncName
 	default:
 		return "unknown"
 	}
@@ -51,13 +58,13 @@ func (mode SyncMode) String() string {
 func (mode SyncMode) MarshalText() ([]byte, error) {
 	switch mode {
 	case FullSync:
-		return []byte("full"), nil
+		return []byte(FullSyncName), nil
 	case FastSync:
-		return []byte("fast"), nil
+		return []byte(FastSyncName), nil
 	case LightSync:
-		return []byte("light"), nil
+		return []byte(LightSyncName), nil
 	case StagedSync:
-		return []byte("staged"), nil
+		return []byte(StagedSyncName), nil
 	default:
 		return nil, fmt.Errorf("unknown sync mode %d", mode)
 	}
@@ -65,16 +72,17 @@ func (mode SyncMode) MarshalText() ([]byte, error) {
 
 func (mode *SyncMode) UnmarshalText(text []byte) error {
 	switch string(text) {
-	case "full":
+	case FullSyncName:
 		*mode = FullSync
-	case "fast":
+	case FastSyncName:
 		*mode = FastSync
-	case "light":
+	case LightSyncName:
 		*mode = LightSync
-	case "staged":
+	case StagedSyncName:
 		*mode = StagedSync
 	default:
-		return fmt.Errorf(`unknown sync mode %q, want "full", "fast", "light" or "staged"`, text)
+		return fmt.Errorf(`unknown sync mode %q, want "%s", "%s", "%s" or "%s"`,
+			FullSyncName, FastSyncName, LightSyncName, StagedSyncName, text)
 	}
 	return nil
 }

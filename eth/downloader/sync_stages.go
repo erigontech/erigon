@@ -33,7 +33,7 @@ const (
 )
 
 // GetStageProcess retrieves saved progress of given sync stage from the database
-func GetStageProgress(db ethdb.Database, stage SyncStage) (uint64, error) {
+func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
 		return 0, err
@@ -45,7 +45,7 @@ func GetStageProgress(db ethdb.Database, stage SyncStage) (uint64, error) {
 }
 
 // SaveStageProgress saves the progress of the given stage in the database
-func SaveStageProcess(db ethdb.Database, stage SyncStage, progress uint64) error {
+func SaveStageProcess(db ethdb.Putter, stage SyncStage, progress uint64) error {
 	var v [8]byte
 	binary.BigEndian.PutUint64(v[:], progress)
 	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, v[:])
