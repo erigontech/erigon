@@ -205,6 +205,9 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 
 		return true, nil
 	})
+	if maxResults < 1 || numberOfResults < 1 {
+		nextKey = nil
+	}
 	if err != nil {
 		panic(err)
 	}
