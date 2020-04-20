@@ -406,10 +406,10 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	var addrHash common.Hash
 	var keyHash common.Hash
 	var values = make([][]byte, len(storageTouches))
-	for _, storageKey := range storageTouches {
+	for i, storageKey := range storageTouches {
 		copy(addrHash[:], storageKey[:])
 		copy(keyHash[:], storageKey[common.HashLength:])
-		values = append(values, tds.aggregateBuffer.storageUpdates[addrHash][keyHash])
+		values[i] = tds.aggregateBuffer.storageUpdates[addrHash][keyHash]
 	}
 	return storageTouches, values
 }
