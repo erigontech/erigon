@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -221,11 +222,11 @@ func makeTokenBalances() {
 	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
-		enc, err := ethDb.Get(dbutils.AccountsBucket, crypto.Keccak256(token[:]))
-		if enc == nil {
+		if ok, err := rawdb.ReadAccount(ethDb, common.BytesToHash(crypto.Keccak256(token[:])), &a); err != nil {
+			panic(err)
+		} else if !ok {
 			continue
 		}
-		check(a.DecodeForStorage(enc))
 		if a.IsEmptyCodeHash() {
 			// Only processing contracts
 			continue
@@ -280,7 +281,7 @@ func makeTokenBalances() {
 		if plen != 1 {
 			fmt.Printf(" balanceOf preimages: %d\n", plen)
 		}
-		err = ethDb.Walk(dbutils.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
 			var preimage []byte
@@ -441,11 +442,11 @@ func makeTokenAllowances() {
 	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
-		enc, err := ethDb.Get(dbutils.AccountsBucket, crypto.Keccak256(token[:]))
-		if enc == nil {
+		if ok, err := rawdb.ReadAccount(ethDb, common.BytesToHash(crypto.Keccak256(token[:])), &a); err != nil {
+			panic(err)
+		} else if !ok {
 			continue
 		}
-		check(a.DecodeForStorage(enc))
 		if a.IsEmptyCodeHash() {
 			// Only processing contracts
 			continue
@@ -518,7 +519,7 @@ func makeTokenAllowances() {
 			fmt.Printf("allowance base not found\n")
 			continue
 		}
-		err = ethDb.Walk(dbutils.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
 			var index2 common.Hash

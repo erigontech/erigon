@@ -210,23 +210,28 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			return nil
 		}
 		{
-			b := tx.Bucket(bucket)
-			if b == nil {
+			v, _ := tx.Bucket(bucket).Get(key)
+			if v == nil {
 				return ErrKeyNotFound
 			}
-			c := b.Cursor()
 
-			k, v := c.Seek(key)
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-				return nil
-			}
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			return nil
 		}
-
-		return ErrKeyNotFound
 	})
 	return dat, err
+}
+
+func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byte, err error) {
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(accNoRoot); err != nil {
+		return nil, err
+	}
+	acc.Root = common.BytesToHash(root)
+	accWithRoot = make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(accWithRoot)
+	return accWithRoot, nil
 }
 
 func Bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
@@ -264,9 +269,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 }
 
 func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	if len(startkeys) == 0 {
-		return nil
-	}
+
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
@@ -322,9 +325,9 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
-			return fmt.Errorf("accountsBucket not found")
+			return fmt.Errorf("currentStateBucket not found")
 		}
 		hB := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if hB == nil {
@@ -479,7 +482,7 @@ func (sc *splitCursor) Next() (key1, key2, val []byte) {
 
 func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return fmt.Errorf("storageBucket not found")
 		}
@@ -569,9 +572,9 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
-	if bytes.Equal(bucket, dbutils.AccountsBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+	if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
 		return db.walkAsOfThinAccounts(startkey, fixedbits, timestamp, walker)
-	} else if bytes.Equal(bucket, dbutils.StorageBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
+	} else if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 		return db.walkAsOfThinStorage(startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
 			return walker(append(common.CopyBytes(k1), k2...), v)
 		})

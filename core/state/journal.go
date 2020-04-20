@@ -101,7 +101,8 @@ type (
 		account *common.Address
 	}
 	resetObjectChange struct {
-		prev *stateObject
+		prev         *stateObject
+		prevdestruct bool
 	}
 	suicideChange struct {
 		account     *common.Address

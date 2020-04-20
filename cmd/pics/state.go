@@ -121,10 +121,9 @@ var bucketLabels = map[string]string{
 	string(dbutils.HeaderNumberPrefix):     "Header Numbers",
 	string(dbutils.AccountChangeSetBucket): "Account Change Sets",
 	string(dbutils.StorageChangeSetBucket): "Storage Change Sets",
-	string(dbutils.AccountsBucket):         "Accounts",
+	string(dbutils.CurrentStateBucket):     "Current State",
 	string(dbutils.TxLookupPrefix):         "Transaction Index",
 	string(dbutils.StorageHistoryBucket):   "History of Storage",
-	string(dbutils.StorageBucket):          "Storage",
 	string(dbutils.CodeBucket):             "Code of Contracts",
 }
 

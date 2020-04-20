@@ -45,6 +45,7 @@ func testFastSyncDisabling(t *testing.T, protocol int) {
 	if atomic.LoadUint32(&pmFull.fastSync) == 1 {
 		t.Fatalf("fast sync not disabled on non-empty blockchain")
 	}
+
 	// Sync up the two peers
 	io1, io2 := p2p.MsgPipe()
 
@@ -52,7 +53,10 @@ func testFastSyncDisabling(t *testing.T, protocol int) {
 	go pmEmpty.handle(pmEmpty.newPeer(protocol, p2p.NewPeer(enode.ID{}, "full", nil), io1, pmEmpty.txpool.Get)) //nolint:errcheck
 
 	time.Sleep(250 * time.Millisecond)
-	pmEmpty.synchronise(pmEmpty.peers.BestPeer())
+	op := peerToSyncOp(downloader.FastSync, pmEmpty.peers.BestPeer())
+	if err := pmEmpty.doSync(op); err != nil {
+		t.Fatal("sync failed:", err)
+	}
 
 	// Check that fast sync was disabled
 	if atomic.LoadUint32(&pmEmpty.fastSync) == 1 {

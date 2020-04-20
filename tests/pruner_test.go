@@ -705,7 +705,10 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		return stateStats{}, err
 	}
 
-	err = db.Walk(dbutils.AccountsBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+		if len(key) > 32 {
+			return false, nil
+		}
 		stat.AccountsInState++
 		return true, nil
 	})

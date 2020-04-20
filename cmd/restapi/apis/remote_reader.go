@@ -108,7 +108,7 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 	key := addrHash[:]
 	r.accountReads[address] = true
 	composite, _ := dbutils.CompositeKeySuffix(key, r.blockNr)
-	var dat []byte
+	acc := accounts.NewAccount()
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
 		{
 			hB := tx.Bucket(dbutils.AccountsHistoryBucket)
@@ -119,36 +119,44 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 			}
 
 			if hK != nil && bytes.HasPrefix(hK, key) {
-				dat = make([]byte, len(hV))
-				copy(dat, hV)
+				err = acc.DecodeForStorage(hV)
+				if err != nil {
+					return err
+				}
 				return nil
 			}
 		}
 		{
-			b := tx.Bucket(dbutils.AccountsBucket)
-			c := b.Cursor()
-			k, v, err := c.Seek(key)
+			v, err := tx.Bucket(dbutils.CurrentStateBucket).Get(key)
 			if err != nil {
 				return err
 			}
-
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
+			if v == nil {
 				return nil
 			}
+
+			root, err := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(key)
+			if err != nil {
+				return err
+			}
+			if root == nil {
+				return nil
+			}
+
+			err = acc.DecodeForStorage(v)
+			if err != nil {
+				return err
+			}
+			acc.Root = common.BytesToHash(root)
+			return nil
 		}
 
 		return ethdb.ErrKeyNotFound
 	})
-	if err != nil || dat == nil || len(dat) == 0 {
+	if err != nil {
 		return nil, nil
 	}
-	acc := accounts.NewAccount()
-	err = acc.DecodeForStorage(dat)
-	if err != nil {
-		return nil, err
-	}
+
 	return &acc, nil
 }
 
@@ -159,7 +167,7 @@ func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation ui
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		v, err := b.Get(compositeKey)
 		val = v
 		return err
@@ -177,7 +185,7 @@ func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.H
 	}
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		v, err := b.Get(codeHash[:])
 		val = v
 		return err
@@ -194,7 +202,7 @@ func (r *RemoteReader) ReadAccountCodeSize(address common.Address, codeHash comm
 	}
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		v, err := b.Get(codeHash[:])
 		val = v
 		return err

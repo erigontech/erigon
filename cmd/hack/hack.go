@@ -63,7 +63,7 @@ func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, dbutils.AccountsBucket) {
+			if len(name) == 20 || bytes.Equal(name, dbutils.CurrentStateBucket) {
 				n := make([]byte, len(name))
 				copy(n, name)
 				bucketList = append(bucketList, n)
@@ -345,9 +345,12 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if len(k) != 32 {
+				continue
+			}
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
 				emptyRoots++
 			}
@@ -687,7 +690,7 @@ func extractTrie(block int) {
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
@@ -787,128 +790,24 @@ func testStartup() {
 	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 
-func testResolveCached() {
-	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
-	return
-	//startTime := time.Now()
-	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
-	check(err)
-	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
-	check(err)
-	currentBlock := bc.CurrentBlock()
-	check(err)
-	currentBlockNr := currentBlock.NumberU64()
-	keys := []string{
-		"070f0f04010a0a0c0b0e0e0a010e0306020004090901000d03070d080704010b0f000809010204050d050d06050606050a0c0e090d05000a090b050a0d020705",
-		"0c0a",
-		"0a",
-	}
-
-	for _, key := range keys {
-		tries := []*trie.Trie{trie.New(currentBlock.Root()), trie.New(currentBlock.Root())}
-
-		r1 := trie.NewResolver(2, true, currentBlockNr)
-		r1.AddRequest(tries[0].NewResolveRequest(nil, common.FromHex(key), 0, currentBlock.Root().Bytes()))
-		err = r1.ResolveStateful(ethDb, currentBlockNr)
-		check(err)
-
-		r2 := trie.NewResolver(2, true, currentBlockNr)
-		r2.AddRequest(tries[1].NewResolveRequest(nil, common.FromHex(key), 0, currentBlock.Root().Bytes()))
-		err = r2.ResolveStatefulCached(ethDb, currentBlockNr, false)
-		check(err)
-
-		bufs := [2]*bytes.Buffer{
-			{}, {},
-		}
-		tries[0].Print(bufs[0])
-		tries[1].Print(bufs[1])
-		fmt.Printf("Res: %v\n", bytes.Compare(bufs[0].Bytes(), bufs[1].Bytes()))
-	}
-
-	/*
-		fmt.Printf("Current block number: %d\n", currentBlockNr)
-		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
-		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
-
-		resolve := func(key []byte) {
-			for topLevels := 0; topLevels < 1; topLevels++ {
-				need, req := tries[0].NeedResolution(nil, key)
-				if need {
-					r := trie.NewResolver(topLevels, true, currentBlockNr)
-					r.AddRequest(req)
-					err1 := r.ResolveStateful(ethDb, currentBlockNr)
-					if err1 != nil {
-						fmt.Println("With NeedResolution check1:", err1)
-					}
-				}
-				need, req = tries[1].NeedResolution(nil, key)
-				if need {
-					r2 := trie.NewResolver(topLevels, true, currentBlockNr)
-					r2.AddRequest(req)
-					err2 := r2.ResolveStatefulCached(ethDb, currentBlockNr)
-					if err2 != nil {
-						fmt.Println("With NeedResolution check2:", err2)
-					}
-				}
-
-				//r := trie.NewResolver(topLevels, true, currentBlockNr)
-				//r.AddRequest(tries[0].NewResolveRequest(nil, key, 1, currentBlock.Root().Bytes()))
-				//err1 := r.ResolveStateful(ethDb, currentBlockNr)
-				//if err1 != nil {
-				//	fmt.Println("No NeedResolution check1:", err1)
-				//}
-				//r2 := trie.NewResolver(topLevels, true, currentBlockNr)
-				//r2.AddRequest(tries[1].NewResolveRequest(nil, key, 1, currentBlock.Root().Bytes()))
-				//err2 := r2.ResolveStatefulCached(ethDb, currentBlockNr)
-				//if err2 != nil {
-				//	fmt.Println("No NeedResolution check2:", err2)
-				//}
-				//
-				//if tries[0].Hash() != tries[1].Hash() {
-				//	fmt.Printf("Differrent hash")
-				//}
-				//if err1 == nil || err2 == nil {
-				//	if err1 != err2 {
-				//		fmt.Printf("Not equal errors: \n%v\n%v\n\n", err1, err2)
-				//		fmt.Printf("Input: %d  %x\n", topLevels, key)
-				//	}
-				//} else if err1.Error() != err2.Error() {
-				//	fmt.Printf("Not equal errors: \n%v\n%v\n\n", err1, err2)
-				//	fmt.Printf("Input: %d %x\n", topLevels, key)
-				//}
-			}
-		}
-
-		keys := []string{
-			"070f0f04010a0a0c0b0e0e0a010e0306020004090901000d03070d080704010b0f000809010204050d050d06050606050a0c0e090d05000a090b050a0d020705",
-		}
-		buf := pool.GetBuffer(32)
-		defer pool.PutBuffer(buf)
-		for _, key := range keys {
-			trie.CompressNibbles(common.FromHex(key), &buf.B)
-			resolve(buf.B)
-		}
-
-		fmt.Printf("Took %v\n", time.Since(startTime))
-	*/
-}
-
 func dbSlice(chaindata string, prefix []byte) {
 	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
 	err = db.View(func(tx *bolt.Tx) error {
-		ab := tx.Bucket(dbutils.AccountsBucket)
-		c := ab.Cursor()
+		st := tx.Bucket(dbutils.CurrentStateBucket)
+		c := st.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.AccountsBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			if len(k) != 32 {
+				continue
+			}
+			fmt.Printf("db.Put(dbutils.CurrentStateBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
 		}
-		sb := tx.Bucket(dbutils.StorageBucket)
-		c = sb.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.StorageBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			if len(k) == 32 {
+				continue
+			}
+			fmt.Printf("db.Put(dbutils.CurrentStateBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
 		}
 		ib := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		c = ib.Cursor()
@@ -1195,14 +1094,14 @@ func loadAccount() {
 	blockSuffix := dbutils.EncodeTimestamp(blockNr)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	accountData, err := ethDb.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
+	accountData, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
 	check(err)
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
+	if err := ethDb.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v)
@@ -1225,11 +1124,11 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
+		v, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		vOrig, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr)
+		vOrig, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
@@ -1275,12 +1174,14 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	secKey := crypto.Keccak256(account[:])
-	v, _ := ethDb.Get(dbutils.AccountsBucket, secKey)
 	var a accounts.Account
-	if err = a.DecodeForStorage(v); err != nil {
+	ok, err := rawdb.ReadAccount(ethDb, common.BytesToHash(secKey), &a)
+	if err != nil {
 		panic(err)
+	} else if !ok {
+		panic("acc not found")
 	}
-	fmt.Printf("%x:%x\n%x\n%x\n%d\n", secKey, v, a.Root, a.CodeHash, a.Incarnation)
+	fmt.Printf("%x\n%x\n%x\n%d\n", secKey, a.Root, a.CodeHash, a.Incarnation)
 	//var addrHash common.Hash
 	//copy(addrHash[:], secKey)
 	//codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
@@ -1291,6 +1192,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		var printed bool
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
 		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
+		var v []byte
 		v, err = ethDb.Get(dbutils.StorageChangeSetBucket, changeSetKey)
 		check(err)
 		if v != nil {
@@ -1314,16 +1216,16 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	v, _ := ethDb.Get(dbutils.AccountsBucket, addrHash[:])
 	var a accounts.Account
-	if err = a.DecodeForStorage(v); err != nil {
+	if ok, err := rawdb.ReadAccount(ethDb, addrHash, &a); err != nil {
 		panic(err)
+	} else if !ok {
+		panic("acc not found")
 	}
 	a.Root = storageRoot
-	v = make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(v)
-	err = ethDb.Put(dbutils.AccountsBucket, addrHash[:], v)
-	check(err)
+	if err := rawdb.WriteAccount(ethDb, addrHash, a); err != nil {
+		panic(err)
+	}
 }
 
 func nextIncarnation(chaindata string, addrHash common.Hash) {
@@ -1334,7 +1236,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	var fixedbits uint = 8 * common.HashLength
 	copy(startkey, addrHash[:])
-	if err := ethDb.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
 		found = true
 		return false, nil
@@ -1357,18 +1259,21 @@ func repairCurrent() {
 	check(err)
 	defer currentDb.Close()
 	check(historyDb.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(dbutils.StorageBucket); err != nil {
+		if err := tx.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(dbutils.StorageBucket, true)
+		newB, err := tx.CreateBucket(dbutils.CurrentStateBucket, true)
 		if err != nil {
 			return err
 		}
 		count := 0
 		if err := currentDb.View(func(ctx *bolt.Tx) error {
-			b := ctx.Bucket(dbutils.StorageBucket)
+			b := ctx.Bucket(dbutils.CurrentStateBucket)
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
+				if len(k) == 32 {
+					continue
+				}
 				newB.Put(k, v)
 				count++
 				if count == 10000 {
@@ -2023,7 +1928,7 @@ func walkOverStorage(chaindata string) {
 	copy(startkey[:], h[:])
 	binary.BigEndian.PutUint64(startkey[32:], ^uint64(1))
 	fmt.Printf("startkey %x\n", startkey)
-	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey[:], 8*(32+8), 50796, func(k []byte, v []byte) (bool, error) {
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey[:], 8*(32+8), 50796, func(k []byte, v []byte) (bool, error) {
 		fmt.Printf("%x: %x\n", k, v)
 		return true, nil
 	})
@@ -2078,9 +1983,6 @@ func main() {
 	//buildHashFromFile()
 	if *action == "testResolve" {
 		testResolve(*chaindata)
-	}
-	if *action == "testResolveCached" {
-		testResolveCached()
 	}
 	//rlpIndices()
 	//printFullNodeRLPs()
