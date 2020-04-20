@@ -106,7 +106,7 @@ func stateTestCmd(ctx *cli.Context) error {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && tds != nil {
-					dump := tds.DefaultRawDump()
+					dump := tds.Dumper().DefaultRawDump()
 					result.State = &dump
 				}
 			}

@@ -1515,6 +1515,6 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) Dumper() *StateDumper {
-	return &StateDumper{source: tds, db: tds.db}
+func (tds *TrieDbState) Dumper() *Dumper {
+	return &Dumper{source: tds, db: tds.db}
 }

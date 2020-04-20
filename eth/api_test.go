@@ -81,7 +81,10 @@ func TestAccountRange(t *testing.T) {
 		}
 	}
 	tds.StartNewBuffer()
-	sdb.CommitBlock(context.Background(), tds.DbStateWriter())
+	if err := sdb.CommitBlock(context.Background(), tds.DbStateWriter()); err != nil {
+		t.Fatal(err)
+	}
+
 	_, err := tds.ComputeTrieRoots()
 	if err != nil {
 		t.Fatal(err)
