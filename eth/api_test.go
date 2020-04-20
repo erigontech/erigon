@@ -18,7 +18,10 @@ package eth
 
 import (
 	"bytes"
+	"fmt"
+	"math/big"
 	"reflect"
+	"sort"
 	"strconv"
 	"testing"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -57,77 +61,74 @@ func (h resultHash) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h resultHash) Less(i, j int) bool { return bytes.Compare(h[i].Bytes(), h[j].Bytes()) < 0 }
 
 func TestAccountRange(t *testing.T) {
-	t.Error("restore when accountRange is impemented")
-	/*
-		var (
-			db      = ethdb.NewMemDatabase()
-			tds     = state.NewTrieDbState(common.Hash{}, db, 0)
-			statedb = state.NewDbState(db, 0)
-			state   = state.New(tds)
-			addrs   = [AccountRangeMaxResults * 2]common.Address{}
-			m       = map[common.Address]bool{}
-		)
+	var (
+		db    = ethdb.NewMemDatabase()
+		tds   = state.NewTrieDbState(common.Hash{}, db, 0)
+		sdb   = state.New(tds)
+		addrs = [AccountRangeMaxResults * 2]common.Address{}
+		m     = map[common.Address]bool{}
+	)
 
-		for i := range addrs {
-			hash := common.HexToHash(fmt.Sprintf("%x", i))
-			addr := common.BytesToAddress(crypto.Keccak256Hash(hash.Bytes()).Bytes())
-			addrs[i] = addr
-			state.SetBalance(addrs[i], big.NewInt(1))
-			if _, ok := m[addr]; ok {
-				t.Fatalf("bad")
-			} else {
-				m[addr] = true
-			}
+	for i := range addrs {
+		hash := common.HexToHash(fmt.Sprintf("%x", i))
+		addr := common.BytesToAddress(crypto.Keccak256Hash(hash.Bytes()).Bytes())
+		addrs[i] = addr
+		sdb.SetBalance(addrs[i], big.NewInt(1))
+		if _, ok := m[addr]; ok {
+			t.Fatalf("bad")
+		} else {
+			m[addr] = true
 		}
-		state.Commit(true)
-		root := state.IntermediateRoot(true)
+	}
+	sdb.CommitBlock(context.Background(), tds.TrieStateWriter())
+	_, err := tds.ComputeTrieRoots()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		trie, err := statedb.OpenTrie(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		accountRangeTest(t, &trie, state, common.Hash{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
-		// test pagination
-		firstResult := accountRangeTest(t, &trie, state, common.Hash{}, AccountRangeMaxResults, AccountRangeMaxResults)
-		secondResult := accountRangeTest(t, &trie, state, common.BytesToHash(firstResult.Next), AccountRangeMaxResults, AccountRangeMaxResults)
+	trie := tds.Trie()
 
-		hList := make(resultHash, 0)
-		for addr1 := range firstResult.Accounts {
-			// If address is empty, then it makes no sense to compare
-			// them as they might be two different accounts.
-			if addr1 == (common.Address{}) {
-				continue
-			}
-			if _, duplicate := secondResult.Accounts[addr1]; duplicate {
-				t.Fatalf("pagination test failed:  results should not overlap")
-			}
-			hList = append(hList, crypto.Keccak256Hash(addr1.Bytes()))
+	accountRangeTest(t, trie, tds, sdb, common.Hash{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
+	// test pagination
+	firstResult := accountRangeTest(t, trie, tds, sdb, common.Hash{}, AccountRangeMaxResults, AccountRangeMaxResults)
+	secondResult := accountRangeTest(t, trie, tds, sdb, common.BytesToHash(firstResult.Next), AccountRangeMaxResults, AccountRangeMaxResults)
+
+	hList := make(resultHash, 0)
+	for addr1 := range firstResult.Accounts {
+		// If address is empty, then it makes no sense to compare
+		// them as they might be two different accounts.
+		if addr1 == (common.Address{}) {
+			continue
 		}
-		// Test to see if it's possible to recover from the middle of the previous
-		// set and get an even split between the first and second sets.
-		sort.Sort(hList)
-		middleH := hList[AccountRangeMaxResults/2]
-		middleResult := accountRangeTest(t, &trie, state, middleH, AccountRangeMaxResults, AccountRangeMaxResults)
-		missing, infirst, insecond := 0, 0, 0
-		for h := range middleResult.Accounts {
-			if _, ok := firstResult.Accounts[h]; ok {
-				infirst++
-			} else if _, ok := secondResult.Accounts[h]; ok {
-				insecond++
-			} else {
-				missing++
-			}
+		if _, duplicate := secondResult.Accounts[addr1]; duplicate {
+			t.Fatalf("pagination test failed:  results should not overlap")
 		}
-		if missing != 0 {
-			t.Fatalf("%d hashes in the 'middle' set were neither in the first not the second set", missing)
+		hList = append(hList, crypto.Keccak256Hash(addr1.Bytes()))
+	}
+	// Test to see if it's possible to recover from the middle of the previous
+	// set and get an even split between the first and second sets.
+	sort.Sort(hList)
+	middleH := hList[AccountRangeMaxResults/2]
+	middleResult := accountRangeTest(t, trie, tds, sdb, middleH, AccountRangeMaxResults, AccountRangeMaxResults)
+	missing, infirst, insecond := 0, 0, 0
+	for h := range middleResult.Accounts {
+		if _, ok := firstResult.Accounts[h]; ok {
+			infirst++
+		} else if _, ok := secondResult.Accounts[h]; ok {
+			insecond++
+		} else {
+			missing++
 		}
-		if infirst != AccountRangeMaxResults/2 {
-			t.Fatalf("Imbalance in the number of first-test results: %d != %d", infirst, AccountRangeMaxResults/2)
-		}
-		if insecond != AccountRangeMaxResults/2 {
-			t.Fatalf("Imbalance in the number of second-test results: %d != %d", insecond, AccountRangeMaxResults/2)
-		}
-	*/
+	}
+	if missing != 0 {
+		t.Fatalf("%d hashes in the 'middle' set were neither in the first not the second set", missing)
+	}
+	if infirst != AccountRangeMaxResults/2 {
+		t.Fatalf("Imbalance in the number of first-test results: %d != %d", infirst, AccountRangeMaxResults/2)
+	}
+	if insecond != AccountRangeMaxResults/2 {
+		t.Fatalf("Imbalance in the number of second-test results: %d != %d", insecond, AccountRangeMaxResults/2)
+	}
 }
 
 func TestEmptyAccountRange(t *testing.T) {
