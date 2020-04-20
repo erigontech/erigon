@@ -1153,46 +1153,51 @@ func bench3() {
 		return
 	}
 
-	page := 256
+	pageSize := 2
 	req_id++
-	template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": [ "0x%x", %d ], "id":%d}`
-	nextKey = &start
+	template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1", "%s", %d, true, true, true], "id":%d}`
 
-	accRangeTG := make(map[common.Hash]*common.Address)
+	page := common.Hash{}.Bytes()
 
-	for nextKey != nil {
+	accRangeTG := make(map[common.Address]state.DumpAccount)
+
+	for len(page) > 0 {
+		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, common.Hash{}, page, req_id), &sr); err != nil {
+		if err := post(client, turbogeth_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
 			fmt.Printf("Could not get accountRange: %v\n", err)
 			return
 		}
+		fmt.Printf("tg boom: %d -> 0x%x\n", len(sr.Result.Accounts), sr.Result.Next)
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
 		} else {
-			nextKey = &sr.Result.Next
+			page = sr.Result.Next
 			for k, v := range sr.Result.Accounts {
 				accRangeTG[k] = v
 			}
 		}
 	}
 
-	accRangeGeth := make(map[common.Hash]*common.Address)
+	accRangeGeth := make(map[common.Address]state.DumpAccount)
 
-	nextKey = &start
-	for nextKey != nil {
+	page = common.Hash{}.Bytes()
+	for len(page) > 0 {
+		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, geth_url, fmt.Sprintf(template, common.Hash{}, page, req_id), &sr); err != nil {
+		if err := post(client, geth_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
+
 			fmt.Printf("Could not get accountRange: %v\n", err)
 			return
 		}
+		fmt.Printf("gg boom: %d -> 0x%x\n", len(sr.Result.Accounts), sr.Result.Next)
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
 		} else {
-			nextKey = &sr.Result.Next
+			page = sr.Result.Next
 			for k, v := range sr.Result.Accounts {
-				accRangeGeth[k] = v
 			}
 		}
 	}
