@@ -39,7 +39,7 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 		return 0, err
 	}
 	if len(v) != 8 {
-		return 0, fmt.Errorf("Stage process value must be of length 8, got %d", len(v))
+		return 0, fmt.Errorf("stage process value must be of length 8, got %d", len(v))
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
