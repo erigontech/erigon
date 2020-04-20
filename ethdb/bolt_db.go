@@ -173,6 +173,35 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
+// GetIndexChunk returns proper index chunk or return error if index is not created.
+// key must contain inverted block number in the end
+func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, []byte, error) {
+
+	var dat []byte
+	var chunkKey []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			c := b.Cursor()
+			k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+			if !bytes.HasPrefix(k, key) {
+				k, v = c.Prev()
+				if !bytes.HasPrefix(k, key) {
+					return ErrKeyNotFound
+				}
+			}
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			chunkKey = common.CopyBytes(k)
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, nil, ErrKeyNotFound
+	}
+	return dat, chunkKey, err
+}
+
 // getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
@@ -691,14 +720,22 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	if hB == nil {
 		return nil, ErrKeyNotFound
 	}
-	var v []byte
+	var keyF []byte
 	if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
-		keyNoInc := make([]byte, len(key)-common.IncarnationLength)
-		copy(keyNoInc, key[:common.HashLength])
-		copy(keyNoInc[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
-		v, _ = hB.Get(keyNoInc)
+		keyF = make([]byte, len(key)-common.IncarnationLength)
+		copy(keyF, key[:common.HashLength])
+		copy(keyF[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
 	} else {
-		v, _ = hB.Get(key)
+		keyF = common.CopyBytes(key)
+	}
+
+	c := hB.Cursor()
+	k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+	if !bytes.HasPrefix(k, keyF) {
+		k, v = c.Prev()
+		if !bytes.HasPrefix(k, keyF) {
+			return nil, ErrKeyNotFound
+		}
 	}
 	index := dbutils.WrapHistoryIndex(v)
 
