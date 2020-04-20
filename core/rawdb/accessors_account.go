@@ -59,12 +59,12 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	return nil
 }
 
-type DBToDeleteAccount interface {
+type DatabaseReaderDeleter interface {
 	DatabaseReader
 	DatabaseDeleter
 }
 
-func DeleteAccount(db DBToDeleteAccount, addrHash common.Hash) error {
+func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
 	//fmt.Printf("DeleteAccount: %x\n ", addrHash)
 
 	addrHashBytes := addrHash[:]
