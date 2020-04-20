@@ -583,7 +583,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	fmt.Println("==========================ACCOUNT===========================")
 	err = blockchain.ChainDb().Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		if len(k) > 32 {
-			return false, nil
+			return true, nil
 		}
 		acc := &accounts.Account{}
 		innerErr := acc.DecodeForStorage(v)
