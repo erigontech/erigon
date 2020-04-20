@@ -33,24 +33,21 @@ import (
 
 var dumper = spew.ConfigState{Indent: "    "}
 
-func accountRangeTest(t *testing.T, trie *trie.Trie, statedb *state.DbState, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump {
-	panic("implement me when accountRange is fixed")
-	/*
-		result := statedb.IteratorDump(true, true, false, start.Bytes(), requestedNum)
+func accountRangeTest(t *testing.T, trie *trie.Trie, tds *state.TrieDbState, sdb *state.IntraBlockState, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump {
+	result := tds.IteratorDump(true, true, false, start.Bytes(), requestedNum)
 
-		if len(result.Accounts) != expectedNum {
-			t.Fatalf("expected %d results, got %d", expectedNum, len(result.Accounts))
+	if len(result.Accounts) != expectedNum {
+		t.Fatalf("expected %d results, got %d", expectedNum, len(result.Accounts))
+	}
+	for address := range result.Accounts {
+		if address == (common.Address{}) {
+			t.Fatalf("empty address returned")
 		}
-		for address := range result.Accounts {
-			if address == (common.Address{}) {
-				t.Fatalf("empty address returned")
-			}
-			if !statedb.Exist(address) {
-				t.Fatalf("account not found in state %s", address.Hex())
-			}
+		if !sdb.Exist(address) {
+			t.Fatalf("account not found in state %s", address.Hex())
 		}
-		return result
-	*/
+	}
+	return result
 }
 
 type resultHash []common.Hash
