@@ -598,7 +598,7 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, isIH bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, isIH bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -615,7 +615,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 		if ihBucket != nil {
 			ih = ihBucket.Cursor()
 		}
-		c := tx.Bucket(bucket).Cursor()
+		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		accRoots := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 
 		k, v := c.Seek(startkey)
@@ -730,7 +730,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 			}
 
 			if !isIH {
-				if err := walker(rangeIdx, blockNr, minKey, v, false, getAccRoot); err != nil {
+				if err := walker(rangeIdx, minKey, v, false, getAccRoot); err != nil {
 					return err
 				}
 				k, v = c.Next()
@@ -756,7 +756,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byt
 				continue
 			}
 
-			if err := walker(rangeIdx, blockNr, minKey, ihV, isIH, nil); err != nil {
+			if err := walker(rangeIdx, minKey, ihV, isIH, nil); err != nil {
 				return fmt.Errorf("waker err: %w", err)
 			}
 
