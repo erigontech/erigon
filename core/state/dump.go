@@ -34,6 +34,7 @@ type trieHasher interface {
 
 type DumperSource interface {
 	GetKey([]byte) []byte
+	GetBlockNr() uint64
 }
 
 type Dumper struct {
@@ -128,7 +129,7 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err := tds.db.Walk(dbutils.CurrentStateBucket, start, 0, func(k, v []byte) (bool, error) {
+	err := tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, tds.source.GetBlockNr(), func(k, v []byte) (bool, error) {
 		nextKey = k
 		if maxResults > 0 && numberOfResults >= maxResults {
 			return false, nil

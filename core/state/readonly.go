@@ -60,6 +60,10 @@ func (dbs *DbState) SetBlockNr(blockNr uint64) {
 	dbs.blockNr = blockNr
 }
 
+func (dbs *DbState) GetBlockNr() uint64 {
+	return dbs.blockNr
+}
+
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) error {
 	addrHash, err := common.HashData(addr[:])
 	if err != nil {
