@@ -127,14 +127,10 @@ const (
 
 // ResolveWithDb resolves and hooks subtries using a state database.
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, trace bool) error {
-	if !tr.historical {
-		return tr.ResolveStatefulCached(db, blockNr, trace)
-	}
-
-	return tr.ResolveStateful(db, blockNr)
+	return tr.ResolveStateful(db, blockNr, trace)
 }
 
-func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace bool) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -145,23 +141,6 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
 	sort.Stable(tr)
 
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
-	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical); err != nil {
-		return err
-	}
-	return resolver.AttachRequestedCode(db, tr.codeRequests)
-}
-
-func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64, trace bool) error {
-	var hf hookFunction
-	if tr.collectWitnesses {
-		hf = tr.extractWitnessAndHookSubtrie
-	} else {
-		hf = hookSubtrie
-	}
-
-	sort.Stable(tr)
-
-	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
 	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical, trace); err != nil {
 		return err
 	}
