@@ -37,7 +37,7 @@ import (
 
 var dumper = spew.ConfigState{Indent: "    "}
 
-func accountRangeTest(t *testing.T, trie *trie.Trie, tds *state.TrieDbState, sdb *state.IntraBlockState, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump {
+func accountRangeTest(t *testing.T, trie *trie.Trie, tds *state.TrieDbState, sdb *state.IntraBlockState, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump { //nolint: unparam
 	result := tds.Dumper().IteratorDump(true, true, false, start.Bytes(), requestedNum)
 
 	if len(result.Accounts) != expectedNum {
