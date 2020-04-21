@@ -54,23 +54,11 @@ func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
-func (m *mutation) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, []byte, error) {
-	//there is a hack for searching index
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	indexBytes, chunkKey, err := m.puts.ChunkByIDOrLastChunk(bucket, key, timestamp)
-	if err != nil && err != ErrKeyNotFound {
-		return nil, nil, err
-	}
-	if len(indexBytes) > 0 {
-		return indexBytes, chunkKey, nil
-	}
-
+func (m *mutation) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
 	if m.db != nil {
 		return m.db.GetIndexChunk(bucket, key, timestamp)
 	}
-	return nil, nil, ErrKeyNotFound
+	return nil, ErrKeyNotFound
 }
 
 func (m *mutation) hasMem(bucket, key []byte) bool {

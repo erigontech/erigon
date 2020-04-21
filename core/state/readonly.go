@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -133,7 +134,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 				if err == nil {
 					copy(item.key[:], key)
 				} else {
-					log.Error("Error getting preimage", "err", err)
+					log.Error(fmt.Sprintf("Error getting preimage for %x", item.seckey[:]), "err", err)
 					innerErr = err
 					return false
 				}
