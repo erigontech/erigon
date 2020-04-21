@@ -908,13 +908,3 @@ Author: Martin Holst Swende <martin@swende.se>
 Date:   Tue Apr 21 16:26:02 2020 +0200
 
     core/state/snapshot: make difflayer account iterator seek operation inclusive
-
-commit 7599999dcd966843a08a79529470d15e77139ce0
-Author: Boqin Qin <Bobbqqin@gmail.com>
-Date:   Tue Apr 21 16:11:38 2020 +0800
-
-    snapshot: add Unlock before return (#20948)
-    
-    * Forget Unlock in snapshot
-    
-    * Remove Unlock before panic
