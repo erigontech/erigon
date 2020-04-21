@@ -180,6 +180,15 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		if len(indexBytes) == 0 {
 			index = dbutils.NewHistoryIndex()
 		} else if dbutils.CheckNewIndexChunk(indexBytes) {
+			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
+			index = dbutils.WrapHistoryIndex(indexBytes)
+			indexKey, err := index.Key(change.Key)
+			if err != nil {
+				return err
+			}
+			if err := dsw.tds.db.Put(bucket, indexKey, *index); err != nil {
+				return err
+			}
 			index = dbutils.NewHistoryIndex()
 		} else {
 			index = dbutils.WrapHistoryIndex(indexBytes)
@@ -187,12 +196,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 
 		index.Append(dsw.tds.blockNr)
 
-		indexKey, err := index.Key(change.Key)
-		if err != nil {
-			return err
-		}
-
-		if err := dsw.tds.db.Put(bucket, indexKey, *index); err != nil {
+		if err := dsw.tds.db.Put(bucket, dbutils.IndexChunkKey(change.Key, ^uint64(0)), *index); err != nil {
 			return err
 		}
 	}
