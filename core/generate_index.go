@@ -35,7 +35,7 @@ type IndexGenerator struct {
 }
 
 type IndexWithKey struct {
-	Val     dbutils.HistoryIndexBytes
+	Val dbutils.HistoryIndexBytes
 }
 
 func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) error {
@@ -58,7 +58,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 			}
 
 			indexes = append(indexes, IndexWithKey{
-				Val:     index,
+				Val: index,
 			})
 			ig.cache[string(k)] = indexes
 		}
