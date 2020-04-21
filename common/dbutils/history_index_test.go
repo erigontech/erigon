@@ -7,8 +7,7 @@ import (
 )
 
 func TestHistoryIndex_Search1(t *testing.T) {
-	index := NewHistoryIndex()
-	index.Append(3).Append(5).Append(8)
+	index := NewHistoryIndex().Append(3).Append(5).Append(8)
 	fmt.Println(index.Decode())
 	v, _ := index.Search(1)
 	if v != 3 {
@@ -53,7 +52,7 @@ func TestHistoryIndex_Search_EmptyIndex(t *testing.T) {
 func TestHistoryIndex_Append(t *testing.T) {
 	index := NewHistoryIndex()
 	for i := uint64(1); i < 10; i++ {
-		index.Append(i)
+		index = index.Append(i)
 	}
 
 	res, err := index.Decode()
@@ -68,7 +67,7 @@ func TestHistoryIndex_Append(t *testing.T) {
 		t.Fatal()
 	}
 
-	index.Remove(9)
+	index = index.Remove(9)
 	res, err = index.Decode()
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +81,7 @@ func TestHistoryIndex_Append(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 
-	index.Remove(5)
+	index = index.Remove(5)
 	res, err = index.Decode()
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +95,7 @@ func TestHistoryIndex_Append(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 
-	index.Remove(1)
+	index = index.Remove(1)
 	res, err = index.Decode()
 	if err != nil {
 		t.Fatal(err)
