@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path"
@@ -460,14 +461,16 @@ type splitCursor struct {
 	mask       uint8
 	part1end   int // Position in the key where the first part ends
 	part2start int // Position in the key where the second part starts
+	part3start int // Position in the key where the third part starts
 }
 
-func newSplitCursor(b *bolt.Bucket, startkey []byte, matchBits uint, part1end, part2start int) *splitCursor {
+func newSplitCursor(b *bolt.Bucket, startkey []byte, matchBits uint, part1end, part2start, part3start int) *splitCursor {
 	var sc splitCursor
 	sc.c = b.Cursor()
 	sc.startkey = startkey
 	sc.part1end = part1end
 	sc.part2start = part2start
+	sc.part3start = part3start
 	sc.matchBytes, sc.mask = Bytesmask(matchBits)
 	return &sc
 }
@@ -488,20 +491,20 @@ func (sc *splitCursor) matchKey(k []byte) bool {
 	return (k[sc.matchBytes-1] & sc.mask) == (sc.startkey[sc.matchBytes-1] & sc.mask)
 }
 
-func (sc *splitCursor) Seek() (key1, key2, val []byte) {
+func (sc *splitCursor) Seek() (key1, key2, key3, val []byte) {
 	k, v := sc.c.Seek(sc.startkey)
 	if !sc.matchKey(k) {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	return k[:sc.part1end], k[sc.part2start:], v
+	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v
 }
 
-func (sc *splitCursor) Next() (key1, key2, val []byte) {
+func (sc *splitCursor) Next() (key1, key2, key3, val []byte) {
 	k, v := sc.c.Next()
 	if !sc.matchKey(k) {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	return k[:sc.part1end], k[sc.part2start:], v
+	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v
 }
 
 func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
@@ -528,17 +531,29 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 			fixedbits,
 			common.HashLength, /* part1end */
 			common.HashLength+common.IncarnationLength, /* part2start */
+			common.HashLength+common.IncarnationLength+common.HashLength, /* part3start */
 		)
 		//for historic data
 		historyCursor := newSplitCursor(
 			hB,
 			startkeyNoInc,
 			fixedbits-8*common.IncarnationLength,
-			common.HashLength, /* part1end */
-			common.HashLength, /* part2start */
+			common.HashLength,   /* part1end */
+			common.HashLength,   /* part2start */
+			common.HashLength*2, /* part3start */
 		)
-		addrHash, keyHash, v := mainCursor.Seek()
-		hAddrHash, hKeyHash, hV := historyCursor.Seek()
+		addrHash, keyHash, _, v := mainCursor.Seek()
+		hAddrHash, hKeyHash, tsEnc, hV := historyCursor.Seek()
+		if hKeyHash != nil {
+			ts := binary.BigEndian.Uint64(tsEnc)
+			hKeyHash0 := hKeyHash
+			for hKeyHash != nil && bytes.Equal(hKeyHash, hKeyHash0) && ts < timestamp {
+				hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
+				if hKeyHash != nil {
+					ts = binary.BigEndian.Uint64(tsEnc)
+				}
+			}
+		}
 		goOn := true
 		var err error
 		for goOn {
@@ -581,13 +596,22 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 			}
 			if goOn {
 				if cmp <= 0 {
-					addrHash, keyHash, v = mainCursor.Next()
+					addrHash, keyHash, _, v = mainCursor.Next()
 				}
 				if cmp >= 0 {
-					hAddrHash, hKeyHash, hV = historyCursor.Next()
+					hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
+					if hKeyHash != nil {
+						ts := binary.BigEndian.Uint64(tsEnc)
+						hKeyHash0 := hKeyHash
+						for hKeyHash != nil && bytes.Equal(hKeyHash, hKeyHash0) && ts < timestamp {
+							hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
+							if hKeyHash != nil {
+								ts = binary.BigEndian.Uint64(tsEnc)
+							}
+						}
+					}
 				}
 			}
-
 		}
 		return err
 	})
