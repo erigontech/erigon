@@ -187,9 +187,11 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 			if err != nil {
 				return err
 			}
+			// Flush the old chunk
 			if err := dsw.tds.db.Put(bucket, indexKey, index); err != nil {
 				return err
 			}
+			// Start a new chunk
 			index = dbutils.NewHistoryIndex()
 		} else {
 			index = dbutils.WrapHistoryIndex(indexBytes)
