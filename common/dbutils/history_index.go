@@ -138,18 +138,15 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
-func (hi HistoryIndexBytes) Key(key []byte, first bool) ([]byte, error) {
-	if first {
-		IndexChunkKey(key, 0)
-	}
-	blockNum, ok := hi.FirstElement()
+func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
+	blockNum, ok := hi.LastElement()
 	if !ok {
 		return nil, errors.New("empty index")
 	}
 	return IndexChunkKey(key, blockNum), nil
 }
 
-func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
+func (hi HistoryIndexBytes) LastElement() (uint64, bool) {
 	if len(hi) < LenBytes*2+4 {
 		return 0, false
 	}
@@ -159,10 +156,10 @@ func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
 	}
 
 	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
-	if numOfUint32Elements > 0 {
-		return uint64(binary.LittleEndian.Uint32(hi[2*LenBytes : 2*LenBytes+4])), true
+	if numOfUint32Elements < numOfElements {
+		return binary.LittleEndian.Uint64(hi[len(hi)-8:]), true
 	}
-	return binary.LittleEndian.Uint64(hi[2*LenBytes : 2*LenBytes+8]), true
+	return uint64(binary.LittleEndian.Uint32(hi[len(hi)-4:])), true
 }
 
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
@@ -171,13 +168,13 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	case common.HashLength:
 		blockNumBytes = make([]byte, common.HashLength+8)
 		copy(blockNumBytes, key)
-		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength:], ^blockNumber)
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength:], blockNumber)
 	case common.HashLength*2 + common.IncarnationLength:
 		//remove incarnation and add inversed block number
 		blockNumBytes = make([]byte, common.HashLength*2+8)
 		copy(blockNumBytes, key[:common.HashLength])
 		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
-		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], ^blockNumber)
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], blockNumber)
 	default:
 		panic("unexpected length " + strconv.Itoa(len(key)))
 	}

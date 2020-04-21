@@ -932,7 +932,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 
 	if len(changedAccounts) > 0 {
 		innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
-			indexBytes, chunkKey, getErr := tds.db.GetIndexChunk(dbutils.AccountsHistoryBucket, kk, timestamp)
+			indexBytes, getErr := tds.db.GetIndexChunk(dbutils.AccountsHistoryBucket, kk, timestamp)
 			if getErr != nil {
 				if getErr == ethdb.ErrKeyNotFound {
 					return nil
@@ -941,7 +941,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 			}
 
 			index := dbutils.WrapHistoryIndex(indexBytes)
-			chunkKey, err := index.Key(kk, dbutils.IsFirstChunk(chunkKey))
+			chunkKey, err := index.Key(kk)
 			if err != nil {
 				return err
 			}
@@ -962,7 +962,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 
 	if len(changedStorage) > 0 {
 		innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
-			indexBytes, firstChunk, getErr := tds.db.GetIndexChunk(dbutils.StorageHistoryBucket, kk, timestamp)
+			indexBytes, getErr := tds.db.GetIndexChunk(dbutils.StorageHistoryBucket, kk, timestamp)
 			if getErr != nil {
 				if getErr == ethdb.ErrKeyNotFound {
 					return nil
@@ -971,7 +971,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 			}
 
 			index := dbutils.WrapHistoryIndex(indexBytes)
-			chunkKey, err := index.Key(kk, dbutils.IsFirstChunk(firstChunk))
+			chunkKey, err := index.Key(kk)
 			if err != nil {
 				return err
 			}
