@@ -365,9 +365,25 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 		//for state
 		mainCursor := b.Cursor()
 		//for historic data
-		historyCursor := hB.Cursor()
+		historyCursor := newSplitCursor(
+			hB,
+			startkey,
+			fixedbits,
+			common.HashLength,   /* part1end */
+			common.HashLength,   /* part2start */
+			common.HashLength+8,   /* part3start */
+		)
 		k, v := mainCursor.Seek(startkey)
-		hK, hV := historyCursor.Seek(startkey)
+		hK, tsEnc, _, hV := historyCursor.Seek()
+		if hK != nil {
+			ts := binary.BigEndian.Uint64(tsEnc)
+			for hK != nil && ts < timestamp {
+				hK, tsEnc, _, hV = historyCursor.Next()
+				if hK != nil {
+					ts = binary.BigEndian.Uint64(tsEnc)
+				}
+			}
+		}
 		goOn := true
 		var err error
 		for goOn {
@@ -438,7 +454,16 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 					k, v = mainCursor.Next()
 				}
 				if cmp >= 0 {
-					hK, hV = historyCursor.Next()
+					hK, tsEnc, _, hV = historyCursor.Next()
+					if hK != nil {
+						ts := binary.BigEndian.Uint64(tsEnc)
+						for hK != nil && ts < timestamp {
+							hK, tsEnc, _, hV = historyCursor.Next()
+							if hK != nil {
+								ts = binary.BigEndian.Uint64(tsEnc)
+							}
+						}
+					}
 				}
 			}
 		}
