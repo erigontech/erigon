@@ -945,12 +945,12 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 			if err != nil {
 				return err
 			}
-			index.Remove(timestamp)
+			index = index.Remove(timestamp)
 
 			if index.Len() == 0 {
 				return tds.db.Delete(dbutils.AccountsHistoryBucket, chunkKey)
 			}
-			return tds.db.Put(dbutils.AccountsHistoryBucket, chunkKey, *index)
+			return tds.db.Put(dbutils.AccountsHistoryBucket, chunkKey, index)
 		})
 		if innerErr != nil {
 			return innerErr
@@ -976,12 +976,12 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 				return err
 			}
 
-			index.Remove(timestamp)
+			index = index.Remove(timestamp)
 
 			if index.Len() == 0 {
 				return tds.db.Delete(dbutils.StorageHistoryBucket, chunkKey)
 			}
-			return tds.db.Put(dbutils.StorageHistoryBucket, chunkKey, *index)
+			return tds.db.Put(dbutils.StorageHistoryBucket, chunkKey, index)
 		})
 		if innerErr != nil {
 			return innerErr

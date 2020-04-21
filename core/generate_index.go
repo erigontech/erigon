@@ -35,7 +35,7 @@ type IndexGenerator struct {
 }
 
 type IndexWithKey struct {
-	Val     *dbutils.HistoryIndexBytes
+	Val dbutils.HistoryIndexBytes
 }
 
 func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) error {
@@ -47,7 +47,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 			if err != nil && err != ethdb.ErrKeyNotFound {
 				return err
 			}
-			var index *dbutils.HistoryIndexBytes
+			var index dbutils.HistoryIndexBytes
 
 			if len(indexBytes) == 0 {
 				index = dbutils.NewHistoryIndex()
@@ -58,18 +58,18 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 			}
 
 			indexes = append(indexes, IndexWithKey{
-				Val:     index,
+				Val: index,
 			})
 			ig.cache[string(k)] = indexes
 		}
 
 		lastIndex := indexes[len(indexes)-1]
-		if dbutils.CheckNewIndexChunk(*lastIndex.Val) {
+		if dbutils.CheckNewIndexChunk(lastIndex.Val) {
 			lastIndex.Val = dbutils.NewHistoryIndex()
 			indexes = append(indexes, lastIndex)
 			ig.cache[string(k)] = indexes
 		}
-		lastIndex.Val.Append(blockNum)
+		lastIndex.Val = lastIndex.Val.Append(blockNum)
 		return nil
 	}
 }
@@ -109,7 +109,7 @@ func (ig *IndexGenerator) GenerateIndex() error {
 					return err
 				}
 
-				if err := tuples.Append(ig.bucketToWrite, chunkKey, *val.Val); err != nil {
+				if err := tuples.Append(ig.bucketToWrite, chunkKey, val.Val); err != nil {
 					return err
 				}
 
