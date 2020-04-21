@@ -743,13 +743,14 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 			currentRs := tr.rss[rangeIdx]
 
+			keyAsNibbles.Reset()
+			DecompressNibbles(minKey, &keyAsNibbles.B)
+
 			if len(keyAsNibbles.B) < currentReq.extResolvePos {
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
-			keyAsNibbles.Reset()
-			DecompressNibbles(minKey, &keyAsNibbles.B)
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
