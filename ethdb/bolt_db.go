@@ -371,7 +371,7 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 			fixedbits,
 			common.HashLength,   /* part1end */
 			common.HashLength,   /* part2start */
-			common.HashLength+8,   /* part3start */
+			common.HashLength+8, /* part3start */
 		)
 		k, v := mainCursor.Seek(startkey)
 		hK, tsEnc, _, hV := historyCursor.Seek()
@@ -555,7 +555,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 			startkey,
 			fixedbits,
 			common.HashLength, /* part1end */
-			common.HashLength+common.IncarnationLength, /* part2start */
+			common.HashLength+common.IncarnationLength,                   /* part2start */
 			common.HashLength+common.IncarnationLength+common.HashLength, /* part3start */
 		)
 		//for historic data
