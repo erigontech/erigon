@@ -169,7 +169,7 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 		copy(blockNumBytes, key)
 		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength:], blockNumber)
 	case common.HashLength*2 + common.IncarnationLength:
-		//remove incarnation and add inversed block number
+		//remove incarnation and add block number
 		blockNumBytes = make([]byte, common.HashLength*2+8)
 		copy(blockNumBytes, key[:common.HashLength])
 		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])

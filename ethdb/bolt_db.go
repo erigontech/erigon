@@ -378,14 +378,8 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 			k, v = mainCursor.Next()
 		}
 		hK, tsEnc, _, hV := historyCursor.Seek()
-		if hK != nil {
-			ts := binary.BigEndian.Uint64(tsEnc)
-			for hK != nil && ts < timestamp {
-				hK, tsEnc, _, hV = historyCursor.Next()
-				if hK != nil {
-					ts = binary.BigEndian.Uint64(tsEnc)
-				}
-			}
+		for hK != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
+			hK, tsEnc, _, hV = historyCursor.Next()
 		}
 		goOn := true
 		var err error
@@ -396,12 +390,6 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 			}
 			if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
 				k = nil
-			}
-			if hK != nil && fixedbits > 0 && !bytes.Equal(hK[:fixedbytes-1], startkey[:fixedbytes-1]) {
-				hK = nil
-			}
-			if hK != nil && fixedbits > 0 && (hK[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
-				hK = nil
 			}
 			var cmp int
 			if k == nil {
@@ -462,15 +450,10 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 					}
 				}
 				if cmp >= 0 {
+					hK0 := hK
 					hK, tsEnc, _, hV = historyCursor.Next()
-					if hK != nil {
-						ts := binary.BigEndian.Uint64(tsEnc)
-						for hK != nil && ts < timestamp {
-							hK, tsEnc, _, hV = historyCursor.Next()
-							if hK != nil {
-								ts = binary.BigEndian.Uint64(tsEnc)
-							}
-						}
+					for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
+						hK, tsEnc, _, hV = historyCursor.Next()
 					}
 				}
 			}
@@ -577,14 +560,8 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 		)
 		addrHash, keyHash, _, v := mainCursor.Seek()
 		hAddrHash, hKeyHash, tsEnc, hV := historyCursor.Seek()
-		if hKeyHash != nil {
-			ts := binary.BigEndian.Uint64(tsEnc)
-			for hKeyHash != nil && ts < timestamp {
-				hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
-				if hKeyHash != nil {
-					ts = binary.BigEndian.Uint64(tsEnc)
-				}
-			}
+		for hKeyHash != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
+			hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
 		}
 		goOn := true
 		var err error
@@ -621,7 +598,9 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 							err1,
 						)
 					}
-					goOn, err = walker(hAddrHash, hKeyHash, data)
+					if len(data) > 0 { // Skip deleted entries
+						goOn, err = walker(hAddrHash, hKeyHash, data)
+					}
 				} else if cmp == 0 {
 					goOn, err = walker(addrHash, keyHash, v)
 				}
@@ -631,15 +610,10 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 					addrHash, keyHash, _, v = mainCursor.Next()
 				}
 				if cmp >= 0 {
+					hKeyHash0 := hKeyHash
 					hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
-					if hKeyHash != nil {
-						ts := binary.BigEndian.Uint64(tsEnc)
-						for hKeyHash != nil && ts < timestamp {
-							hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
-							if hKeyHash != nil {
-								ts = binary.BigEndian.Uint64(tsEnc)
-							}
-						}
+					for hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
+						hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
 					}
 				}
 			}

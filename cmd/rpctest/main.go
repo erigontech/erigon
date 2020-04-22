@@ -672,7 +672,7 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 1800000
+	firstBn := 1801821
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -1307,21 +1307,26 @@ func bench7() {
 		Timeout: time.Second * 600,
 	}
 	turbogethURL := routes[TurboGeth]
-	blockhash := common.HexToHash("0x820b9eb70726aef7706b4db5b55ec6d6684fa155e0f964c8253970861f96ab6b")
+	gethURL := routes[Geth]
+	blockhash := common.HexToHash("0xdd3eb495312b11621669be45a2d50f8a66f2616bc72a610e2cbf1aebf9e4a9aa")
 	reqID := 1
-	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
-	sm := make(map[common.Hash]storageEntry)
-	start := common.HexToHash("0xf9b13da5a2865143a9bb5ad68c1241df890b5fe3f35e94e7dae2e2e480710461")
+	to := common.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")
+	var sm map[common.Hash]storageEntry
+	var smg map[common.Hash]storageEntry
+	start := common.HexToHash("0x4a17477338cba00d8a94336ef62ea15f68e77ad0ca738fa405daa13bf0874134")
 
 	reqID++
 	template := `
 {"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}
 	`
-	i := 5
+	i := 0
 	nextKey := &start
+	nextKeyG := &start
 	for nextKey != nil {
+		sm = make(map[common.Hash]storageEntry)
+		smg = make(map[common.Hash]storageEntry)
 		var sr DebugStorageRange
-		if err := post(client, turbogethURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
+		if err := post(client, turbogethURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 2, reqID), &sr); err != nil {
 			fmt.Printf("Could not get storageRange: %v\n", err)
 			return
 		}
@@ -1336,6 +1341,40 @@ func bench7() {
 					fmt.Printf("%x: %x", k, v)
 				}
 			}
+		}
+		var srg DebugStorageRange
+		if err := post(client, gethURL, fmt.Sprintf(template, blockhash, i, to, *nextKeyG, 2, reqID), &srg); err != nil {
+			fmt.Printf("Could not get storageRange: %v\n", err)
+			return
+		}
+		if srg.Error != nil {
+			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+			break
+		} else {
+			for k, v := range srg.Result.Storage {
+				smg[k] = v
+				if v.Key == nil {
+					fmt.Printf("%x: %x", k, v)
+				}
+			}
+			nextKeyG = srg.Result.NextKey
+			if *nextKey != *nextKeyG {
+				fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyG)
+				fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
+				fmt.Printf("================sm\n")
+				printStorageRange(sm)
+				fmt.Printf("================smg\n")
+				printStorageRange(smg)
+				return
+			}
+		}
+		if !compareStorageRanges(sm, smg) {
+			fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
+			fmt.Printf("================sm\n")
+			printStorageRange(sm)
+			fmt.Printf("================smg\n")
+			printStorageRange(smg)
+			return
 		}
 	}
 	fmt.Printf("storageRange: %d\n", len(sm))
