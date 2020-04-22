@@ -684,7 +684,7 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 49000
+	firstBn := 4900000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -731,11 +731,16 @@ func bench1(needCompare bool, fullTest bool) {
 				if storageCounter == 100 {
 					storageCounter = 0
 					reqGen.reqID++
-					sm := make(map[common.Hash]storageEntry)
+					var sm map[common.Hash]storageEntry
+					var smGeth map[common.Hash]storageEntry
 					nextKey := &common.Hash{}
+					nextKeyGeth := &common.Hash{}
 					var sr DebugStorageRange
+					var srGeth DebugStorageRange
 					for nextKey != nil {
-						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
+						sm = make(map[common.Hash]storageEntry)
+						smGeth = make(map[common.Hash]storageEntry)
+						res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
@@ -750,43 +755,39 @@ func bench1(needCompare bool, fullTest bool) {
 								sm[k] = v
 							}
 						}
-					}
-
-					if needCompare {
-						smg := make(map[common.Hash]storageEntry)
-						nextKey = &common.Hash{}
-						for nextKey != nil {
-							var srg DebugStorageRange
-							res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &srg)
-							resultsCh <- res
-							if res.Err != nil {
-								fmt.Printf("Could not get storageRange g: %s: %v\n", tx.Hash, res.Err)
-								return
-							}
-							if srg.Error != nil {
-								fmt.Printf("Error getting storageRange g: %d %s\n", srg.Error.Code, srg.Error.Message)
-								break
-							} else {
-								nextKey = srg.Result.NextKey
-								for k, v := range srg.Result.Storage {
-									smg[k] = v
-								}
+						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyGeth), &srGeth)
+						resultsCh <- res
+						if res.Err != nil {
+							fmt.Printf("Could not get storageRange geth: %s: %v\n", tx.Hash, res.Err)
+							break
+						}
+						if srGeth.Error != nil {
+							fmt.Printf("Error getting storageRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
+							break
+						} else {
+							nextKeyGeth = srGeth.Result.NextKey
+							for k, v := range srGeth.Result.Storage {
+								sm[k] = v
 							}
 						}
-
-						if res.Err == nil && sr.Error == nil {
-							if !compareStorageRanges(sm, smg) {
-								fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
-								fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
-								fmt.Printf("================sm\n")
-								printStorageRange(sm)
-								fmt.Printf("================smg\n")
-								printStorageRange(smg)
-								return
-							}
+						if *nextKey != *nextKeyGeth {
+							fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyGeth)
+							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smGeth))
+							fmt.Printf("================sm\n")
+							printStorageRange(sm)
+							fmt.Printf("================smg\n")
+							printStorageRange(smGeth)
+							return
 						}
 					}
-
+					if !compareStorageRanges(sm, smGeth) {
+						fmt.Printf("len(sm) %d, len(smGeth) %d\n", len(sm), len(smGeth))
+						fmt.Printf("================sm\n")
+						printStorageRange(sm)
+						fmt.Printf("================smg\n")
+						printStorageRange(smGeth)
+						return
+					}
 				}
 			}
 
