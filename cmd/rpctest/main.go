@@ -1358,7 +1358,7 @@ func bench7() {
 				}
 			}
 			nextKeyG = srg.Result.NextKey
-			if  *nextKey != *nextKeyG {
+			if *nextKey != *nextKeyG {
 				fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyG)
 				fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
 				fmt.Printf("================sm\n")
