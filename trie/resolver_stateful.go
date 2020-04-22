@@ -45,9 +45,11 @@ type ResolverStateful struct {
 	roots        []node // roots of the tries that are being built
 	hookFunction hookFunction
 
-	isIH     bool
-	hashData GenStructStepHashData
-	trace    bool
+	isIH               bool
+	hashData           GenStructStepHashData
+	trace              bool
+	accAddrHashIsValid bool
+	accAddrHash        []byte
 }
 
 func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
@@ -130,7 +132,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
-func (tr *ResolverStateful) finaliseRoot() error {
+func (tr *ResolverStateful) finaliseRoot(accRoot getAccRootF) error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
@@ -156,6 +158,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				if err != nil {
 					return err
 				}
+
 				err = tr.hb.hash(tr.a.Root[:])
 				if err != nil {
 					return err
@@ -209,24 +212,65 @@ func (tr *ResolverStateful) RebuildTrie(
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
+	getAccRot := func(acc common.Hash, incarnation uint64) (common.Hash, error) {
+		root := EmptyRoot
+		root2 := EmptyRoot
+		rootIH := EmptyRoot
+		accWithInc := dbutils.GenerateStoragePrefix(acc, incarnation)
+		resolver := NewResolverStateful(0, []*ResolveRequest{
+			tr.currentReq.t.NewResolveRequest(accWithInc, nil, 0, nil),
+		}, func(req *ResolveRequest, node node, hash common.Hash) error {
+			root.SetBytes(common.CopyBytes(hash.Bytes()))
+
+			h := req.t.getHasher()
+			defer returnHasherToPool(h)
+			h.hash(node, true, root2[:])
+
+			return nil
+		})
+		err := resolver.RebuildTrie(db, 0, false, false, true)
+		if err != nil {
+			return root, err
+		}
+
+		if err := boltDB.View(func(tx *bolt.Tx) error {
+			v, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(accWithInc)
+			if v == nil {
+				return ethdb.ErrKeyNotFound
+			}
+
+			rootIH.SetBytes(common.CopyBytes(v))
+			return nil
+		}); err != nil {
+			return root, err
+		}
+
+		if !(bytes.Equal(root.Bytes(), rootIH.Bytes()) && bytes.Equal(root.Bytes(), root2.Bytes())) {
+			fmt.Printf("%x!=%x!=%x\n\n", root, rootIH, root2)
+			panic(1)
+		}
+
+		return root, err
+	}
+
 	var err error
 	if isAccount {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerAccounts, true)
+			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerAccounts, true, getAccRot)
 		}
 	} else {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerStorage, false)
+			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerStorage, false, getAccRot)
 		}
 	}
 	if err != nil {
 		return err
 	}
-	if err = tr.finaliseRoot(); err != nil {
+	if err = tr.finaliseRoot(getAccRot); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params", isAccount)
 		for _, req := range tr.requests {
 			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
@@ -260,22 +304,22 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 	return nil
 }
 
-func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, isIH bool, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, isIH bool, accRoot getAccRootF) error {
 	return tr.Walker(true, isIH, keyIdx, k, v, accRoot)
 }
 
-func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte, isIH bool, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte, isIH bool, accRoot getAccRootF) error {
 	return tr.Walker(false, isIH, keyIdx, k, v, accRoot)
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []byte, v []byte, accRoot func(addrHash []byte, a accounts.Account) ([]byte, error)) error {
+func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []byte, v []byte, accRoot getAccRootF) error {
 	if tr.trace {
 		fmt.Printf("Walker: %t, keyIdx: %d key:%x  value:%x, isIH: %v\n", isAccount, keyIdx, k, v, isIH)
 	}
 
 	if keyIdx != tr.keyIdx {
-		if err := tr.finaliseRoot(); err != nil {
+		if err := tr.finaliseRoot(accRoot); err != nil {
 			return err
 		}
 		tr.hb.Reset()
@@ -284,6 +328,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
 		tr.curr.Reset()
+		tr.accAddrHashIsValid = false
 	}
 	if len(v) > 0 {
 		tr.curr.Reset()
@@ -358,11 +403,12 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 		if err := tr.a.DecodeForStorage(v); err != nil {
 			return fmt.Errorf("fail DecodeForStorage: %w", err)
 		}
-		storageHash, err := accRoot(k, tr.a)
+
+		storageHash, err := accRoot(common.BytesToHash(k), tr.a.Incarnation)
 		if err != nil {
 			return err
 		}
-		tr.a.Root.SetBytes(storageHash)
+		tr.a.Root.SetBytes(storageHash.Bytes())
 
 		if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 			tr.fieldSet = AccountFieldSetNotContract
@@ -373,13 +419,19 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 				tr.fieldSet = AccountFieldSetContract
 			}
 		}
+
+		tr.accAddrHashIsValid = true
+		tr.accAddrHash = tr.accAddrHash[:0]
+		tr.accAddrHash = append(tr.accAddrHash, k...)
 	}
 
 	return nil
 }
 
+type getAccRootF = func(acc common.Hash, incarnation uint64) (common.Hash, error)
+
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, isIH bool, accRoot func([]byte, accounts.Account) ([]byte, error)) error, isAccount bool) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, isIH bool, accRoot getAccRootF) error, isAccount bool, accRoot getAccRootF) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -511,7 +563,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			if !isIH {
-				if err := walker(rangeIdx, minKey, v, false, getAccRoot); err != nil {
+				if err := walker(rangeIdx, minKey, v, false, accRoot); err != nil {
 					return err
 				}
 				k, v = c.Next()
@@ -533,6 +585,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
@@ -616,20 +669,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			ih = ihBucket.Cursor()
 		}
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		accRoots := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 
 		k, v := c.Seek(startkey)
-		getAccRoot := func(addrHash []byte, a accounts.Account) ([]byte, error) {
-			seekKey := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), a.Incarnation)
-			accRootKey, accRoot := accRoots.SeekTo(seekKey)
-			if tr.trace {
-				fmt.Printf("getAccRoot: %x -> %x, %x\n", seekKey, accRootKey, accRoot)
-			}
-			if accRoot == nil || !bytes.Equal(seekKey, accRootKey) {
-				return nil, fmt.Errorf("acc root not found for %x", seekKey)
-			}
-			return accRoot, nil
-		}
 
 		var ihK, ihV []byte
 		if ih != nil {
