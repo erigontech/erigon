@@ -730,16 +730,17 @@ func bench1(needCompare bool, fullTest bool) {
 				storageCounter++
 				if storageCounter == 100 {
 					storageCounter = 0
-					reqGen.reqID++
 					var sm map[common.Hash]storageEntry
 					var smGeth map[common.Hash]storageEntry
 					nextKey := &common.Hash{}
 					nextKeyGeth := &common.Hash{}
 					var sr DebugStorageRange
 					var srGeth DebugStorageRange
-					for nextKey != nil {
+					counter := 16
+					for nextKey != nil && counter > 0 {
 						sm = make(map[common.Hash]storageEntry)
 						smGeth = make(map[common.Hash]storageEntry)
+						reqGen.reqID++
 						res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
@@ -770,7 +771,7 @@ func bench1(needCompare bool, fullTest bool) {
 								sm[k] = v
 							}
 						}
-						if *nextKey != *nextKeyGeth {
+						if nextKey != nil && nextKeyGeth != nil && *nextKey != *nextKeyGeth {
 							fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyGeth)
 							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smGeth))
 							fmt.Printf("================sm\n")
@@ -779,14 +780,15 @@ func bench1(needCompare bool, fullTest bool) {
 							printStorageRange(smGeth)
 							return
 						}
-					}
-					if !compareStorageRanges(sm, smGeth) {
-						fmt.Printf("len(sm) %d, len(smGeth) %d\n", len(sm), len(smGeth))
-						fmt.Printf("================sm\n")
-						printStorageRange(sm)
-						fmt.Printf("================smg\n")
-						printStorageRange(smGeth)
-						return
+						if !compareStorageRanges(sm, smGeth) {
+							fmt.Printf("len(sm) %d, len(smGeth) %d\n", len(sm), len(smGeth))
+							fmt.Printf("================sm\n")
+							printStorageRange(sm)
+							fmt.Printf("================smg\n")
+							printStorageRange(smGeth)
+							return
+						}
+						counter--
 					}
 				}
 			}
@@ -962,7 +964,6 @@ func bench1(needCompare bool, fullTest bool) {
 				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
 
-			reqGen.reqID++
 			page := common.Hash{}.Bytes()
 			pageGeth := common.Hash{}.Bytes()
 
@@ -973,6 +974,7 @@ func bench1(needCompare bool, fullTest bool) {
 				accRangeTG = make(map[common.Address]state.DumpAccount)
 				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
+				reqGen.reqID++
 				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
 				resultsCh <- res
 

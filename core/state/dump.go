@@ -118,7 +118,7 @@ func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
 	return &Dumper{db: db, blockNumber: blockNumber}
 }
 
-func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte, err error) {
+func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var accountList []*DumpAccount
 	var incarnationList []uint64
