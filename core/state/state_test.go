@@ -292,6 +292,7 @@ func TestDump(t *testing.T) {
 	obj1.AddBalance(big.NewInt(22))
 	obj2 := state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj2.setIncarnation(1)
 	obj3 := state.GetOrNewStateObject(toAddr([]byte{0x02}))
 	obj3.SetBalance(big.NewInt(44))
 
@@ -320,13 +321,22 @@ func TestDump(t *testing.T) {
 
 	tds.SetBlockNr(1)
 
-	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	blockWriter := tds.DbStateWriter()
+	err = state.CommitBlock(ctx, blockWriter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = blockWriter.WriteChangeSets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = blockWriter.WriteHistory()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(db, 1).DefaultDump())
+	got := string(NewDumper(db, 2).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

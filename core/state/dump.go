@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -117,7 +119,7 @@ func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
 }
 
 func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte, err error) {
-
+	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var accountList []*DumpAccount
 	var incarnationList []uint64
 	var addrHashList []common.Hash
@@ -174,15 +176,24 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPr
 			return nil, fmt.Errorf("getting account storage root for %x: %v", addrHash, err)
 		}
 		if root != nil {
-			account.Root = common.BytesToHash(root).String()
+			account.Root = common.Bytes2Hex(root)
 		}
-		if !excludeCode && incarnation != 0 {
-			var code []byte
-			code, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)
+		fmt.Printf("%x, incarnation %d\n", addrHash, incarnation)
+		if incarnation > 0 {
+			var codeHash []byte
+			codeHash, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)
 			if err != nil {
-				return nil, fmt.Errorf("getting code for %x: %v", addrHash, err)
+				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
 			}
-			account.Code = common.Bytes2Hex(code)
+			account.CodeHash = common.Bytes2Hex(codeHash)
+			if !excludeCode && !bytes.Equal(emptyCodeHash[:], codeHash) {
+				fmt.Printf("Getting code for %x\n", codeHash)
+				var code []byte
+				if code, err = d.db.Get(dbutils.CodeBucket, codeHash); err != nil {
+					return nil, err
+				}
+				account.Code = common.Bytes2Hex(code)
+			}
 		}
 		if !excludeStorage {
 			storageMap := make(map[common.Hash][]byte)

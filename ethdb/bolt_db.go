@@ -423,19 +423,6 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 						)
 					}
 					if len(data) > 0 { // Skip accounts did not exist
-						var acc accounts.Account
-						if err2 := acc.DecodeForStorage(data); err2 != nil {
-							return err2
-						}
-						if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-							codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-							codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(hK, acc.Incarnation))
-							if len(codeHash) > 0 {
-								acc.CodeHash = common.BytesToHash(codeHash)
-							}
-							data = make([]byte, acc.EncodingLengthForStorage())
-							acc.EncodeForStorage(data)
-						}
 						goOn, err = walker(hK, data)
 					}
 				} else if cmp == 0 {
