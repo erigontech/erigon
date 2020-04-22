@@ -231,6 +231,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bo
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
+	//nolint:errcheck
 	d.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 	return *dump
 }
