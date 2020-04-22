@@ -1113,6 +1113,7 @@ func bench3() {
 		fmt.Printf("Different in account ranges tx\n")
 		return
 	}
+	fmt.Println("debug_accountRanges... OK!")
 
 	template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
@@ -1220,13 +1221,13 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	for addr := range allAddresses {
 		tgAcc, tgOk := tg[addr]
 		if !tgOk {
-			fmt.Println("mising account in TurboGeth", addr)
+			fmt.Println("missing account in TurboGeth", addr.Hex())
 			return false
 		}
 
 		gethAcc, gethOk := geth[addr]
 		if !gethOk {
-			fmt.Println("mising account in Geth", addr)
+			fmt.Println("missing account in Geth", addr.Hex())
 			return false
 		}
 
@@ -1234,7 +1235,7 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 		gethAccBytes, _ := json.Marshal(gethAcc)
 
 		if !bytes.Equal(tgAccBytes, gethAccBytes) {
-			fmt.Printf("account mismatch:\n\ttg=%s\n\tgg=%s\n", string(tgAccBytes), string(gethAccBytes))
+			fmt.Printf("account mismatch:\n\tturbo=%s\n\t geth=%s\n", string(tgAccBytes), string(gethAccBytes))
 			return false
 		}
 	}
