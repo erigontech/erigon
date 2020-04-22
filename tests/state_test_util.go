@@ -210,12 +210,12 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != common.Hash(post.Root) {
-		return statedb, db, readBlockNr+1, common.Hash{}, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return statedb, db, readBlockNr + 1, common.Hash{}, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(statedb.Logs()); logs != common.Hash(post.Logs) {
-		return statedb, db, readBlockNr+1, common.Hash{}, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return statedb, db, readBlockNr + 1, common.Hash{}, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return statedb, db, readBlockNr+1, root, nil
+	return statedb, db, readBlockNr + 1, root, nil
 }
 
 func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
