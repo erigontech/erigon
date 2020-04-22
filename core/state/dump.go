@@ -225,17 +225,17 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPr
 }
 
 // RawDump returns the entire state an a single large object
-func (tds *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
+func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
-	tds.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 	return *dump
 }
 
 // Dump returns a JSON string representing the entire state as a single json-object
-func (tds *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
-	dump := tds.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
+func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
+	dump := d.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
 	json, err := json.MarshalIndent(dump, "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
@@ -249,20 +249,20 @@ func (tds *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPrei
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (tds *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (IteratorDump, error) {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
-	iterator.Next, err = tds.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	iterator.Next, err = d.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
 	return *iterator, err
 }
 
-func (tds *Dumper) DefaultRawDump() Dump {
-	return tds.RawDump(false, false, false)
+func (d *Dumper) DefaultRawDump() Dump {
+	return d.RawDump(false, false, false)
 }
 
 // DefaultDump returns a JSON string representing the state with the default params
-func (tds *Dumper) DefaultDump() []byte {
-	return tds.Dump(false, false, false)
+func (d *Dumper) DefaultDump() []byte {
+	return d.Dump(false, false, false)
 }

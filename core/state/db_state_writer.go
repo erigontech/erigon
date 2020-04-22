@@ -75,7 +75,12 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 		return err
 	}
 	//save contract to codeHash mapping
-	return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash.Bytes())
+	if addrHash == common.HexToHash("008a847b18f2031712b3bf761a1147dd938d9d8f4eddf7d79180edd782ee7471") {
+		fmt.Printf("dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(%x, %d), %x[:])",
+		addrHash, incarnation, codeHash,
+		)
+	}
+	return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:])
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
