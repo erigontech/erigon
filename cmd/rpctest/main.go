@@ -548,7 +548,7 @@ func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) s
 func (g *RequestGenerator) accountRange(bn int, page []byte) string {
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, true, true, true], "id":%d}`
 	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, 1024, g.reqID)
+	return fmt.Sprintf(template, bn, encodedKey, 256, g.reqID)
 }
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {

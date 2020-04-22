@@ -33,20 +33,19 @@ type trieHasher interface {
 
 type Dumper struct {
 	blockNumber uint64
-	db     ethdb.Getter
+	db          ethdb.Getter
 }
 
 // DumpAccount represents an account in the state.
 type DumpAccount struct {
-	Balance     string            `json:"balance"`
-	Nonce       uint64            `json:"nonce"`
-	Root        string            `json:"root"`
-	CodeHash    string            `json:"codeHash"`
-	Code        string            `json:"code,omitempty"`
-	Storage     map[string]string `json:"storage,omitempty"`
-	StorageSize *uint64           `json:",omitempty"`
-	Address     *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey   hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
+	Balance   string            `json:"balance"`
+	Nonce     uint64            `json:"nonce"`
+	Root      string            `json:"root"`
+	CodeHash  string            `json:"codeHash"`
+	Code      string            `json:"code,omitempty"`
+	Storage   map[string]string `json:"storage,omitempty"`
+	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
+	SecureKey hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map.
@@ -118,6 +117,10 @@ func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
 }
 
 func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte, err error) {
+
+	var accountList []*DumpAccount
+	var incarnationList []uint64
+	var addrHashList []common.Hash
 	c.onRoot(common.Hash{}) // We do not calculate the root
 
 	var acc accounts.Account
@@ -138,24 +141,6 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPr
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
 		}
-		var addr []byte
-		addr, err = d.db.Get(dbutils.PreimagePrefix, k)
-		if err != nil {
-			return false, fmt.Errorf("getting preimage of %x: %v", k, err)
-		}
-		root, err := d.db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(k, acc.GetIncarnation()))
-		if err != nil {
-			return false, fmt.Errorf("getting account storage root for %x: %v", k, err)
-		}
-		acc.Root = common.BytesToHash(root)
-
-		var code []byte
-
-		if !acc.IsEmptyCodeHash() {
-			if code, err = d.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
-				return false, fmt.Errorf("getting code for %x: %v", k, err)
-			}
-		}
 		account := DumpAccount{
 			Balance:  acc.Balance.String(),
 			Nonce:    acc.Nonce,
@@ -163,41 +148,69 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPr
 			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
 			Storage:  make(map[string]string),
 		}
-		if !excludeCode {
-			account.Code = common.Bytes2Hex(code)
-		}
+		accountList = append(accountList, &account)
+		addrHashList = append(addrHashList, common.BytesToHash(k))
+		incarnationList = append(incarnationList, acc.Incarnation)
 
-		if acc.HasStorageSize {
-			var storageSize = acc.StorageSize
-			account.StorageSize = &storageSize
-		}
-
-		if !excludeStorage {
-			err = d.db.WalkAsOf(
-				dbutils.CurrentStateBucket,
-				dbutils.StorageHistoryBucket,
-				dbutils.GenerateStoragePrefix(k, acc.GetIncarnation()),
-				8*uint(common.HashLength+common.IncarnationLength),
-				d.blockNumber,
-				func(ks, vs []byte) (bool, error) {
-				key, err := d.db.Get(dbutils.PreimagePrefix, ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
-				if err != nil {
-					return false, err
-				}
-				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
-				return true, nil
-			})
-			if err != nil {
-				return false, fmt.Errorf("walking over storage for %x: %v", k, err)
-			}
-		}
-		c.onAccount(common.BytesToAddress(addr), account)
 		numberOfResults++
 
 		return true, nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return nextKey, err
+	for i, addrHash := range addrHashList {
+		account := accountList[i]
+		incarnation := incarnationList[i]
+		var addr []byte
+		addr, err = d.db.Get(dbutils.PreimagePrefix, addrHash[:])
+		if err != nil {
+			return nil, fmt.Errorf("getting preimage of %x: %v", addrHash, err)
+		}
+		storagePrefix := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
+		root, err := d.db.Get(dbutils.IntermediateTrieHashBucket, storagePrefix)
+		if err != nil && err != ethdb.ErrKeyNotFound {
+			return nil, fmt.Errorf("getting account storage root for %x: %v", addrHash, err)
+		}
+		if root != nil {
+			account.Root = common.BytesToHash(root).String()
+		}
+		if !excludeCode && incarnation != 0 {
+			var code []byte
+			code, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)
+			if err != nil {
+				return nil, fmt.Errorf("getting code for %x: %v", addrHash, err)
+			}
+			account.Code = common.Bytes2Hex(code)
+		}
+		if !excludeStorage {
+			storageMap := make(map[common.Hash][]byte)
+			err = d.db.WalkAsOf(
+				dbutils.CurrentStateBucket,
+				dbutils.StorageHistoryBucket,
+				storagePrefix,
+				8*uint(common.HashLength+common.IncarnationLength),
+				d.blockNumber,
+				func(ks, vs []byte) (bool, error) {
+					storageMap[common.BytesToHash(ks[common.HashLength+common.IncarnationLength:])] = common.CopyBytes(vs)
+					return true, nil
+				})
+			if err != nil {
+				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
+			}
+			for keyHash, vs := range storageMap {
+				var key []byte
+				key, err = d.db.Get(dbutils.PreimagePrefix, keyHash[:]) //remove account address and version from composite key
+				if err != nil {
+					return nil, fmt.Errorf("getting preimage for storage %x %x: %v", addrHash, keyHash, err)
+				}
+				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
+			}
+		}
+		c.onAccount(common.BytesToAddress(addr), *account)
+	}
+	return nextKey, nil
 }
 
 // RawDump returns the entire state an a single large object
