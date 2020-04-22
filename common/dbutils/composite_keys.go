@@ -101,7 +101,7 @@ func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byt
 // For contract storage
 func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
 	compositeKey := make([]byte, 0, common.HashLength+8+common.HashLength)
-	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash, incarnation)...)
+	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash[:], incarnation)...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
@@ -116,9 +116,9 @@ func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, stor
 }
 
 // address hash + incarnation prefix
-func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
+func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 	prefix := make([]byte, common.HashLength+8)
-	copy(prefix, addressHash[:])
+	copy(prefix, addressHash)
 	binary.BigEndian.PutUint64(prefix[common.HashLength:], ^incarnation)
 	return prefix
 }

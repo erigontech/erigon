@@ -399,7 +399,7 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
 		maxResults = AccountRangeMaxResults
 	}
-	return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults), nil
+	return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.

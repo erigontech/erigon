@@ -429,7 +429,7 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 						}
 						if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 							codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-							codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(hK), acc.Incarnation))
+							codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(hK, acc.Incarnation))
 							if len(codeHash) > 0 {
 								acc.CodeHash = common.BytesToHash(codeHash)
 							}
@@ -797,7 +797,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 		}
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-			codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(key), acc.Incarnation))
+			codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(key, acc.Incarnation))
 			if len(codeHash) > 0 {
 				acc.CodeHash = common.BytesToHash(codeHash)
 			}
