@@ -31,13 +31,8 @@ type trieHasher interface {
 	GetTrieHash() common.Hash
 }
 
-type DumperSource interface {
-	GetKey([]byte) []byte
-	GetBlockNr() uint64
-}
-
 type Dumper struct {
-	source DumperSource
+	blockNumber uint64
 	db     ethdb.Getter
 }
 
@@ -117,18 +112,17 @@ func (d iterativeDump) onRoot(root common.Hash) {
 		Root common.Hash `json:"root"`
 	}{root})
 }
-func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte, err error) {
-	emptyAddress := common.Address{}
-	missingPreimages := 0
 
-	if hasher, ok := tds.source.(trieHasher); ok {
-		h := hasher.GetTrieHash()
-		c.onRoot(h)
-	}
+func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
+	return &Dumper{db: db, blockNumber: blockNumber}
+}
+
+func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte, err error) {
+	c.onRoot(common.Hash{}) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err = tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, tds.source.GetBlockNr(), func(k, v []byte) (bool, error) {
+	err = d.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -144,8 +138,12 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
 		}
-		addr := common.BytesToAddress(tds.source.GetKey(k))
-		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(k, acc.GetIncarnation()))
+		var addr []byte
+		addr, err = d.db.Get(dbutils.PreimagePrefix, k)
+		if err != nil {
+			return false, fmt.Errorf("getting preimage of %x: %v", k, err)
+		}
+		root, err := d.db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(k, acc.GetIncarnation()))
 		if err != nil {
 			return false, fmt.Errorf("getting account storage root for %x: %v", k, err)
 		}
@@ -154,7 +152,7 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 		var code []byte
 
 		if !acc.IsEmptyCodeHash() {
-			if code, err = tds.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
+			if code, err = d.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
 				return false, fmt.Errorf("getting code for %x: %v", k, err)
 			}
 		}
@@ -164,14 +162,6 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 			Root:     common.Bytes2Hex(acc.Root[:]),
 			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
 			Storage:  make(map[string]string),
-		}
-		if emptyAddress == addr {
-			// Preimage missing
-			missingPreimages++
-			if excludeMissingPreimages {
-				return true, nil
-			}
-			account.SecureKey = common.CopyBytes(k)
 		}
 		if !excludeCode {
 			account.Code = common.Bytes2Hex(code)
@@ -183,8 +173,17 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 		}
 
 		if !excludeStorage {
-			err = tds.db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(k, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
-				key := tds.source.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
+			err = d.db.WalkAsOf(
+				dbutils.CurrentStateBucket,
+				dbutils.StorageHistoryBucket,
+				dbutils.GenerateStoragePrefix(k, acc.GetIncarnation()),
+				8*uint(common.HashLength+common.IncarnationLength),
+				d.blockNumber,
+				func(ks, vs []byte) (bool, error) {
+				key, err := d.db.Get(dbutils.PreimagePrefix, ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
+				if err != nil {
+					return false, err
+				}
 				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 				return true, nil
 			})
@@ -192,7 +191,7 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 				return false, fmt.Errorf("walking over storage for %x: %v", k, err)
 			}
 		}
-		c.onAccount(addr, account)
+		c.onAccount(common.BytesToAddress(addr), account)
 		numberOfResults++
 
 		return true, nil

@@ -68,7 +68,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	got := string(s.tds.Dumper().DefaultDump())
+	got := string(NewDumper(s.db, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -326,9 +326,9 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(tds.Dumper().DefaultDump())
+	got := string(NewDumper(db, 1).DefaultDump())
 	want := `{
-    "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
+    "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {
         "0x0000000000000000000000000000000000000001": {
             "balance": "22",

@@ -548,7 +548,7 @@ func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) s
 func (g *RequestGenerator) accountRange(bn int, page []byte) string {
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, true, true, true], "id":%d}`
 	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, 256, g.reqID)
+	return fmt.Sprintf(template, bn, encodedKey, 1024, g.reqID)
 }
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
@@ -684,7 +684,7 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 1801821
+	firstBn := 49000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -963,10 +963,14 @@ func bench1(needCompare bool, fullTest bool) {
 
 			reqGen.reqID++
 			page := common.Hash{}.Bytes()
+			pageGeth := common.Hash{}.Bytes()
 
-			accRangeTG := make(map[common.Address]state.DumpAccount)
+			var accRangeTG map[common.Address]state.DumpAccount
+			var accRangeGeth map[common.Address]state.DumpAccount
 
 			for len(page) > 0 {
+				accRangeTG = make(map[common.Address]state.DumpAccount)
+				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
 				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
 				resultsCh <- res
@@ -985,36 +989,30 @@ func bench1(needCompare bool, fullTest bool) {
 						accRangeTG[k] = v
 					}
 				}
-			}
-
-			accRangeGeth := make(map[common.Address]state.DumpAccount)
-
-			page = common.Hash{}.Bytes()
-			for len(page) > 0 {
-				var sr DebugAccountRange
-				res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+				var srGeth DebugAccountRange
+				res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth), &srGeth)
 				resultsCh <- res
 				if res.Err != nil {
-					fmt.Printf("Could not get accountRange: %v\n", res.Err)
+					fmt.Printf("Could not get accountRange geth: %v\n", res.Err)
 					return
 				}
-				if sr.Error != nil {
-					fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+				if srGeth.Error != nil {
+					fmt.Printf("Error getting accountRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
 					break
 				} else {
-					page = sr.Result.Next
-					for k, v := range sr.Result.Accounts {
-						accRangeTG[k] = v
+					pageGeth = srGeth.Result.Next
+					for k, v := range srGeth.Result.Accounts {
+						accRangeGeth[k] = v
 					}
 				}
+				if !bytes.Equal(page, pageGeth) {
+					fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
+				}
+				if !compareAccountRanges(accRangeTG, accRangeGeth) {
+					fmt.Printf("Different in account ranges tx\n")
+					return
+				}
 			}
-
-			if !compareAccountRanges(accRangeTG, accRangeGeth) {
-				fmt.Printf("Different in account ranges tx\n")
-				return
-			}
-			fmt.Println("debug_accountRanges... OK!")
-
 			prevBn = bn
 		}
 	}
