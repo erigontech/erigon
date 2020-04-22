@@ -146,9 +146,18 @@ func (t *StateTest) Subtests() []StateSubtest {
 
 // Run executes a specific subtest.
 func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, ethdb.Getter, uint64, common.Hash, error) {
+	statedb, root, err := t.RunNoVerify(subtest, vmconfig, snapshotter)
+	if err != nil {
+		return statedb, err
+	}
 	config, ok := Forks[subtest.Fork]
+	// N.B: We need to do this in a two-step process, because the first Commit takes care
+	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if !ok {
+		return statedb, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+	}
 		return nil, nil, 0, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return statedb, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
 	block, _, _, _ := t.genesis(config).ToBlock(nil, false /* history */)
 	readBlockNr := block.Number().Uint64()
@@ -174,7 +183,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
 	snapshot := statedb.Snapshot()
-	if _, _, _, err = core.ApplyMessage(evm, msg, gaspool); err != nil {
+	if _, err := core.ApplyMessage(evm, msg, gaspool); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
