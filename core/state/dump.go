@@ -130,9 +130,7 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 	var acc accounts.Account
 	numberOfResults := 0
 	err := tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, tds.source.GetBlockNr(), func(k, v []byte) (bool, error) {
-		fmt.Printf("k=%x v=%x\n", k, v)
 		if maxResults > 0 && numberOfResults >= maxResults {
-			fmt.Printf("setting nexKey to %x\n", k)
 			nextKey = k
 			return false, nil
 		}

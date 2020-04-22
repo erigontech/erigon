@@ -1061,7 +1061,7 @@ func bench3() {
 	blockhash := common.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
 
-	pageSize := 2
+	pageSize := 256
 	req_id++
 	template := `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1", "%s", %d, true, true, true], "id":%d}`
 
@@ -1076,7 +1076,6 @@ func bench3() {
 			fmt.Printf("Could not get accountRange: %v\n", err)
 			return
 		}
-		fmt.Printf("tg boom: %d -> 0x%x\n", len(sr.Result.Accounts), sr.Result.Next)
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
@@ -1099,7 +1098,6 @@ func bench3() {
 			fmt.Printf("Could not get accountRange: %v\n", err)
 			return
 		}
-		fmt.Printf("gg boom: %d -> 0x%x\n", len(sr.Result.Accounts), sr.Result.Next)
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
