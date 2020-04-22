@@ -438,7 +438,6 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 				}
 				if cmp >= 0 {
 					hK0 := hK
-					hK, tsEnc, _, hV = historyCursor.Next()
 					for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
 						hK, tsEnc, _, hV = historyCursor.Next()
 					}
@@ -598,7 +597,6 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 				}
 				if cmp >= 0 {
 					hKeyHash0 := hKeyHash
-					hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
 					for hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
 						hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
 					}

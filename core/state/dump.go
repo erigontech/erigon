@@ -247,8 +247,8 @@ func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool)
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (tds *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
-	tds.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
+	d.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
