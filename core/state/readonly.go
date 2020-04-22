@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -58,6 +58,10 @@ func NewDbState(db ethdb.Getter, blockNr uint64) *DbState {
 
 func (dbs *DbState) SetBlockNr(blockNr uint64) {
 	dbs.blockNr = blockNr
+}
+
+func (dbs *DbState) GetBlockNr() uint64 {
+	return dbs.blockNr
 }
 
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) error {
@@ -133,7 +137,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 				if err == nil {
 					copy(item.key[:], key)
 				} else {
-					log.Error("Error getting preimage", "err", err)
+					log.Error(fmt.Sprintf("Error getting preimage for %x", item.seckey[:]), "err", err)
 					innerErr = err
 					return false
 				}
@@ -269,92 +273,8 @@ func (dbs *DbState) GetKey(shaKey []byte) []byte {
 	return key
 }
 
-func (dbs *DbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
-	emptyAddress := (common.Address{})
-	missingPreimages := 0
-	var acc accounts.Account
-	var prefix [32]byte
-	err := dbs.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, _ []byte) (bool, error) {
-		if len(k) > 32 {
-			return true, nil
-		}
-		addr := common.BytesToAddress(dbs.GetKey(k))
-		var err error
-		_, err = rawdb.ReadAccount(dbs.db, common.BytesToHash(k), &acc)
-		if err != nil {
-			return false, err
-		}
-
-		var code []byte
-
-		if !acc.IsEmptyCodeHash() {
-			if code, err = dbs.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
-				return false, err
-			}
-		}
-		account := DumpAccount{
-			Balance:  acc.Balance.String(),
-			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(acc.Root[:]),
-			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
-			Storage:  make(map[string]string),
-		}
-		if emptyAddress == addr {
-			// Preimage missing
-			missingPreimages++
-			if excludeMissingPreimages {
-				return true, nil
-			}
-			account.SecureKey = common.CopyBytes(k)
-		}
-		if !excludeCode {
-			account.Code = common.Bytes2Hex(code)
-		}
-
-		if acc.HasStorageSize {
-			var storageSize = acc.StorageSize
-			account.StorageSize = &storageSize
-		}
-
-		buf := make([]byte, binary.MaxVarintLen64)
-		binary.PutUvarint(buf, acc.GetIncarnation())
-
-		addrHash, err := common.HashData(addr[:])
-		if err != nil {
-			return false, err
-		}
-
-		err = dbs.db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
-			key := dbs.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
-
-			if !excludeStorage {
-				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
-			}
-
-			return true, nil
-		})
-		if err != nil {
-			return false, err
-		}
-		c.onAccount(addr, account)
-		return true, nil
-	})
-	if err != nil {
-		panic(err)
-	}
-}
-
-// RawDump returns the entire state an a single large object
-func (dbs *DbState) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
-	dump := &Dump{
-		Accounts: make(map[common.Address]DumpAccount),
-	}
-	dbs.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages)
-	return *dump
-}
-
-func (dbs *DbState) DefaultRawDump() Dump {
-	return dbs.RawDump(false, false, false)
+func (dbs *DbState) Dumper() *Dumper {
+	return &Dumper{source: dbs, db: dbs.db}
 }
 
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,

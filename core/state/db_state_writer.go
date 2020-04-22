@@ -171,31 +171,35 @@ func (dsw *DbStateWriter) WriteHistory() error {
 
 func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
 	for _, change := range changes.Changes {
-		indexBytes, chunkKey, err := dsw.tds.db.GetIndexChunk(bucket, change.Key, dsw.tds.blockNr)
+		currentChunkKey := dbutils.IndexChunkKey(change.Key, ^uint64(0))
+		indexBytes, err := dsw.tds.db.Get(bucket, currentChunkKey)
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
 
-		var index *dbutils.HistoryIndexBytes
-		var firstChunk bool
+		var index dbutils.HistoryIndexBytes
 		if len(indexBytes) == 0 {
-			firstChunk = true
 			index = dbutils.NewHistoryIndex()
 		} else if dbutils.CheckNewIndexChunk(indexBytes) {
+			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
+			index = dbutils.WrapHistoryIndex(indexBytes)
+			indexKey, err := index.Key(change.Key)
+			if err != nil {
+				return err
+			}
+			// Flush the old chunk
+			if err := dsw.tds.db.Put(bucket, indexKey, index); err != nil {
+				return err
+			}
+			// Start a new chunk
 			index = dbutils.NewHistoryIndex()
 		} else {
 			index = dbutils.WrapHistoryIndex(indexBytes)
-			firstChunk = dbutils.IsFirstChunk(chunkKey)
 		}
 
-		index.Append(dsw.tds.blockNr)
+		index = index.Append(dsw.tds.blockNr)
 
-		indexKey, err := index.Key(change.Key, firstChunk)
-		if err != nil {
-			return err
-		}
-
-		if err := dsw.tds.db.Put(bucket, indexKey, *index); err != nil {
+		if err := dsw.tds.db.Put(bucket, currentChunkKey, index); err != nil {
 			return err
 		}
 	}

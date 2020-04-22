@@ -695,10 +695,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 				return AccountRangeResult{}, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
 			}
 			// Ensure any modifications are committed to the state
-			// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-			//root = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
-				// This is to make sure root can be opened by OpenTrie
 				err = statedb.CommitBlock(ctx, dbState)
 				if err != nil {
 					return AccountRangeResult{}, err
@@ -707,45 +704,19 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			}
 		}
 	}
-	/*
-		accountTrie, err := statedb.Database().OpenTrie(root)
+
+	iterator := dbState.Dumper().IteratorDump(false, false, false, common.BigToHash((*big.Int)(addressHash)).Bytes(), int(maxResults))
+
+	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
+	for addr := range iterator.Accounts {
+		addrHash, err := common.HashData(addr[:])
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
-		it := trie.NewIterator(accountTrie.NodeIterator(common.BigToHash((*big.Int)(addressHash)).Bytes()))
-	*/
+		result.AddressMap[addrHash] = addr
+	}
 
-	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
-
-	/*
-		for i := 0; i < int(maxResults) && it.Next(); i++ {
-			if preimage := accountTrie.GetKey(it.Key); preimage != nil {
-				result.AddressMap[common.BytesToHash(it.Key)] = common.BytesToAddress(preimage)
-				//fmt.Printf("%x: %x\n", it.Key, preimage)
-			} else {
-				//fmt.Printf("could not find preimage for %x\n", it.Key)
-			}
-		}
-		//fmt.Printf("Number of entries returned: %d\n", len(result.AddressMap))
-		// Add the 'next key' so clients can continue downloading.
-		if it.Next() {
-			next := common.BytesToHash(it.Key)
-			result.NextKey = next
-		}
-	*/
-
-	/*
-		result.NextKey = rangeResult.Next
-
-		for k, v := range rangeResult.Accounts {
-			if v == nil {
-				result.AddressMap[k] = common.Address{}
-			} else {
-				result.AddressMap[k] = *v
-			}
-		}
-	*/
-
+	result.NextKey = common.BytesToHash(iterator.Next)
 	return result, nil
 }
 

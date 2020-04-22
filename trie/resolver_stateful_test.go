@@ -297,9 +297,6 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 }
 
 func TestApiDetails(t *testing.T) {
-	const Stateful = "stateful"
-	const StatefulCached = "stateful_cached"
-
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 
 	storageKey := func(incarnation uint64, k string) []byte {
@@ -353,55 +350,47 @@ func TestApiDetails(t *testing.T) {
 	// this IntermediateHash key must not be used, because such key is in ResolveRequest
 	putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
 
-	tries := []*Trie{New(common.Hash{}), New(common.Hash{})}
+	tr := New(common.Hash{})
 	{
-		for i, resolverName := range []string{Stateful, StatefulCached} {
-			i := i
-			resolver := NewResolver(1, true, 0)
-			expectRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
+		resolver := NewResolver(1, true, 0)
+		expectRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
 
-			resolver.AddRequest(tries[i].NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
-			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
-			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("0f"), 0, expectRootHash.Bytes()))
+		resolver.AddRequest(tr.NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
+		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
+		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("0f"), 0, expectRootHash.Bytes()))
 
-			if resolverName == Stateful {
-				err := resolver.ResolveStateful(db, 0)
-				//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
-				//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
-				assert.NoError(err)
-			} else {
-				err := resolver.ResolveStatefulCached(db, 0, false)
-				assert.NoError(err)
-			}
+		err := resolver.ResolveStateful(db, 0, false)
+		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
+		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
+		assert.NoError(err)
 
-			assert.Equal(expectRootHash.String(), tries[i].Hash().String(), resolverName)
+		assert.Equal(expectRootHash.String(), tr.Hash().String())
 
-			_, found := tries[i].GetAccount(common.Hex2Bytes(fmt.Sprintf("000%061x", 0)))
-			assert.False(found) // exists in DB but resolved, there is hashNode
+		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("000%061x", 0)))
+		assert.False(found) // exists in DB but resolved, there is hashNode
 
-			acc, found := tries[i].GetAccount(common.Hex2Bytes(fmt.Sprintf("011%061x", 0)))
-			assert.True(found)
-			require.NotNil(acc)              // cache bucket has empty value, but self-destructed Account still available
-			assert.Equal(int(acc.Nonce), 11) // i * 10 + j
+		acc, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("011%061x", 0)))
+		assert.True(found)
+		require.NotNil(acc)              // cache bucket has empty value, but self-destructed Account still available
+		assert.Equal(int(acc.Nonce), 11) // i * 10 + j
 
-			acc, found = tries[i].GetAccount(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)))
-			assert.True(found)
-			require.NotNil(acc)              // exists in db and resolved
-			assert.Equal(int(acc.Nonce), 21) // i * 10 + j
+		acc, found = tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)))
+		assert.True(found)
+		require.NotNil(acc)              // exists in db and resolved
+		assert.Equal(int(acc.Nonce), 21) // i * 10 + j
 
-			acc, found = tries[i].GetAccount(common.Hex2Bytes(fmt.Sprintf("051%061x", 0)))
-			assert.True(found)
-			assert.Nil(acc) // not exists in DB
+		acc, found = tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("051%061x", 0)))
+		assert.True(found)
+		assert.Nil(acc) // not exists in DB
 
-			assert.Panics(func() {
-				tries[i].UpdateAccount(common.Hex2Bytes(fmt.Sprintf("001%061x", 0)), &accounts.Account{})
-			})
-			assert.NotPanics(func() {
-				tries[i].UpdateAccount(common.Hex2Bytes(fmt.Sprintf("011%061x", 0)), &accounts.Account{})
-				tries[i].UpdateAccount(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)), &accounts.Account{})
-				tries[i].UpdateAccount(common.Hex2Bytes(fmt.Sprintf("051%061x", 0)), &accounts.Account{})
-			})
-		}
+		assert.Panics(func() {
+			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("001%061x", 0)), &accounts.Account{})
+		})
+		assert.NotPanics(func() {
+			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("011%061x", 0)), &accounts.Account{})
+			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)), &accounts.Account{})
+			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("051%061x", 0)), &accounts.Account{})
+		})
 	}
 
 	/*

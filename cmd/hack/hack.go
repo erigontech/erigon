@@ -795,24 +795,10 @@ func dbSlice(chaindata string, prefix []byte) {
 	check(err)
 	defer db.Close()
 	err = db.View(func(tx *bolt.Tx) error {
-		st := tx.Bucket(dbutils.CurrentStateBucket)
+		st := tx.Bucket(dbutils.AccountsHistoryBucket)
 		c := st.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			if len(k) != 32 {
-				continue
-			}
-			fmt.Printf("db.Put(dbutils.CurrentStateBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
-		}
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			if len(k) == 32 {
-				continue
-			}
-			fmt.Printf("db.Put(dbutils.CurrentStateBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
-		}
-		ib := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		c = ib.Cursor()
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			fmt.Printf("db.Put(dbutils.AccountsHistoryBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
 		}
 		return nil
 	})
@@ -2061,5 +2047,8 @@ func main() {
 	}
 	if *action == "storage" {
 		walkOverStorage(*chaindata)
+	}
+	if *action == "slice" {
+		dbSlice(*chaindata, common.FromHex(*hash))
 	}
 }

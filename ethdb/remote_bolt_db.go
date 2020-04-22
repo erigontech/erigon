@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -97,10 +96,9 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 // Get returns the value for a given key if it's present.
 //
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
-func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, []byte, error) {
+func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	var chunkKey []byte
 	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
@@ -114,11 +112,7 @@ func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64
 		}
 
 		if !bytes.HasPrefix(k, key) {
-			//todo need Prev to impliment
-			//k, v = c.Prev()
-			//if !bytes.HasPrefix(k, key) {
 			return ErrKeyNotFound
-			//}
 		}
 		if v == nil {
 			return nil
@@ -126,14 +120,13 @@ func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64
 
 		dat = make([]byte, len(v))
 		copy(dat, v)
-		chunkKey = common.CopyBytes(k)
 
 		return nil
 	})
 	if dat == nil {
-		return nil, nil, ErrKeyNotFound
+		return nil, ErrKeyNotFound
 	}
-	return dat, chunkKey, err
+	return dat, err
 }
 
 // GetAsOf returns the value valid as of a given timestamp.

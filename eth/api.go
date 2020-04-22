@@ -286,7 +286,7 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 		// both the pending block as well as the pending state from
 		// the miner and operate on those
 		_, _, tds := api.eth.miner.Pending()
-		return tds.DefaultRawDump(), nil
+		return tds.Dumper().DefaultRawDump(), nil
 	}
 	var block *types.Block
 	if blockNr == rpc.LatestBlockNumber {
@@ -301,7 +301,7 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 	if err != nil {
 		return state.Dump{}, err
 	}
-	return tds.DefaultRawDump(), nil
+	return tds.Dumper().DefaultRawDump(), nil
 }
 
 // PrivateDebugAPI is the collection of Ethereum full node APIs exposed over
@@ -357,50 +357,49 @@ func (api *PrivateDebugAPI) GetBadBlocks(ctx context.Context) ([]*BadBlockArgs, 
 // AccountRangeMaxResults is the maximum number of results to be returned per call
 const AccountRangeMaxResults = 256
 
-// AccountRangeAt enumerates all accounts in the given block and start point in paging request
+// AccountRange enumerates all accounts in the given block and start point in paging request
 func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
-	/*
-		var stateDb *state.StateDB
-		var err error
+	var dumper *state.Dumper
 
-		if number, ok := blockNrOrHash.Number(); ok {
-			if number == rpc.PendingBlockNumber {
-				// If we're dumping the pending state, we need to request
-				// both the pending block as well as the pending state from
-				// the miner and operate on those
-				_, stateDb = api.eth.miner.Pending()
+	if number, ok := blockNrOrHash.Number(); ok {
+		if number == rpc.PendingBlockNumber {
+			// If we're dumping the pending state, we need to request
+			// both the pending block as well as the pending state from
+			// the miner and operate on those
+			_, _, tds := api.eth.miner.Pending()
+			dumper = tds.Dumper()
+		} else {
+			var block *types.Block
+			if number == rpc.LatestBlockNumber {
+				block = api.eth.blockchain.CurrentBlock()
 			} else {
-				var block *types.Block
-				if number == rpc.LatestBlockNumber {
-					block = api.eth.blockchain.CurrentBlock()
-				} else {
-					block = api.eth.blockchain.GetBlockByNumber(uint64(number))
-				}
-				if block == nil {
-					return state.IteratorDump{}, fmt.Errorf("block #%d not found", number)
-				}
-				stateDb, err = api.eth.BlockChain().StateAt(block.Root())
-				if err != nil {
-					return state.IteratorDump{}, err
-				}
+				block = api.eth.blockchain.GetBlockByNumber(uint64(number))
 			}
-		} else if hash, ok := blockNrOrHash.Hash(); ok {
-			block := api.eth.blockchain.GetBlockByHash(hash)
 			if block == nil {
-				return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
+				return state.IteratorDump{}, fmt.Errorf("block #%d not found", number)
 			}
-			stateDb, err = api.eth.BlockChain().StateAt(block.Root())
+			_, stateDb, err := api.eth.BlockChain().StateAt(block.NumberU64())
 			if err != nil {
 				return state.IteratorDump{}, err
 			}
+			dumper = stateDb.Dumper()
 		}
+	} else if hash, ok := blockNrOrHash.Hash(); ok {
+		block := api.eth.blockchain.GetBlockByHash(hash)
+		if block == nil {
+			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
+		}
+		_, stateDb, err := api.eth.BlockChain().StateAt(block.NumberU64())
+		if err != nil {
+			return state.IteratorDump{}, err
+		}
+		dumper = stateDb.Dumper()
+	}
 
-		if maxResults > AccountRangeMaxResults || maxResults <= 0 {
-			maxResults = AccountRangeMaxResults
-		}
-		return stateDb.IteratorDump(nocode, nostorage, incompletes, start, maxResults), nil
-	*/
-	panic("reimplement me for turbo-geth")
+	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
+		maxResults = AccountRangeMaxResults
+	}
+	return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults), nil
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.

@@ -17,46 +17,45 @@ const (
 	MaxChunkSize = 1000
 )
 
-func NewHistoryIndex() *HistoryIndexBytes {
-	b := make(HistoryIndexBytes, LenBytes*2, 16)
-	return &b
+func NewHistoryIndex() HistoryIndexBytes {
+	return make(HistoryIndexBytes, LenBytes*2, 16)
 }
 
-func WrapHistoryIndex(b []byte) *HistoryIndexBytes {
+func WrapHistoryIndex(b []byte) HistoryIndexBytes {
 	index := HistoryIndexBytes(b)
 	if len(index) == 0 {
 		index = make(HistoryIndexBytes, LenBytes*2, 16)
 	}
-	return &index
+	return index
 }
 
 type HistoryIndexBytes []byte
 
-func (hi *HistoryIndexBytes) Decode() ([]uint64, error) {
+func (hi HistoryIndexBytes) Decode() ([]uint64, error) {
 	if hi == nil {
 		return []uint64{}, nil
 	}
-	if len(*hi) <= LenBytes*2 {
+	if len(hi) <= LenBytes*2 {
 		return []uint64{}, nil
 	}
 
-	numOfElements := binary.LittleEndian.Uint32((*hi)[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32((*hi)[LenBytes : 2*LenBytes])
+	numOfElements := binary.LittleEndian.Uint32(hi[0:LenBytes])
+	numOfUint32Elements := binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes])
 	decoded := make([]uint64, numOfElements)
 
 	for i := uint32(0); i < numOfElements; i++ {
 		if i < numOfUint32Elements {
-			decoded[i] = uint64(binary.LittleEndian.Uint32((*hi)[LenBytes*2+i*4 : LenBytes*2+i*4+4]))
+			decoded[i] = uint64(binary.LittleEndian.Uint32(hi[LenBytes*2+i*4 : LenBytes*2+i*4+4]))
 		} else {
-			decoded[i] = binary.LittleEndian.Uint64((*hi)[LenBytes*2+numOfUint32Elements*4+i*ItemLen : LenBytes*2+i*ItemLen+ItemLen])
+			decoded[i] = binary.LittleEndian.Uint64(hi[LenBytes*2+numOfUint32Elements*4+i*ItemLen : LenBytes*2+i*ItemLen+ItemLen])
 		}
 	}
 	return decoded, nil
 }
 
-func (hi *HistoryIndexBytes) Append(v uint64) *HistoryIndexBytes {
-	numOfElements := binary.LittleEndian.Uint32((*hi)[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32((*hi)[LenBytes : 2*LenBytes])
+func (hi HistoryIndexBytes) Append(v uint64) HistoryIndexBytes {
+	numOfElements := binary.LittleEndian.Uint32(hi[0:LenBytes])
+	numOfUint32Elements := binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes])
 	var b []byte
 	if v < math.MaxUint32 {
 		b = make([]byte, 4)
@@ -67,9 +66,9 @@ func (hi *HistoryIndexBytes) Append(v uint64) *HistoryIndexBytes {
 		binary.LittleEndian.PutUint64(b, v)
 	}
 
-	*hi = append(*hi, b...)
-	binary.LittleEndian.PutUint32((*hi)[0:LenBytes], numOfElements+1)
-	binary.LittleEndian.PutUint32((*hi)[LenBytes:2*LenBytes], numOfUint32Elements)
+	hi = append(hi, b...)
+	binary.LittleEndian.PutUint32(hi[0:LenBytes], numOfElements+1)
+	binary.LittleEndian.PutUint32(hi[LenBytes:2*LenBytes], numOfUint32Elements)
 	return hi
 }
 
@@ -78,9 +77,9 @@ func (hi HistoryIndexBytes) Len() uint32 {
 }
 
 //most common operation is remove one from the tail
-func (hi *HistoryIndexBytes) Remove(v uint64) *HistoryIndexBytes {
-	numOfElements := binary.LittleEndian.Uint32((*hi)[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32((*hi)[LenBytes : 2*LenBytes])
+func (hi HistoryIndexBytes) Remove(v uint64) HistoryIndexBytes {
+	numOfElements := binary.LittleEndian.Uint32(hi[0:LenBytes])
+	numOfUint32Elements := binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes])
 
 	var currentElement uint64
 	var elemEnd uint32
@@ -90,17 +89,17 @@ Loop:
 	for i := numOfElements; i > 0; i-- {
 		if i > numOfUint32Elements {
 			elemEnd = LenBytes*2 + numOfUint32Elements*4 + (i-numOfUint32Elements)*8
-			currentElement = binary.LittleEndian.Uint64((*hi)[elemEnd-8 : elemEnd])
+			currentElement = binary.LittleEndian.Uint64(hi[elemEnd-8 : elemEnd])
 			itemLen = 8
 		} else {
 			elemEnd = LenBytes*2 + i*4
-			currentElement = uint64(binary.LittleEndian.Uint32((*hi)[elemEnd-4 : elemEnd]))
+			currentElement = uint64(binary.LittleEndian.Uint32(hi[elemEnd-4 : elemEnd]))
 			itemLen = 4
 		}
 
 		switch {
 		case currentElement == v:
-			*hi = append((*hi)[:elemEnd-itemLen], (*hi)[elemEnd:]...)
+			hi = append(hi[:elemEnd-itemLen], hi[elemEnd:]...)
 			numOfElements--
 			if itemLen == 4 {
 				numOfUint32Elements--
@@ -111,8 +110,8 @@ Loop:
 			continue
 		}
 	}
-	binary.LittleEndian.PutUint32((*hi)[0:LenBytes], numOfElements)
-	binary.LittleEndian.PutUint32((*hi)[LenBytes:2*LenBytes], numOfUint32Elements)
+	binary.LittleEndian.PutUint32(hi[0:LenBytes], numOfElements)
+	binary.LittleEndian.PutUint32(hi[LenBytes:2*LenBytes], numOfUint32Elements)
 	return hi
 }
 
@@ -138,18 +137,15 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
-func (hi HistoryIndexBytes) Key(key []byte, first bool) ([]byte, error) {
-	if first {
-		IndexChunkKey(key, 0)
-	}
-	blockNum, ok := hi.FirstElement()
+func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
+	blockNum, ok := hi.LastElement()
 	if !ok {
 		return nil, errors.New("empty index")
 	}
 	return IndexChunkKey(key, blockNum), nil
 }
 
-func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
+func (hi HistoryIndexBytes) LastElement() (uint64, bool) {
 	if len(hi) < LenBytes*2+4 {
 		return 0, false
 	}
@@ -159,24 +155,25 @@ func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
 	}
 
 	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
-	if numOfUint32Elements > 0 {
-		return uint64(binary.LittleEndian.Uint32(hi[2*LenBytes : 2*LenBytes+4])), true
+	if numOfUint32Elements < numOfElements {
+		return binary.LittleEndian.Uint64(hi[len(hi)-8:]), true
 	}
-	return binary.LittleEndian.Uint64(hi[2*LenBytes : 2*LenBytes+8]), true
+	return uint64(binary.LittleEndian.Uint32(hi[len(hi)-4:])), true
 }
 
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	var blockNumBytes []byte // make([]byte, len(key)+8)
 	switch len(key) {
 	case common.HashLength:
-		blockNumBytes = make([]byte, len(key)+8)
-		binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
-		copy(blockNumBytes[:len(key)], key)
+		blockNumBytes = make([]byte, common.HashLength+8)
+		copy(blockNumBytes, key)
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength:], blockNumber)
 	case common.HashLength*2 + common.IncarnationLength:
-		//remove incarnation and add inversed block number
+		//remove incarnation and add block number
 		blockNumBytes = make([]byte, common.HashLength*2+8)
 		copy(blockNumBytes, key[:common.HashLength])
 		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], blockNumber)
 	default:
 		panic("unexpected length " + strconv.Itoa(len(key)))
 	}
@@ -187,14 +184,7 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 func IsIndexBucket(b []byte) bool {
 	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
 }
-func IsFirstChunk(b []byte) bool {
-	if len(b) == common.HashLength+8 {
-		return binary.BigEndian.Uint64(b[common.HashLength:]) == ^uint64(0)
-	} else if len(b) == common.HashLength*2+8 {
-		return binary.BigEndian.Uint64(b[common.HashLength*2:]) == ^uint64(0)
-	}
-	panic("unexpected length" + strconv.Itoa(len(b)))
-}
+
 func CheckNewIndexChunk(b []byte) bool {
 	return len(b)+8 > MaxChunkSize
 }
