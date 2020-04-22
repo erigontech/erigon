@@ -1508,3 +1508,13 @@ func (tds *TrieDbState) GetNodeByHash(hash common.Hash) []byte {
 
 	return tds.t.GetNodeByHash(hash)
 }
+
+func (tds *TrieDbState) GetTrieHash() common.Hash {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	return tds.t.Hash()
+}
+
+func (tds *TrieDbState) Dumper() *Dumper {
+	return &Dumper{source: tds, db: tds.db}
+}
