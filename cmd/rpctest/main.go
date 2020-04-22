@@ -545,6 +545,12 @@ func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) s
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
 }
 
+func (g *RequestGenerator) accountRange(bn int, page []byte) string {
+	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, true, true, true], "id":%d}`
+	encodedKey := base64.StdEncoding.EncodeToString(page)
+	return fmt.Sprintf(template, bn, encodedKey, 256, g.reqID)
+}
+
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
 	err := post(g.client, routes[target], body, response)
@@ -954,6 +960,61 @@ func bench1(needCompare bool, fullTest bool) {
 				}
 				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
+
+			reqGen.reqID++
+			page := common.Hash{}.Bytes()
+
+			accRangeTG := make(map[common.Address]state.DumpAccount)
+
+			for len(page) > 0 {
+				var sr DebugAccountRange
+				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+				resultsCh <- res
+
+				if res.Err != nil {
+					fmt.Printf("Could not get accountRange: %v\n", res.Err)
+					return
+				}
+
+				if sr.Error != nil {
+					fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+					break
+				} else {
+					page = sr.Result.Next
+					for k, v := range sr.Result.Accounts {
+						accRangeTG[k] = v
+					}
+				}
+			}
+
+			accRangeGeth := make(map[common.Address]state.DumpAccount)
+
+			page = common.Hash{}.Bytes()
+			for len(page) > 0 {
+				var sr DebugAccountRange
+				res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+				resultsCh <- res
+				if res.Err != nil {
+					fmt.Printf("Could not get accountRange: %v\n", res.Err)
+					return
+				}
+				if sr.Error != nil {
+					fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+					break
+				} else {
+					page = sr.Result.Next
+					for k, v := range sr.Result.Accounts {
+						accRangeTG[k] = v
+					}
+				}
+			}
+
+			if !compareAccountRanges(accRangeTG, accRangeGeth) {
+				fmt.Printf("Different in account ranges tx\n")
+				return
+			}
+			fmt.Println("debug_accountRanges... OK!")
+
 			prevBn = bn
 		}
 	}
