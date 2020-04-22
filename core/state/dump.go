@@ -178,16 +178,18 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPr
 		if root != nil {
 			account.Root = common.Bytes2Hex(root)
 		}
-		fmt.Printf("%x, incarnation %d\n", addrHash, incarnation)
 		if incarnation > 0 {
 			var codeHash []byte
 			codeHash, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)
-			if err != nil {
+			if err != nil && err != ethdb.ErrKeyNotFound {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
 			}
-			account.CodeHash = common.Bytes2Hex(codeHash)
-			if !excludeCode && !bytes.Equal(emptyCodeHash[:], codeHash) {
-				fmt.Printf("Getting code for %x\n", codeHash)
+			if codeHash != nil {
+				account.CodeHash = common.Bytes2Hex(codeHash)
+			} else {
+				account.CodeHash = common.Bytes2Hex(emptyCodeHash[:])
+			}
+			if !excludeCode && codeHash != nil && !bytes.Equal(emptyCodeHash[:], codeHash) {
 				var code []byte
 				if code, err = d.db.Get(dbutils.CodeBucket, codeHash); err != nil {
 					return nil, err
