@@ -36,7 +36,6 @@ type ResolverStateful struct {
 	currentReq *ResolveRequest // Request currently being handled
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	keyIdx     int
-	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
 	a          accounts.Account
 	leafData   GenStructStepLeafData
 	accData    GenStructStepAccountData
@@ -45,7 +44,8 @@ type ResolverStateful struct {
 	roots        []node // roots of the tries that are being built
 	hookFunction hookFunction
 
-	isIH               bool
+	wasIH              bool
+	wasAccount         bool
 	hashData           GenStructStepHashData
 	trace              bool
 	accAddrHashIsValid bool
@@ -59,6 +59,7 @@ func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction
 		reqIndices:   []int{},
 		requests:     requests,
 		hookFunction: hookFunction,
+		accAddrHash:  []byte{},
 	}
 }
 
@@ -70,7 +71,6 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.keyIdx = 0
 	tr.currentReq = nil
 	tr.currentRs = nil
-	tr.fieldSet = 0
 	tr.rss = tr.rss[:0]
 	tr.requests = requests
 	tr.hookFunction = hookFunction
@@ -80,7 +80,9 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.groups = tr.groups[:0]
 	tr.a.Reset()
 	tr.hb.Reset()
-	tr.isIH = false
+	tr.wasIH = false
+	tr.accAddrHashIsValid = false
+	tr.accAddrHash = tr.accAddrHash[:0]
 }
 
 func (tr *ResolverStateful) PopRoots() []node {
@@ -139,14 +141,29 @@ func (tr *ResolverStateful) finaliseRoot(accRoot getAccRootF) error {
 	if tr.curr.Len() > 0 {
 		var err error
 		var data GenStructStepData
-		if tr.isIH {
+		if tr.wasIH {
 			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
 			data = &tr.hashData
-		} else if tr.fieldSet == 0 {
+		} else if !tr.wasAccount {
 			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
 			data = &tr.leafData
 		} else {
-			tr.accData.FieldSet = tr.fieldSet
+			storageHash, err := accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+			if err != nil {
+				return err
+			}
+			tr.a.Root.SetBytes(storageHash.Bytes())
+
+			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
+				tr.accData.FieldSet = AccountFieldSetNotContract
+			} else {
+				if tr.a.HasStorageSize {
+					tr.accData.FieldSet = AccountFieldSetContractWithSize
+				} else {
+					tr.accData.FieldSet = AccountFieldSetContract
+				}
+			}
+
 			tr.accData.StorageSize = tr.a.StorageSize
 			tr.accData.Balance.Set(&tr.a.Balance)
 			tr.accData.Nonce = tr.a.Nonce
@@ -228,7 +245,7 @@ func (tr *ResolverStateful) RebuildTrie(
 
 			return nil
 		})
-		err := resolver.RebuildTrie(db, 0, false, false, true)
+		err := resolver.RebuildTrie(db, 0, false, false, false)
 		if err != nil {
 			return root, err
 		}
@@ -329,6 +346,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 		tr.currentRs = tr.rss[keyIdx]
 		tr.curr.Reset()
 		tr.accAddrHashIsValid = false
+		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 	if len(v) > 0 {
 		tr.curr.Reset()
@@ -355,19 +373,40 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 		if tr.curr.Len() > 0 {
 			var err error
 			var data GenStructStepData
-			if tr.isIH {
+			if tr.wasIH {
 				tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
 				data = &tr.hashData
-			} else if tr.fieldSet == 0 {
+			} else if !tr.wasAccount {
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
 				data = &tr.leafData
 			} else {
-				tr.accData.FieldSet = tr.fieldSet
+				_ = tr.accAddrHash
+				_ = tr.a.Incarnation
+				_ = common.BytesToHash(tr.accAddrHash)
+				_, _ = accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+
+				storageHash, err := accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+				if err != nil {
+					return err
+				}
+				tr.a.Root.SetBytes(storageHash.Bytes())
+
+				if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
+					tr.accData.FieldSet = AccountFieldSetNotContract
+				} else {
+					if tr.a.HasStorageSize {
+						tr.accData.FieldSet = AccountFieldSetContractWithSize
+					} else {
+						tr.accData.FieldSet = AccountFieldSetContract
+					}
+				}
+
 				tr.accData.StorageSize = tr.a.StorageSize
 				tr.accData.Balance.Set(&tr.a.Balance)
 				tr.accData.Nonce = tr.a.Nonce
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
+
 				if !tr.a.IsEmptyCodeHash() || !tr.a.IsEmptyRoot() {
 					// the first item ends up deepest on the stack, the second item - on the top
 					err = tr.hb.hash(tr.a.CodeHash[:])
@@ -386,38 +425,17 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 			}
 		}
 		// Remember the current key and value
-		tr.isIH = isIH
-		if isIH {
-			tr.value.Reset()
-			tr.value.Write(v)
-			return nil
-		}
+		tr.wasIH = isIH
+		tr.wasAccount = !isIH && len(k) == 32
 
-		if !isAccount {
+		if tr.wasIH || !tr.wasAccount {
 			tr.value.Reset()
 			tr.value.Write(v)
-			tr.fieldSet = AccountFieldSetNotAccount
 			return nil
 		}
 
 		if err := tr.a.DecodeForStorage(v); err != nil {
 			return fmt.Errorf("fail DecodeForStorage: %w", err)
-		}
-
-		storageHash, err := accRoot(common.BytesToHash(k), tr.a.Incarnation)
-		if err != nil {
-			return err
-		}
-		tr.a.Root.SetBytes(storageHash.Bytes())
-
-		if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
-			tr.fieldSet = AccountFieldSetNotContract
-		} else {
-			if tr.a.HasStorageSize {
-				tr.fieldSet = AccountFieldSetContractWithSize
-			} else {
-				tr.fieldSet = AccountFieldSetContract
-			}
 		}
 
 		tr.accAddrHashIsValid = true
@@ -527,7 +545,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						ihK, ihV = ih.SeekTo(startkey)
 						if tr.trace {
 							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
-							fmt.Printf("[isIH = %t], ih.SeekTo(%x) = %x\n", isIH, startkey, ihK)
+							fmt.Printf("[wasIH = %t], ih.SeekTo(%x) = %x\n", isIH, startkey, ihK)
 							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
 						// for Address bucket, skip ih keys longer than 31 bytes
@@ -549,7 +567,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 						isIH, minKey = keyIsBefore(ihK, k)
 						if tr.trace {
-							fmt.Printf("isIH, minKey = %t, %x\n", isIH, minKey)
+							fmt.Printf("wasIH, minKey = %t, %x\n", isIH, minKey)
 						}
 					} else if cmp > 0 {
 						rangeIdx++
@@ -585,13 +603,12 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
-			if err := walker(rangeIdx, minKey, ihV, isIH, nil); err != nil {
+			if err := walker(rangeIdx, minKey, ihV, isIH, accRoot); err != nil {
 				return fmt.Errorf("waker err: %w", err)
 			}
 
