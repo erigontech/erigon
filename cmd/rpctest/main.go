@@ -768,7 +768,7 @@ func bench1(needCompare bool, fullTest bool) {
 						} else {
 							nextKeyGeth = srGeth.Result.NextKey
 							for k, v := range srGeth.Result.Storage {
-								sm[k] = v
+								smGeth[k] = v
 							}
 						}
 						if nextKey != nil && nextKeyGeth != nil && *nextKey != *nextKeyGeth {
