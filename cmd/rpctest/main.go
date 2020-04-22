@@ -1311,8 +1311,8 @@ func bench7() {
 	blockhash := common.HexToHash("0xdd3eb495312b11621669be45a2d50f8a66f2616bc72a610e2cbf1aebf9e4a9aa")
 	reqID := 1
 	to := common.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")
-	sm := make(map[common.Hash]storageEntry)
-	smg := make(map[common.Hash]storageEntry)
+	var sm map[common.Hash]storageEntry
+	var smg map[common.Hash]storageEntry
 	start := common.HexToHash("0x4a17477338cba00d8a94336ef62ea15f68e77ad0ca738fa405daa13bf0874134")
 
 	reqID++
