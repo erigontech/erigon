@@ -322,7 +322,7 @@ func (hc *HeaderChain) InsertHeaderChain(chain []*types.Header, writeHeader WhCa
 	}
 	log.Info("Imported new block headers", context...)
 
-	return 0, nil
+	return len(chain), nil
 }
 
 // GetBlockHashesFromHash retrieves a number of block hashes starting at a given

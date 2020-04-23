@@ -502,9 +502,13 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	}
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
-		func() error { return d.fetchBodies(origin + 1) },          // Bodies are retrieved during normal and fast sync
-		func() error { return d.fetchReceipts(origin + 1) },        // Receipts are retrieved during fast sync
 		func() error { return d.processHeaders(origin+1, pivot, td) },
+	}
+	if d.mode == FullSync || d.mode == FastSync {
+		fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })    // Bodies are retrieved during normal and fast sync
+	}
+	if d.mode == FastSync {
+		fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) })  // Receipts are retrieved during fast sync
 	}
 	if d.mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
@@ -692,6 +696,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 		floor        = int64(-1)
 		localHeight  uint64
 		remoteHeight = remoteHeader.Number.Uint64()
+		err          error
 	)
 	switch d.mode {
 	case FullSync:
@@ -699,7 +704,10 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	case FastSync:
 		localHeight = d.blockchain.CurrentFastBlock().NumberU64()
 	case StagedSync:
-		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
+		localHeight, err = GetStageProgress(d.stateDB, Headers)
+		if err != nil {
+			return 0, err
+		}
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
@@ -783,6 +791,8 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 					known = d.blockchain.HasBlock(h, n)
 				case FastSync:
 					known = d.blockchain.HasFastBlock(h, n)
+				case StagedSync:
+					known = d.blockchain.HasHeader(h, n)
 				default:
 					known = d.lightchain.HasHeader(h, n)
 				}
@@ -856,6 +866,8 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 					known = d.blockchain.HasBlock(h, n)
 				case FastSync:
 					known = d.blockchain.HasFastBlock(h, n)
+				case StagedSync:
+					known = d.blockchain.HasHeader(h, n)
 				default:
 					known = d.lightchain.HasHeader(h, n)
 				}
@@ -1456,7 +1468,13 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					if chunk[len(chunk)-1].Number.Uint64()+uint64(fsHeaderForceVerify) > pivot {
 						frequency = 1
 					}
-					if n, err := d.lightchain.InsertHeaderChain(chunk, frequency); err != nil {
+					n, err := d.lightchain.InsertHeaderChain(chunk, frequency)
+					if d.mode == StagedSync && n > 0 {
+						if err := SaveStageProcess(d.stateDB, Headers, chunk[n-1].Number.Uint64()); err != nil {
+							return fmt.Errorf("saving SyncStage Headers progress: %v\n", err)
+						}
+					}
+					if err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if n > 0 {
 							rollback = append(rollback, chunk[:n]...)
@@ -1464,6 +1482,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
 						return errInvalidChain
 					}
+
 					// All verifications passed, store newly found uncertain headers
 					rollback = append(rollback, unknown...)
 					if len(rollback) > fsHeaderSafetyNet {

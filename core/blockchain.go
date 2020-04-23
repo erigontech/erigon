@@ -2113,17 +2113,15 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 		_, err := bc.hc.WriteHeader(context.Background(), header)
 		return err
 	}
-	i, err := bc.hc.InsertHeaderChain(chain, whFunc, start)
-	if err != nil {
-		return i, err
-	}
+	n, err := bc.hc.InsertHeaderChain(chain, whFunc, start)
 	var written uint64
-	if written, err = bc.db.Commit(); err != nil {
-		log.Error("Could not commit chainDb", "error", err)
-		return 0, err
+	var err1 error
+	if written, err1 = bc.db.Commit(); err1 != nil {
+		log.Error("Could not commit chainDb", "error", err1)
+		return 0, err1
 	}
 	log.Info("Database", "size", bc.db.DiskSize(), "written", written)
-	return i, nil
+	return n, err
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The

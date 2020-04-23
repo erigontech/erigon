@@ -139,7 +139,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 			manager.fastSync = uint32(1)
 			log.Warn("Switch sync mode from full sync to fast sync")
 		}
-	} else {
+	} else if mode == downloader.FastSync {
 		if blockchain.CurrentBlock().NumberU64() > 0 {
 			// Print warning log if database is not empty to run fast sync.
 			log.Warn("Switch sync mode from fast sync to full sync")

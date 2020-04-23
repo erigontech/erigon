@@ -38,6 +38,9 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	if err != nil && err != ethdb.ErrKeyNotFound {
 		return 0, err
 	}
+	if len(v) == 0 {
+		return 0, nil
+	}
 	if len(v) != 8 {
 		return 0, fmt.Errorf("stage process value must be of length 8, got %d", len(v))
 	}
