@@ -1470,8 +1470,8 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					}
 					n, err := d.lightchain.InsertHeaderChain(chunk, frequency)
 					if d.mode == StagedSync && n > 0 {
-						if err := SaveStageProcess(d.stateDB, Headers, chunk[n-1].Number.Uint64()); err != nil {
-							return fmt.Errorf("saving SyncStage Headers progress: %v", err)
+						if err1 := SaveStageProcess(d.stateDB, Headers, chunk[n-1].Number.Uint64()); err1 != nil {
+							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
 					if err != nil {
