@@ -120,10 +120,11 @@ func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
 
 func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
+	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var incarnationList []uint64
 	var addrHashList []common.Hash
-	c.onRoot(common.Hash{}) // We do not calculate the root
+	c.onRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
@@ -146,8 +147,8 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		account := DumpAccount{
 			Balance:  acc.Balance.String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(acc.Root[:]),
-			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
+			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
@@ -171,13 +172,6 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			return nil, fmt.Errorf("getting preimage of %x: %v", addrHash, err)
 		}
 		storagePrefix := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
-		root, err := d.db.Get(dbutils.IntermediateTrieHashBucket, storagePrefix)
-		if err != nil && err != ethdb.ErrKeyNotFound {
-			return nil, fmt.Errorf("getting account storage root for %x: %v", addrHash, err)
-		}
-		if root != nil {
-			account.Root = common.Bytes2Hex(root)
-		}
 		if incarnation > 0 {
 			var codeHash []byte
 			codeHash, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)

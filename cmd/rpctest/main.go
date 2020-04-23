@@ -1292,12 +1292,25 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 			fmt.Println("missing account in Geth", addr.Hex())
 			return false
 		}
-
-		tgAccBytes, _ := json.Marshal(tgAcc)
-		gethAccBytes, _ := json.Marshal(gethAcc)
-
-		if !bytes.Equal(tgAccBytes, gethAccBytes) {
-			fmt.Printf("account mismatch:\n\tturbo=%s\n\t geth=%s\n", string(tgAccBytes), string(gethAccBytes))
+		different := false
+		if tgAcc.Balance != gethAcc.Balance {
+			fmt.Printf("Different balance for %x: turbo %s, geth %s", addr, tgAcc.Balance, gethAcc.Balance)
+			different = true
+		}
+		if tgAcc.Nonce != gethAcc.Nonce {
+			fmt.Printf("Different nonce for %x: turbo %d, geth %d", addr, tgAcc.Nonce, gethAcc.Nonce)
+			different = true
+		}
+		// We do not compare Root, because Turbo-geth does not compute it
+		if tgAcc.CodeHash != gethAcc.CodeHash {
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.CodeHash, gethAcc.CodeHash)
+			different = true			
+		}
+		if tgAcc.Code != gethAcc.Code {
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.Code, gethAcc.Code)
+			different = true			
+		}
+		if different {
 			return false
 		}
 	}
