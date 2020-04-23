@@ -17,7 +17,7 @@
 package state
 
 import (
-	"encoding/binary"
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -32,27 +33,21 @@ type trieHasher interface {
 	GetTrieHash() common.Hash
 }
 
-type DumperSource interface {
-	GetKey([]byte) []byte
-	GetBlockNr() uint64
-}
-
 type Dumper struct {
-	source DumperSource
-	db     ethdb.Getter
+	blockNumber uint64
+	db          ethdb.Getter
 }
 
 // DumpAccount represents an account in the state.
 type DumpAccount struct {
-	Balance     string            `json:"balance"`
-	Nonce       uint64            `json:"nonce"`
-	Root        string            `json:"root"`
-	CodeHash    string            `json:"codeHash"`
-	Code        string            `json:"code,omitempty"`
-	Storage     map[string]string `json:"storage,omitempty"`
-	StorageSize *uint64           `json:",omitempty"`
-	Address     *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey   hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
+	Balance   string            `json:"balance"`
+	Nonce     uint64            `json:"nonce"`
+	Root      string            `json:"root"`
+	CodeHash  string            `json:"codeHash"`
+	Code      string            `json:"code,omitempty"`
+	Storage   map[string]string `json:"storage,omitempty"`
+	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
+	SecureKey hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map.
@@ -118,18 +113,22 @@ func (d iterativeDump) onRoot(root common.Hash) {
 		Root common.Hash `json:"root"`
 	}{root})
 }
-func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (nextKey []byte) {
-	emptyAddress := common.Address{}
-	missingPreimages := 0
 
-	if hasher, ok := tds.source.(trieHasher); ok {
-		h := hasher.GetTrieHash()
-		c.onRoot(h)
-	}
+func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
+	return &Dumper{db: db, blockNumber: blockNumber}
+}
+
+func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
+	var emptyCodeHash = crypto.Keccak256Hash(nil)
+	var emptyHash = common.Hash{}
+	var accountList []*DumpAccount
+	var incarnationList []uint64
+	var addrHashList []common.Hash
+	c.onRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err := tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, tds.source.GetBlockNr(), func(k, v []byte) (bool, error) {
+	err = d.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -143,91 +142,97 @@ func (tds *Dumper) dump(c collector, excludeCode, excludeStorage, excludeMissing
 		}
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
-			return false, err
-		}
-		addr := common.BytesToAddress(tds.source.GetKey(k))
-		root, err := tds.db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(common.BytesToHash(k), acc.GetIncarnation()))
-		if err != nil {
-			return false, err
-		}
-		acc.Root = common.BytesToHash(root)
-
-		var code []byte
-
-		if !acc.IsEmptyCodeHash() {
-			if code, err = tds.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
-				return false, err
-			}
+			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
 		}
 		account := DumpAccount{
 			Balance:  acc.Balance.String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(acc.Root[:]),
-			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
+			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
 			Storage:  make(map[string]string),
 		}
-		if emptyAddress == addr {
-			// Preimage missing
-			missingPreimages++
-			if excludeMissingPreimages {
-				return true, nil
-			}
-			account.SecureKey = common.CopyBytes(k)
-		}
-		if !excludeCode {
-			account.Code = common.Bytes2Hex(code)
-		}
+		accountList = append(accountList, &account)
+		addrHashList = append(addrHashList, common.BytesToHash(k))
+		incarnationList = append(incarnationList, acc.Incarnation)
 
-		if acc.HasStorageSize {
-			var storageSize = acc.StorageSize
-			account.StorageSize = &storageSize
-		}
-
-		buf := make([]byte, binary.MaxVarintLen64)
-		binary.PutUvarint(buf, acc.GetIncarnation())
-
-		addrHash, err := common.HashData(addr[:])
-		if err != nil {
-			return false, err
-		}
-
-		err = tds.db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
-			key := tds.source.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
-
-			if !excludeStorage {
-				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
-			}
-
-			return true, nil
-		})
-		if err != nil {
-			return false, err
-		}
-		c.onAccount(addr, account)
 		numberOfResults++
 
 		return true, nil
 	})
-
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return nextKey
+	for i, addrHash := range addrHashList {
+		account := accountList[i]
+		incarnation := incarnationList[i]
+		var addr []byte
+		addr, err = d.db.Get(dbutils.PreimagePrefix, addrHash[:])
+		if err != nil {
+			return nil, fmt.Errorf("getting preimage of %x: %v", addrHash, err)
+		}
+		storagePrefix := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
+		if incarnation > 0 {
+			var codeHash []byte
+			codeHash, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)
+			if err != nil && err != ethdb.ErrKeyNotFound {
+				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
+			}
+			if codeHash != nil {
+				account.CodeHash = common.Bytes2Hex(codeHash)
+			} else {
+				account.CodeHash = common.Bytes2Hex(emptyCodeHash[:])
+			}
+			if !excludeCode && codeHash != nil && !bytes.Equal(emptyCodeHash[:], codeHash) {
+				var code []byte
+				if code, err = d.db.Get(dbutils.CodeBucket, codeHash); err != nil {
+					return nil, err
+				}
+				account.Code = common.Bytes2Hex(code)
+			}
+		}
+		if !excludeStorage {
+			storageMap := make(map[common.Hash][]byte)
+			err = d.db.WalkAsOf(
+				dbutils.CurrentStateBucket,
+				dbutils.StorageHistoryBucket,
+				storagePrefix,
+				8*uint(common.HashLength+common.IncarnationLength),
+				d.blockNumber,
+				func(ks, vs []byte) (bool, error) {
+					storageMap[common.BytesToHash(ks[common.HashLength+common.IncarnationLength:])] = common.CopyBytes(vs)
+					return true, nil
+				})
+			if err != nil {
+				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
+			}
+			for keyHash, vs := range storageMap {
+				var key []byte
+				key, err = d.db.Get(dbutils.PreimagePrefix, keyHash[:]) //remove account address and version from composite key
+				if err != nil {
+					return nil, fmt.Errorf("getting preimage for storage %x %x: %v", addrHash, keyHash, err)
+				}
+				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
+			}
+		}
+		c.onAccount(common.BytesToAddress(addr), *account)
+	}
+	return nextKey, nil
 }
 
 // RawDump returns the entire state an a single large object
-func (tds *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
+func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
-	tds.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	//nolint:errcheck
+	d.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 	return *dump
 }
 
 // Dump returns a JSON string representing the entire state as a single json-object
-func (tds *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
-	dump := tds.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
+func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
+	dump := d.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
 	json, err := json.MarshalIndent(dump, "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
@@ -236,24 +241,26 @@ func (tds *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages boo
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (tds *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
-	tds.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
+	//nolint:errcheck
+	d.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (tds *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) IteratorDump {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
-	iterator.Next = tds.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
-	return *iterator
+	var err error
+	iterator.Next, err = d.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	return *iterator, err
 }
 
-func (tds *Dumper) DefaultRawDump() Dump {
-	return tds.RawDump(false, false, false)
+func (d *Dumper) DefaultRawDump() Dump {
+	return d.RawDump(false, false, false)
 }
 
 // DefaultDump returns a JSON string representing the state with the default params
-func (tds *Dumper) DefaultDump() []byte {
-	return tds.Dump(false, false, false)
+func (d *Dumper) DefaultDump() []byte {
+	return d.Dump(false, false, false)
 }

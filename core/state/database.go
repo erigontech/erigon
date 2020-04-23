@@ -852,7 +852,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				}
 				// Fetch the code hash
 				if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err == nil {
+					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err == nil {
 						copy(acc.CodeHash[:], codeHash)
 					}
 				}
@@ -1024,7 +1024,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	}
 
 	if tds.historical && a.Incarnation > 0 {
-		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
+		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], a.Incarnation))
 		if err == nil {
 			a.CodeHash = common.BytesToHash(codeHash)
 		} else {
@@ -1513,8 +1513,4 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	return tds.t.Hash()
-}
-
-func (tds *TrieDbState) Dumper() *Dumper {
-	return &Dumper{source: tds, db: tds.db}
 }

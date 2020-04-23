@@ -684,7 +684,7 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 1801821
+	firstBn := 4900000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -730,12 +730,18 @@ func bench1(needCompare bool, fullTest bool) {
 				storageCounter++
 				if storageCounter == 100 {
 					storageCounter = 0
-					reqGen.reqID++
-					sm := make(map[common.Hash]storageEntry)
+					var sm map[common.Hash]storageEntry
+					var smGeth map[common.Hash]storageEntry
 					nextKey := &common.Hash{}
+					nextKeyGeth := &common.Hash{}
 					var sr DebugStorageRange
-					for nextKey != nil {
-						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
+					var srGeth DebugStorageRange
+					counter := 16
+					for nextKey != nil && counter > 0 {
+						sm = make(map[common.Hash]storageEntry)
+						smGeth = make(map[common.Hash]storageEntry)
+						reqGen.reqID++
+						res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
@@ -750,43 +756,40 @@ func bench1(needCompare bool, fullTest bool) {
 								sm[k] = v
 							}
 						}
-					}
-
-					if needCompare {
-						smg := make(map[common.Hash]storageEntry)
-						nextKey = &common.Hash{}
-						for nextKey != nil {
-							var srg DebugStorageRange
-							res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &srg)
-							resultsCh <- res
-							if res.Err != nil {
-								fmt.Printf("Could not get storageRange g: %s: %v\n", tx.Hash, res.Err)
-								return
-							}
-							if srg.Error != nil {
-								fmt.Printf("Error getting storageRange g: %d %s\n", srg.Error.Code, srg.Error.Message)
-								break
-							} else {
-								nextKey = srg.Result.NextKey
-								for k, v := range srg.Result.Storage {
-									smg[k] = v
-								}
+						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyGeth), &srGeth)
+						resultsCh <- res
+						if res.Err != nil {
+							fmt.Printf("Could not get storageRange geth: %s: %v\n", tx.Hash, res.Err)
+							break
+						}
+						if srGeth.Error != nil {
+							fmt.Printf("Error getting storageRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
+							break
+						} else {
+							nextKeyGeth = srGeth.Result.NextKey
+							for k, v := range srGeth.Result.Storage {
+								smGeth[k] = v
 							}
 						}
-
-						if res.Err == nil && sr.Error == nil {
-							if !compareStorageRanges(sm, smg) {
-								fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
-								fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
-								fmt.Printf("================sm\n")
-								printStorageRange(sm)
-								fmt.Printf("================smg\n")
-								printStorageRange(smg)
-								return
-							}
+						if nextKey != nil && nextKeyGeth != nil && *nextKey != *nextKeyGeth {
+							fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyGeth)
+							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smGeth))
+							fmt.Printf("================sm\n")
+							printStorageRange(sm)
+							fmt.Printf("================smg\n")
+							printStorageRange(smGeth)
+							return
 						}
+						if !compareStorageRanges(sm, smGeth) {
+							fmt.Printf("len(sm) %d, len(smGeth) %d\n", len(sm), len(smGeth))
+							fmt.Printf("================sm\n")
+							printStorageRange(sm)
+							fmt.Printf("================smg\n")
+							printStorageRange(smGeth)
+							return
+						}
+						counter--
 					}
-
 				}
 			}
 
@@ -961,13 +964,17 @@ func bench1(needCompare bool, fullTest bool) {
 				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
 
-			reqGen.reqID++
 			page := common.Hash{}.Bytes()
+			pageGeth := common.Hash{}.Bytes()
 
-			accRangeTG := make(map[common.Address]state.DumpAccount)
+			var accRangeTG map[common.Address]state.DumpAccount
+			var accRangeGeth map[common.Address]state.DumpAccount
 
 			for len(page) > 0 {
+				accRangeTG = make(map[common.Address]state.DumpAccount)
+				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
+				reqGen.reqID++
 				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
 				resultsCh <- res
 
@@ -985,36 +992,30 @@ func bench1(needCompare bool, fullTest bool) {
 						accRangeTG[k] = v
 					}
 				}
-			}
-
-			accRangeGeth := make(map[common.Address]state.DumpAccount)
-
-			page = common.Hash{}.Bytes()
-			for len(page) > 0 {
-				var sr DebugAccountRange
-				res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+				var srGeth DebugAccountRange
+				res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth), &srGeth)
 				resultsCh <- res
 				if res.Err != nil {
-					fmt.Printf("Could not get accountRange: %v\n", res.Err)
+					fmt.Printf("Could not get accountRange geth: %v\n", res.Err)
 					return
 				}
-				if sr.Error != nil {
-					fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+				if srGeth.Error != nil {
+					fmt.Printf("Error getting accountRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
 					break
 				} else {
-					page = sr.Result.Next
-					for k, v := range sr.Result.Accounts {
-						accRangeTG[k] = v
+					pageGeth = srGeth.Result.Next
+					for k, v := range srGeth.Result.Accounts {
+						accRangeGeth[k] = v
 					}
 				}
+				if !bytes.Equal(page, pageGeth) {
+					fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
+				}
+				if !compareAccountRanges(accRangeTG, accRangeGeth) {
+					fmt.Printf("Different in account ranges tx\n")
+					return
+				}
 			}
-
-			if !compareAccountRanges(accRangeTG, accRangeGeth) {
-				fmt.Printf("Different in account ranges tx\n")
-				return
-			}
-			fmt.Println("debug_accountRanges... OK!")
-
 			prevBn = bn
 		}
 	}
@@ -1291,12 +1292,25 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 			fmt.Println("missing account in Geth", addr.Hex())
 			return false
 		}
-
-		tgAccBytes, _ := json.Marshal(tgAcc)
-		gethAccBytes, _ := json.Marshal(gethAcc)
-
-		if !bytes.Equal(tgAccBytes, gethAccBytes) {
-			fmt.Printf("account mismatch:\n\tturbo=%s\n\t geth=%s\n", string(tgAccBytes), string(gethAccBytes))
+		different := false
+		if tgAcc.Balance != gethAcc.Balance {
+			fmt.Printf("Different balance for %x: turbo %s, geth %s", addr, tgAcc.Balance, gethAcc.Balance)
+			different = true
+		}
+		if tgAcc.Nonce != gethAcc.Nonce {
+			fmt.Printf("Different nonce for %x: turbo %d, geth %d", addr, tgAcc.Nonce, gethAcc.Nonce)
+			different = true
+		}
+		// We do not compare Root, because Turbo-geth does not compute it
+		if tgAcc.CodeHash != gethAcc.CodeHash {
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.CodeHash, gethAcc.CodeHash)
+			different = true
+		}
+		if tgAcc.Code != gethAcc.Code {
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.Code, gethAcc.Code)
+			different = true
+		}
+		if different {
 			return false
 		}
 	}

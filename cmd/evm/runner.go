@@ -118,7 +118,7 @@ func runCmd(ctx *cli.Context) error {
 		tracer        vm.Tracer
 		debugLogger   *vm.StructLogger
 		statedb       *state.IntraBlockState
-		tds           *state.TrieDbState
+		db            ethdb.Database
 		chainConfig   *params.ChainConfig
 		sender        = common.BytesToAddress([]byte("sender"))
 		receiver      = common.BytesToAddress([]byte("receiver"))
@@ -132,16 +132,15 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = vm.NewStructLogger(logconfig)
 	}
+	db = ethdb.NewMemDatabase()
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
-		db := ethdb.NewMemDatabase()
-		_, _, tds, _ = gen.ToBlock(db, false /* history */)
+		_, _, tds, _ := gen.ToBlock(db, false /* history */)
 		statedb = state.New(tds)
 		chainConfig = gen.Config
 	} else {
-		db := ethdb.NewMemDatabase()
-		tds = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds := state.NewTrieDbState(common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		genesisConfig = new(core.Genesis)
 	}
@@ -278,7 +277,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(tds.Dumper().DefaultDump()))
+		fmt.Println(string(state.NewDumper(db, 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.GlobalString(MemProfileFlag.Name); memProfilePath != "" {

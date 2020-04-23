@@ -490,13 +490,12 @@ func TestIsBefore(t *testing.T) {
 }
 
 func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) error {
-	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
+	if err := db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), acc.Root.Bytes()); err != nil {
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
 		return err
 	}
 	return nil
