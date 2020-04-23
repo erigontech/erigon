@@ -504,10 +504,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
 		func() error { return d.processHeaders(origin+1, pivot, td) },
 	}
-	if d.mode == FullSync || d.mode == FastSync {
+	if d.mode != StagedSync {
 		fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) }) // Bodies are retrieved during normal and fast sync
-	}
-	if d.mode == FastSync {
 		fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) }) // Receipts are retrieved during fast sync
 	}
 	if d.mode == FullSync {
@@ -744,7 +742,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	}
 	// If we're doing a light sync, ensure the floor doesn't go below the CHT, as
 	// all headers before that point will be missing.
-	if d.mode == LightSync || d.mode == StagedSync {
+	if d.mode == LightSync {
 		// If we dont know the current CHT position, find it
 		if d.genesis == 0 {
 			header := d.lightchain.CurrentHeader()
