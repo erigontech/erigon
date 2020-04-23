@@ -705,7 +705,10 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		}
 	}
 
-	iterator := dbState.Dumper().IteratorDump(false, false, false, common.BigToHash((*big.Int)(addressHash)).Bytes(), int(maxResults))
+	iterator, err1 := dbState.Dumper().IteratorDump(false, false, false, common.BigToHash((*big.Int)(addressHash)).Bytes(), int(maxResults))
+	if err1 != nil {
+		return AccountRangeResult{}, err1
+	}
 
 	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
 	for addr := range iterator.Accounts {

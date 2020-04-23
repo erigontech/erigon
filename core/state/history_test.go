@@ -138,7 +138,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
 			return true, nil
 		})

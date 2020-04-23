@@ -24,15 +24,14 @@ import (
 
 // ReadAccount reading account object from multiple buckets of db
 func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
-	addrHashBytes := addrHash[:]
-	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
+	enc, err := db.Get(dbutils.CurrentStateBucket, addrHash[:])
 	if err != nil {
 		return false, err
 	}
 	if err = acc.DecodeForStorage(enc); err != nil {
 		return false, err
 	}
-	root, err := db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
+	root, err := db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation))
 	if err != nil {
 		return false, err
 	}
@@ -45,13 +44,12 @@ func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account)
 }
 
 func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account) error {
-	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
+	if err := db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), acc.Root.Bytes()); err != nil {
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
 		return err
 	}
 	return nil
@@ -63,8 +61,7 @@ type DatabaseReaderDeleter interface {
 }
 
 func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
-	addrHashBytes := addrHash[:]
-	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
+	enc, err := db.Get(dbutils.CurrentStateBucket, addrHash[:])
 	if err != nil && err.Error() != "db: key not found" {
 		return err
 	}
@@ -73,11 +70,11 @@ func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
 		return err
 	}
 
-	if err := db.Delete(dbutils.CurrentStateBucket, addrHashBytes); err != nil {
+	if err := db.Delete(dbutils.CurrentStateBucket, addrHash[:]); err != nil {
 		return err
 	}
 
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err != nil {
+	if err := db.Delete(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err != nil {
 		return err
 	}
 	return nil

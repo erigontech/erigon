@@ -401,7 +401,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 		k, v := c.Seek(startkey)
 		getAccRoot := func(addrHash []byte, a accounts.Account) ([]byte, error) {
-			seekKey := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), a.Incarnation)
+			seekKey := dbutils.GenerateStoragePrefix(addrHash, a.Incarnation)
 			accRootKey, accRoot := accRoots.SeekTo(seekKey)
 			if tr.trace {
 				fmt.Printf("getAccRoot: %x -> %x, %x\n", seekKey, accRootKey, accRoot)

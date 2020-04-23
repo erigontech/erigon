@@ -423,19 +423,6 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 						)
 					}
 					if len(data) > 0 { // Skip accounts did not exist
-						var acc accounts.Account
-						if err2 := acc.DecodeForStorage(data); err2 != nil {
-							return err2
-						}
-						if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-							codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-							codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(hK), acc.Incarnation))
-							if len(codeHash) > 0 {
-								acc.CodeHash = common.BytesToHash(codeHash)
-							}
-							data = make([]byte, acc.EncodingLengthForStorage())
-							acc.EncodeForStorage(data)
-						}
 						goOn, err = walker(hK, data)
 					}
 				} else if cmp == 0 {
@@ -451,7 +438,6 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 				}
 				if cmp >= 0 {
 					hK0 := hK
-					hK, tsEnc, _, hV = historyCursor.Next()
 					for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
 						hK, tsEnc, _, hV = historyCursor.Next()
 					}
@@ -611,7 +597,6 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 				}
 				if cmp >= 0 {
 					hKeyHash0 := hKeyHash
-					hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
 					for hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
 						hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
 					}
@@ -797,7 +782,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 		}
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-			codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(key), acc.Incarnation))
+			codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(key, acc.Incarnation))
 			if len(codeHash) > 0 {
 				acc.CodeHash = common.BytesToHash(codeHash)
 			}
