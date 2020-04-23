@@ -1059,10 +1059,12 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 			d.dropPeer(p.id)
 
 			// Finish the sync gracefully instead of dumping the gathered data though
-			for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
-				select {
-				case ch <- false:
-				case <-d.cancelCh:
+			if d.mode != StagedSync {
+				for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
+					select {
+					case ch <- false:
+					case <-d.cancelCh:
+					}
 				}
 			}
 			select {
@@ -1398,10 +1400,12 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 			// Terminate header processing if we synced up
 			if len(headers) == 0 {
 				// Notify everyone that headers are fully processed
-				for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
-					select {
-					case ch <- false:
-					case <-d.cancelCh:
+				if d.mode != StagedSync {
+					for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
+						select {
+						case ch <- false:
+						case <-d.cancelCh:
+						}
 					}
 				}
 				// If no headers were retrieved at all, the peer violated its TD promise that it had a
@@ -1513,10 +1517,12 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 			d.setGreaterSyncStatsChainHeight(origin-1, origin)
 
 			// Signal the content downloaders of the availablility of new tasks
-			for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
-				select {
-				case ch <- true:
-				default:
+			if d.mode != StagedSync {
+				for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
+					select {
+					case ch <- true:
+					default:
+					}
 				}
 			}
 		}
