@@ -505,10 +505,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 		func() error { return d.processHeaders(origin+1, pivot, td) },
 	}
 	if d.mode == FullSync || d.mode == FastSync {
-		fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })    // Bodies are retrieved during normal and fast sync
+		fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) }) // Bodies are retrieved during normal and fast sync
 	}
 	if d.mode == FastSync {
-		fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) })  // Receipts are retrieved during fast sync
+		fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) }) // Receipts are retrieved during fast sync
 	}
 	if d.mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
@@ -1471,7 +1471,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					n, err := d.lightchain.InsertHeaderChain(chunk, frequency)
 					if d.mode == StagedSync && n > 0 {
 						if err := SaveStageProcess(d.stateDB, Headers, chunk[n-1].Number.Uint64()); err != nil {
-							return fmt.Errorf("saving SyncStage Headers progress: %v\n", err)
+							return fmt.Errorf("saving SyncStage Headers progress: %v", err)
 						}
 					}
 					if err != nil {
