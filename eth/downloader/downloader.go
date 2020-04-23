@@ -513,6 +513,30 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	if d.mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
 	}
+	if err = d.spawnSync(fetchers); err != nil {
+		return err
+	}
+	if d.mode != StagedSync {
+		return nil
+	}
+	log.Info("Finished headers downloading, moving onto the the block downloading stage")
+	// Headers stage is finished, start the bodies download stage
+	if err = d.spawnBodyDownloadStage(); err != nil {
+		return err
+	}
+	// Further stages to go here
+	return nil
+}
+
+func (d *Downloader) spawnBodyDownloadStage() error {
+	// Figure out how many blocks have already been downloaded
+	origin, err := GetStageProgress(d.stateDB, Bodies)
+	if err != nil {
+		return err
+	}
+	fetchers := []func() error{
+		func() error { return d.fetchBodies(origin + 1) },
+	}
 	return d.spawnSync(fetchers)
 }
 
