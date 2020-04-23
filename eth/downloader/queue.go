@@ -304,6 +304,29 @@ func (q *queue) RetrieveHeaders() ([]*types.Header, int) {
 	return headers, proced
 }
 
+func (q *queue) ScheduleBodies(from uint64, hashes []common.Hash, headers []*types.Header) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	for i, hash := range hashes {
+		header := headers[i]
+		// Make sure no duplicate requests are executed
+		if _, ok := q.blockTaskPool[hash]; ok {
+			log.Warn("Header already scheduled for block fetch", "number", header.Number, "hash", hash)
+			continue
+		}
+		if _, ok := q.receiptTaskPool[hash]; ok {
+			log.Warn("Header already scheduled for receipt fetch", "number", header.Number, "hash", hash)
+			continue
+		}
+		// Queue the header for content retrieval
+		q.blockTaskPool[hash] = struct{}{}
+		q.blockTaskQueue.Push(header, -int64(from))
+
+		q.headerHead = hash
+		from++
+	}
+}
+
 // Schedule adds a set of headers for the download queue for scheduling, returning
 // the new headers encountered.
 func (q *queue) Schedule(headers []*types.Header, from uint64) []*types.Header {
@@ -359,8 +382,10 @@ func (q *queue) Results(block bool) []*fetchResult {
 		if !block {
 			return nil
 		}
+		//fmt.Printf("Waiting for active\n")
 		q.active.Wait()
 		nproc = q.countProcessableItems()
+		//fmt.Printf("Processable items: %d\n", nproc)
 	}
 	// Since we have a batch limit, don't pull more into "dangling" memory
 	if nproc > maxResultsProcess {
@@ -782,10 +807,7 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, uncleLi
 				}
 			}
 			if !found {
-				//fmt.Printf("Could not find body for %d\n", header.Number.Uint64())
 				return false, nil
-			} else {
-				//fmt.Printf("Fixed up body %d\n", header.Number.Uint64())
 			}
 		}
 		result.Transactions = txLists[i]
@@ -863,6 +885,7 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]struct{}, taskQueue 
 
 		donePool[hash] = struct{}{}
 		q.resultCache[index].Pending--
+		//fmt.Printf("q.resultCache[%d].Pending %d\n", index, q.resultCache[index].Pending)
 		useful = true
 		accepted++
 
@@ -873,6 +896,7 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]struct{}, taskQueue 
 	// Return all failed or missing fetches to the queue
 	for _, header := range request.Headers {
 		if header != nil {
+			//fmt.Printf("Return header back into the queue: %d\n", header.Number.Uint64())
 			taskQueue.Push(header, -int64(header.Number.Uint64()))
 		}
 	}

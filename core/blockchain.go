@@ -1363,6 +1363,15 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 	return nil
 }
 
+// InsertBodyChain attempts to insert the given batch of block into the
+// canonical chain, without executing those blocks
+func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (int, error) {
+	log.Info("Inserting body chain",
+		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
+		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
+	return len(chain), nil
+}
+
 // InsertChain attempts to insert the given batch of blocks in to the canonical
 // chain or, otherwise, create a fork. If an error is returned it will return
 // the index number of the failing block as well an error describing what went
@@ -1422,8 +1431,7 @@ func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int,
 func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
 	log.Info("Inserting chain",
 		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
-		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64(),
-		"callers", debug.Callers(20))
+		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
 
 	// If the chain is terminating, don't even bother starting u
 	if bc.getProcInterrupt() {
@@ -1484,7 +1492,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			"local", localTd,
 			"insertingNumber", chain[0].NumberU64(),
 			"currentNumber", bc.CurrentBlock().Number().Uint64(),
-			"callers", debug.Callers(20),
 		)
 
 		// But we still write the blocks to the database because others might build on top of them
