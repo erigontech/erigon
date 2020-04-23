@@ -1304,11 +1304,11 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 		// We do not compare Root, because Turbo-geth does not compute it
 		if tgAcc.CodeHash != gethAcc.CodeHash {
 			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.CodeHash, gethAcc.CodeHash)
-			different = true			
+			different = true
 		}
 		if tgAcc.Code != gethAcc.Code {
 			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.Code, gethAcc.Code)
-			different = true			
+			different = true
 		}
 		if different {
 			return false
