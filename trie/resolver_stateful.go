@@ -148,9 +148,9 @@ func (tr *ResolverStateful) finaliseRoot(accRoot getAccRootF) error {
 			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
 			data = &tr.leafData
 		} else {
-			storageHash, err := accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-			if err != nil {
-				return err
+			storageHash, err2 := accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+			if err2 != nil {
+				return err2
 			}
 			tr.a.Root.SetBytes(storageHash.Bytes())
 
@@ -241,12 +241,14 @@ func (tr *ResolverStateful) RebuildTrie(
 
 			h := req.t.getHasher()
 			defer returnHasherToPool(h)
-			h.hash(node, true, root2[:])
+			if _, err := h.hash(node, true, root2[:]); err != nil {
+				return err
+			}
 
 			return nil
 		})
-		err := resolver.RebuildTrie(db, 0, false, false, false)
-		if err != nil {
+
+		if err := resolver.RebuildTrie(db, 0, false, false, false); err != nil {
 			return root, err
 		}
 
@@ -262,12 +264,12 @@ func (tr *ResolverStateful) RebuildTrie(
 			return root, err
 		}
 
-		if !(bytes.Equal(root.Bytes(), rootIH.Bytes()) && bytes.Equal(root.Bytes(), root2.Bytes())) {
-			fmt.Printf("%x!=%x!=%x\n\n", root, rootIH, root2)
-			panic(1)
-		}
+		//if !(bytes.Equal(root.Bytes(), rootIH.Bytes()) && bytes.Equal(root.Bytes(), root2.Bytes())) {
+		//	fmt.Printf("%x!=%x!=%x\n\n", root, rootIH, root2)
+		//	panic(1)
+		//}
 
-		return root, err
+		return root, nil
 	}
 
 	var err error
@@ -275,13 +277,13 @@ func (tr *ResolverStateful) RebuildTrie(
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerAccounts, true, getAccRot)
+			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.Walker, true, getAccRot)
 		}
 	} else {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerStorage, false, getAccRot)
+			err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.Walker, false, getAccRot)
 		}
 	}
 	if err != nil {
@@ -321,16 +323,9 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 	return nil
 }
 
-func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte, isIH bool, accRoot getAccRootF) error {
-	return tr.Walker(true, isIH, keyIdx, k, v, accRoot)
-}
-
-func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte, isIH bool, accRoot getAccRootF) error {
-	return tr.Walker(false, isIH, keyIdx, k, v, accRoot)
-}
-
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []byte, v []byte, accRoot getAccRootF) error {
+func (tr *ResolverStateful) Walker(isIH bool, keyIdx int, k, v []byte, accRoot getAccRootF) error {
+	isAccount := !isIH && len(k) == 32
 	if tr.trace {
 		fmt.Printf("Walker: %t, keyIdx: %d key:%x  value:%x, isIH: %v\n", isAccount, keyIdx, k, v, isIH)
 	}
@@ -380,14 +375,9 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
 				data = &tr.leafData
 			} else {
-				_ = tr.accAddrHash
-				_ = tr.a.Incarnation
-				_ = common.BytesToHash(tr.accAddrHash)
-				_, _ = accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-
-				storageHash, err := accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-				if err != nil {
-					return err
+				storageHash, err2 := accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+				if err2 != nil {
+					return err2
 				}
 				tr.a.Root.SetBytes(storageHash.Bytes())
 
@@ -426,7 +416,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 		}
 		// Remember the current key and value
 		tr.wasIH = isIH
-		tr.wasAccount = !isIH && len(k) == 32
+		tr.wasAccount = isAccount
 
 		if tr.wasIH || !tr.wasAccount {
 			tr.value.Reset()
@@ -449,7 +439,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 type getAccRootF = func(acc common.Hash, incarnation uint64) (common.Hash, error)
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, isIH bool, accRoot getAccRootF) error, isAccount bool, accRoot getAccRootF) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, walker func(isIH bool, keyIdx int, k, v []byte, accRoot getAccRootF) error, isAccount bool, accRoot getAccRootF) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -581,7 +571,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			if !isIH {
-				if err := walker(rangeIdx, minKey, v, false, accRoot); err != nil {
+				if err := walker(false, rangeIdx, minKey, v, accRoot); err != nil {
 					return err
 				}
 				k, v = c.Next()
@@ -593,6 +583,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 			currentRs := tr.rss[rangeIdx]
+			_ = currentRs
 
 			keyAsNibbles.Reset()
 			DecompressNibbles(minKey, &keyAsNibbles.B)
@@ -603,12 +594,13 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			//canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
-			if err := walker(rangeIdx, minKey, ihV, isIH, accRoot); err != nil {
+			if err := walker(true, rangeIdx, ihK, ihV, accRoot); err != nil {
 				return fmt.Errorf("waker err: %w", err)
 			}
 
