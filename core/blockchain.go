@@ -1489,11 +1489,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		lastCanon *types.Block
 	)
 	// Fire a single chain head event if we've progressed the chain
-	defer func() {
-		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
-			bc.chainHeadFeed.Send(ChainHeadEvent{lastCanon})
-		}
-	}()
+	if execute {
+		defer func() {
+			if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
+				bc.chainHeadFeed.Send(ChainHeadEvent{lastCanon})
+			}
+		}()
+	}
 	// Start the parallel header verifier
 	headers := make([]*types.Header, len(chain))
 	seals := make([]bool, len(chain))
