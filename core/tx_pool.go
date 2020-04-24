@@ -504,6 +504,9 @@ func (pool *TxPool) Stop() {
 // SubscribeNewTxsEvent registers a subscription of NewTxsEvent and
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription {
+	if pool == nil {
+		return nil
+	}
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
 }
 
@@ -581,10 +584,12 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 // account and sorted by nonce. The returned transaction set is a copy and can be
 // freely modified by calling code.
 func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
+	pending := make(map[common.Address]types.Transactions)
+	if pool == nil {
+		return pending, nil
+	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-
-	pending := make(map[common.Address]types.Transactions)
 	for addr, list := range pool.pending {
 		pending[addr] = list.Flatten()
 	}

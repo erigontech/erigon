@@ -238,9 +238,11 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = eth.blockchain.GetTrieDbState()
-	if err != nil {
-		return nil, err
+	if config.SyncMode != downloader.StagedSync {
+		_, err = eth.blockchain.GetTrieDbState()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
@@ -253,12 +255,16 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		eth.blockchain.SetHead(compat.RewindTo)
 		rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
 	}
-	eth.bloomIndexer.Start(eth.blockchain)
+	if config.SyncMode != downloader.StagedSync {
+		eth.bloomIndexer.Start(eth.blockchain)
+	}
 
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
+	if config.SyncMode != downloader.StagedSync {
+		eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
+	}
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
@@ -269,15 +275,19 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-
-	eth.APIBackend = &EthAPIBackend{ctx.ExtRPCEnabled(), eth, nil}
-	gpoParams := config.GPO
-	if gpoParams.Default == nil {
-		gpoParams.Default = config.Miner.GasPrice
+	if config.SyncMode != downloader.StagedSync {
+		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 	}
-	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+
+	if config.SyncMode != downloader.StagedSync {
+		eth.APIBackend = &EthAPIBackend{ctx.ExtRPCEnabled(), eth, nil}
+		gpoParams := config.GPO
+		if gpoParams.Default == nil {
+			gpoParams.Default = config.Miner.GasPrice
+		}
+		eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+	}
 
 	eth.dialCandiates, err = eth.setupDiscovery(&ctx.Config.P2P)
 	if err != nil {
@@ -340,6 +350,9 @@ func CreateConsensusEngine(ctx *node.ServiceContext, chainConfig *params.ChainCo
 // APIs return the collection of RPC services the ethereum package offers.
 // NOTE, some of these services probably need to be moved to somewhere else.
 func (s *Ethereum) APIs() []rpc.API {
+	if s.APIBackend == nil {
+		return []rpc.API{}
+	}
 	apis := ethapi.GetAPIs(s.APIBackend)
 
 	// Append any APIs exposed explicitly by the les server

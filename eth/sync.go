@@ -273,7 +273,7 @@ func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, *big.Int) {
 	} else {
 		head := cs.pm.blockchain.CurrentHeader()
 		td := cs.pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
-		return downloader.FullSync, td
+		return cs.pm.mode, td
 	}
 }
 
