@@ -638,7 +638,6 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 	}
 	d.queue.Close()
 	d.Cancel()
-	fmt.Printf("Finished spanwSync\n")
 	return err
 }
 
