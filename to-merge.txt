@@ -789,21 +789,3 @@ Author: Gary Rong <garyrong0905@gmail.com>
 Date:   Fri Apr 24 19:43:49 2020 +0800
 
     core/state/snapshot: fix binary iterator (#20970)
-
-commit 44ff3f3dc98a5bd72e06ff6b05739c2dce8c9b62
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Fri Apr 24 19:37:56 2020 +0800
-
-    trie: initial implementation for range proof (#20908)
-    
-    * trie: initial implementation for range proof
-    
-    * trie: add benchmark
-    
-    * trie: fix lint
-    
-    * trie: fix minor issue
-    
-    * trie: unset the edge valuenode as well
-    
-    * trie: unset the edge valuenode as nilValuenode
