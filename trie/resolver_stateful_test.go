@@ -300,7 +300,7 @@ func TestApiDetails(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 
 	storageKey := func(incarnation uint64, k string) []byte {
-		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), incarnation, common.HexToHash(k))
+		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), incarnation, common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001"))
 	}
 	putIH := func(k string, v string) {
 		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
@@ -320,11 +320,13 @@ func TestApiDetails(t *testing.T) {
 			for _, j := range []int{0, 1, 2, 15} {
 				k := fmt.Sprintf(base+"%x%x%061x", i, j, 0)
 				//storageV := common.Hex2Bytes(fmt.Sprintf("%x%x", i, j))
-				storageV := []byte{0}
+				storageV := []byte{2}
 				incarnation := uint64(2)
+				root := common.HexToHash("3ed409af5dae7a8b4670f1df4d90d675b115757858b3ea1ec83a323b5c2e060c")
 				if i == 1 {
-					storageV = []byte{}
+					storageV = []byte{1}
 					incarnation = 1
+					root = common.HexToHash("2abc098983e097b6de2b7fd9c5c322e37d12025bc3e0cfdaad4af26a3b51e208")
 				}
 
 				a := accounts.Account{
@@ -332,6 +334,7 @@ func TestApiDetails(t *testing.T) {
 					// Will check later if value which we .Get() from Trie has expected ID.
 					Nonce:          uint64(i*10 + j),
 					Initialised:    true,
+					Root:           root,
 					CodeHash:       EmptyCodeHash,
 					Balance:        *big.NewInt(0),
 					StorageSize:    uint64(len(storageV)),
@@ -352,7 +355,7 @@ func TestApiDetails(t *testing.T) {
 	tr := New(common.Hash{})
 	{
 		resolver := NewResolver(1, true, 0)
-		expectRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
+		expectRootHash := common.HexToHash("493978735c1186808d87e90d65415e48e74dbf2bcc15e355ae3c0f4d1d66461d")
 
 		resolver.AddRequest(tr.NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
 		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
