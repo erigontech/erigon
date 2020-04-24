@@ -572,9 +572,9 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 		currentNumber++
 		copy(hashes[hashCount][:], k[8:])
 		header := new(types.Header)
-		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-			log.Error("Invalid block header RLP", "hash", k[8:], "err", err)
-			return false, err
+		if err1 := rlp.Decode(bytes.NewReader(v), header); err1 != nil {
+			log.Error("Invalid block header RLP", "hash", k[8:], "err", err1)
+			return false, err1
 		}
 		headers[hashCount] = header
 		hashCount++
