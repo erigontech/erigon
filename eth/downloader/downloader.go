@@ -20,8 +20,8 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"errors"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -560,7 +560,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	var hashCount = 0
 	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
 		// Skip non relevant records
-		if len(k) != 8 + common.HashLength {
+		if len(k) != 8+common.HashLength {
 			return true, nil
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])

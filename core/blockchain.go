@@ -1089,79 +1089,79 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	// this function only accepts canonical chain data. All side chain will be reverted
 	// eventually.
 	/*
-	writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
-		var (
-			previous = bc.CurrentFastBlock()
-		)
-		// If any error occurs before updating the head or we are inserting a side chain,
-		// all the data written this time wll be rolled back.
-		defer func() {
-			if previous != nil {
-				if err := bc.truncateAncient(previous.NumberU64()); err != nil {
-					log.Crit("Truncate ancient store failed", "err", err)
+		writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
+			var (
+				previous = bc.CurrentFastBlock()
+			)
+			// If any error occurs before updating the head or we are inserting a side chain,
+			// all the data written this time wll be rolled back.
+			defer func() {
+				if previous != nil {
+					if err := bc.truncateAncient(previous.NumberU64()); err != nil {
+						log.Crit("Truncate ancient store failed", "err", err)
+					}
+				}
+			}()
+			var deleted []*numberHash
+			for i, block := range blockChain {
+				// Short circuit insertion if shutting down or processing failed
+				if bc.getProcInterrupt() {
+					return 0, errInsertionInterrupted
+				}
+				// Short circuit insertion if it is required(used in testing only)
+				if bc.terminateInsert != nil && bc.terminateInsert(block.Hash(), block.NumberU64()) {
+					return i, errors.New("insertion is terminated for testing purpose")
+				}
+				// Short circuit if the owner header is unknown
+				if !bc.HasHeader(block.Hash(), block.NumberU64()) {
+					return i, fmt.Errorf("containing header #%d [%x…] unknown", block.Number(), block.Hash().Bytes()[:4])
+				}
+
+				// Turbo-Geth doesn't have fast sync support
+
+				// Flush data into ancient database.
+				size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
+				if bc.enableTxLookupIndex {
+					rawdb.WriteTxLookupEntries(bc.db, block)
+				}
+
+				stats.processed++
+			}
+
+			if !updateHead(blockChain[len(blockChain)-1]) {
+				return 0, errors.New("side blocks can't be accepted as the ancient chain data")
+			}
+			previous = nil // disable rollback explicitly
+
+			// Wipe out canonical block data.
+			for _, nh := range deleted {
+				rawdb.DeleteBlockWithoutNumber(bc.db, nh.hash, nh.number)
+				rawdb.DeleteCanonicalHash(bc.db, nh.number)
+			}
+			for _, block := range blockChain {
+				// Always keep genesis block in active database.
+				if block.NumberU64() != 0 {
+					rawdb.DeleteBlockWithoutNumber(bc.db, block.Hash(), block.NumberU64())
+					rawdb.DeleteCanonicalHash(bc.db, block.NumberU64())
 				}
 			}
-		}()
-		var deleted []*numberHash
-		for i, block := range blockChain {
-			// Short circuit insertion if shutting down or processing failed
-			if bc.getProcInterrupt() {
-				return 0, errInsertionInterrupted
-			}
-			// Short circuit insertion if it is required(used in testing only)
-			if bc.terminateInsert != nil && bc.terminateInsert(block.Hash(), block.NumberU64()) {
-				return i, errors.New("insertion is terminated for testing purpose")
-			}
-			// Short circuit if the owner header is unknown
-			if !bc.HasHeader(block.Hash(), block.NumberU64()) {
-				return i, fmt.Errorf("containing header #%d [%x…] unknown", block.Number(), block.Hash().Bytes()[:4])
-			}
 
-			// Turbo-Geth doesn't have fast sync support
-
-			// Flush data into ancient database.
-			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
-			if bc.enableTxLookupIndex {
-				rawdb.WriteTxLookupEntries(bc.db, block)
-			}
-
-			stats.processed++
-		}
-
-		if !updateHead(blockChain[len(blockChain)-1]) {
-			return 0, errors.New("side blocks can't be accepted as the ancient chain data")
-		}
-		previous = nil // disable rollback explicitly
-
-		// Wipe out canonical block data.
-		for _, nh := range deleted {
-			rawdb.DeleteBlockWithoutNumber(bc.db, nh.hash, nh.number)
-			rawdb.DeleteCanonicalHash(bc.db, nh.number)
-		}
-		for _, block := range blockChain {
-			// Always keep genesis block in active database.
-			if block.NumberU64() != 0 {
-				rawdb.DeleteBlockWithoutNumber(bc.db, block.Hash(), block.NumberU64())
-				rawdb.DeleteCanonicalHash(bc.db, block.NumberU64())
-			}
-		}
-
-		// Wipe out side chain too.
-		for _, nh := range deleted {
-			for _, hash := range rawdb.ReadAllHashes(bc.db, nh.number) {
-				rawdb.DeleteBlock(bc.db, hash, nh.number)
-			}
-		}
-		for _, block := range blockChain {
-			// Always keep genesis block in active database.
-			if block.NumberU64() != 0 {
-				for _, hash := range rawdb.ReadAllHashes(bc.db, block.NumberU64()) {
-					rawdb.DeleteBlock(bc.db, hash, block.NumberU64())
+			// Wipe out side chain too.
+			for _, nh := range deleted {
+				for _, hash := range rawdb.ReadAllHashes(bc.db, nh.number) {
+					rawdb.DeleteBlock(bc.db, hash, nh.number)
 				}
 			}
+			for _, block := range blockChain {
+				// Always keep genesis block in active database.
+				if block.NumberU64() != 0 {
+					for _, hash := range rawdb.ReadAllHashes(bc.db, block.NumberU64()) {
+						rawdb.DeleteBlock(bc.db, hash, block.NumberU64())
+					}
+				}
+			}
+			return 0, nil
 		}
-		return 0, nil
-	}
 	*/
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
@@ -1208,14 +1208,14 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 	// Write downloaded chain data and corresponding receipt chain data.
 	/*
-	if len(ancientBlocks) > 0 {
-		if n, err := writeAncient(ancientBlocks, ancientReceipts); err != nil {
-			if err == errInsertionInterrupted {
-				return 0, nil
+		if len(ancientBlocks) > 0 {
+			if n, err := writeAncient(ancientBlocks, ancientReceipts); err != nil {
+				if err == errInsertionInterrupted {
+					return 0, nil
+				}
+				return n, err
 			}
-			return n, err
 		}
-	}
 	*/
 	if len(liveBlocks) > 0 {
 		if n, err := writeLive(liveBlocks, liveReceipts); err != nil {
@@ -1764,7 +1764,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		proctime := time.Since(start)
 
 		// Write the block to the chain and get the status.
-		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false ,execute)
+		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false, execute)
 		if err != nil {
 			bc.db.Rollback()
 			bc.setTrieDbState(nil)
@@ -1824,7 +1824,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 	}
 
-	return committedK+1, nil
+	return committedK + 1, nil
 }
 
 // statsReportLimit is the time limit during import and export after which we

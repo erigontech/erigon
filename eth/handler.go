@@ -380,7 +380,7 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 
 func (pm *ProtocolManager) Stop() {
 	if pm.txsSub != nil {
-		pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
+		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
 	}
 	pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 
