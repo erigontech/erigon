@@ -332,7 +332,6 @@ func TestApiDetails(t *testing.T) {
 					// Will check later if value which we .Get() from Trie has expected ID.
 					Nonce:          uint64(i*10 + j),
 					Initialised:    true,
-					Root:           EmptyRoot,
 					CodeHash:       EmptyCodeHash,
 					Balance:        *big.NewInt(0),
 					StorageSize:    uint64(len(storageV)),
@@ -359,7 +358,7 @@ func TestApiDetails(t *testing.T) {
 		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
 		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("0f"), 0, expectRootHash.Bytes()))
 
-		err := resolver.ResolveStateful(db, 0, false)
+		err := resolver.ResolveStateful(db, 0, true)
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
 		assert.NoError(err)
@@ -413,7 +412,7 @@ func TestApiDetails(t *testing.T) {
 					//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[1].reference())
 					_, root := tries[i].DeepHash(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)))
 					fmt.Printf("Alex: %x\n", root)
-					_, root = tries[i].DeepHash(common.Hex2Bytes(fmt.Spritrie/resolver_stateful_test.go:400ntf("011%061x", 0)))
+					_, root = tries[i].DeepHash(common.Hex2Bytes(fmt.Spritntf("011%061x", 0)))
 					fmt.Printf("Alex: %x\n", root)
 
 					//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
@@ -452,61 +451,11 @@ func TestApiDetails(t *testing.T) {
 	*/
 }
 
-func TestStorageResolver(t *testing.T) {
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-
-	kAcc := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
-	k1 := "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
-	ks1 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc), 1, common.HexToHash(k1))
-	require.NoError(db.Put(dbutils.CurrentStateBucket, ks1, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
-
-	a := accounts.Account{
-		Nonce:          uint64(1),
-		Initialised:    true,
-		CodeHash:       EmptyCodeHash,
-		Balance:        *big.NewInt(0),
-		StorageSize:    uint64(1),
-		Incarnation:    1,
-		HasStorageSize: true,
-		//Root:           common.HexToHash("28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"),
-	}
-
-	if err := writeAccount(db, common.BytesToHash(kAcc), a); err != nil {
-		panic(err)
-	}
-	/*
-		Start GetRoot: 0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83, 1
-		RebuildTrie 1, blockNr 0
-		startkeys: [0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe]
-		Walker: isAcc=false, isIH=false, keyIdx: 0 key:0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563 value:7a381122bada791a7ab1f6037dac80432753baad
-		GotRoot: d3c71bf837ad16f7d89d6085c1a4c671743a18e058b0990ce526fdb2dd22d00f
-
-		d3c71bf837ad16f7d89d6085c1a4c671743a18e058b0990ce526fdb2dd22d00f!=28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0, d3c71bf837ad16f7d89d6085c1a4c671743a18e058b0990ce526fdb2dd22d00f
-	*/
-	expectedRoot := "28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"
-
-	{
-		accWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(kAcc), 1)
-		resolver := NewResolverStateful(0, []*ResolveRequest{
-			{contract: accWithInc},
-		}, func(_ *ResolveRequest, _ node, storageRootHash common.Hash) error {
-			require.Equal(expectedRoot, fmt.Sprintf("%x", storageRootHash.Bytes()))
-			return nil
-		})
-		err := resolver.RebuildTrie(db, 0, false, false, true)
-		assert.NoError(err)
-	}
-}
-
 func TestStorageResolver2(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 
-	kAcc := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
-	k1 := "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
-	ks1 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc), 1, common.HexToHash(k1))
-	require.NoError(db.Put(dbutils.CurrentStateBucket, ks1, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
-
-	a := accounts.Account{
+	kAcc1 := common.FromHex("0000cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
+	a1 := accounts.Account{
 		Nonce:          uint64(1),
 		Initialised:    true,
 		CodeHash:       EmptyCodeHash,
@@ -514,37 +463,62 @@ func TestStorageResolver2(t *testing.T) {
 		StorageSize:    uint64(1),
 		Incarnation:    1,
 		HasStorageSize: true,
-		//Root:           common.HexToHash("28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"),
+		Root:           EmptyRoot,
 	}
 
-	if err := writeAccount(db, common.BytesToHash(kAcc), a); err != nil {
+	if err := writeAccount(db, common.BytesToHash(kAcc1), a1); err != nil {
 		panic(err)
 	}
-	/*
-		Start GetRoot: 0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83, 1
-		RebuildTrie 1, blockNr 0
-		startkeys: [0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe]
-		Walker: isAcc=false, isIH=false, keyIdx: 0 key:0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563 value:7a381122bada791a7ab1f6037dac80432753baad
-		GotRoot: d3c71bf837ad16f7d89d6085c1a4c671743a18e058b0990ce526fdb2dd22d00f
 
-		d3c71bf837ad16f7d89d6085c1a4c671743a18e058b0990ce526fdb2dd22d00f!=28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0, d3c71bf837ad16f7d89d6085c1a4c671743a18e058b0990ce526fdb2dd22d00f
-	*/
-	expectedAccRoot := "28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"
-	_ = expectedAccRoot
+	kAcc2 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
+	k2 := "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
+	ks2 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc2), 1, common.HexToHash(k2))
+	require.NoError(db.Put(dbutils.CurrentStateBucket, ks2, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
 
-	expectedRoot := "53f8a2cd660f85d6d0d3a861d2869e57df0b6262685b188cbf8eb588609a16bb"
+	expectedAccRoot2 := "28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"
+	a2 := accounts.Account{
+		Nonce:          uint64(1),
+		Initialised:    true,
+		CodeHash:       EmptyCodeHash,
+		Balance:        *big.NewInt(0),
+		StorageSize:    uint64(1),
+		Incarnation:    1,
+		HasStorageSize: true,
+		Root:           common.HexToHash(expectedAccRoot2),
+	}
+
+	if err := writeAccount(db, common.BytesToHash(kAcc2), a2); err != nil {
+		panic(err)
+	}
+
+	kAcc3 := common.FromHex("0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
+	k3 := "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
+	ks3 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc3), 1, common.HexToHash(k3))
+	require.NoError(db.Put(dbutils.CurrentStateBucket, ks3, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
+
+	expectedAccRoot3 := "28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"
+	a3 := accounts.Account{
+		Nonce:          uint64(1),
+		Initialised:    true,
+		CodeHash:       EmptyCodeHash,
+		Balance:        *big.NewInt(0),
+		StorageSize:    uint64(1),
+		Incarnation:    1,
+		HasStorageSize: true,
+		Root:           common.HexToHash(expectedAccRoot3),
+	}
+
+	if err := writeAccount(db, common.BytesToHash(kAcc3), a3); err != nil {
+		panic(err)
+	}
+
+	expectedRoot := "1239b601d241f42c96392f0466b4df327a9adec21c2a6a08fd78c1a65946017f"
 
 	tr := New(common.Hash{})
 	{
 		resolver := NewResolver(1, true, 0)
 		resolver.AddRequest(tr.NewResolveRequest(nil, common.FromHex("00000001"), 0, common.FromHex(expectedRoot)))
-		err := resolver.ResolveWithDb(db, 0, true)
-		require.NoError(err)
-
-		//accWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(kAcc), 1)
-		//resolver = NewResolver(1, false, 0)
-		//resolver.AddRequest(tr.NewResolveRequest(accWithInc, nil, 0, common.FromHex(expectedAccRoot)))
-		//err = resolver.ResolveWithDb(db, 0, true)
+		err := resolver.ResolveWithDb(db, 0, false)
 		assert.NoError(err)
 	}
 }
@@ -592,8 +566,8 @@ func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) e
 	if err := db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
-		return err
-	}
+	//if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
+	//	return err
+	//}
 	return nil
 }
