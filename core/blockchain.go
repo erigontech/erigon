@@ -1609,7 +1609,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		// If the header is a banned one, straight out abort
 		if BadHashes[block.Hash()] {
 			bc.reportBlock(block, nil, ErrBlacklistedHash)
-			return committedK, ErrBlacklistedHash
+			return k, ErrBlacklistedHash
 		}
 
 		// Wait for the block's verification to complete
@@ -1637,7 +1637,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			// the chain is discarded and processed at a later time if given.
 			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
 			if block.Time() > max.Uint64() {
-				return committedK, fmt.Errorf("future block: %v > %v", block.Time(), max)
+				return k, fmt.Errorf("future block: %v > %v", block.Time(), max)
 			}
 			bc.futureBlocks.Add(block.Hash(), block)
 			stats.queued++
@@ -1655,7 +1655,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		case err != nil:
 			bc.reportBlock(block, nil, err)
-			return committedK, err
+			return k, err
 		}
 		// Create a new statedb using the parent block and report an
 		// error if it fails.
@@ -1666,7 +1666,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var root common.Hash
 		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly && execute {
 			if _, err = bc.GetTrieDbState(); err != nil {
-				return committedK, err
+				return k, err
 			}
 		}
 
@@ -1690,7 +1690,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				}
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				return committedK, err
+				return k, err
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
 
@@ -1698,7 +1698,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
 				bc.setTrieDbState(nil)
-				return committedK, err
+				return k, err
 			}
 
 			root := bc.trieDbState.LastRoot()
@@ -1706,13 +1706,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				return committedK, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
+				return k, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err = bc.reorg(currentBlock, parent); err != nil {
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				return committedK, err
+				return k, err
 			}
 
 			if _, err = bc.db.Commit(); err != nil {
@@ -1722,9 +1722,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				if bc.committedBlock.Load() != nil {
 					bc.currentBlock.Store(bc.committedBlock.Load())
 				}
-				return committedK, err
+				return k, err
 			}
-			committedK = k + 1
+			committedK = k
 			bc.committedBlock.Store(bc.currentBlock.Load())
 		}
 
@@ -1739,26 +1739,26 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			reuseTrieDbState := true
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return committedK, err
+				return k, err
 			}
 
 			err = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return committedK, err
+				return k, err
 			}
 
 			reuseTrieDbState = false
 			err = bc.processor.PostProcess(block, bc.trieDbState, receipts)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return committedK, err
+				return k, err
 			}
 
 			err = bc.Validator().ValidateReceipts(block, receipts)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return committedK, err
+				return k, err
 			}
 		}
 		proctime := time.Since(start)
@@ -1771,7 +1771,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if bc.committedBlock.Load() != nil {
 				bc.currentBlock.Store(bc.committedBlock.Load())
 			}
-			return committedK, err
+			return k, err
 		}
 
 		switch status {
@@ -1813,10 +1813,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				if bc.committedBlock.Load() != nil {
 					bc.currentBlock.Store(bc.committedBlock.Load())
 				}
-				return committedK, err
+				return k, err
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
-			committedK = k + 1
+			committedK = k
 			if bc.trieDbState != nil {
 				bc.trieDbState.EvictTries(false)
 			}
@@ -1824,7 +1824,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 	}
 
-	return committedK, nil
+	return committedK+1, nil
 }
 
 // statsReportLimit is the time limit during import and export after which we
