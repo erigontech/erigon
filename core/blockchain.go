@@ -1270,11 +1270,11 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if common.IsCanceled(ctx) {
 		return NonStatTy, ctx.Err()
 	}
-	if !execute {
+	if execute {
 		rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
 	}
 	rawdb.WriteBody(ctx, bc.db, block.Hash(), block.NumberU64(), block.Body())
-	if !execute {
+	if execute {
 		rawdb.WriteHeader(ctx, bc.db, block.Header())
 	}
 
@@ -1283,7 +1283,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	}
 
 	ctx = bc.WithContext(ctx, block.Number())
-	if stateDb != nil && !execute {
+	if stateDb != nil && execute {
 		blockWriter := tds.DbStateWriter()
 		if err := stateDb.CommitBlock(ctx, blockWriter); err != nil {
 			return NonStatTy, err
@@ -1299,7 +1299,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 			}
 		}
 	}
-	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly && !execute {
+	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly && execute {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
 
@@ -1324,26 +1324,26 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	//if reorg {
 	// Reorganise the chain if the parent is not the head block
 
-	if block.ParentHash() != currentBlock.Hash() {
+	if execute && block.ParentHash() != currentBlock.Hash() {
 		if err := bc.reorg(currentBlock, block); err != nil {
 			return NonStatTy, err
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
 
-	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly && !execute {
+	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly && execute {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
 	status = CanonStatTy
 
 	// Set new head.
-	if !execute {
+	if execute {
 		bc.writeHeadBlock(block)
 	}
 	bc.futureBlocks.Remove(block.Hash())
 
-	if !execute {
+	if execute {
 		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
 		if len(logs) > 0 {
 			bc.logsFeed.Send(logs)
@@ -1354,7 +1354,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	// canonicial blocks. Avoid firing too much ChainHeadEvents,
 	// we will fire an accumulated ChainHeadEvent and disable fire
 	// event here.
-	if emitHeadEvent && !execute {
+	if emitHeadEvent && execute {
 		bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
 	}
 	return status, nil
@@ -1664,13 +1664,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		readBlockNr := parentNumber
 		var root common.Hash
-		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly && !execute {
+		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly && execute {
 			if _, err = bc.GetTrieDbState(); err != nil {
 				return committedK, err
 			}
 		}
 
-		if !bc.cacheConfig.DownloadOnly && !execute {
+		if !bc.cacheConfig.DownloadOnly && execute {
 			root = bc.trieDbState.LastRoot()
 		}
 
@@ -1679,7 +1679,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			parentRoot = parent.Root()
 		}
 
-		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly && !execute {
+		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly && execute {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr,
 				"root", root.String(), "parentRoot", parentRoot.String())
 
@@ -1732,7 +1732,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var receipts types.Receipts
 		var usedGas uint64
 		var logs []*types.Log
-		if !bc.cacheConfig.DownloadOnly && !execute {
+		if !bc.cacheConfig.DownloadOnly && execute {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
 			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)

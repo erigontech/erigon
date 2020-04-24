@@ -206,7 +206,9 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 		}
 		return p.RequestTxs(hashes)
 	}
-	manager.txFetcher = fetcher.NewTxFetcher(txpool.Has, txpool.AddRemotes, fetchTx)
+	if txpool != nil {
+		manager.txFetcher = fetcher.NewTxFetcher(txpool.Has, txpool.AddRemotes, fetchTx)
+	}
 	manager.chainSync = newChainSyncer(manager)
 }
 
@@ -300,6 +302,14 @@ func (pm *ProtocolManager) makeMgrProtocol() p2p.Protocol {
 	}
 }
 
+func (pm *ProtocolManager) txpoolGet(hash common.Hash) *types.Transaction {
+	switch pm.txpool.(type) {
+	case nil:
+		return nil
+	}
+	return pm.txpool.Get(hash)
+}
+
 func (pm *ProtocolManager) makeProtocol(version uint) p2p.Protocol {
 	length, ok := ProtocolLengths[version]
 	if !ok {
@@ -311,7 +321,7 @@ func (pm *ProtocolManager) makeProtocol(version uint) p2p.Protocol {
 		Version: version,
 		Length:  length,
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-			return pm.runPeer(pm.newPeer(int(version), p, rw, pm.txpool.Get))
+			return pm.runPeer(pm.newPeer(int(version), p, rw, pm.txpoolGet))
 		},
 		NodeInfo: func() interface{} {
 			return pm.NodeInfo()
@@ -353,7 +363,9 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.wg.Add(1)
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
-	go pm.txBroadcastLoop()
+	if pm.txsSub != nil {
+		go pm.txBroadcastLoop()
+	}
 
 	// broadcast mined blocks
 	pm.wg.Add(1)
@@ -367,7 +379,9 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 }
 
 func (pm *ProtocolManager) Stop() {
-	pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	if pm.txsSub != nil {
+		pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	}
 	pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 
 	// Quit chainSync and txsync64.
@@ -724,6 +738,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 		// Obtain the TrieDbState
+		if pm.mode == downloader.StagedSync {
+			return fmt.Errorf("staged sync mode, no support for GetNodeData")
+		}
 		tds, err := pm.blockchain.GetTrieDbState()
 		if err != nil {
 			return err
