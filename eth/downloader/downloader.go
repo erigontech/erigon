@@ -526,14 +526,18 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	}
 	log.Info("Finished headers downloading, moving onto the the block downloading stage")
 	// Headers stage is finished, start the bodies download stage
-	if err = d.spawnBodyDownloadStage(p.id); err != nil {
+	var cont bool = true
+	for cont && err == nil {
+		cont, err = d.spawnBodyDownloadStage(p.id)
+	}
+	if err != nil {
 		return err
 	}
 	// Further stages to go here
-	return nil
+	return err
 }
 
-func (d *Downloader) spawnBodyDownloadStage(id string) error {
+func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -541,25 +545,19 @@ func (d *Downloader) spawnBodyDownloadStage(id string) error {
 	d.cancelLock.Unlock()
 
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
-	d.queue.Reset()
 	// Figure out how many blocks have already been downloaded
 	origin, err := GetStageProgress(d.stateDB, Bodies)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Figure out how many headers we have
-	fetchers := []func() error{
-		func() error { return d.fetchBodies(origin + 1) },
-		d.processBodiesStage,
-	}
 	currentNumber := origin + 1
 	var missingHeader uint64
 	// Go over canonical headers and insert them into the queue
-	const N = 1024
+	const N = 65536
 	var hashes [N]common.Hash
 	var headers [N]*types.Header
 	var hashCount = 0
-	from := origin + 1
 	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
 		// Skip non relevant records
 		if len(k) != 8 + common.HashLength {
@@ -586,27 +584,34 @@ func (d *Downloader) spawnBodyDownloadStage(id string) error {
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("walking over canonical hashes: %v", err)
+		return false, fmt.Errorf("walking over canonical hashes: %v", err)
 	}
 	if missingHeader != 0 {
 		if err1 := SaveStageProgress(d.stateDB, Headers, missingHeader); err1 != nil {
-			return fmt.Errorf("resetting SyncStage Headers to missing header: %v", err1)
+			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %v", err1)
 		}
 		// This will cause the sync return to the header stage
-		return nil
+		return false, nil
 	}
-	// Schedule the remaining bodies, if any
-	if hashCount > 0 {
-		d.queue.ScheduleBodies(from, hashes[:hashCount], headers[:hashCount])
-		from += uint64(hashCount)
-		fmt.Printf("Scheduled bodies up to %d\n", from)	
+	d.queue.Reset()
+	if hashCount == 0 {
+		// No more bodies to download
+		return false, nil
 	}
+	from := origin + 1
+	d.queue.Prepare(from, d.mode)
+	d.queue.ScheduleBodies(from, hashes[:hashCount], headers[:hashCount])
+	to := from + uint64(hashCount)
 	select {
 	case d.bodyWakeCh <- true:
 	case <-d.cancelCh:
 	}
 	// Now fetch all the bodies
-	return d.spawnSync(fetchers)
+	fetchers := []func() error{
+		func() error { return d.fetchBodies(from) },
+		func() error { return d.processBodiesStage(to) },
+	}
+	return true, d.spawnSync(fetchers)
 }
 
 // spawnSync runs d.process and all given fetcher functions to completion in
@@ -633,6 +638,7 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 	}
 	d.queue.Close()
 	d.Cancel()
+	fmt.Printf("Finished spanwSync\n")
 	return err
 }
 
@@ -1623,16 +1629,22 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 }
 
 // processFullSyncContent takes fetch results from the queue and imports them into the chain.
-func (d *Downloader) processBodiesStage() error {
-	fmt.Printf("processBodiesStage\n")
+func (d *Downloader) processBodiesStage(to uint64) error {
 	for {
 		results := d.queue.Results(true)
-		fmt.Printf("Got results: %d\n", len(results))
 		if len(results) == 0 {
 			return nil
 		}
-		if err := d.importBlockResults(results, false /* execute */); err != nil {
+		lastNumber, err := d.importBlockResults(results, false /* execute */)
+		if err != nil {
 			return err
+		}
+		if lastNumber == to {
+			select {
+			case d.bodyWakeCh <- false:
+			case <-d.cancelCh:
+			}
+			return nil
 		}
 	}
 }
@@ -1647,20 +1659,20 @@ func (d *Downloader) processFullSyncContent() error {
 		if d.chainInsertHook != nil {
 			d.chainInsertHook(results)
 		}
-		if err := d.importBlockResults(results, true /* execute */); err != nil {
+		if _, err := d.importBlockResults(results, true /* execute */); err != nil {
 			return err
 		}
 	}
 }
 
-func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) error {
+func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
-		return nil
+		return 0, nil
 	}
 	select {
 	case <-d.quitCh:
-		return errCancelContentProcessing
+		return 0, errCancelContentProcessing
 	default:
 	}
 	// Retrieve the a batch of results to import
@@ -1690,10 +1702,15 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) er
 			// of the blocks delivered from the downloader, and the indexing will be off.
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
-		return errInvalidChain
+		return 0, errInvalidChain
 	}
-
-	return nil
+	if d.mode == StagedSync && index > 0 {
+		if err1 := SaveStageProgress(d.stateDB, Bodies, blocks[index-1].NumberU64()); err1 != nil {
+			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
+		}
+		return blocks[index-1].NumberU64() + 1, nil
+	}
+	return 0, nil
 }
 
 func splitAroundPivot(pivot uint64, results []*fetchResult) (p *fetchResult, before, after []*fetchResult) {

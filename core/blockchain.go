@@ -1241,7 +1241,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
-func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool, execute bool) (status WriteStatus, err error) {
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
 	}
@@ -1250,12 +1250,12 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent)
+	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent, execute)
 }
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool, execute bool) (status WriteStatus, err error) {
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
@@ -1270,15 +1270,20 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if common.IsCanceled(ctx) {
 		return NonStatTy, ctx.Err()
 	}
-	rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
-	rawdb.WriteBlock(ctx, bc.db, block)
+	if !execute {
+		rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
+	}
+	rawdb.WriteBody(ctx, bc.db, block.Hash(), block.NumberU64(), block.Body())
+	if !execute {
+		rawdb.WriteHeader(ctx, bc.db, block.Header())
+	}
 
 	if tds != nil {
 		tds.SetBlockNr(block.NumberU64())
 	}
 
 	ctx = bc.WithContext(ctx, block.Number())
-	if stateDb != nil {
+	if stateDb != nil && !execute {
 		blockWriter := tds.DbStateWriter()
 		if err := stateDb.CommitBlock(ctx, blockWriter); err != nil {
 			return NonStatTy, err
@@ -1294,7 +1299,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 			}
 		}
 	}
-	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
+	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly && !execute {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
 
@@ -1326,26 +1331,30 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
 
-	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
+	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly && !execute {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
 	status = CanonStatTy
 
 	// Set new head.
-	bc.writeHeadBlock(block)
+	if !execute {
+		bc.writeHeadBlock(block)
+	}
 	bc.futureBlocks.Remove(block.Hash())
 
-	bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
-	if len(logs) > 0 {
-		bc.logsFeed.Send(logs)
+	if !execute {
+		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
+		if len(logs) > 0 {
+			bc.logsFeed.Send(logs)
+		}
 	}
 	// In theory we should fire a ChainHeadEvent when we inject
 	// a canonical block, but sometimes we can insert a batch of
 	// canonicial blocks. Avoid firing too much ChainHeadEvents,
 	// we will fire an accumulated ChainHeadEvent and disable fire
 	// event here.
-	if emitHeadEvent {
+	if emitHeadEvent && !execute {
 		bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
 	}
 	return status, nil
@@ -1366,10 +1375,42 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 // InsertBodyChain attempts to insert the given batch of block into the
 // canonical chain, without executing those blocks
 func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (int, error) {
-	log.Info("Inserting body chain",
-		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
-		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
-	return len(chain), nil
+	// Sanity check that we have something meaningful to import
+	if len(chain) == 0 {
+		return 0, nil
+	}
+
+	// Remove already known canon-blocks
+	var (
+		block, prev *types.Block
+	)
+	// Do a sanity check that the provided chain is actually ordered and linked
+	for i := 1; i < len(chain); i++ {
+		block = chain[i]
+		prev = chain[i-1]
+		if block.NumberU64() != prev.NumberU64()+1 || block.ParentHash() != prev.Hash() {
+			// Chain broke ancestry, log a message (programming error) and skip insertion
+			log.Error("Non contiguous block insert", "number", block.Number(), "hash", block.Hash(),
+				"parent", block.ParentHash(), "prevnumber", prev.Number(), "prevhash", prev.Hash())
+
+			return 0, fmt.Errorf("non contiguous insert: item %d is #%d [%x…], item %d is #%d [%x…] (parent [%x…])", i-1, prev.NumberU64(),
+				prev.Hash().Bytes()[:4], i, block.NumberU64(), block.Hash().Bytes()[:4], block.ParentHash().Bytes()[:4])
+		}
+	}
+	// Only insert if the difficulty of the inserted chain is bigger than existing chain
+	// Pre-checks passed, start the full block imports
+	if err := bc.addJob(); err != nil {
+		return 0, err
+	}
+	ctx = bc.WithContext(ctx, chain[0].Number())
+	bc.chainmu.Lock()
+	defer func() {
+		bc.chainmu.Unlock()
+		bc.doneJob()
+	}()
+	n, err := bc.insertChain(ctx, chain, false, false /* execute */)
+
+	return n, err
 }
 
 // InsertChain attempts to insert the given batch of blocks in to the canonical
@@ -1415,7 +1456,7 @@ func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int,
 		bc.chainmu.Unlock()
 		bc.doneJob()
 	}()
-	n, err := bc.insertChain(ctx, chain, true)
+	n, err := bc.insertChain(ctx, chain, true, true /* execute */)
 
 	return n, err
 }
@@ -1428,7 +1469,7 @@ func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int,
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
+func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool, execute bool) (int, error) {
 	log.Info("Inserting chain",
 		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
 		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
@@ -1461,8 +1502,12 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		headers[i] = block.Header()
 		seals[i] = verifySeals
 	}
-	abort, results := bc.engine.VerifyHeaders(bc, headers, seals)
-	defer close(abort)
+	var abort chan<- struct{}
+	var results <-chan error
+	if execute {
+		abort, results = bc.engine.VerifyHeaders(bc, headers, seals)
+		defer close(abort)
+	}
 
 	externTd := big.NewInt(0)
 	if len(chain) > 0 && chain[0].NumberU64() > 0 {
@@ -1477,16 +1522,17 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	var verifyFrom int
 	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 		header := chain[verifyFrom].Header()
-
-		err := <-results
-		if err != nil {
-			bc.reportBlock(chain[verifyFrom], nil, err)
-			return 0, err
+		if execute {
+			err := <-results
+			if err != nil {
+				bc.reportBlock(chain[verifyFrom], nil, err)
+				return 0, err
+			}
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
 	}
 
-	if localTd.Cmp(externTd) >= 0 {
+	if execute && localTd.Cmp(externTd) >= 0 {
 		log.Warn("Ignoring the chain segment because of insufficient difficulty",
 			"external", externTd,
 			"local", localTd,
@@ -1543,12 +1589,15 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
+	var k int
+	var committedK int
 	// Iterate over the blocks and insert when the verifier permits
 	for i, block := range chain {
 		start := time.Now()
-		k := 0
 		if i >= offset {
 			k = i - offset
+		} else {
+			k = 0
 		}
 
 		// If the chain is terminating, stop processing blocks
@@ -1560,12 +1609,12 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		// If the header is a banned one, straight out abort
 		if BadHashes[block.Hash()] {
 			bc.reportBlock(block, nil, ErrBlacklistedHash)
-			return k, ErrBlacklistedHash
+			return committedK, ErrBlacklistedHash
 		}
 
 		// Wait for the block's verification to complete
 		var err error
-		if i >= offset && k >= verifyFrom {
+		if i >= offset && k >= verifyFrom && execute {
 			err = <-results
 		}
 		if err == nil {
@@ -1588,7 +1637,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			// the chain is discarded and processed at a later time if given.
 			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
 			if block.Time() > max.Uint64() {
-				return k, fmt.Errorf("future block: %v > %v", block.Time(), max)
+				return committedK, fmt.Errorf("future block: %v > %v", block.Time(), max)
 			}
 			bc.futureBlocks.Add(block.Hash(), block)
 			stats.queued++
@@ -1606,7 +1655,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		case err != nil:
 			bc.reportBlock(block, nil, err)
-			return i, err
+			return committedK, err
 		}
 		// Create a new statedb using the parent block and report an
 		// error if it fails.
@@ -1615,13 +1664,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		readBlockNr := parentNumber
 		var root common.Hash
-		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
+		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly && !execute {
 			if _, err = bc.GetTrieDbState(); err != nil {
-				return k, err
+				return committedK, err
 			}
 		}
 
-		if !bc.cacheConfig.DownloadOnly {
+		if !bc.cacheConfig.DownloadOnly && !execute {
 			root = bc.trieDbState.LastRoot()
 		}
 
@@ -1630,7 +1679,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			parentRoot = parent.Root()
 		}
 
-		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
+		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly && !execute {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr,
 				"root", root.String(), "parentRoot", parentRoot.String())
 
@@ -1641,7 +1690,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				}
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				return 0, err
+				return committedK, err
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
 
@@ -1649,7 +1698,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
 				bc.setTrieDbState(nil)
-				return 0, err
+				return committedK, err
 			}
 
 			root := bc.trieDbState.LastRoot()
@@ -1657,13 +1706,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				return 0, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
+				return committedK, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err = bc.reorg(currentBlock, parent); err != nil {
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				return 0, err
+				return committedK, err
 			}
 
 			if _, err = bc.db.Commit(); err != nil {
@@ -1673,8 +1722,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				if bc.committedBlock.Load() != nil {
 					bc.currentBlock.Store(bc.committedBlock.Load())
 				}
-				return 0, err
+				return committedK, err
 			}
+			committedK = k + 1
 			bc.committedBlock.Store(bc.currentBlock.Load())
 		}
 
@@ -1682,46 +1732,46 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var receipts types.Receipts
 		var usedGas uint64
 		var logs []*types.Log
-		if !bc.cacheConfig.DownloadOnly {
+		if !bc.cacheConfig.DownloadOnly && !execute {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
 			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
 			reuseTrieDbState := true
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+				return committedK, err
 			}
 
 			err = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+				return committedK, err
 			}
 
 			reuseTrieDbState = false
 			err = bc.processor.PostProcess(block, bc.trieDbState, receipts)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+				return committedK, err
 			}
 
 			err = bc.Validator().ValidateReceipts(block, receipts)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+				return committedK, err
 			}
 		}
 		proctime := time.Since(start)
 
 		// Write the block to the chain and get the status.
-		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false)
+		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false ,execute)
 		if err != nil {
 			bc.db.Rollback()
 			bc.setTrieDbState(nil)
 			if bc.committedBlock.Load() != nil {
 				bc.currentBlock.Store(bc.committedBlock.Load())
 			}
-			return k, err
+			return committedK, err
 		}
 
 		switch status {
@@ -1763,9 +1813,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				if bc.committedBlock.Load() != nil {
 					bc.currentBlock.Store(bc.committedBlock.Load())
 				}
-				return 0, err
+				return committedK, err
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
+			committedK = k + 1
 			if bc.trieDbState != nil {
 				bc.trieDbState.EvictTries(false)
 			}
@@ -1773,7 +1824,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 	}
 
-	return 0, nil
+	return committedK, nil
 }
 
 // statsReportLimit is the time limit during import and export after which we

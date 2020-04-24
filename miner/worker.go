@@ -626,7 +626,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 		}
 
 		// Commit block and state to database.
-		_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
+		_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true, true /* execute */)
 		if err != nil {
 			log.Error("Failed writing block with state", "err", err)
 			return
