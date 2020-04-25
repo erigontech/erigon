@@ -1289,7 +1289,7 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 
 		gethAcc, gethOk := geth[addr]
 		if !gethOk {
-			fmt.Println("missing account in Geth %x\n", addr)
+			fmt.Printf("missing account in Geth %x\n", addr)
 			return false
 		}
 		different := false
