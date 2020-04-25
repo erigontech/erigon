@@ -562,6 +562,57 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, reso
 	return nil
 }
 
+type sortable [][]byte
+
+func (s sortable) Len() int {
+	return len(s)
+}
+func (s sortable) Less(i, j int) bool {
+	return bytes.Compare(s[i], s[j]) < 0
+}
+func (s sortable) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, resolveFunc trie.ResolveFunc) error {
+	var firstRequest = true
+	touches := make([][]byte, 0, len(accountTouches)+len(storageTouches))
+	for _, addrHash := range accountTouches {
+		touches = append(touches, addrHash[:])
+	}
+	for _, storageKey := range storageTouches {
+		touches = append(touches, storageKey[:])
+	}
+
+	sort.Sort(sortable(touches))
+
+	if tds.resolver == nil {
+		tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+		tds.resolver.SetHistorical(tds.historical)
+	}
+	tds.resolver.Reset(0, true, tds.blockNr)
+
+	for _, touch := range touches {
+		var need bool
+		var req *trie.ResolveRequest
+		if len(touch) <= 32 {
+			need, req = tds.t.NeedResolution(nil, touch)
+		} else {
+			need, req = tds.t.NeedResolution(touch[:common.HashLength], touch[:])
+		}
+
+		if need {
+			firstRequest = false
+			tds.resolver.AddRequest(req)
+		}
+	}
+
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
+	}
+	return nil
+}
+
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
 	for _, addrHash := range accountTouches {
 		a := addrHash
@@ -606,7 +657,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 
 	var err error
 
-	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
+	if err = tds.resolveAccountAndStorageTouches(accountTouches, storageTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -616,10 +667,6 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
-	}
-
-	if err = tds.resolveStorageTouches(storageTouches, resolveFunc); err != nil {
-		return err
 	}
 
 	if tds.resolveReads {

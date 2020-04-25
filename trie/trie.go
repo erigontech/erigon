@@ -496,6 +496,9 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], ^incarnation)
 			hexContractLen := 2 * len(contract) // Length of 'contract' prefix in HEX encoding
+			if pos-hexContractLen < 0 {
+				return true, t.NewResolveRequest(prefix, hex[hexContractLen:], 0, common.CopyBytes(n))
+			}
 			return true, t.NewResolveRequest(prefix, hex[hexContractLen:], pos-hexContractLen, common.CopyBytes(n))
 
 		default:
