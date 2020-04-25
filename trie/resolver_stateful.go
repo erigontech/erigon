@@ -54,6 +54,7 @@ type ResolverStateful struct {
 	valueStorage  bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groupsStorage []uint16
 	hbStorage     *HashBuilder
+	rssStorage    []*ResolveSet
 }
 
 func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
@@ -92,6 +93,7 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.hbStorage.Reset()
 	tr.groupsStorage = tr.groupsStorage[:0]
 	tr.wasIHStorage = false
+	tr.rssStorage = tr.rssStorage[:0]
 }
 
 func (tr *ResolverStateful) PopRoots() []node {
@@ -106,38 +108,61 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
 	tr.rss = tr.rss[:0]
+	tr.rssStorage = tr.rssStorage[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
+	contractAsNibbles := pool.GetBuffer(256)
+	defer pool.PutBuffer(contractAsNibbles)
+
 	var prevReq *ResolveRequest
 	for i, req := range tr.requests {
-		if prevReq == nil ||
-			!bytes.Equal(req.contract, prevReq.contract) ||
-			!bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
+		if prevReq != nil &&
+			bytes.Equal(req.contract, prevReq.contract) &&
+			bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
 
-			tr.reqIndices = append(tr.reqIndices, i)
-			pLen := len(req.contract)
-			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
-			copy(key[:], req.contract)
-			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
-			startkeys = append(startkeys, key)
-			req.extResolvePos = req.resolvePos + 2*pLen
-			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
-			prevReq = req
-			var minLength int
-			if req.resolvePos >= tr.topLevels {
-				minLength = 0
+			if req.contract == nil {
+				tr.rss[len(tr.rss)-1].AddHex(req.resolveHex[req.resolvePos:])
 			} else {
-				minLength = tr.topLevels - req.resolvePos
+				tr.rssStorage[len(tr.rssStorage)-1].AddHex(req.resolveHex[req.resolvePos:])
 			}
-			rs := NewResolveSet(minLength)
-			tr.rss = append(tr.rss, rs)
-			rs.AddHex(req.resolveHex[req.resolvePos:])
+			continue
+		}
+		if prevReq != nil && prevReq.contract == nil && req.contract != nil {
+			DecompressNibbles(req.contract[:common.HashLength], &contractAsNibbles.B)
+			prevHex := prevReq.resolveHex
+			if len(prevHex) == 65 {
+				prevHex = prevHex[:64]
+			}
+			if bytes.Equal(prevHex[:prevReq.resolvePos], contractAsNibbles.B[:prevReq.resolvePos]) {
+				tr.rssStorage[len(tr.rssStorage)-1].AddHex(req.resolveHex[req.resolvePos:])
+				continue
+			}
+		}
+		tr.reqIndices = append(tr.reqIndices, i)
+		pLen := len(req.contract)
+		key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
+		copy(key[:], req.contract)
+		decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
+		startkeys = append(startkeys, key)
+		req.extResolvePos = req.resolvePos + 2*pLen
+		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+		prevReq = req
+		var minLength int
+		if req.resolvePos >= tr.topLevels {
+			minLength = 0
 		} else {
-			rs := tr.rss[len(tr.rss)-1]
-			rs.AddHex(req.resolveHex[req.resolvePos:])
+			minLength = tr.topLevels - req.resolvePos
+		}
+		tr.rss = append(tr.rss, NewResolveSet(minLength))
+		tr.rssStorage = append(tr.rssStorage, NewResolveSet(0))
+		if req.contract == nil {
+			tr.rss[len(tr.rss)-1].AddHex(req.resolveHex[req.resolvePos:])
+		} else {
+			tr.rssStorage[len(tr.rssStorage)-1].AddHex(req.resolveHex[req.resolvePos:])
 		}
 	}
+
 	tr.currentReq = tr.requests[tr.reqIndices[0]]
 	tr.currentRs = tr.rss[0]
 	return startkeys, fixedbits
@@ -167,7 +192,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				tr.a.Root = EmptyRoot
 			}
 
-			fmt.Printf("Got: %x\n", tr.a.Root)
+			//fmt.Printf("Got: %x\n", tr.a.Root)
 
 			tr.hbStorage.Reset()
 			tr.groupsStorage = nil
@@ -211,6 +236,17 @@ func (tr *ResolverStateful) finaliseRoot() error {
 		if err != nil {
 			return err
 		}
+	} else {
+		err := tr.finaliseStorageRoot()
+		if err != nil {
+			return err
+		}
+		if tr.hbStorage.hasRoot() {
+			hbRoot := tr.hbStorage.root()
+			hbHash := tr.hbStorage.rootHash()
+			return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
+		}
+		return nil
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -261,6 +297,20 @@ func (tr *ResolverStateful) RebuildTrie(
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
+	fmt.Printf("startkeys: %x\n", startkeys)
+	fmt.Printf("fixedbits: %d\n", fixedbits)
+	if len(tr.rss) > 0 {
+		fmt.Printf("tr.rss[0].hexes: %x\n", tr.rss[0].hexes)
+	}
+	if len(tr.rssStorage) > 0 {
+		fmt.Printf("tr.rssStorage[0].hexes: %x\n", tr.rssStorage[0].hexes)
+	}
+
+	for _, req := range tr.requests {
+		fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+		fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+	}
+	fmt.Printf("----\n")
 	if db == nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "ResolveWithDb(db=nil), isAccount: %t\n", isAccount)
@@ -372,7 +422,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 				data = &tr.leafData
 			}
-			tr.groupsStorage, err = GenStructStep(tr.currentRs.HashOnly, tr.currStorage.Bytes(), tr.currStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
+			tr.groupsStorage, err = GenStructStep(tr.rssStorage[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
 			if err != nil {
 				return err
 			}
@@ -444,7 +494,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				} else {
 					tr.a.Root = EmptyRoot
 				}
-				fmt.Printf("Got: %x\n", tr.a.Root)
+				//fmt.Printf("Got: %x\n", tr.a.Root)
 
 				tr.hbStorage.Reset()
 				tr.groupsStorage = nil

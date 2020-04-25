@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -86,6 +87,32 @@ func min(a, b int) int {
 func (tr *Resolver) Less(i, j int) bool {
 	ci := tr.requests[i]
 	cj := tr.requests[j]
+	if ci.contract == nil && cj.contract != nil {
+		contractAsNibbles := pool.GetBuffer(256)
+		defer pool.PutBuffer(contractAsNibbles)
+		DecompressNibbles(cj.contract[:common.HashLength], &contractAsNibbles.B)
+		hex1 := ci.resolveHex
+		if len(hex1) == 65 {
+			hex1 = hex1[:64]
+		}
+		c := bytes.Compare(hex1[:ci.resolvePos], contractAsNibbles.B[:ci.resolvePos])
+		if c != 0 {
+			return c < 0
+		}
+	} else if ci.contract != nil && cj.contract == nil {
+		contractAsNibbles := pool.GetBuffer(256)
+		defer pool.PutBuffer(contractAsNibbles)
+		DecompressNibbles(ci.contract[:common.HashLength], &contractAsNibbles.B)
+		hex1 := cj.resolveHex
+		if len(hex1) == 65 {
+			hex1 = hex1[:64]
+		}
+		c := bytes.Compare(contractAsNibbles.B[:cj.resolvePos], hex1[:cj.resolvePos])
+		if c != 0 {
+			return c < 0
+		}
+	}
+
 	m := min(ci.resolvePos, cj.resolvePos)
 	c := bytes.Compare(ci.contract, cj.contract)
 	if c != 0 {
