@@ -304,31 +304,13 @@ func (ma *DebugModifiedAccounts) Print() {
 	}
 }
 
-func compareModifiedAccounts(ma, mag *DebugModifiedAccounts) (bool, map[common.Address]struct{}) {
+func extractAccountMap(ma *DebugModifiedAccounts) map[common.Address]struct{} {
 	r := ma.Result
-	rg := mag.Result
 	rset := make(map[common.Address]struct{})
-	rsetg := make(map[common.Address]struct{})
 	for _, a := range r {
 		rset[a] = struct{}{}
 	}
-	for _, a := range rg {
-		rsetg[a] = struct{}{}
-	}
-	for _, a := range r {
-		if _, ok := rsetg[a]; !ok {
-			fmt.Printf("%x not present in rg\n", a)
-			return false, nil
-		}
-	}
-	for _, a := range rg {
-		if _, ok := rset[a]; !ok {
-			fmt.Printf("%x not present in r\n", a)
-			// We tolerate that, because go-ethereum does not include contracts that were created and then self-destructed
-			// within the block range
-		}
-	}
-	return true, rset
+	return rset
 }
 
 func printStorageRange(sm map[common.Hash]storageEntry) {
@@ -684,7 +666,7 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 4900000
+	firstBn := 49000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -900,69 +882,50 @@ func bench1(needCompare bool, fullTest bool) {
 		if prevBn < bn && bn%100 == 0 {
 			// Checking modified accounts
 			reqGen.reqID++
-			var ma DebugModifiedAccounts
-			res = reqGen.Geth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &ma)
+			var mag DebugModifiedAccounts
+			res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not get modified accounts: %v\n", res.Err)
+				fmt.Printf("Could not get modified accounts g: %v\n", res.Err)
+				return
 			}
-			if ma.Error != nil {
-				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
+			if mag.Error != nil {
+				fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
+				return
 			}
-			if needCompare {
-				var mag DebugModifiedAccounts
-				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
-				resultsCh <- res
-				if res.Err != nil {
-					fmt.Printf("Could not get modified accounts g: %v\n", res.Err)
-					return
-				}
-				if mag.Error != nil {
-					fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
-					return
-				}
-				if res.Err == nil && ma.Error == nil {
-					ok, accountSet := compareModifiedAccounts(&ma, &mag)
-					if !ok {
-						fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
-						fmt.Printf("ma-------------------------\n")
-						ma.Print()
-						fmt.Printf("\nmag-------------------------\n")
-						mag.Print()
+			if res.Err == nil && mag.Error == nil {
+				accountSet := extractAccountMap(&mag)
+				for account := range accountSet {
+					reqGen.reqID++
+					var logs EthLogs
+					res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
+					resultsCh <- res
+					if res.Err != nil {
+						fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
 						return
 					}
-					reqGen.reqID++
-					for account := range accountSet {
-						var logs EthLogs
-						res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
-						resultsCh <- res
-						if res.Err != nil {
-							fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
-							return
-						}
-						if logs.Error != nil {
-							fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
-							return
-						}
-						var logsg EthLogs
-						res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
-						resultsCh <- res
-						if res.Err != nil {
-							fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
-							return
-						}
-						if logsg.Error != nil {
-							fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
-							return
-						}
-						if !compareLogs(&logs, &logsg) {
-							fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-							return
-						}
+					if logs.Error != nil {
+						fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
+						return
+					}
+					var logsg EthLogs
+					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
+					resultsCh <- res
+					if res.Err != nil {
+						fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
+						return
+					}
+					if logsg.Error != nil {
+						fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
+						return
+					}
+					if !compareLogs(&logs, &logsg) {
+						fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
+						return
 					}
 				}
-				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
+			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 
 			page := common.Hash{}.Bytes()
 			pageGeth := common.Hash{}.Bytes()
@@ -1283,31 +1246,31 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	for addr := range allAddresses {
 		tgAcc, tgOk := tg[addr]
 		if !tgOk {
-			fmt.Println("missing account in TurboGeth", addr.Hex())
+			fmt.Printf("missing account in TurboGeth %x\n", addr)
 			return false
 		}
 
 		gethAcc, gethOk := geth[addr]
 		if !gethOk {
-			fmt.Println("missing account in Geth", addr.Hex())
+			fmt.Printf("missing account in Geth %x\n", addr)
 			return false
 		}
 		different := false
 		if tgAcc.Balance != gethAcc.Balance {
-			fmt.Printf("Different balance for %x: turbo %s, geth %s", addr, tgAcc.Balance, gethAcc.Balance)
+			fmt.Printf("Different balance for %x: turbo %s, geth %s\n", addr, tgAcc.Balance, gethAcc.Balance)
 			different = true
 		}
 		if tgAcc.Nonce != gethAcc.Nonce {
-			fmt.Printf("Different nonce for %x: turbo %d, geth %d", addr, tgAcc.Nonce, gethAcc.Nonce)
+			fmt.Printf("Different nonce for %x: turbo %d, geth %d\n", addr, tgAcc.Nonce, gethAcc.Nonce)
 			different = true
 		}
 		// We do not compare Root, because Turbo-geth does not compute it
 		if tgAcc.CodeHash != gethAcc.CodeHash {
-			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.CodeHash, gethAcc.CodeHash)
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.CodeHash, gethAcc.CodeHash)
 			different = true
 		}
 		if tgAcc.Code != gethAcc.Code {
-			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.Code, gethAcc.Code)
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.Code, gethAcc.Code)
 			different = true
 		}
 		if different {

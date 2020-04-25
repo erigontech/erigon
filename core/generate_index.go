@@ -51,7 +51,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 
 			if len(indexBytes) == 0 {
 				index = dbutils.NewHistoryIndex()
-			} else if dbutils.CheckNewIndexChunk(indexBytes) {
+			} else if dbutils.CheckNewIndexChunk(indexBytes, blockNum) {
 				index = dbutils.NewHistoryIndex()
 			} else {
 				index = dbutils.WrapHistoryIndex(indexBytes)
@@ -64,12 +64,12 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		}
 
 		lastIndex := indexes[len(indexes)-1]
-		if dbutils.CheckNewIndexChunk(lastIndex.Val) {
+		if dbutils.CheckNewIndexChunk(lastIndex.Val, blockNum) {
 			lastIndex.Val = dbutils.NewHistoryIndex()
 			indexes = append(indexes, lastIndex)
 			ig.cache[string(k)] = indexes
 		}
-		lastIndex.Val = lastIndex.Val.Append(blockNum)
+		lastIndex.Val = lastIndex.Val.Append(blockNum, len(v) == 0)
 		return nil
 	}
 }

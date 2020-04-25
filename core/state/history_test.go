@@ -66,7 +66,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 
 	index := dbutils.WrapHistoryIndex(indexBytes)
 
-	parsed, innerErr := index.Decode()
+	parsed, _, innerErr := index.Decode()
 	if innerErr != nil {
 		t.Fatal(innerErr)
 	}
@@ -128,7 +128,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		index := dbutils.WrapHistoryIndex(indexBytes)
-		parsedIndex, err := index.Decode()
+		parsedIndex, _, err := index.Decode()
 		if err != nil {
 			t.Fatal("error on get account", i, err)
 		}
