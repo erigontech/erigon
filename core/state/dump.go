@@ -140,10 +140,6 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		if len(k) > 32 {
 			return true, nil
 		}
-		if bytes.Equal(k, common.FromHex("0x5380c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312a")) {
-			// It is hash of zero address, we skip it to be compatible bug-for-bug with go-ethereum
-			return true, nil
-		}
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
