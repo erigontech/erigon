@@ -4,137 +4,115 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
 	"strconv"
-
-	"github.com/ledgerwatch/turbo-geth/common/math"
 )
 
 const (
-	LenBytes     = 4
-	ItemLen      = 8
+	ItemLen      = 3
 	MaxChunkSize = 1000
 )
 
 func NewHistoryIndex() HistoryIndexBytes {
-	return make(HistoryIndexBytes, LenBytes*2, 16)
+	return make(HistoryIndexBytes, 8)
 }
 
 func WrapHistoryIndex(b []byte) HistoryIndexBytes {
 	index := HistoryIndexBytes(b)
 	if len(index) == 0 {
-		index = make(HistoryIndexBytes, LenBytes*2, 16)
+		index = make(HistoryIndexBytes, 8)
 	}
 	return index
 }
 
 type HistoryIndexBytes []byte
 
-func (hi HistoryIndexBytes) Decode() ([]uint64, error) {
-	if hi == nil {
-		return []uint64{}, nil
+// decode is used for debugging and in tests
+func (hi HistoryIndexBytes) Decode() ([]uint64, []bool, error) {
+	if len(hi) < 8 {
+		return nil, nil, fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi))
 	}
-	if len(hi) <= LenBytes*2 {
-		return []uint64{}, nil
+	if (len(hi)-8)%ItemLen != 0 {
+		return nil, nil, fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(hi))
 	}
-
-	numOfElements := binary.LittleEndian.Uint32(hi[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes])
-	decoded := make([]uint64, numOfElements)
-
-	for i := uint32(0); i < numOfElements; i++ {
-		if i < numOfUint32Elements {
-			decoded[i] = uint64(binary.LittleEndian.Uint32(hi[LenBytes*2+i*4 : LenBytes*2+i*4+4]))
-		} else {
-			decoded[i] = binary.LittleEndian.Uint64(hi[LenBytes*2+numOfUint32Elements*4+i*ItemLen : LenBytes*2+i*ItemLen+ItemLen])
-		}
+	numElements := (len(hi) - 8) / 3
+	minElement := binary.BigEndian.Uint64(hi[:8])
+	numbers := make([]uint64, 0, numElements)
+	sets := make([]bool, 0, numElements)
+	for i := 8; i < len(hi); i += 3 {
+		numbers = append(numbers, minElement+(uint64(hi[i]&0x7f)<<16)+(uint64(hi[i+1])<<8)+uint64(hi[i+2]))
+		sets = append(sets, hi[i]&0x80 != 0)
 	}
-	return decoded, nil
+	return numbers, sets, nil
 }
 
-func (hi HistoryIndexBytes) Append(v uint64) HistoryIndexBytes {
-	numOfElements := binary.LittleEndian.Uint32(hi[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes])
-	var b []byte
-	if v < math.MaxUint32 {
-		b = make([]byte, 4)
-		numOfUint32Elements++
-		binary.LittleEndian.PutUint32(b, uint32(v))
-	} else {
-		b = make([]byte, ItemLen)
-		binary.LittleEndian.PutUint64(b, v)
+func (hi HistoryIndexBytes) Append(v uint64, s bool) HistoryIndexBytes {
+	if len(hi) < 8 {
+		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))
 	}
-
-	hi = append(hi, b...)
-	binary.LittleEndian.PutUint32(hi[0:LenBytes], numOfElements+1)
-	binary.LittleEndian.PutUint32(hi[LenBytes:2*LenBytes], numOfUint32Elements)
+	if (len(hi)-8)%ItemLen != 0 {
+		panic(fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(hi)))
+	}
+	numElements := (len(hi) - 8) / 3
+	var minElement uint64
+	if numElements == 0 {
+		minElement = v
+		binary.BigEndian.PutUint64(hi[:], minElement)
+	} else {
+		minElement = binary.BigEndian.Uint64(hi[:8])
+	}
+	if v > minElement + 0x7fffff { // Maximum number representable in 23 bits
+		panic(fmt.Errorf("item %d cannot be placed into the chunk with minElement %d", v, minElement))
+	}
+	v -= minElement
+	if s {
+		hi = append(hi, 0x80|byte(v>>16))
+	} else {
+		hi = append(hi, byte(v>>16))
+	}
+	hi = append(hi, byte(v>>8))
+	hi = append(hi, byte(v))
 	return hi
 }
 
-func (hi HistoryIndexBytes) Len() uint32 {
-	return binary.LittleEndian.Uint32(hi[:LenBytes])
+func (hi HistoryIndexBytes) Len() int {
+	if len(hi) < 8 {
+		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))
+	}
+	if (len(hi)-8)%ItemLen != 0 {
+		panic(fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(hi)))
+	}
+	return (len(hi) - 8) / 3
 }
 
 //most common operation is remove one from the tail
 func (hi HistoryIndexBytes) Remove(v uint64) HistoryIndexBytes {
-	numOfElements := binary.LittleEndian.Uint32(hi[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes])
-
-	var currentElement uint64
-	var elemEnd uint32
-	var itemLen uint32
-
-Loop:
-	for i := numOfElements; i > 0; i-- {
-		if i > numOfUint32Elements {
-			elemEnd = LenBytes*2 + numOfUint32Elements*4 + (i-numOfUint32Elements)*8
-			currentElement = binary.LittleEndian.Uint64(hi[elemEnd-8 : elemEnd])
-			itemLen = 8
-		} else {
-			elemEnd = LenBytes*2 + i*4
-			currentElement = uint64(binary.LittleEndian.Uint32(hi[elemEnd-4 : elemEnd]))
-			itemLen = 4
-		}
-
-		switch {
-		case currentElement == v:
-			hi = append(hi[:elemEnd-itemLen], hi[elemEnd:]...)
-			numOfElements--
-			if itemLen == 4 {
-				numOfUint32Elements--
-			}
-		case currentElement < v:
-			break Loop
-		default:
-			continue
-		}
-	}
-	binary.LittleEndian.PutUint32(hi[0:LenBytes], numOfElements)
-	binary.LittleEndian.PutUint32(hi[LenBytes:2*LenBytes], numOfUint32Elements)
-	return hi
+	panic("not implemented")
 }
 
-func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
-	if len(hi) == 0 {
-		return 0, false
+func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool, bool) {
+	if len(hi) < 8 {
+		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))
 	}
-	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
-	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
-	elements := hi[LenBytes*2:]
-	idx := sort.Search(numOfElements, func(i int) bool {
-		if i > numOfUint32Elements {
-			return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4+(i-numOfUint32Elements)*8:]) >= v
-		}
-		return uint64(binary.LittleEndian.Uint32(elements[i*4:])) >= v
-	})
-	if idx == numOfElements {
-		return 0, false
+	if (len(hi)-8)%ItemLen != 0 {
+		panic(fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(hi)))
 	}
-	if idx > numOfUint32Elements {
-		return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4+(idx-numOfUint32Elements)*8:]), true
+	numElements := (len(hi) - 8) / 3
+	minElement := binary.BigEndian.Uint64(hi[:8])
+	elements := hi[8:]
+	idx := sort.Search(numElements, func(i int) bool {
+		return v <= minElement + (uint64(elements[i*ItemLen]&0x7f) << 16) + (uint64(elements[i*ItemLen+1]) << 8) + uint64(elements[i*ItemLen+2])
+	}) * ItemLen
+	if idx == len(elements) {
+		return 0, false, false
 	}
-	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
+	return minElement +
+			(uint64(elements[idx]&0x7f) << 16) +
+			(uint64(elements[idx+1]) << 8) +
+			uint64(elements[idx+2]),
+		(elements[idx] & 0x80) != 0, true
 }
 
 func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
@@ -146,19 +124,19 @@ func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
 }
 
 func (hi HistoryIndexBytes) LastElement() (uint64, bool) {
-	if len(hi) < LenBytes*2+4 {
+	if len(hi) < 8 {
+		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))
+	}
+	if (len(hi)-8)%ItemLen != 0 {
+		panic(fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(hi)))
+	}
+	numElements := (len(hi) - 8) / 3
+	if numElements == 0 {
 		return 0, false
 	}
-	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
-	if numOfElements == 0 {
-		return 0, false
-	}
-
-	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
-	if numOfUint32Elements < numOfElements {
-		return binary.LittleEndian.Uint64(hi[len(hi)-8:]), true
-	}
-	return uint64(binary.LittleEndian.Uint32(hi[len(hi)-4:])), true
+	minElement := binary.BigEndian.Uint64(hi[:8])
+	idx := 8 + ItemLen*(numElements-1)
+	return minElement + (uint64(hi[idx]&0x7f) << 16) + (uint64(hi[idx+1]) << 8) + uint64(hi[idx+2]), true
 }
 
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
@@ -185,6 +163,17 @@ func IsIndexBucket(b []byte) bool {
 	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
 }
 
-func CheckNewIndexChunk(b []byte) bool {
-	return len(b)+8 > MaxChunkSize
+func CheckNewIndexChunk(b []byte, v uint64) bool {
+	if len(b) < 8 {
+		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(b)))
+	}
+	if (len(b)-8)%ItemLen != 0 {
+		panic(fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(b)))
+	}
+	numElements := (len(b) - 8) / 3
+	if numElements == 0 {
+		return false
+	}
+	minElement := binary.BigEndian.Uint64(b[:8])
+	return (numElements >= MaxChunkSize) || (v > minElement + 0x7fffff)
 }

@@ -29,7 +29,6 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -913,7 +912,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			return err
 		}
 	}
-
+	//TODO: Truncate history indices if required
 	tds.clearUpdates()
 	tds.setBlockNr(blockNr)
 	return nil
@@ -929,68 +928,16 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	if err != nil && err != ethdb.ErrKeyNotFound {
 		return err
 	}
-
 	if len(changedAccounts) > 0 {
-		innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
-			indexBytes, getErr := tds.db.GetIndexChunk(dbutils.AccountsHistoryBucket, kk, timestamp)
-			if getErr != nil {
-				if getErr == ethdb.ErrKeyNotFound {
-					return nil
-				}
-				return getErr
-			}
-
-			index := dbutils.WrapHistoryIndex(indexBytes)
-			chunkKey, err := index.Key(kk)
-			if err != nil {
-				return err
-			}
-			index = index.Remove(timestamp)
-
-			if index.Len() == 0 {
-				return tds.db.Delete(dbutils.AccountsHistoryBucket, chunkKey)
-			}
-			return tds.db.Put(dbutils.AccountsHistoryBucket, chunkKey, index)
-		})
-		if innerErr != nil {
-			return innerErr
-		}
 		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
 			return err
 		}
 	}
-
 	if len(changedStorage) > 0 {
-		innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
-			indexBytes, getErr := tds.db.GetIndexChunk(dbutils.StorageHistoryBucket, kk, timestamp)
-			if getErr != nil {
-				if getErr == ethdb.ErrKeyNotFound {
-					return nil
-				}
-				return getErr
-			}
-
-			index := dbutils.WrapHistoryIndex(indexBytes)
-			chunkKey, err := index.Key(kk)
-			if err != nil {
-				return err
-			}
-
-			index = index.Remove(timestamp)
-
-			if index.Len() == 0 {
-				return tds.db.Delete(dbutils.StorageHistoryBucket, chunkKey)
-			}
-			return tds.db.Put(dbutils.StorageHistoryBucket, chunkKey, index)
-		})
-		if innerErr != nil {
-			return innerErr
-		}
 		if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -1228,33 +1175,18 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
-	if tds.historical {
-		// We reserve ethdb.MaxTimestampLength (8) at the end of the key to accomodate any possible timestamp
-		// (timestamp's encoding may have variable length)
-		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength+ethdb.MaxTimestampLength)
-		var fixedbits uint = 8 * common.HashLength
-		copy(startkey, addrHash[:])
-		if err := tds.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
-			copy(incarnationBytes[:], k[common.HashLength:])
-			found = true
-			return false, nil
-		}); err != nil {
-			return 0, err
-		}
-	} else {
-		if inc, ok := tds.incarnationMap[addrHash]; ok {
-			return inc + 1, nil
-		}
-		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-		var fixedbits uint = 8 * common.HashLength
-		copy(startkey, addrHash[:])
-		if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
-			copy(incarnationBytes[:], k[common.HashLength:])
-			found = true
-			return false, nil
-		}); err != nil {
-			return 0, err
-		}
+	if inc, ok := tds.incarnationMap[addrHash]; ok {
+		return inc + 1, nil
+	}
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	}); err != nil {
+		return 0, err
 	}
 	if found {
 		return (^binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil

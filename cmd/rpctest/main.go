@@ -684,7 +684,7 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 4900000
+	firstBn := 49000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -1283,31 +1283,31 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	for addr := range allAddresses {
 		tgAcc, tgOk := tg[addr]
 		if !tgOk {
-			fmt.Println("missing account in TurboGeth", addr.Hex())
+			fmt.Printf("missing account in TurboGeth %x\n", addr)
 			return false
 		}
 
 		gethAcc, gethOk := geth[addr]
 		if !gethOk {
-			fmt.Println("missing account in Geth", addr.Hex())
+			fmt.Println("missing account in Geth %x\n", addr)
 			return false
 		}
 		different := false
 		if tgAcc.Balance != gethAcc.Balance {
-			fmt.Printf("Different balance for %x: turbo %s, geth %s", addr, tgAcc.Balance, gethAcc.Balance)
+			fmt.Printf("Different balance for %x: turbo %s, geth %s\n", addr, tgAcc.Balance, gethAcc.Balance)
 			different = true
 		}
 		if tgAcc.Nonce != gethAcc.Nonce {
-			fmt.Printf("Different nonce for %x: turbo %d, geth %d", addr, tgAcc.Nonce, gethAcc.Nonce)
+			fmt.Printf("Different nonce for %x: turbo %d, geth %d\n", addr, tgAcc.Nonce, gethAcc.Nonce)
 			different = true
 		}
 		// We do not compare Root, because Turbo-geth does not compute it
 		if tgAcc.CodeHash != gethAcc.CodeHash {
-			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.CodeHash, gethAcc.CodeHash)
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.CodeHash, gethAcc.CodeHash)
 			different = true
 		}
 		if tgAcc.Code != gethAcc.Code {
-			fmt.Printf("Different codehash for %x: turbo %s, geth %s", addr, tgAcc.Code, gethAcc.Code)
+			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.Code, gethAcc.Code)
 			different = true
 		}
 		if different {

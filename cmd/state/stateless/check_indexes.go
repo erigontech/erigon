@@ -45,7 +45,7 @@ func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) er
 			}
 
 			index := dbutils.WrapHistoryIndex(indexBytes)
-			if findVal, ok := index.Search(blockNum); !ok {
+			if findVal, _, ok := index.Search(blockNum); !ok {
 				return fmt.Errorf("%v,%v,%v", blockNum, findVal, common.Bytes2Hex(key))
 			}
 			return nil

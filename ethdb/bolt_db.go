@@ -407,23 +407,27 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 				goOn, err = walker(k, v)
 			} else {
 				index := dbutils.WrapHistoryIndex(hV)
-				if changeSetBlock, ok := index.Search(timestamp); ok {
-					// Extract value from the changeSet
-					csKey := dbutils.EncodeTimestamp(changeSetBlock)
-					changeSetData, _ := csB.Get(csKey)
-					if changeSetData == nil {
-						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
-					}
-					data, err1 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
-					if err1 != nil {
-						return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)",
-							hK,
-							changeSetBlock,
-							timestamp,
-						)
-					}
-					if len(data) > 0 { // Skip accounts did not exist
-						goOn, err = walker(hK, data)
+				if changeSetBlock, set, ok := index.Search(timestamp); ok {
+					// set == true if this change was from empty record (non-existent account) to non-empty
+					// In such case, we do not need to examine changeSet and simply skip the record
+					if !set {
+						// Extract value from the changeSet
+						csKey := dbutils.EncodeTimestamp(changeSetBlock)
+						changeSetData, _ := csB.Get(csKey)
+						if changeSetData == nil {
+							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
+						}
+						data, err1 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
+						if err1 != nil {
+							return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)",
+								hK,
+								changeSetBlock,
+								timestamp,
+							)
+						}
+						if len(data) > 0 { // Skip accounts did not exist
+							goOn, err = walker(hK, data)
+						}
 					}
 				} else if cmp == 0 {
 					goOn, err = walker(k, v)
@@ -568,24 +572,28 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 				goOn, err = walker(addrHash, keyHash, v)
 			} else {
 				index := dbutils.WrapHistoryIndex(hV)
-				if changeSetBlock, ok := index.Search(timestamp); ok {
-					// Extract value from the changeSet
-					csKey := dbutils.EncodeTimestamp(changeSetBlock)
-					changeSetData, _ := csB.Get(csKey)
-					if changeSetData == nil {
-						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
-					}
-					data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
-					if err1 != nil {
-						return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
-							hAddrHash, hKeyHash,
-							changeSetBlock,
-							timestamp,
-							err1,
-						)
-					}
-					if len(data) > 0 { // Skip deleted entries
-						goOn, err = walker(hAddrHash, hKeyHash, data)
+				if changeSetBlock, set, ok := index.Search(timestamp); ok {
+					// set == true if this change was from empty record (non-existent storage item) to non-empty
+					// In such case, we do not need to examine changeSet and simply skip the record
+					if !set {
+						// Extract value from the changeSet
+						csKey := dbutils.EncodeTimestamp(changeSetBlock)
+						changeSetData, _ := csB.Get(csKey)
+						if changeSetData == nil {
+							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
+						}
+						data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
+						if err1 != nil {
+							return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
+								hAddrHash, hKeyHash,
+								changeSetBlock,
+								timestamp,
+								err1,
+							)
+						}
+						if len(data) > 0 { // Skip deleted entries
+							goOn, err = walker(hAddrHash, hKeyHash, data)
+						}
 					}
 				} else if cmp == 0 {
 					goOn, err = walker(addrHash, keyHash, v)
@@ -745,11 +753,15 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	}
 	index := dbutils.WrapHistoryIndex(v)
 
-	changeSetBlock, ok := index.Search(timestamp)
+	changeSetBlock, set, ok := index.Search(timestamp)
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
-
+	// set == true if this change was from empty record (non-existent account) to non-empty
+	// In such case, we do not need to examine changeSet and return empty data
+	if set {
+		return []byte{}, nil
+	}
 	csB := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
 	if csB == nil {
 		return nil, ErrKeyNotFound
