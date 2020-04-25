@@ -14,9 +14,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
+func NewDbStateWriter(db ethdb.Database, blockNr uint64) StateWriter {
+	return &DbStateWriter{
+		db:      db,
+		blockNr: blockNr,
+		pw:      &PreimageWriter{db: db, savePreimages: true},
+		csw:     NewChangeSetWriter(),
+	}
+}
+
 type DbStateWriter struct {
-	tds *TrieDbState
-	csw *ChangeSetWriter
+	db      ethdb.Database
+	pw      *PreimageWriter
+	blockNr uint64
+	csw     *ChangeSetWriter
 }
 
 func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
@@ -42,11 +53,11 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err := dsw.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
-	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
+	addrHash, err := dsw.pw.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
-	if err := rawdb.WriteAccount(dsw.tds.db, addrHash, *account); err != nil {
+	if err := rawdb.WriteAccount(dsw.db, addrHash, *account); err != nil {
 		return err
 	}
 	return nil
@@ -56,11 +67,11 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.csw.DeleteAccount(ctx, address, original); err != nil {
 		return err
 	}
-	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
+	addrHash, err := dsw.pw.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
-	if err := rawdb.DeleteAccount(dsw.tds.db, addrHash); err != nil {
+	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
 		return err
 	}
 	return nil
@@ -71,11 +82,11 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 		return err
 	}
 	//save contract code mapping
-	if err := dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+	if err := dsw.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
 	//save contract to codeHash mapping
-	return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:])
+	return dsw.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:])
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -86,7 +97,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if *original == *value {
 		return nil
 	}
-	seckey, err := dsw.tds.HashKey(key, true /*save*/)
+	seckey, err := dsw.pw.HashKey(key, true /*save*/)
 	if err != nil {
 		return err
 	}
@@ -94,16 +105,16 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	vv := make([]byte, len(v))
 	copy(vv, v)
 
-	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := dsw.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
-		return dsw.tds.db.Delete(dbutils.CurrentStateBucket, compositeKey)
+		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return dsw.tds.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
+		return dsw.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }
 
@@ -126,8 +137,8 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	key := dbutils.EncodeTimestamp(dsw.tds.blockNr)
-	if err = dsw.tds.db.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
+	key := dbutils.EncodeTimestamp(dsw.blockNr)
+	if err = dsw.db.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
 	storageChanges, err := dsw.csw.GetStorageChanges()
@@ -140,7 +151,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		if err != nil {
 			return err
 		}
-		if err = dsw.tds.db.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
+		if err = dsw.db.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
 			return err
 		}
 	}
@@ -172,7 +183,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
 	for _, change := range changes.Changes {
 		currentChunkKey := dbutils.IndexChunkKey(change.Key, ^uint64(0))
-		indexBytes, err := dsw.tds.db.Get(bucket, currentChunkKey)
+		indexBytes, err := dsw.db.Get(bucket, currentChunkKey)
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
@@ -189,7 +200,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 				return err
 			}
 			// Flush the old chunk
-			if err := dsw.tds.db.Put(bucket, indexKey, index); err != nil {
+			if err := dsw.db.Put(bucket, indexKey, index); err != nil {
 				return err
 			}
 			// Start a new chunk
@@ -206,7 +217,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		//	fmt.Printf("After append %x\n", index)
 		//}
 
-		if err := dsw.tds.db.Put(bucket, currentChunkKey, index); err != nil {
+		if err := dsw.db.Put(bucket, currentChunkKey, index); err != nil {
 			return err
 		}
 	}

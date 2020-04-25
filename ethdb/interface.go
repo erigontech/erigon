@@ -61,6 +61,11 @@ type Getter interface {
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
 }
 
+type GetterPutter interface {
+	Getter
+	Putter
+}
+
 // Deleter wraps the database delete operations.
 type Deleter interface {
 	// Delete removes a single entry.

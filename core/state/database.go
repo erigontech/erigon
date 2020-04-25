@@ -92,9 +92,9 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // Structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
-	codeReads      map[common.Hash]common.Hash
-	codeSizeReads  map[common.Hash]common.Hash
-	codeUpdates    map[common.Hash][]byte
+	codeReads     map[common.Hash]common.Hash
+	codeSizeReads map[common.Hash]common.Hash
+	codeUpdates   map[common.Hash][]byte
 	// storageUpdates structure collects the effects of the block (or transaction) execution. It does not necessarily
 	// include all the intermediate reads and write that happened. For example, if the storage of some contract has
 	// been modified, and then the contract has subsequently self-destructed, this structure will not contain any
@@ -109,14 +109,14 @@ type Buffer struct {
 	// There is a potential for optimisation - we may actually skip all the intermediate modification of the trie if
 	// we know that in the end, the entire storage will be dropped. However, this optimisation has not yet been
 	// implemented.
-	storageReads   map[common.Hash]map[common.Hash]struct{}
+	storageReads map[common.Hash]map[common.Hash]struct{}
 	// accountUpdates structure collects the effects of the block (or transaxction) execution.
 	accountUpdates map[common.Hash]*accounts.Account
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
-	accountReads   map[common.Hash]struct{}
-	deleted        map[common.Hash]struct{}
-	created        map[common.Hash]struct{}
+	accountReads map[common.Hash]struct{}
+	deleted      map[common.Hash]struct{}
+	created      map[common.Hash]struct{}
 }
 
 // Prepares buffer for work or clears previous data
@@ -192,6 +192,7 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
+	PreimageWriter
 	t                 *trie.Trie
 	tMu               *sync.Mutex
 	db                ethdb.Database
@@ -202,7 +203,6 @@ type TrieDbState struct {
 	historical        bool
 	noHistory         bool
 	resolveReads      bool
-	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
 	tp                *trie.Eviction
 	newStream         trie.Stream
@@ -216,13 +216,13 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
+		PreimageWriter:    PreimageWriter{db: db, savePreimages: true},
 		t:                 t,
 		tMu:               new(sync.Mutex),
 		db:                db,
 		blockNr:           blockNr,
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
-		savePreimages:     true,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
@@ -236,7 +236,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
-	tds.savePreimages = ep
+	tds.PreimageWriter.SetSavePreimages(ep)
 }
 
 func (tds *TrieDbState) SetHistorical(h bool) {
@@ -309,6 +309,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 
 	tds.tMu.Lock()
 	t := &TrieDbState{
+		PreimageWriter:    tds.PreimageWriter,
 		t:                 tds.t,
 		tMu:               tds.tMu,
 		db:                tds.db,
@@ -1000,34 +1001,6 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	return tds.readAccountDataByHash(addrHash)
 }
 
-func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
-	if !save || !tds.savePreimages {
-		return nil
-	}
-	// Following check is to minimise the overwriting the same value of preimage
-	// in the database, which would cause extra write churn
-	if p, _ := tds.db.Get(dbutils.PreimagePrefix, hash); p != nil {
-		return nil
-	}
-	return tds.db.Put(dbutils.PreimagePrefix, hash, preimage)
-}
-
-func (tds *TrieDbState) HashAddress(address common.Address, save bool) (common.Hash, error) {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return addrHash, tds.savePreimage(save, addrHash[:], address[:])
-}
-
-func (tds *TrieDbState) HashKey(key *common.Hash, save bool) (common.Hash, error) {
-	keyHash, err := common.HashData(key[:])
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return keyHash, tds.savePreimage(save, keyHash[:], key[:])
-}
-
 func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 	key, _ := tds.db.Get(dbutils.PreimagePrefix, shaKey)
 	return key
@@ -1272,7 +1245,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{tds: tds, csw: NewChangeSetWriter()}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: &tds.PreimageWriter, csw: NewChangeSetWriter()}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {

@@ -2455,3 +2455,7 @@ func (bc *BlockChain) waitJobs() {
 	bc.wg.Wait()
 	bc.quitMu.Unlock()
 }
+
+func (bc *BlockChain) ExecuteBlockEuphemerally(_ *types.Block, _ state.StateReader, _ state.StateWriter) error {
+	panic("implement me")
+}
