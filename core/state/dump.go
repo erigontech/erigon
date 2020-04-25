@@ -128,7 +128,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err = d.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber + 1, func(k, v []byte) (bool, error) {
+	err = d.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))

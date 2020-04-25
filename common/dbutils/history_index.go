@@ -63,7 +63,7 @@ func (hi HistoryIndexBytes) Append(v uint64, s bool) HistoryIndexBytes {
 	} else {
 		minElement = binary.BigEndian.Uint64(hi[:8])
 	}
-	if v > minElement + 0x7fffff { // Maximum number representable in 23 bits
+	if v > minElement+0x7fffff { // Maximum number representable in 23 bits
 		panic(fmt.Errorf("item %d cannot be placed into the chunk with minElement %d", v, minElement))
 	}
 	v -= minElement
@@ -103,7 +103,7 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool, bool) {
 	minElement := binary.BigEndian.Uint64(hi[:8])
 	elements := hi[8:]
 	idx := sort.Search(numElements, func(i int) bool {
-		return v <= minElement + (uint64(elements[i*ItemLen]&0x7f) << 16) + (uint64(elements[i*ItemLen+1]) << 8) + uint64(elements[i*ItemLen+2])
+		return v <= minElement+(uint64(elements[i*ItemLen]&0x7f)<<16)+(uint64(elements[i*ItemLen+1])<<8)+uint64(elements[i*ItemLen+2])
 	}) * ItemLen
 	if idx == len(elements) {
 		return 0, false, false
@@ -175,5 +175,5 @@ func CheckNewIndexChunk(b []byte, v uint64) bool {
 		return false
 	}
 	minElement := binary.BigEndian.Uint64(b[:8])
-	return (numElements >= MaxChunkSize) || (v > minElement + 0x7fffff)
+	return (numElements >= MaxChunkSize) || (v > minElement+0x7fffff)
 }
