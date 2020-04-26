@@ -192,7 +192,6 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	PreimageWriter
 	t                 *trie.Trie
 	tMu               *sync.Mutex
 	db                ethdb.Database
@@ -208,6 +207,7 @@ type TrieDbState struct {
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	resolver          *trie.Resolver
+	pw                *PreimageWriter
 	incarnationMap    map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
@@ -216,13 +216,13 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
-		PreimageWriter:    PreimageWriter{db: db, savePreimages: true},
 		t:                 t,
 		tMu:               new(sync.Mutex),
 		db:                db,
 		blockNr:           blockNr,
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
+		pw:                &PreimageWriter{db: db, savePreimages: true},
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
@@ -236,7 +236,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
-	tds.PreimageWriter.SetSavePreimages(ep)
+	tds.pw.SetSavePreimages(ep)
 }
 
 func (tds *TrieDbState) SetHistorical(h bool) {
@@ -266,6 +266,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		db:             tds.db,
 		blockNr:        n,
 		tp:             tp,
+		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[common.Hash]uint64),
 	}
@@ -309,7 +310,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 
 	tds.tMu.Lock()
 	t := &TrieDbState{
-		PreimageWriter:    tds.PreimageWriter,
 		t:                 tds.t,
 		tMu:               tds.tMu,
 		db:                tds.db,
@@ -322,6 +322,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
+		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
@@ -1007,7 +1008,7 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 }
 
 func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	addrHash, err := tds.HashAddress(address, false /*save*/)
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,7 +1022,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 			return nil, nil
 		}
 	}
-	seckey, err := tds.HashKey(key, false /*save*/)
+	seckey, err := tds.pw.HashKey(key, false /*save*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1087,7 +1088,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		return nil, nil
 	}
 
-	addrHash, err := tds.HashAddress(address, false /*save*/)
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1113,7 +1114,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 }
 
 func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
-	addrHash, err := tds.HashAddress(address, false /*save*/)
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return 0, err
 	}
@@ -1245,7 +1246,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: &tds.PreimageWriter, csw: NewChangeSetWriter()}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
@@ -1277,7 +1278,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -1288,7 +1289,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != err {
 		return err
 	}
@@ -1308,7 +1309,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation 
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
-	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -1324,7 +1325,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 		m1 = make(map[common.Hash]struct{})
 		tsw.tds.currentBuffer.storageReads[addrHash] = m1
 	}
-	seckey, err := tsw.tds.HashKey(key, false /*save*/)
+	seckey, err := tsw.tds.pw.HashKey(key, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -1377,7 +1378,7 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBina
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
-	addrHash, err := tsw.tds.HashAddress(address, true /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
