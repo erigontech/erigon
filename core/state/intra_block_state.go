@@ -858,16 +858,20 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 			return err
 		}
 
+		if stateObject.created {
+			var incarnation uint64
+			var err error
+			if incarnation, err = stateWriter.CreateContract(addr); err != nil {
+				return err
+			}
+			stateObject.data.Incarnation = incarnation
+			stateObject.created = false
+		}
+		
 		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
 
-		if stateObject.created {
-			if err := stateWriter.CreateContract(addr); err != nil {
-				return err
-			}
-			stateObject.created = false
-		}
 	}
 	return nil
 }

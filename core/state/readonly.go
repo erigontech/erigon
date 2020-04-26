@@ -263,9 +263,9 @@ func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Addres
 	return nil
 }
 
-func (dbs *DbState) CreateContract(address common.Address) error {
+func (dbs *DbState) CreateContract(address common.Address) (uint64, error) {
 	delete(dbs.storage, address)
-	return nil
+	return 0, nil
 }
 
 func (dbs *DbState) GetKey(shaKey []byte) []byte {
