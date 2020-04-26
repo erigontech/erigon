@@ -236,6 +236,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 	addrs := make([]common.Address, numOfAccounts)
 	addrHashes := make([]common.Hash, numOfAccounts)
 	tds := NewTrieDbState(common.Hash{}, db, 1)
+	tds.SetBlockNr(2)
 	blockWriter := tds.DbStateWriter()
 	ctx := context.Background()
 	for i := range accHistory {
@@ -273,7 +274,6 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 			t.Fatal(err)
 		}
 	}
-	tds.SetBlockNr(2)
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
