@@ -40,7 +40,7 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 			return err
 		}
 
-		if err = SaveStageProgress(d.stateDB, Execution, currentBlockNumber); err != nil {
+		if err = SaveStageProgress(mutation, Execution, currentBlockNumber); err != nil {
 			return err
 		}
 
