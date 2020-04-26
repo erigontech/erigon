@@ -14,7 +14,6 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	if err = d.spawnSync(headersFetchers); err != nil {
 		return err
 	}
-	*/
 
 	log.Info("Sync stage 1/4. Downloading headers... Complete!")
 	log.Info("Sync stage 2/4. Downloading block bodies...")

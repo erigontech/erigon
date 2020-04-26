@@ -1,7 +1,6 @@
 package downloader
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -41,7 +40,10 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 			return err
 		}
 
-		SaveStageProgress(d.stateDB, Execution, currentBlockNumber)
+		if err = SaveStageProgress(d.stateDB, Execution, currentBlockNumber); err != nil {
+			return err
+		}
+
 		currentBlockNumber++
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
@@ -52,8 +54,4 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 		}
 	}
 	return nil
-}
-
-func getBlockHashFromNumber(blockNumber uint64) common.Hash {
-	return common.Hash{}
 }
