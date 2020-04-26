@@ -1147,14 +1147,14 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 
 // nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
 func (tds *TrieDbState) nextIncarnation(address common.Address, addrHash common.Hash) (uint64, error) {
-	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
 	if inc, ok := tds.incarnationMap[address]; ok {
 		return inc, nil
 	}
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	var fixedbits uint = 8 * common.HashLength
 	copy(startkey, addrHash[:])
+	var found bool
+	var incarnationBytes [common.IncarnationLength]byte
 	if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
 		found = true
@@ -1297,7 +1297,9 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = struct{}{}
-	tsw.tds.incarnationMap[address] = original.Incarnation + 1
+	if original.Incarnation > 0 {
+		tsw.tds.incarnationMap[address] = original.Incarnation + 1
+	}
 	return nil
 }
 

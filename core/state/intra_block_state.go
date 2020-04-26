@@ -853,11 +853,6 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 				return err
 			}
 		}
-
-		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
-			return err
-		}
-
 		if stateObject.created {
 			var incarnation uint64
 			var err error
@@ -867,11 +862,12 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 			stateObject.data.Incarnation = incarnation
 			stateObject.created = false
 		}
-
+		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
+			return err
+		}
 		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
-
 	}
 	return nil
 }

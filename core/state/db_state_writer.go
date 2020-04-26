@@ -77,7 +77,9 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
 		return err
 	}
-	dsw.incarnations[address] = original.Incarnation + 1 // next incarnation
+	if original.Incarnation > 0 {
+		dsw.incarnations[address] = original.Incarnation + 1 // next incarnation
+	}
 	return nil
 }
 
