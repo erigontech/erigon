@@ -92,9 +92,9 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // Structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
-	codeReads      map[common.Hash]common.Hash
-	codeSizeReads  map[common.Hash]common.Hash
-	codeUpdates    map[common.Hash][]byte
+	codeReads     map[common.Hash]common.Hash
+	codeSizeReads map[common.Hash]common.Hash
+	codeUpdates   map[common.Hash][]byte
 	// storageUpdates structure collects the effects of the block (or transaction) execution. It does not necessarily
 	// include all the intermediate reads and write that happened. For example, if the storage of some contract has
 	// been modified, and then the contract has subsequently self-destructed, this structure will not contain any
@@ -109,14 +109,14 @@ type Buffer struct {
 	// There is a potential for optimisation - we may actually skip all the intermediate modification of the trie if
 	// we know that in the end, the entire storage will be dropped. However, this optimisation has not yet been
 	// implemented.
-	storageReads   map[common.Hash]map[common.Hash]struct{}
+	storageReads map[common.Hash]map[common.Hash]struct{}
 	// accountUpdates structure collects the effects of the block (or transaxction) execution.
 	accountUpdates map[common.Hash]*accounts.Account
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
-	accountReads   map[common.Hash]struct{}
-	deleted        map[common.Hash]struct{}
-	created        map[common.Hash]struct{}
+	accountReads map[common.Hash]struct{}
+	deleted      map[common.Hash]struct{}
+	created      map[common.Hash]struct{}
 }
 
 // Prepares buffer for work or clears previous data
@@ -202,12 +202,12 @@ type TrieDbState struct {
 	historical        bool
 	noHistory         bool
 	resolveReads      bool
-	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
 	tp                *trie.Eviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	resolver          *trie.Resolver
+	pw                *PreimageWriter
 	incarnationMap    map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
@@ -222,7 +222,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 		blockNr:           blockNr,
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
-		savePreimages:     true,
+		pw:                &PreimageWriter{db: db, savePreimages: true},
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
@@ -236,7 +236,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
-	tds.savePreimages = ep
+	tds.pw.SetSavePreimages(ep)
 }
 
 func (tds *TrieDbState) SetHistorical(h bool) {
@@ -266,6 +266,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		db:             tds.db,
 		blockNr:        n,
 		tp:             tp,
+		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[common.Hash]uint64),
 	}
@@ -321,6 +322,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
+		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
@@ -1000,41 +1002,13 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	return tds.readAccountDataByHash(addrHash)
 }
 
-func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
-	if !save || !tds.savePreimages {
-		return nil
-	}
-	// Following check is to minimise the overwriting the same value of preimage
-	// in the database, which would cause extra write churn
-	if p, _ := tds.db.Get(dbutils.PreimagePrefix, hash); p != nil {
-		return nil
-	}
-	return tds.db.Put(dbutils.PreimagePrefix, hash, preimage)
-}
-
-func (tds *TrieDbState) HashAddress(address common.Address, save bool) (common.Hash, error) {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return addrHash, tds.savePreimage(save, addrHash[:], address[:])
-}
-
-func (tds *TrieDbState) HashKey(key *common.Hash, save bool) (common.Hash, error) {
-	keyHash, err := common.HashData(key[:])
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return keyHash, tds.savePreimage(save, keyHash[:], key[:])
-}
-
 func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 	key, _ := tds.db.Get(dbutils.PreimagePrefix, shaKey)
 	return key
 }
 
 func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	addrHash, err := tds.HashAddress(address, false /*save*/)
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1048,7 +1022,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 			return nil, nil
 		}
 	}
-	seckey, err := tds.HashKey(key, false /*save*/)
+	seckey, err := tds.pw.HashKey(key, false /*save*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1114,7 +1088,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		return nil, nil
 	}
 
-	addrHash, err := tds.HashAddress(address, false /*save*/)
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1140,7 +1114,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 }
 
 func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
-	addrHash, err := tds.HashAddress(address, false /*save*/)
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return 0, err
 	}
@@ -1272,7 +1246,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{tds: tds, csw: NewChangeSetWriter()}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
@@ -1304,7 +1278,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -1315,7 +1289,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != err {
 		return err
 	}
@@ -1335,7 +1309,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation 
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
-	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -1351,7 +1325,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 		m1 = make(map[common.Hash]struct{})
 		tsw.tds.currentBuffer.storageReads[addrHash] = m1
 	}
-	seckey, err := tsw.tds.HashKey(key, false /*save*/)
+	seckey, err := tsw.tds.pw.HashKey(key, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -1404,7 +1378,7 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBina
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
-	addrHash, err := tsw.tds.HashAddress(address, true /*save*/)
+	addrHash, err := tsw.tds.pw.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,7 @@ import (
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -365,6 +366,14 @@ func (dl *downloadTester) dropPeer(id string) {
 
 	delete(dl.peers, id)
 	dl.downloader.UnregisterPeer(id)
+}
+
+func (dl *downloadTester) ExecuteBlockEuphemerally(_ *types.Block, _ state.StateReader, _ *state.DbStateWriter) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (dl *downloadTester) GetBlockByNumber(number uint64) *types.Block {
+	panic("not implemented and should not be called")
 }
 
 type downloadTesterPeer struct {
