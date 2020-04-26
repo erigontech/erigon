@@ -208,6 +208,9 @@ type BlockChain interface {
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
 	InsertBodyChain(context.Context, types.Blocks) (int, error)
 
+	// InsertHeaderChainStaged inserts a batch of headers into the local chain.
+	InsertHeaderChainStaged([]*types.Header, int) (int, bool, uint64, error)
+
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
 
@@ -548,7 +551,43 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	// Figure out how many blocks have already been downloaded
 	origin, err := GetStageProgress(d.stateDB, Bodies)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("getting Bodies stage progress: %v", err)
+	}
+	// Check invalidation (caused by reorgs of header chain)
+	var invalidation uint64
+	invalidation, err = GetStageInvalidation(d.stateDB, Bodies)
+	if err != nil {
+		return false, fmt.Errorf("getting Bodies stage invalidation: %v", err)
+	}
+	if invalidation != 0 {
+		batch := d.stateDB.NewBatch()
+		if invalidation < origin {
+			// Rollback the progress
+			if err = SaveStageProgress(batch, Bodies, invalidation); err != nil {
+				return false, fmt.Errorf("rolling back Bodies stage progress: %v", err)
+			}
+			// In case of downloading bodies, we simply re-download the new branch of bodies
+			log.Warn("Rolling back bodies download", "from", origin, "to", invalidation)
+			origin = invalidation
+		}
+		// push invalidation onto further stages
+		if err = SaveStageInvalidation(batch, Bodies, 0); err != nil {
+			return false, fmt.Errorf("removing Bodies stage invalidation: %v", err)
+		}
+		if Bodies+1 < Finish {
+			var postInvalidation uint64
+			if postInvalidation, err = GetStageInvalidation(batch, Bodies+1); err != nil {
+				return false, fmt.Errorf("getting post-Bodies stage invalidation: %v", err)
+			}
+			if postInvalidation == 0 || invalidation < postInvalidation {
+				if err = SaveStageInvalidation(batch, Bodies+1, invalidation); err != nil {
+					return false, fmt.Errorf("pushing post-Bodies stage invalidation: %v", err)
+				}
+			}
+		}
+		if _, err = batch.Commit(); err != nil {
+			return false, fmt.Errorf("committing rollback and push invalidation post-Bodies: %v", err)
+		}
 	}
 	// Figure out how many headers we have
 	currentNumber := origin + 1
@@ -1570,7 +1609,27 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					if chunk[len(chunk)-1].Number.Uint64()+uint64(fsHeaderForceVerify) > pivot {
 						frequency = 1
 					}
-					n, err := d.lightchain.InsertHeaderChain(chunk, frequency)
+					var n int
+					var err error
+					if d.mode == StagedSync {
+						var newCanonical bool
+						var lowestCanonicalNumber uint64
+						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
+						if newCanonical {
+							// Need to invalidate further stages
+							invalid, err1 := GetStageInvalidation(d.stateDB, SyncStage(StagedSync+1))
+							if err1 != nil {
+								return fmt.Errorf("getting SyncStage invalidation for post-Headers: %v", err1)
+							}
+							if invalid == 0 || invalid > lowestCanonicalNumber {
+								if err2 := SaveStageInvalidation(d.stateDB, SyncStage(StagedSync+1), lowestCanonicalNumber); err2 != nil {
+									return fmt.Errorf("saving SyncStage for post-Headers invalidation: %v", err2)
+								}
+							}
+						}
+					} else {
+						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
+					}
 					if d.mode == StagedSync && n > 0 {
 						if err1 := SaveStageProgress(d.stateDB, Headers, chunk[n-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)

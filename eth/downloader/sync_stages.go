@@ -43,7 +43,7 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 		return 0, nil
 	}
 	if len(v) != 8 {
-		return 0, fmt.Errorf("stage process value must be of length 8, got %d", len(v))
+		return 0, fmt.Errorf("stage progress value must be of length 8, got %d", len(v))
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
@@ -53,4 +53,28 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 	var v [8]byte
 	binary.BigEndian.PutUint64(v[:], progress)
 	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, v[:])
+}
+
+// GetStageInvalidation retrives the invalidation for the given stage
+// Invalidation means that that stage needs to rollback to the invalidation
+// point and be redone
+func GetStageInvalidation(db ethdb.Getter, stage SyncStage) (uint64, error) {
+	v, err := db.Get(dbutils.SyncStageInvalidation, []byte{byte(stage)})
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	if len(v) != 8 {
+		return 0, fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
+	}
+	return binary.BigEndian.Uint64(v), nil
+}
+
+// SaveStageInvalidation saves the progress of the given stage in the database
+func SaveStageInvalidation(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
+	var v [8]byte
+	binary.BigEndian.PutUint64(v[:], invalidation)
+	return db.Put(dbutils.SyncStageInvalidation, []byte{byte(stage)}, v[:])
 }

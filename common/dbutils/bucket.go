@@ -110,6 +110,8 @@ var (
 
 	// Progress of sync stages
 	SyncStageProgress = []byte("SSP")
+	// Invalidations of the sync stages
+	SyncStageInvalidation = []byte("SSI")
 )
 
 var Buckets = [][]byte{
