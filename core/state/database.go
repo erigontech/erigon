@@ -59,7 +59,7 @@ type StateWriter interface {
 	UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
-	CreateContract(address common.Address) error
+	CreateContract(address common.Address) (uint64, error)
 }
 
 type NoopWriter struct {
@@ -85,8 +85,8 @@ func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Addr
 	return nil
 }
 
-func (nw *NoopWriter) CreateContract(address common.Address) error {
-	return nil
+func (nw *NoopWriter) CreateContract(address common.Address) (uint64, error) {
+	return 0, nil
 }
 
 // Structure holding updates, deletes, and reads registered within one change period
@@ -208,7 +208,7 @@ type TrieDbState struct {
 	hashBuilder       *trie.HashBuilder
 	resolver          *trie.Resolver
 	pw                *PreimageWriter
-	incarnationMap    map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
+	incarnationMap    map[common.Address]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
@@ -224,7 +224,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 		tp:                tp,
 		pw:                &PreimageWriter{db: db, savePreimages: true},
 		hashBuilder:       trie.NewHashBuilder(false),
-		incarnationMap:    make(map[common.Hash]uint64),
+		incarnationMap:    make(map[common.Address]uint64),
 	}
 
 	tp.SetBlockNumber(blockNr)
@@ -268,7 +268,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		tp:             tp,
 		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
-		incarnationMap: make(map[common.Hash]uint64),
+		incarnationMap: make(map[common.Address]uint64),
 	}
 
 	cpy.t.AddObserver(tp)
@@ -324,7 +324,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		tp:                tds.tp,
 		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
-		incarnationMap:    make(map[common.Hash]uint64),
+		incarnationMap:    make(map[common.Address]uint64),
 	}
 	tds.tMu.Unlock()
 
@@ -1146,15 +1146,15 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 }
 
 // nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
-func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
-	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	if inc, ok := tds.incarnationMap[addrHash]; ok {
-		return inc + 1, nil
+func (tds *TrieDbState) nextIncarnation(address common.Address, addrHash common.Hash) (uint64, error) {
+	if inc, ok := tds.incarnationMap[address]; ok {
+		return inc, nil
 	}
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	var fixedbits uint = 8 * common.HashLength
 	copy(startkey, addrHash[:])
+	var found bool
+	var incarnationBytes [common.IncarnationLength]byte
 	if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
 		found = true
@@ -1178,7 +1178,7 @@ func (tds *TrieDbState) EvictTries(print bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	strict := print
-	tds.incarnationMap = make(map[common.Hash]uint64)
+	tds.incarnationMap = make(map[common.Address]uint64)
 	if print {
 		trieSize := tds.t.TrieSize()
 		fmt.Println("") // newline for better formatting
@@ -1246,7 +1246,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter(), incarnations: tds.incarnationMap}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
@@ -1297,6 +1297,9 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = struct{}{}
+	if original.Incarnation > 0 {
+		tsw.tds.incarnationMap[address] = original.Incarnation + 1
+	}
 	return nil
 }
 
@@ -1377,22 +1380,19 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBina
 	return t.ExtractWitness(tds.blockNr, trace, rs)
 }
 
-func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
+func (tsw *TrieStateWriter) CreateContract(address common.Address) (uint64, error) {
 	addrHash, err := tsw.tds.pw.HashAddress(address, true /*save*/)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
-	if account, ok := tsw.tds.currentBuffer.accountUpdates[addrHash]; ok && account != nil {
-		incarnation, err := tsw.tds.nextIncarnation(addrHash)
-		if err != nil {
-			return err
-		}
-		account.SetIncarnation(incarnation)
-		tsw.tds.incarnationMap[addrHash] = incarnation
+	var incarnation uint64
+	incarnation, err = tsw.tds.nextIncarnation(address, addrHash)
+	if err != nil {
+		return 0, err
 	}
-	return nil
+	return incarnation, nil
 }
 
 func (tds *TrieDbState) TriePruningDebugDump() string {

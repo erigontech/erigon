@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -21,14 +22,16 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 		}
 	}()
 
+	var incarnationMap = make(map[common.Address]uint64)
+
 	for {
 		block := d.blockchain.GetBlockByNumber(currentBlockNumber)
 		if block == nil {
 			break
 		}
 
-		stateReader := state.NewDbState(mutation, currentBlockNumber)
-		stateWriter := state.NewDbStateWriter(mutation, currentBlockNumber)
+		stateReader := state.NewDbStateReader(mutation)
+		stateWriter := state.NewDbStateWriter(mutation, currentBlockNumber, incarnationMap)
 
 		if currentBlockNumber%1000 == 0 {
 			log.Info("Executed blocks:", "blockNumber", currentBlockNumber)
@@ -51,6 +54,7 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 				return err
 			}
 			mutation = d.stateDB.NewBatch()
+			incarnationMap = make(map[common.Address]uint64)
 		}
 	}
 	return nil

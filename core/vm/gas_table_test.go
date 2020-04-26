@@ -92,7 +92,7 @@ func TestEIP2200(t *testing.T) {
 		s.CommitBlock(context.Background(), tds.DbStateWriter())
 
 		// re-initialize the state
-		state := state.New(state.NewDbState(db, 0))
+		state := state.New(state.NewDbStateReader(db))
 
 		vmctx := Context{
 			CanTransfer: func(IntraBlockState, common.Address, *big.Int) bool { return true },

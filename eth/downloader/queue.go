@@ -304,11 +304,11 @@ func (q *queue) RetrieveHeaders() ([]*types.Header, int) {
 	return headers, proced
 }
 
-func (q *queue) ScheduleBodies(from uint64, hashes []common.Hash, headers []*types.Header) {
+func (q *queue) ScheduleBodies(from uint64, hashes []common.Hash, headers map[common.Hash]*types.Header) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
-	for i, hash := range hashes {
-		header := headers[i]
+	for _, hash := range hashes {
+		header := headers[hash]
 		// Make sure no duplicate requests are executed
 		if _, ok := q.blockTaskPool[hash]; ok {
 			log.Warn("Header already scheduled for block fetch", "number", header.Number, "hash", hash)

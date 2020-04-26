@@ -233,16 +233,16 @@ func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Addres
 
 // CreateContract is a part of StateWriter interface
 // This implementation registers given address in the internal map `created`
-func (s *Stateless) CreateContract(address common.Address) error {
+func (s *Stateless) CreateContract(address common.Address) (uint64, error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if s.trace {
 		fmt.Printf("Stateless: CreateContract %x hash %x\n", address, addrHash)
 	}
 	s.created[addrHash] = struct{}{}
-	return nil
+	return 0, nil
 }
 
 // CheckRoot finalises the execution of a block and computes the resulting state root

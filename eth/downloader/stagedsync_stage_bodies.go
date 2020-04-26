@@ -66,32 +66,38 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	var missingHeader uint64
 	// Go over canonical headers and insert them into the queue
 	const N = 65536
-	var hashes [N]common.Hash
-	var headers [N]*types.Header
+	var hashes [N]common.Hash                         // Canonical hashes of the blocks
+	var headers = make(map[common.Hash]*types.Header) // We use map because there might be more than one header by block number
 	var hashCount = 0
 	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
 		// Skip non relevant records
+		if len(k) == 8+len(dbutils.HeaderHashSuffix) && bytes.Equal(k[8:], dbutils.HeaderHashSuffix) {
+			// This is how we learn about canonical chain
+			blockNumber := binary.BigEndian.Uint64(k[:8])
+			if blockNumber != currentNumber {
+				log.Warn("Canonical hash is missing", "number", currentNumber, "got", blockNumber)
+				missingHeader = currentNumber
+				return false, nil
+			}
+			currentNumber++
+			if hashCount < len(hashes) {
+				copy(hashes[hashCount][:], v)
+			}
+			hashCount++
+			if hashCount > len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
+				return false, nil
+			}
+			return true, nil
+		}
 		if len(k) != 8+common.HashLength {
 			return true, nil
 		}
-		blockNumber := binary.BigEndian.Uint64(k[:8])
-		if blockNumber != currentNumber {
-			log.Warn("Canonical hash is missing", "number", currentNumber, "got", blockNumber)
-			missingHeader = currentNumber
-			return false, nil
-		}
-		currentNumber++
-		copy(hashes[hashCount][:], k[8:])
 		header := new(types.Header)
 		if err1 := rlp.Decode(bytes.NewReader(v), header); err1 != nil {
 			log.Error("Invalid block header RLP", "hash", k[8:], "err", err1)
 			return false, err1
 		}
-		headers[hashCount] = header
-		hashCount++
-		if hashCount == len(hashes) {
-			return false, nil
-		}
+		headers[common.BytesToHash(k[8:])] = header
 		return true, nil
 	})
 	if err != nil {
@@ -105,14 +111,14 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 		return false, nil
 	}
 	d.queue.Reset()
-	if hashCount == 0 {
+	if hashCount <= 1 {
 		// No more bodies to download
 		return false, nil
 	}
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
-	d.queue.ScheduleBodies(from, hashes[:hashCount], headers[:hashCount])
-	to := from + uint64(hashCount)
+	d.queue.ScheduleBodies(from, hashes[:hashCount-1], headers)
+	to := from + uint64(hashCount-1)
 	select {
 	case d.bodyWakeCh <- true:
 	case <-d.cancelCh:
