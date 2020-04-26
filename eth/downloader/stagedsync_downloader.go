@@ -3,6 +3,8 @@ package downloader
 import "github.com/ledgerwatch/turbo-geth/log"
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
+
+	log.Info("Downloading headers stage")
 	var err error
 	/*
 	* Stage 1. Download Headers
