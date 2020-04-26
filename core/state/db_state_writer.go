@@ -14,11 +14,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func NewDbStateWriter(db ethdb.Database, blockNr uint64) StateWriter {
+func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 	return &DbStateWriter{
 		db:      db,
 		blockNr: blockNr,
-		pw:      &PreimageWriter{db: db, savePreimages: true},
+		pw:      &PreimageWriter{db: db, savePreimages: false},
 		csw:     NewChangeSetWriter(),
 	}
 }

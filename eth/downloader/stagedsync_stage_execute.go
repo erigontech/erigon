@@ -15,6 +15,12 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 	currentBlockNumber := origin + 1
 
 	mutation := d.stateDB.NewBatch()
+	defer func() {
+		_, dbErr := mutation.Commit()
+		if dbErr != nil {
+			log.Error("Sync (Execution): failed to write db commit", "err", dbErr)
+		}
+	}()
 
 	for {
 		block := d.blockchain.GetBlockByNumber(currentBlockNumber)
@@ -25,10 +31,11 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 		stateReader := state.NewDbState(mutation, currentBlockNumber)
 		stateWriter := state.NewDbStateWriter(mutation, currentBlockNumber)
 
-		// where the magic happens
 		if currentBlockNumber%1000 == 0 {
 			log.Info("Executed blocks:", "blockNumber", currentBlockNumber)
 		}
+
+		// where the magic happens
 		err = d.blockchain.ExecuteBlockEuphemerally(block, stateReader, stateWriter)
 		if err != nil {
 			return err
@@ -37,7 +44,7 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 		SaveStageProgress(d.stateDB, Execution, currentBlockNumber)
 		currentBlockNumber++
 
-		if mutation.BatchSize() > 5000 {
+		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if _, err = mutation.Commit(); err != nil {
 				return err
 			}

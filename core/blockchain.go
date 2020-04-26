@@ -2459,7 +2459,7 @@ func (bc *BlockChain) waitJobs() {
 
 // ExecuteBlockEuphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
-func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader state.StateReader, stateWriter state.StateWriter) error {
+func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader state.StateReader, stateWriter *state.DbStateWriter) error {
 	ibs := state.New(stateReader)
 	header := block.Header()
 	chainConfig := bc.chainConfig
@@ -2479,6 +2479,11 @@ func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader s
 		receipts = append(receipts, receipt)
 	}
 
+	receiptSha := types.DeriveSha(receipts)
+	if receiptSha != block.Header().ReceiptHash {
+		return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+	}
+
 	engine := bc.engine
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
@@ -2489,5 +2494,10 @@ func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader s
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
+
+	if err := stateWriter.WriteChangeSets(); err != nil {
+		return fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+	}
+
 	return nil
 }

@@ -216,7 +216,7 @@ type BlockChain interface {
 	// ExecuteBlockEuphemerally executes a block getting state from a specified
 	// state reader and writing it to a specified state writer
 	// then it writes it to a specified block writer
-	ExecuteBlockEuphemerally(*types.Block, state.StateReader, state.StateWriter) error
+	ExecuteBlockEuphemerally(*types.Block, state.StateReader, *state.DbStateWriter) error
 
 	// GetBlockByNumber is necessary for staged sync
 	GetBlockByNumber(number uint64) *types.Block
