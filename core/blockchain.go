@@ -2479,9 +2479,11 @@ func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader s
 		receipts = append(receipts, receipt)
 	}
 
-	receiptSha := types.DeriveSha(receipts)
-	if receiptSha != block.Header().ReceiptHash {
-		return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+	if chainConfig.IsByzantium(header.Number) {
+		receiptSha := types.DeriveSha(receipts)
+		if receiptSha != block.Header().ReceiptHash {
+			return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+		}
 	}
 
 	engine := bc.engine
