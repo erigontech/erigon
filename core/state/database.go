@@ -1079,7 +1079,6 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	var enc []byte
 	var a accounts.Account
 	if tds.historical {
-		// TODO: do we need to get a.Root from IH here?
 		enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
