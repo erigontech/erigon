@@ -574,7 +574,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 		if err = SaveStageInvalidation(batch, Bodies, 0); err != nil {
 			return false, fmt.Errorf("removing Bodies stage invalidation: %v", err)
 		}
-		if Bodies + 1 < Finish {
+		if Bodies+1 < Finish {
 			var postInvalidation uint64
 			if postInvalidation, err = GetStageInvalidation(batch, Bodies+1); err != nil {
 				return false, fmt.Errorf("getting post-Bodies stage invalidation: %v", err)

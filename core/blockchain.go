@@ -2200,7 +2200,7 @@ func (bc *BlockChain) insertHeaderChainStaged(chain []*types.Header) (int, int, 
 // 2. (type bool) whether the insertion of this chunk has changed the canonical chain
 // 3. (type uint64) the lowest block number that has been displaced from the canonical chain (this is to be used to invalidate further sync stages)
 // 4. (type error) error happed during processing
-func (bc *BlockChain) InsertHeaderChainStaged (chain []*types.Header, checkFreq int) (int, bool, uint64, error) {
+func (bc *BlockChain) InsertHeaderChainStaged(chain []*types.Header, checkFreq int) (int, bool, uint64, error) {
 	start := time.Now()
 	if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
 		return i, false, 0, err

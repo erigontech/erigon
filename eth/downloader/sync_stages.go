@@ -69,7 +69,7 @@ func GetStageInvalidation(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	if len(v) != 8 {
 		return 0, fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
 	}
-	return binary.BigEndian.Uint64(v), nil	
+	return binary.BigEndian.Uint64(v), nil
 }
 
 // SaveStageInvalidation saves the progress of the given stage in the database
