@@ -4,7 +4,7 @@ import "github.com/ledgerwatch/turbo-geth/log"
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 
-	log.Info("Stage 1/4. Downloading headers...")
+	log.Info("Sync stage 1/4. Downloading headers...")
 
 	var err error
 
@@ -16,8 +16,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	}
 	*/
 
-	log.Info("Stage 1/4. Downloading headers... Complete!")
-	log.Info("Stage 2/4. Downloading block bodies...")
+	log.Info("Sync stage 1/4. Downloading headers... Complete!")
+	log.Info("Sync stage 2/4. Downloading block bodies...")
 
 	/*
 	* Stage 2. Download Block bodies
@@ -31,22 +31,21 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Stage 2/4. Downloading block bodies... Complete!")
-	log.Info("Stage 3/4. Executing blocks w/o hash checks...")
+	log.Info("Sync stage 2/4. Downloading block bodies... Complete!")
+	log.Info("Sync stage 3/4. Executing blocks w/o hash checks...")
 
 	/*
 	* Stage 3. Execute block bodies w/o calculating trie roots
 	 */
-	// Further stages to go here
-
 	if err = d.spawnExecuteBlocksStage(); err != nil {
 		return err
 	}
 
-	log.Info("Stage 3/4. Executing blocks w/o hash checks... Complete!")
+	log.Info("Sync stage 3/4. Executing blocks w/o hash checks... Complete!")
 
-	log.Info("Stage 4/4. Validating final hash")
-	log.Info("Stage 4/4. Validating final hash... NOT IMPLEMENTED")
+	// Further stages go there
+	log.Info("Sync stage 4/4. Validating final hash")
+	log.Info("Sync stage 4/4. Validating final hash... NOT IMPLEMENTED")
 
 	return err
 }
