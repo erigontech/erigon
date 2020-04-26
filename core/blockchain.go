@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -2456,6 +2457,37 @@ func (bc *BlockChain) waitJobs() {
 	bc.quitMu.Unlock()
 }
 
-func (bc *BlockChain) ExecuteBlockEuphemerally(_ *types.Block, _ state.StateReader, _ state.StateWriter) error {
-	panic("implement me")
+// ExecuteBlockEuphemerally runs a block from provided stateReader and
+// writes the result to the provided stateWriter
+func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader state.StateReader, stateWriter state.StateWriter) error {
+	ibs := state.New(stateReader)
+	header := block.Header()
+	chainConfig := bc.chainConfig
+	var receipts types.Receipts
+	usedGas := new(uint64)
+	vmConfig := bc.vmConfig
+	gp := new(GasPool).AddGas(block.GasLimit())
+
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	for _, tx := range block.Transactions() {
+		receipt, err := ApplyTransaction(chainConfig, bc, nil, gp, ibs, stateWriter, header, tx, usedGas, vmConfig)
+		if err != nil {
+			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+		}
+		receipts = append(receipts, receipt)
+	}
+
+	engine := bc.engine
+	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
+		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+	}
+
+	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+	}
+	return nil
 }
