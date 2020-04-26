@@ -25,13 +25,9 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 		stateReader := state.NewDbState(d.stateDB, currentBlockNumber)
 		stateWriter := state.NewDbStateWriter(d.stateDB, currentBlockNumber)
 
-		fmt.Printf("execute block: %v -> %x\n", currentBlockNumber, block.Hash())
-
 		// where the magic happens
 		err = d.blockchain.ExecuteBlockEuphemerally(block, stateReader, stateWriter)
-		fmt.Printf("execute block: %v -result-> err=%v\n", currentBlockNumber, err)
 		if err != nil {
-
 			return err
 		}
 
