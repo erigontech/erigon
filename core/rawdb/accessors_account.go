@@ -24,7 +24,6 @@ import (
 
 // ReadAccount reading account object from multiple buckets of db
 func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
-	//fmt.Printf("ReadAccount: %x,%x\n ", addrHash, acc.Root.Bytes())
 	enc, err := db.Get(dbutils.CurrentStateBucket, addrHash[:])
 	if err != nil {
 		return false, err

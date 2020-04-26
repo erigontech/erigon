@@ -498,8 +498,10 @@ func TestStorageResolver2(t *testing.T) {
 
 	kAcc3 := common.FromHex("0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	k3 := k2
-	ks3 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc3), 1, common.HexToHash(k3))
+	ks3 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc3), 2, common.HexToHash(k3))
+	ks3OldIncarnation := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc3), 1, common.HexToHash(k3))
 	require.NoError(db.Put(dbutils.CurrentStateBucket, ks3, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
+	require.NoError(db.Put(dbutils.CurrentStateBucket, ks3OldIncarnation, common.FromHex("9999999999999999")))
 
 	expectedAccRoot3 := expectedAccStorageRoot
 	a3 := accounts.Account{
@@ -508,7 +510,7 @@ func TestStorageResolver2(t *testing.T) {
 		CodeHash:       EmptyCodeHash,
 		Balance:        *big.NewInt(0),
 		StorageSize:    uint64(1),
-		Incarnation:    1,
+		Incarnation:    2,
 		HasStorageSize: true,
 		Root:           common.HexToHash(expectedAccRoot3),
 	}
@@ -518,6 +520,11 @@ func TestStorageResolver2(t *testing.T) {
 	}
 
 	expectedRoot := "1239b601d241f42c96392f0466b4df327a9adec21c2a6a08fd78c1a65946017f"
+
+	// abandoned storage - account was deleted, but storage still exists
+	kAcc4 := common.FromHex("0004cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83") // don't write it to db
+	ks4 := dbutils.GenerateCompositeStorageKey(common.BytesToHash(kAcc4), 1, common.HexToHash(k2))
+	require.NoError(db.Put(dbutils.CurrentStateBucket, ks4, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
 
 	tr := New(common.Hash{})
 	{
@@ -550,7 +557,8 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, nil, keybytesToHex(kAcc1), 10, 0, nil, false, nil})
 	tr.AddRequest(&ResolveRequest{nil, nil, keybytesToHex(kAcc2), 20, 0, nil, false, nil})
 	sort.Stable(tr)
-	startkeys, fixedbits := NewResolverStateful(tr.topLevels, tr.requests, nil).PrepareResolveParams()
+	resolver := NewResolverStateful(tr.topLevels, tr.requests, nil)
+	startkeys, fixedbits := resolver.PrepareResolveParams()
 	assert.Equal("[0001cf1ce0 0002cf1ce0664746d39a]", fmt.Sprintf("%x", startkeys))
 	assert.Equal("[40 80]", fmt.Sprintf("%d", fixedbits))
 	tr.Reset(1, true, 0)
@@ -562,7 +570,8 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks2), 0, 0, nil, false, nil})
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks22), 0, 0, nil, false, nil})
 	sort.Stable(tr)
-	startkeys, fixedbits = NewResolverStateful(tr.topLevels, tr.requests, nil).PrepareResolveParams()
+	resolver = NewResolverStateful(tr.topLevels, tr.requests, nil)
+	startkeys, fixedbits = resolver.PrepareResolveParams()
 	assert.Equal("[0001cf1ce0 0002cf1ce0664746d39a]", fmt.Sprintf("%x", startkeys))
 	assert.Equal("[40 80]", fmt.Sprintf("%d", fixedbits))
 	tr.Reset(1, true, 0)
@@ -573,7 +582,8 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks2), 0, 0, nil, false, nil})
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks22), 0, 0, nil, false, nil})
 	sort.Stable(tr)
-	startkeys, fixedbits = NewResolverStateful(tr.topLevels, tr.requests, nil).PrepareResolveParams()
+	resolver = NewResolverStateful(tr.topLevels, tr.requests, nil)
+	startkeys, fixedbits = resolver.PrepareResolveParams()
 	assert.Equal([][]byte{
 		common.FromHex("0001cf1ce0"),
 		kAcc2WithInc,
@@ -585,7 +595,8 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks2), 0, 0, nil, false, nil})
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks22), 0, 0, nil, false, nil})
 	sort.Stable(tr)
-	startkeys, fixedbits = NewResolverStateful(tr.topLevels, tr.requests, nil).PrepareResolveParams()
+	resolver = NewResolverStateful(tr.topLevels, tr.requests, nil)
+	startkeys, fixedbits = resolver.PrepareResolveParams()
 	assert.Equal([][]byte{
 		kAcc2WithInc,
 	}, startkeys)
@@ -596,29 +607,11 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc1WithInc, keybytesToHex(ks1), 0, 0, nil, false, nil})
 	tr.AddRequest(&ResolveRequest{nil, nil, keybytesToHex(kAcc2), 0, 0, nil, false, nil})
 	sort.Stable(tr)
-	startkeys, fixedbits = NewResolverStateful(tr.topLevels, tr.requests, nil).PrepareResolveParams()
+	resolver = NewResolverStateful(tr.topLevels, tr.requests, nil)
+	startkeys, fixedbits = resolver.PrepareResolveParams()
 	assert.Equal("[]", fmt.Sprintf("%x", startkeys))
 	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
 	tr.Reset(1, true, 0)
-
-	/* tr.rss[0].hexes - repeating!
-	   startkeys: []
-	   fixedbits: [0]
-	   tr.rss[0].hexes: [0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810]
-	   tr.rssStorage[0].hexes: [0c020507050a000e090e0509030c00000f0905090f080c09020f01020d0b020806090c030309050a030b000500020d00050e020501060404060f07010f08050b10 0c020507050a000e090e0509030c00000f0905090f080c09020f01020d0b020806090c030309050a030b000500020d00050e020501060404060f07010f08050b10]
-	   req.resolvePos: 0, req.extResolvePos: 0, len(req.resolveHex): 65, len(req.contract): 0
-	   req.contract: , req.resolveHex: 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810
-	   req.resolvePos: 0, req.extResolvePos: 0, len(req.resolveHex): 65, len(req.contract): 0
-	   req.contract: , req.resolveHex: 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810
-	   req.resolvePos: 0, req.extResolvePos: 0, len(req.resolveHex): 65, len(req.contract): 0
-	   req.contract: , req.resolveHex: 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810
-	   req.resolvePos: 0, req.extResolvePos: 0, len(req.resolveHex): 65, len(req.contract): 0
-	   req.contract: , req.resolveHex: 0d0e0005080a0d0605010f0a0902010c0e0407040f090c090e050d08020e030f030b0b05080d02040a04040e0f0103000f03080b0a0a050e0602060e0d0b0e0810
-	   req.resolvePos: 0, req.extResolvePos: 0, len(req.resolveHex): 65, len(req.contract): 40
-	   req.contract: de058ad651fa921ce474f9c9e5d82e3f3bb58d24a44ef130f38baa5e626edbe8ffffffffffffffff, req.resolveHex: 0c020507050a000e090e0509030c00000f0905090f080c09020f01020d0b020806090c030309050a030b000500020d00050e020501060404060f07010f08050b10
-	   req.resolvePos: 0, req.extResolvePos: 0, len(req.resolveHex): 65, len(req.contract): 40
-	   req.contract: de058ad651fa921ce474f9c9e5d82e3f3bb58d24a44ef130f38baa5e626edbe8ffffffffffffffff, req.resolveHex: 0c020507050a000e090e0509030c00000f0905090f080c09020f01020d0b020806090c030309050a030b000500020d00050e020501060404060f07010f08050b10
-	*/
 }
 
 func TestIsBefore(t *testing.T) {
