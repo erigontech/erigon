@@ -187,7 +187,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
-		v := dsw.tds.blockNr
+		v := dsw.blockNr
 
 		var index dbutils.HistoryIndexBytes
 		if len(indexBytes) == 0 {
