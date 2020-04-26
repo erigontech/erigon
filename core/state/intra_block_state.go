@@ -867,7 +867,7 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 			stateObject.data.Incarnation = incarnation
 			stateObject.created = false
 		}
-		
+
 		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
