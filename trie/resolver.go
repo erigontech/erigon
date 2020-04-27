@@ -166,7 +166,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 	}
 
 	sort.Stable(tr)
-
+	trace = true
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
 	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical, trace); err != nil {
 		return err
