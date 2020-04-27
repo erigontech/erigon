@@ -9,13 +9,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func (d *Downloader) spawnExecuteBlocksStage() error {
-	origin, err := GetStageProgress(d.stateDB, Execution)
+func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
+	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	currentBlockNumber := origin + 1
+	nextBlockNumber := lastProcessedBlockNumber + 1
 
 	profileNumber := currentBlockNumber
 	f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
@@ -39,33 +39,33 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 	var incarnationMap = make(map[common.Address]uint64)
 
 	for {
-		block := d.blockchain.GetBlockByNumber(currentBlockNumber)
+		block := d.blockchain.GetBlockByNumber(nextBlockNumber)
 		if block == nil {
 			break
 		}
 
 		stateReader := state.NewDbStateReader(mutation)
-		stateWriter := state.NewDbStateWriter(mutation, currentBlockNumber, incarnationMap)
+		stateWriter := state.NewDbStateWriter(mutation, nextBlockNumber, incarnationMap)
 
-		if currentBlockNumber%1000 == 0 {
-			log.Info("Executed blocks:", "blockNumber", currentBlockNumber)
+		if nextBlockNumber%1000 == 0 {
+			log.Info("Executed blocks:", "blockNumber", nextBlockNumber)
 		}
 
 		// where the magic happens
 		err = d.blockchain.ExecuteBlockEuphemerally(block, stateReader, stateWriter)
 		if err != nil {
-			return err
+			return 0, err
 		}
 
-		if err = SaveStageProgress(mutation, Execution, currentBlockNumber); err != nil {
-			return err
+		if err = SaveStageProgress(mutation, Execution, nextBlockNumber); err != nil {
+			return 0, err
 		}
 
-		currentBlockNumber++
+		nextBlockNumber++
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if _, err = mutation.Commit(); err != nil {
-				return err
+				return 0, err
 			}
 			mutation = d.stateDB.NewBatch()
 			incarnationMap = make(map[common.Address]uint64)
@@ -76,5 +76,6 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 			pprof.StopCPUProfile()
 		}
 	}
-	return nil
+
+	return nextBlockNumber - 1 /* the last processed block */, nil
 }

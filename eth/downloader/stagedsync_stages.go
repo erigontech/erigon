@@ -31,6 +31,7 @@ const (
 	Headers   SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	Bodies                     // Block bodies are downloaded, TxHash and UncleHash are getting verified, "From" recovered from signatures
 	Execution                  // Executing each block w/o buildinf a trie
+	HashCheck                  // Checking the root hash
 	Finish                     // Nominal stage after all other stages
 )
 

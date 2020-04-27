@@ -100,11 +100,13 @@ func (p *BlockChainBlockProvider) NextBlock() (*types.Block, error) {
 }
 
 type ExportFileBlockProvider struct {
-	stream    *rlp.Stream
-	engine    consensus.Engine
-	headersDb ethdb.Database
-	batch     ethdb.DbWithPendingMutations
-	fh        io.Closer
+	stream          *rlp.Stream
+	engine          consensus.Engine
+	headersDb       ethdb.Database
+	batch           ethdb.DbWithPendingMutations
+	fh              *os.File
+	reader          io.Reader
+	lastBlockNumber uint64
 }
 
 func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
@@ -124,7 +126,7 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 	engine := ethash.NewFullFaker()
 	// keeping all the past block headers in memory
 	headersDb := mustCreateTempDatabase()
-	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh}, nil
+	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh, reader, 0}, nil
 }
 
 func getTempFileName() string {
@@ -164,7 +166,36 @@ func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
 	}
 }
 
+func (p *ExportFileBlockProvider) resetStream() error {
+	if _, err := p.fh.Seek(0, 0); err != nil {
+		return err
+	}
+	if p.reader != p.fh {
+		if err := p.reader.(*gzip.Reader).Reset(p.fh); err != nil {
+			return err
+		}
+	}
+	p.stream = rlp.NewStream(p.reader, 0)
+	p.lastBlockNumber = 0
+	return nil
+}
+
 func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
+	if to == 0 {
+		fmt.Println("fastfwd: reseting stream")
+		if err := p.resetStream(); err != nil {
+			return err
+		}
+	}
+	if p.lastBlockNumber == to-1 {
+		fmt.Println("fastfwd: nothing to do there")
+		return nil
+	} else if p.lastBlockNumber > to-1 {
+		fmt.Println("fastfwd: resetting stream")
+		if err := p.resetStream(); err != nil {
+			return err
+		}
+	}
 	var b types.Block
 	for {
 		if err := p.stream.Decode(&b); err == io.EOF {
@@ -173,6 +204,7 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 			return fmt.Errorf("error fast fwd: %v", err)
 		} else {
 			p.WriteHeader(b.Header())
+			p.lastBlockNumber = b.NumberU64()
 			if b.NumberU64() >= to-1 {
 				return nil
 			}
@@ -188,6 +220,7 @@ func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {
 		return nil, fmt.Errorf("error fast fwd: %v", err)
 	}
 
+	p.lastBlockNumber = b.NumberU64()
 	p.WriteHeader(b.Header())
 	return &b, nil
 }
