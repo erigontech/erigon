@@ -17,15 +17,15 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
-	profileNumber := currentBlockNumber
+	profileNumber := nextBlockNumber
 	f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
 	if err != nil {
 		log.Error("could not create CPU profile", "error", err)
-		return err
+		return 0, err
 	}
 	if err := pprof.StartCPUProfile(f); err != nil {
 		log.Error("could not start CPU profile", "error", err)
-		return err
+		return 0, err
 	}
 
 	mutation := d.stateDB.NewBatch()
@@ -71,7 +71,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			incarnationMap = make(map[common.Address]uint64)
 		}
 
-		if currentBlockNumber - profileNumber == 100000 {
+		if nextBlockNumber - profileNumber == 100000 {
 			// Flush the profiler
 			pprof.StopCPUProfile()
 		}
