@@ -2,11 +2,11 @@ package downloader
 
 import (
 	"context"
-	"math/big"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"math/big"
 )
 
 func (d *Downloader) spawnRecoverSendersStage() (uint64, error) {

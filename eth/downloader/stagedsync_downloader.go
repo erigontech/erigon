@@ -33,7 +33,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	log.Info("Sync stage 2/5. Downloading block bodies... Complete!")
 	/*
 	* Stage 3. Recover senders from tx signatures
-	*/
+	 */
 	log.Info("Sync stage 3/5. Recovering senders from tx signatures...")
 
 	syncHeadNumber := uint64(0)
@@ -42,7 +42,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 3/5. Recovering senders from tx signatures... Complete!")	
+	log.Info("Sync stage 3/5. Recovering senders from tx signatures... Complete!")
 	log.Info("Sync stage 4/5. Executing blocks w/o hash checks...")
 
 	/*
