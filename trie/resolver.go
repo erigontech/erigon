@@ -18,7 +18,6 @@ type ResolveFunc func(*Resolver) error
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	accounts         bool // Is this a resolver for accounts or for storage
 	historical       bool
 	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
@@ -28,9 +27,8 @@ type Resolver struct {
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
 
-func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
+func NewResolver(topLevels int, blockNr uint64) *Resolver {
 	tr := Resolver{
-		accounts:     forAccounts,
 		requests:     []*ResolveRequest{},
 		codeRequests: []*ResolveRequestForCode{},
 		blockNr:      blockNr,
@@ -39,9 +37,8 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	return &tr
 }
 
-func (tr *Resolver) Reset(topLevels int, forAccounts bool, blockNr uint64) {
+func (tr *Resolver) Reset(topLevels int, blockNr uint64) {
 	tr.topLevels = topLevels
-	tr.accounts = forAccounts
 	tr.blockNr = blockNr
 	tr.requests = tr.requests[:0]
 	tr.codeRequests = tr.codeRequests[:0]
@@ -167,7 +164,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 
 	sort.Stable(tr)
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
-	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical, trace); err != nil {
+	if err := resolver.RebuildTrie(db, blockNr, tr.historical, trace); err != nil {
 		return err
 	}
 	return resolver.AttachRequestedCode(db, tr.codeRequests)
