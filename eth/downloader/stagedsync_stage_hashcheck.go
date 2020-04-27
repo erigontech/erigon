@@ -3,7 +3,8 @@ package downloader
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 func (d *Downloader) spawnCheckFinalHashStage() error {
@@ -21,10 +22,22 @@ func (d *Downloader) spawnCheckFinalHashStage() error {
 	// should never be commited
 	euphemeralMutation := d.stateDB.NewBatch()
 
-	tds := state.NewTrieDbState(syncHeadBlock.Header().Hash(), euphemeralMutation, syncHeadBlock.Header().Number.Uint64())
+	blockNr := syncHeadBlock.Header().Number.Uint64()
 
-	_, err = tds.ResolveStateTrie(false, false)
-	fmt.Printf("resolving state trie err=%v\n", err)
+	tr := trie.New(syncHeadBlock.Root())
+
+	// FIXME: miner of the first block on Ethereum mainnet
+	addr := common.HexToAddress("0x05a56e2d52c817161883f50c441c3228cfe54d9f")
+
+	addrHash, _ := common.HashData(addr[:])
+
+	r := trie.NewResolver(0, true, blockNr)
+	need, rr := tr.NeedResolution(nil, addrHash[:])
+	if !need {
+		panic("should need :-D")
+	}
+	r.AddRequest(rr)
+	err = r.ResolveStateful(euphemeralMutation, blockNr, true)
 	if err != nil {
 		return err
 	}
