@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/pkg/errors"
 )
 
 func (d *Downloader) spawnCheckFinalHashStage() error {
@@ -24,29 +25,32 @@ func (d *Downloader) spawnCheckFinalHashStage() error {
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
-	fmt.Printf("HEAD block:\n\thash=%x\n\troot=%x\n\theaderHash=%x\n",
-		syncHeadBlock.Hash(), syncHeadBlock.Root(), syncHeadBlock.Header().Hash())
-
 	tr := trie.New(syncHeadBlock.Root())
 
+	resolver := trie.NewResolver(0, true, blockNr)
+
+	rr := createResolveRequest(tr)
+
+	resolver.AddRequest(rr)
+	err = resolver.ResolveStateful(euphemeralMutation, blockNr, false)
+	if err != nil {
+		return errors.Wrap(err, "checking root hash failed")
+	}
+
+	return nil
+}
+
+func createResolveRequest(tr *trie.Trie) *trie.ResolveRequest {
 	// FIXME: miner of the first block on Ethereum mainnet
 	addr := common.HexToAddress("0x05a56e2d52c817161883f50c441c3228cfe54d9f")
-
-	addrHash, _ := common.HashData(addr[:])
-
-	r := trie.NewResolver(0, true, blockNr)
+	addrHash, err := common.HashData(addr[:])
+	if err != nil {
+		panic(err)
+	}
 	need, rr := tr.NeedResolution(nil, addrHash[:])
 	if !need {
 		panic("should need :-D")
 	}
-	r.AddRequest(rr)
-	err = r.ResolveStateful(euphemeralMutation, blockNr, false)
-	if err != nil {
-		fmt.Printf(" >>>>>> failed root check\n")
-		return err
-	}
-
-	fmt.Printf(" >>>>>> success root check\n")
-
-	return nil
+	//tr.NewResolveRequest(nil, []byte{0x00, 0x00}, 0, tr.Root())
+	return rr
 }
