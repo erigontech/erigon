@@ -1,6 +1,9 @@
 package downloader
 
 import (
+	"fmt"
+	"runtime/pprof"
+	"os"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -13,6 +16,17 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 	}
 
 	currentBlockNumber := origin + 1
+
+	profileNumber := currentBlockNumber
+	f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
+	if err != nil {
+		log.Error("could not create CPU profile", "error", err)
+		return err
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Error("could not start CPU profile", "error", err)
+		return err
+	}
 
 	mutation := d.stateDB.NewBatch()
 	defer func() {
@@ -55,6 +69,11 @@ func (d *Downloader) spawnExecuteBlocksStage() error {
 			}
 			mutation = d.stateDB.NewBatch()
 			incarnationMap = make(map[common.Address]uint64)
+		}
+
+		if currentBlockNumber - profileNumber == 100000 {
+			// Flush the profiler
+			pprof.StopCPUProfile()
 		}
 	}
 	return nil
