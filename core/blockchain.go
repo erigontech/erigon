@@ -2472,7 +2472,8 @@ func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader s
 		misc.ApplyDAOHardFork(ibs)
 	}
 	noop := state.NewNoopWriter()
-	for _, tx := range block.Transactions() {
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, err := ApplyTransaction(chainConfig, bc, nil, gp, ibs, noop, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
