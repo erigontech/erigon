@@ -21,7 +21,6 @@ type Walker interface {
 }
 
 func CheckEnc(chaindata string) error {
-
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
@@ -69,7 +68,7 @@ func CheckEnc(chaindata string) error {
 						return innerErr
 					}
 
-					if reflect.DeepEqual(cs, cs2) == false {
+					if !reflect.DeepEqual(cs, cs2) {
 						return fmt.Errorf("not identical changesets. block %d", blockNum)
 					}
 
