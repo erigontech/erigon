@@ -1,23 +1,24 @@
 package downloader
 
 import (
-	"fmt"
-
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/pkg/errors"
 )
 
-func (d *Downloader) spawnCheckFinalHashStage() error {
-	// TODO: fix this
-	syncHeadNumber, err := GetStageProgress(d.stateDB, Execution)
+func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
+	hashProgress, err := GetStageProgress(d.stateDB, HashCheck)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("getting head as %v\n", syncHeadNumber)
-	syncHeadBlock := d.blockchain.GetBlockByNumber(syncHeadNumber)
 
-	fmt.Printf("getting head block as %v\n", syncHeadBlock)
+	if hashProgress == syncHeadNumber {
+		// we already did hash check for this block
+		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
+		return nil
+	}
+
+	syncHeadBlock := d.blockchain.GetBlockByNumber(syncHeadNumber)
 
 	// make sure that we won't write the the real DB
 	// should never be commited
@@ -26,31 +27,19 @@ func (d *Downloader) spawnCheckFinalHashStage() error {
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	tr := trie.New(syncHeadBlock.Root())
+	// making resolve request for the trie root, so we only get a hash
+	rr := tr.NewResolveRequest(nil, []byte{}, 0, tr.Root())
+
+	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 
 	resolver := trie.NewResolver(0, true, blockNr)
-
-	rr := createResolveRequest(tr)
-
 	resolver.AddRequest(rr)
 	err = resolver.ResolveStateful(euphemeralMutation, blockNr, false)
 	if err != nil {
 		return errors.Wrap(err, "checking root hash failed")
 	}
 
-	return nil
-}
+	SaveStageProgress(d.stateDB, HashCheck, blockNr)
 
-func createResolveRequest(tr *trie.Trie) *trie.ResolveRequest {
-	// FIXME: miner of the first block on Ethereum mainnet
-	addr := common.HexToAddress("0x05a56e2d52c817161883f50c441c3228cfe54d9f")
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		panic(err)
-	}
-	need, rr := tr.NeedResolution(nil, addrHash[:])
-	if !need {
-		panic("should need :-D")
-	}
-	//tr.NewResolveRequest(nil, []byte{0x00, 0x00}, 0, tr.Root())
-	return rr
+	return nil
 }

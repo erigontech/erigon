@@ -36,7 +36,9 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	/*
 	* Stage 3. Execute block bodies w/o calculating trie roots
 	 */
-	if err = d.spawnExecuteBlocksStage(); err != nil {
+	syncHeadNumber := uint64(0)
+	syncHeadNumber, err = d.spawnExecuteBlocksStage()
+	if err != nil {
 		return err
 	}
 
@@ -44,10 +46,10 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 4/4. Validating final hash")
-	if err = d.spawnCheckFinalHashStage(); err != nil {
+	if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
 		return err
 	}
-	log.Info("Sync stage 4/4. Validating final hash... NOT IMPLEMENTED")
+	log.Info("Sync stage 4/4. Validating final hash... Complete!")
 
 	return err
 }
