@@ -44,6 +44,9 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 4/4. Validating final hash")
+	if err = d.spawnCheckFinalHashStage(); err != nil {
+		return err
+	}
 	log.Info("Sync stage 4/4. Validating final hash... NOT IMPLEMENTED")
 
 	return err
