@@ -104,11 +104,6 @@ func (hi HistoryIndexBytes) TruncateGreater(lower uint64) HistoryIndexBytes {
 	return hi[:8+idx*ItemLen]
 }
 
-//most common operation is remove one from the tail
-func (hi HistoryIndexBytes) Remove(v uint64) HistoryIndexBytes {
-	panic("not implemented")
-}
-
 // Search looks for the element which is equal or greater of given timestamp
 func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool, bool) {
 	if len(hi) < 8 {
