@@ -39,7 +39,5 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 		return errors.Wrap(err, "checking root hash failed")
 	}
 
-	SaveStageProgress(d.stateDB, HashCheck, blockNr)
-
-	return nil
+	return SaveStageProgress(d.stateDB, HashCheck, blockNr)
 }
