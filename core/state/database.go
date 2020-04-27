@@ -566,10 +566,10 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	var firstRequest = true
 	touches := make([][]byte, 0, len(accountTouches)+len(storageTouches))
 	for _, addrHash := range accountTouches {
-		touches = append(touches, addrHash[:])
+		touches = append(touches, common.CopyBytes(addrHash[:]))
 	}
 	for _, storageKey := range storageTouches {
-		touches = append(touches, storageKey[:])
+		touches = append(touches, common.CopyBytes(storageKey[:]))
 	}
 
 	if tds.resolver == nil {

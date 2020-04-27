@@ -343,6 +343,9 @@ func (tr *ResolverStateful) RebuildTrie(
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if tr.trace {
 		fmt.Printf("----------\n")
+		for i := range tr.rss {
+			fmt.Printf("tr.rss[%d]: %x\n", i, tr.rss[i].hexes)
+		}
 		for _, req := range tr.requests {
 			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
 			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
