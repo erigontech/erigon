@@ -24,6 +24,9 @@ func (d *Downloader) spawnCheckFinalHashStage() error {
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
+	fmt.Printf("HEAD block:\n\thash=%x\n\troot=%x\n\theaderHash=%x\n",
+		syncHeadBlock.Hash(), syncHeadBlock.Root(), syncHeadBlock.Header().Hash())
+
 	tr := trie.New(syncHeadBlock.Root())
 
 	// FIXME: miner of the first block on Ethereum mainnet
@@ -37,10 +40,13 @@ func (d *Downloader) spawnCheckFinalHashStage() error {
 		panic("should need :-D")
 	}
 	r.AddRequest(rr)
-	err = r.ResolveStateful(euphemeralMutation, blockNr, true)
+	err = r.ResolveStateful(euphemeralMutation, blockNr, false)
 	if err != nil {
+		fmt.Printf(" >>>>>> failed root check\n")
 		return err
 	}
+
+	fmt.Printf(" >>>>>> success root check\n")
 
 	return nil
 }
