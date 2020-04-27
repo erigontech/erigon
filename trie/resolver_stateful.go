@@ -150,7 +150,11 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
 		copy(key[:], req.contract)
 		decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
-		startkeys = append(startkeys, key)
+		if len(key) > common.HashLength {
+			startkeys = append(startkeys, key[:common.HashLength])
+		} else {
+			startkeys = append(startkeys, key)
+		}
 		req.extResolvePos = req.resolvePos + 2*pLen
 		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
 		prevReq = req
@@ -331,9 +335,19 @@ func (tr *ResolverStateful) RebuildTrie(
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
+	//trace = true
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
+	//fmt.Printf("----------\n")
+	//for _, req := range tr.requests {
+	//	fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
+	//	fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+	//	fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+	//}
+	//fmt.Printf("fixedbits: %d\n", fixedbits)
+	//fmt.Printf("startkey: %x\n", startkeys)
+
 	if db == nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "ResolveWithDb(db=nil), isAccount: %t\n", isAccount)
@@ -742,7 +756,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			//canUseIntermediateHash = false
+			canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
