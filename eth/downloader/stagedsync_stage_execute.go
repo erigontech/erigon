@@ -2,11 +2,11 @@ package downloader
 
 import (
 	"fmt"
-	"runtime/pprof"
-	"os"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"os"
+	"runtime/pprof"
 )
 
 func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
@@ -71,7 +71,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			incarnationMap = make(map[common.Address]uint64)
 		}
 
-		if nextBlockNumber - profileNumber == 100000 {
+		if nextBlockNumber-profileNumber == 100000 {
 			// Flush the profiler
 			pprof.StopCPUProfile()
 		}
