@@ -198,7 +198,9 @@ func Stateless(
 	engine := ethash.NewFullFaker()
 
 	if blockNum > 1 {
-		blockProvider.FastFwd(blockNum - 1)
+		if errBc := blockProvider.FastFwd(blockNum - 1); errBc != nil {
+			check(errBc)
+		}
 		block, errBc := blockProvider.NextBlock()
 		check(errBc)
 		fmt.Printf("Block number: %d\n", blockNum-1)

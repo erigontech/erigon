@@ -166,26 +166,35 @@ func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
 	}
 }
 
-func (p *ExportFileBlockProvider) resetStream() {
-	p.fh.Seek(0, 0)
+func (p *ExportFileBlockProvider) resetStream() error {
+	if _, err := p.fh.Seek(0, 0); err != nil {
+		return err
+	}
 	if p.reader != p.fh {
-		p.reader.(*gzip.Reader).Reset(p.fh)
+		if err := p.reader.(*gzip.Reader).Reset(p.fh); err != nil {
+			return err
+		}
 	}
 	p.stream = rlp.NewStream(p.reader, 0)
 	p.lastBlockNumber = 0
+	return nil
 }
 
 func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 	if to == 0 {
 		fmt.Println("fastfwd: reseting stream")
-		p.resetStream()
+		if err := p.resetStream(); err != nil {
+			return err
+		}
 	}
 	if p.lastBlockNumber == to-1 {
 		fmt.Println("fastfwd: nothing to do there")
 		return nil
 	} else if p.lastBlockNumber > to-1 {
 		fmt.Println("fastfwd: resetting stream")
-		p.resetStream()
+		if err := p.resetStream(); err != nil {
+			return err
+		}
 	}
 	var b types.Block
 	for {
