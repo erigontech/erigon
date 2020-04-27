@@ -101,7 +101,6 @@ func (hi HistoryIndexBytes) TruncateGreater(lower uint64) HistoryIndexBytes {
 	idx := sort.Search(numElements, func(i int) bool {
 		return lower < minElement+(uint64(elements[i*ItemLen]&0x7f)<<16)+(uint64(elements[i*ItemLen+1])<<8)+uint64(elements[i*ItemLen+2])
 	})
-	binary.BigEndian.PutUint64(hi[:8], uint64(idx))
 	return hi[:8+idx*ItemLen]
 }
 
