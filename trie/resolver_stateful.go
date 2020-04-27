@@ -327,6 +327,11 @@ func (tr *ResolverStateful) RebuildTrie(
 	isAccount bool,
 	historical bool,
 	trace bool) error {
+
+	if len(tr.requests) == 0 {
+		return nil
+	}
+
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
 	tr.trace = trace
 
