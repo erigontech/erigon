@@ -136,8 +136,8 @@ func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, ti
 	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 
-func (m *mutation) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return RewindData(m, timestampSrc, timestampDst, df)
+func (m *mutation) RewindData(timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
+	return RewindData(m, timestampSrc, timestampDst)
 }
 
 func (m *mutation) Delete(bucket, key []byte) error {

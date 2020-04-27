@@ -533,8 +533,8 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 	return nil
 }
 
-func (db *RemoteBoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return RewindData(db, timestampSrc, timestampDst, df)
+func (db *RemoteBoltDatabase) RewindData(timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
+	return RewindData(db, timestampSrc, timestampDst)
 }
 
 func (db *RemoteBoltDatabase) Close() {

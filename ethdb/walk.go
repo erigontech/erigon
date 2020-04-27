@@ -30,39 +30,32 @@ var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 // Generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
+func RewindData(db Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
 	// Collect list of buckets and keys that need to be considered
-	m := make(map[string]map[string][]byte)
+	accountMap := make(map[string][]byte)
 	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
 		timestamp, _ := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
-
 		if changeset.Len(v) > 0 {
-			bucketStr := string(dbutils.AccountsHistoryBucket)
-			var t map[string][]byte
-			var ok bool
-			if t, ok = m[bucketStr]; !ok {
-				t = make(map[string][]byte)
-				m[bucketStr] = t
-			}
-
 			walker := func(kk, vv []byte) error {
-				if _, ok = t[string(kk)]; !ok {
-					t[string(kk)] = vv
+				if _, ok := accountMap[string(kk)]; !ok {
+					accountMap[string(kk)] = vv
 				}
 				return nil
 			}
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
 			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
 				return false, innerErr
 			}
 		}
 		return true, nil
 	}); err != nil {
-		return err
+		return nil, nil, err
 	}
+	storageMap := make(map[string][]byte)
 	if err := db.Walk(dbutils.StorageChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
 		timestamp, _ := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
@@ -70,40 +63,22 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 		}
 
 		if changeset.Len(v) > 0 {
-			bucketStr := string(dbutils.StorageHistoryBucket)
-			var t map[string][]byte
-			var ok bool
-			if t, ok = m[bucketStr]; !ok {
-				t = make(map[string][]byte)
-				m[bucketStr] = t
-			}
-
 			walker := func(kk, vv []byte) error {
-				if _, ok = t[string(kk)]; !ok {
-					t[string(kk)] = vv
+				if _, ok := storageMap[string(kk)]; !ok {
+					storageMap[string(kk)] = vv
 				}
 				return nil
 			}
 			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-
 			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
 				return false, innerErr
 			}
 		}
 		return true, nil
 	}); err != nil {
-		return err
+		return nil, nil, err
 	}
-	for bucketStr, t := range m {
-		bucket := []byte(bucketStr)
-		for keyStr, value := range t {
-			key := []byte(keyStr)
-			if err := df(bucket, key, value); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return accountMap, storageMap, nil
 }
 
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
