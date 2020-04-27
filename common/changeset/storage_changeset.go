@@ -5,18 +5,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sort"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"sort"
 )
 
 const (
-	DefaultIncarnation                      = uint64(1)
-	storageEnodingIndexSize                 = 4
-	storageEnodingStartElem                 = 4
-	storageEnodingLengthOfNumOfElements     = 4
-	storageEnodingLengthOfDict              = 2
-	storageEnodingLengthOfNumTypeOfElements = 2
+	DefaultIncarnation                  = uint64(1)
+	storageEnodingLengthOfNumOfElements = 4
+	storageEnodingLengthOfUniqueElemens = 2
 )
 
 var ErrNotFound = errors.New("not found")
@@ -28,13 +24,15 @@ func NewStorageChangeSet() *ChangeSet {
 	}
 }
 
-/*
-Storage ChangeSet is serialized in the following manner in order to facilitate binary search:
-
+/**
 numOfElements uint32
-numOfUniqAddrHashes uint16
-[addrHashes] []common.Hash
-[idOfAddr:idOfKey] [uint8/uint16/uint32:common.Hash...] (depends on numOfUniqAddrHashes)
+numOfUniqueContracts uint16
+[]{
+	addrhash common.Hash
+	numOfStorageKeysToSkip uint16
+}
+keys     []common.Hash numOfElements
+ lenToValue []uint16,
 numOfUint8Values uint16
 numOfUint16Values uint16
 numOfUint32Values uint16
@@ -42,283 +40,286 @@ numOfUint32Values uint16
 [len(valnumOfUint8Values), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{numOfUint16Values-1})] []uint16
 [len(valnumOfUint16Values), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{numOfUint32Values-1})] []uint32
 [elementNum:incarnation] -  optional [uint32:uint64...]
+
 */
 
 func EncodeStorage(s *ChangeSet) ([]byte, error) {
 	sort.Sort(s)
+	var err error
 	buf := new(bytes.Buffer)
-	uint32Arr := make([]byte, storageEnodingLengthOfNumOfElements)
-	n := s.Len()
+	uint16Arr := make([]byte, 2)
+	uint32Arr := make([]byte, 4)
+	numOfElements := s.Len()
 
-	//write numOfElements
-	binary.BigEndian.PutUint32(uint32Arr, uint32(n))
+	//save numOfElements
+	binary.BigEndian.PutUint32(uint32Arr, uint32(numOfElements))
 	if _, err := buf.Write(uint32Arr); err != nil {
 		return nil, err
 	}
 
-	addrHashesMap := make([]uint32, n)
-	var addrHashList []byte
-	notDefaultIncarnationList := make([]byte, 0)
+	keys := make([]contractKeys, 0, numOfElements)
+	valLengthes := make([]byte, 0, numOfElements)
+	var (
+		currentContract contractKeys
+		numOfUint8      uint16
+		numOfUint16     uint16
+		numOfUint32     uint16
+		lengthOfValues  uint32
+	)
+	notDefaultIncarnationsBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(notDefaultIncarnationsBytes, 0)
 
-	//collect information about unique addHashes and non default incarnations
-	var addrID uint32
-	var addrIdxToIncarnation [12]byte
-	for i, change := range s.Changes {
-		if i == 0 || !bytes.Equal(change.Key[:common.HashLength], s.Changes[i-1].Key[:common.HashLength]) {
-			if i > 0 {
-				addrID++
-			}
-			addrHashList = append(addrHashList, change.Key[:common.HashLength]...)
-			incarnation := ^binary.BigEndian.Uint64(change.Key[common.HashLength : common.HashLength+common.IncarnationLength])
-			if incarnation != DefaultIncarnation {
-				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], addrID)
-				binary.BigEndian.PutUint64(addrIdxToIncarnation[4:12], ^incarnation)
-				notDefaultIncarnationList = append(notDefaultIncarnationList, addrIdxToIncarnation[:]...)
-			}
-		}
-		addrHashesMap[i] = addrID
-	}
-
-	//write numOfUniqAddrHashes
-	numOfUniqAddrHashes := make([]byte, storageEnodingLengthOfDict)
-	binary.BigEndian.PutUint16(numOfUniqAddrHashes, uint16(addrID+1))
-	if _, err := buf.Write(numOfUniqAddrHashes); err != nil {
-		return nil, err
-	}
-
-	//Write contiguous array of address hashes
-	if _, err := buf.Write(addrHashList); err != nil {
-		return nil, err
-	}
-
-	lenOfAddr := getNumOfBytesByLen(int(addrID + 1))
-	row := make([]byte, lenOfAddr+common.HashLength)
-	for i, change := range s.Changes {
-		writeKeyRow(
-			addrHashesMap[i],
-			row[0:lenOfAddr],
-		)
-		copy(row[lenOfAddr:lenOfAddr+common.HashLength], change.Key[common.IncarnationLength+common.HashLength:common.IncarnationLength+2*common.HashLength])
-		buf.Write(row)
-	}
-	numOfUint8 := uint16(0)
-	numOfUint16 := uint16(0)
-	numOfUint32 := uint16(0)
-
-	lengthOfValues := uint32(0)
-
-	// Remember position to fix up the lengths later
-	lengthPos := buf.Len()
-	uint16b := make([]byte, 2)
-	// Reserve 3 positions for lengths
-	buf.Write(uint16b)
-	buf.Write(uint16b)
-	buf.Write(uint16b)
-	uint32b := make([]byte, 4)
+	currentKey := -1
 	for _, change := range s.Changes {
+		//found new contract address
+		if !bytes.Equal(currentContract.AddrHash, change.Key[0:common.HashLength]) || currentContract.Incarnation != binary.BigEndian.Uint64(change.Key[common.HashLength:common.HashLength+common.IncarnationLength]) {
+			currentKey++
+			currentContract.AddrHash = change.Key[0:common.HashLength]
+			currentContract.Incarnation = binary.BigEndian.Uint64(change.Key[common.HashLength : common.HashLength+common.IncarnationLength])
+			//add to incarnations part
+			if currentContract.Incarnation != DefaultIncarnation {
+				b := make([]byte, 10)
+				binary.BigEndian.PutUint16(b[0:2], uint16(currentKey))
+				binary.BigEndian.PutUint64(b[2:10], currentContract.Incarnation)
+				notDefaultIncarnationsBytes = append(notDefaultIncarnationsBytes, b...)
+				binary.BigEndian.PutUint16(notDefaultIncarnationsBytes[0:2], binary.BigEndian.Uint16(notDefaultIncarnationsBytes[0:2])+1)
+			}
+			currentContract.Keys = [][]byte{change.Key[common.HashLength+common.IncarnationLength : 2*common.HashLength+common.IncarnationLength]}
+			currentContract.Vals = [][]byte{change.Value}
+			keys = append(keys, currentContract)
+		} else {
+			//add key and value
+			currentContract.Keys = append(currentContract.Keys, change.Key[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength])
+			currentContract.Vals = append(currentContract.Vals, change.Value)
+		}
+
+		//calculate lengthes of values
 		lengthOfValues += uint32(len(change.Value))
 		switch {
 		case lengthOfValues <= 255:
+			valLengthes = append(valLengthes, uint8(lengthOfValues))
 			numOfUint8++
-			buf.WriteByte(uint8(lengthOfValues))
+
 		case lengthOfValues <= 65535:
+			binary.BigEndian.PutUint16(uint16Arr, uint16(lengthOfValues))
+			valLengthes = append(valLengthes, uint16Arr...)
 			numOfUint16++
-			binary.BigEndian.PutUint16(uint16b, uint16(lengthOfValues))
-			buf.Write(uint16b)
+
 		default:
+			binary.BigEndian.PutUint32(uint32Arr, lengthOfValues)
+			valLengthes = append(valLengthes, uint32Arr...)
 			numOfUint32++
-			binary.BigEndian.PutUint32(uint32b, lengthOfValues)
-			buf.Write(uint32b)
 		}
+
+		//save to array
+		keys[currentKey] = currentContract
 	}
 
-	for _, change := range s.Changes {
-		buf.Write(change.Value)
+	// save numOfUniqueContracts
+	binary.BigEndian.PutUint16(uint16Arr, uint16(len(keys)))
+	if _, err = buf.Write(uint16Arr); err != nil {
+		return nil, err
 	}
 
-	if len(notDefaultIncarnationList) > 0 {
-		if _, err := buf.Write(notDefaultIncarnationList); err != nil {
+	if len(keys) == 0 {
+		return nil, errors.New("empty prepared data")
+	}
+
+	keysBuf := make([]byte, numOfElements*common.HashLength)
+	var endNumOfKeys int
+
+	for i := 0; i < len(keys); i++ {
+		_, err = buf.Write(keys[i].AddrHash)
+		if err != nil {
 			return nil, err
 		}
+		numOfKeysToSkip := endNumOfKeys
+		endNumOfKeys += len(keys[i].Keys)
+
+		//end of keys
+		binary.BigEndian.PutUint16(uint16Arr, uint16(endNumOfKeys))
+		_, err = buf.Write(uint16Arr)
+		if err != nil {
+			return nil, err
+		}
+
+		//add key to keys
+		for j, v := range keys[i].Keys {
+			copy(keysBuf[(numOfKeysToSkip+j)*common.HashLength:(numOfKeysToSkip+j+1)*common.HashLength], v[:])
+		}
 	}
 
-	b := buf.Bytes()
-	// Fix up the lengths
-	binary.BigEndian.PutUint16(b[lengthPos:], numOfUint8)
-	binary.BigEndian.PutUint16(b[lengthPos+2:], numOfUint16)
-	binary.BigEndian.PutUint16(b[lengthPos+4:], numOfUint32)
-	return b, nil
+	if endNumOfKeys != numOfElements {
+		return nil, fmt.Errorf("incorrect number of elements must:%v current:%v", numOfElements, endNumOfKeys)
+	}
+
+	_, err = buf.Write(notDefaultIncarnationsBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = buf.Write(keysBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	binary.BigEndian.PutUint16(uint16Arr, numOfUint8)
+	_, err = buf.Write(uint16Arr)
+	if err != nil {
+		return nil, err
+	}
+
+	binary.BigEndian.PutUint16(uint16Arr, numOfUint16)
+	_, err = buf.Write(uint16Arr)
+	if err != nil {
+		return nil, err
+	}
+
+	binary.BigEndian.PutUint16(uint16Arr, numOfUint32)
+	_, err = buf.Write(uint16Arr)
+	if err != nil {
+		return nil, err
+	}
+
+	binary.BigEndian.PutUint32(uint32Arr, lengthOfValues)
+	_, err = buf.Write(uint32Arr)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = buf.Write(valLengthes)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range keys {
+		for _, val := range v.Vals {
+			_, err = buf.Write(val)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return buf.Bytes(), nil
 }
 
 func DecodeStorage(b []byte) (*ChangeSet, error) {
-	h := NewStorageChangeSet()
-	if len(b) == 0 {
-		h.Changes = make([]Change, 0)
-		return h, nil
-	}
-	if len(b) < 4 {
-		return h, fmt.Errorf("decode: input too short (%d bytes)", len(b))
-	}
+	numOfElements := binary.BigEndian.Uint32(b[0:4])
+	numOfUniqueElements := binary.BigEndian.Uint16(b[4:6])
 
-	numOfElements := int(binary.BigEndian.Uint32(b[0:storageEnodingLengthOfNumOfElements]))
-	h.Changes = make([]Change, numOfElements)
+	keys := make([]contractKeys, numOfUniqueElements)
+
+	changeSet := &ChangeSet{
+		Changes: make([]Change, numOfElements),
+		keyLen:  72,
+	}
 
 	if numOfElements == 0 {
-		return h, nil
+		return changeSet, nil
 	}
 
-	dictLen := int(binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfDict]))
-	addMap := make(map[uint32][]byte)
-	for i := 0; i < dictLen; i++ {
-		elemStart := storageEnodingLengthOfNumOfElements + storageEnodingLengthOfDict + i*common.HashLength
-		addMap[uint32(i)] = b[elemStart : elemStart+common.HashLength]
-	}
-
-	lenOfValsPos := storageEnodingStartElem +
-		2 + dictLen*common.HashLength +
-		numOfElements*(getNumOfBytesByLen(dictLen)+common.HashLength)
-
-	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos : lenOfValsPos+2]))
-	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+2 : lenOfValsPos+4]))
-	numOfUint32 := int(binary.BigEndian.Uint16(b[lenOfValsPos+4 : lenOfValsPos+6]))
-	lenOfValsPos = lenOfValsPos + 3*storageEnodingLengthOfNumTypeOfElements
-	valuesPos := lenOfValsPos + numOfUint8 + numOfUint16*2 + numOfUint32*4
-
-	incarnationPosition := lenOfValsPos + calculateIncarnationPos3(b[lenOfValsPos:], numOfUint8, numOfUint16, numOfUint32)
-	notDefaultIncarnation := make(map[uint32]uint64)
-
-	if len(b) > incarnationPosition {
-		if len(b[incarnationPosition:])%12 != 0 {
-			return h, fmt.Errorf("decode: incarnatin part is incorrect(%d bytes)", len(b[incarnationPosition:]))
-		}
-		for i := incarnationPosition; i < len(b); i += 12 {
-			id := binary.BigEndian.Uint32(b[i : i+4])
-			inc := ^binary.BigEndian.Uint64(b[i+4 : i+12])
-			notDefaultIncarnation[id] = inc
-		}
-	}
-
-	elementStart := storageEnodingStartElem + storageEnodingLengthOfDict + dictLen*common.HashLength
-
-	lenOfAddHash := getNumOfBytesByLen(len(addMap))
-	for i := 0; i < numOfElements; i++ {
-		//copy addrHash
-		key := make([]byte, common.HashLength*2+common.IncarnationLength)
-		elem := elementStart + i*(lenOfAddHash+common.HashLength)
-		addrIdx := getUint32(b[elem : elem+lenOfAddHash])
-		copy(key[:common.HashLength], addMap[addrIdx])
-		if inc, ok := notDefaultIncarnation[addrIdx]; ok {
-			binary.BigEndian.PutUint64(key[common.HashLength:], ^inc)
+	numOfSkipKeys := make([]uint16, numOfUniqueElements+1)
+	numOfSkipKeys[numOfUniqueElements] = uint16(numOfElements)
+	for i := uint32(0); i < uint32(numOfUniqueElements); i++ {
+		var start uint32
+		if i > 0 {
+			numOfSkipKeys[i] = binary.BigEndian.Uint16(b[6+i*(common.HashLength)+(i-1)*2 : 6+i*(common.HashLength)+(i)*2])
+			start = 6 + i*common.HashLength + i*2
 		} else {
-			binary.BigEndian.PutUint64(key[common.HashLength:], ^DefaultIncarnation)
+			start = 6
 		}
-		//copy key hash
-		copy(
-			key[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength],
-			common.CopyBytes(b[elem+lenOfAddHash:elem+lenOfAddHash+common.HashLength]),
-		)
-
-		h.Changes[i].Key = key
-		h.Changes[i].Value = findVal(b[lenOfValsPos:valuesPos], b[valuesPos:], i, numOfUint8, numOfUint16, numOfUint32)
+		keys[i].AddrHash = b[start : start+common.HashLength]
+		keys[i].Incarnation = DefaultIncarnation
 	}
-	return h, nil
+
+	incarnatonsInfo := 6 + uint32(numOfUniqueElements)*(common.HashLength+2)
+	numOfNotDefaultIncarnations := binary.BigEndian.Uint16(b[incarnatonsInfo : incarnatonsInfo+2])
+
+	incarnationsStart := incarnatonsInfo + 2
+	if numOfNotDefaultIncarnations > 0 {
+		for i := uint32(0); i < uint32(numOfNotDefaultIncarnations); i++ {
+			id := binary.BigEndian.Uint16(b[incarnationsStart+i*10 : incarnationsStart+i*10+2])
+			keys[id].Incarnation = binary.BigEndian.Uint64(b[incarnationsStart+i*10+2 : incarnationsStart+i*10+10])
+		}
+	}
+
+	keysStart := incarnationsStart + uint32(numOfNotDefaultIncarnations)*10
+
+	for i := uint32(0); i < uint32(numOfUniqueElements); i++ {
+		for j := numOfSkipKeys[i]; j < numOfSkipKeys[i+1]; j++ {
+			if keys[i].Keys == nil {
+				keys[i].Keys = make([][]byte, 0, numOfSkipKeys[i+1]-numOfSkipKeys[i])
+			}
+			keys[i].Keys = append(keys[i].Keys, b[keysStart+uint32(j)*common.HashLength:keysStart+(uint32(j)+1)*common.HashLength])
+		}
+	}
+
+	valsInfoStart := keysStart + numOfElements*common.HashLength
+	cs := NewStorageChangeSet()
+	cs.Changes = make([]Change, numOfElements)
+	id := uint32(0)
+	for _, v := range keys {
+		for i := range v.Keys {
+			k := make([]byte, common.HashLength*2+common.IncarnationLength)
+			copy(k[:common.HashLength], v.AddrHash)
+			binary.BigEndian.PutUint64(k[common.HashLength:common.HashLength+common.IncarnationLength], v.Incarnation)
+			copy(k[common.HashLength+common.IncarnationLength:common.HashLength*2+common.IncarnationLength], v.Keys[i])
+			val, innerErr := FindValue(b[valsInfoStart:], id)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			cs.Changes[id] = Change{
+				Key:   k,
+				Value: val,
+			}
+
+			id++
+		}
+	}
+
+	return cs, nil
 }
 
-// no more than len(changeset)
-func getNumOfBytesByLen(n int) int {
-	switch {
-	case n < 255:
-		return 1
-	case n < 65535:
-		return 2
-	case n < 4294967295:
-		return 4
-	default:
-		return 8
-	}
-}
+func FindValue(b []byte, i uint32) ([]byte, error) {
+	numOfUint8 := uint32(binary.BigEndian.Uint16(b[0:2]))
+	numOfUint16 := uint32(binary.BigEndian.Uint16(b[2:4]))
+	numOfUint32 := uint32(binary.BigEndian.Uint16(b[4:6]))
+	lenOfValsStartPointer := uint32(10)
+	valsPointer := lenOfValsStartPointer + numOfUint8 + numOfUint16*2 + numOfUint32*4
+	var (
+		lenOfValStart uint32
+		lenOfValEnd   uint32
+	)
 
-func calculateIncarnationPos3(b []byte, numOfUint8, numOfUint16, numOfUint32 int) int {
-	res := 0
-	end := 0
-	switch {
-	case numOfUint32 > 0:
-		end = numOfUint8 + numOfUint16*2 + numOfUint32*4
-		res = int(binary.BigEndian.Uint32(b[end-4:end])) + end
-	case numOfUint16 > 0:
-		end = numOfUint8 + numOfUint16*2
-		res = int(binary.BigEndian.Uint16(b[end-2:end])) + end
-	case numOfUint8 > 0:
-		end = numOfUint8
-		res = int(b[end-1]) + end
-	default:
-		return 0
-	}
-	return res
-}
-
-func findVal(lenOfVals []byte, values []byte, i int, numOfUint8, numOfUint16, numOfUint32 int) []byte {
-	lenOfValStart := 0
-	lenOfValEnd := 0
 	switch {
 	case i < numOfUint8:
-		lenOfValEnd = int(lenOfVals[i])
+		lenOfValEnd = uint32(b[lenOfValsStartPointer+i])
 		if i > 0 {
-			lenOfValStart = int(lenOfVals[i-1])
+			lenOfValStart = uint32(b[lenOfValsStartPointer+i-1])
 		}
 	case i < numOfUint8+numOfUint16:
 		one := (i-numOfUint8)*2 + numOfUint8
-		lenOfValEnd = int(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
+		lenOfValEnd = uint32(binary.BigEndian.Uint16(b[lenOfValsStartPointer+one : lenOfValsStartPointer+one+2]))
 		if i-1 < numOfUint8 {
-			lenOfValStart = int(lenOfVals[i-1])
+			lenOfValStart = uint32(b[lenOfValsStartPointer+i-1])
 		} else {
 			one = (i-1)*2 - numOfUint8
-			lenOfValStart = int(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
+			lenOfValStart = uint32(binary.BigEndian.Uint16(b[lenOfValsStartPointer+one : lenOfValsStartPointer+one+2]))
 		}
 	case i < numOfUint8+numOfUint16+numOfUint32:
-		one := numOfUint8 + numOfUint16*2 + (i-numOfUint8-numOfUint16)*4
-		lenOfValEnd = int(binary.BigEndian.Uint32(lenOfVals[one : one+4]))
+		one := lenOfValsStartPointer + numOfUint8 + numOfUint16*2 + (i-numOfUint8-numOfUint16)*4
+		lenOfValEnd = binary.BigEndian.Uint32(b[one : one+4])
 		if i-1 < numOfUint8+numOfUint16 {
-			one = (i-1)*2 - numOfUint8
-			lenOfValStart = int(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
+			one = lenOfValsStartPointer + (i-1)*2 - numOfUint8
+			lenOfValStart = uint32(binary.BigEndian.Uint16(b[one : one+2]))
 		} else {
-			one = numOfUint8 + numOfUint16*2 + (i-1-numOfUint8-numOfUint16)*4
-			lenOfValStart = int(binary.BigEndian.Uint32(lenOfVals[one : one+4]))
+			one = lenOfValsStartPointer + numOfUint8 + numOfUint16*2 + (i-1-numOfUint8-numOfUint16)*4
+			lenOfValStart = binary.BigEndian.Uint32(b[one : one+4])
 		}
 	default:
-		panic("findval err")
+		return nil, errors.New("find value error")
 	}
-	return common.CopyBytes(values[lenOfValStart:lenOfValEnd])
-}
-
-func writeKeyRow(id uint32, row []byte) {
-	switch len(row) {
-	case 1:
-		row[0] = uint8(id)
-	case 2:
-		binary.BigEndian.PutUint16(row, uint16(id))
-	case 4:
-		binary.BigEndian.PutUint32(row, id)
-	case 8:
-		binary.BigEndian.PutUint64(row, uint64(id))
-	default:
-		panic("wrong size of row")
-	}
-}
-
-func getUint32(row []byte) uint32 {
-	switch len(row) {
-	case 1:
-		return uint32(row[0])
-	case 2:
-		return uint32(binary.BigEndian.Uint16(row))
-	case 4:
-		return binary.BigEndian.Uint32(row)
-	case 8:
-		return uint32(binary.BigEndian.Uint64(row))
-	default:
-		panic("wrong")
-	}
+	return common.CopyBytes(b[valsPointer+lenOfValStart : valsPointer+lenOfValEnd]), nil
 }
 
 type StorageChangeSetBytes []byte
@@ -327,78 +328,71 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 	if len(b) == 0 {
 		return nil
 	}
+
 	if len(b) < 8 {
 		return fmt.Errorf("decode: input too short (%d bytes)", len(b))
 	}
 
-	numOfItems := int(binary.BigEndian.Uint32(b[0:4]))
-
-	if numOfItems == 0 {
+	numOfElements := binary.BigEndian.Uint32(b[0:4])
+	if numOfElements == 0 {
 		return nil
 	}
 
-	numOfUniqueItems := int(binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfDict]))
-	lenOfValsPos := storageEnodingStartElem +
-		storageEnodingLengthOfDict +
-		numOfUniqueItems*common.HashLength +
-		numOfItems*(getNumOfBytesByLen(numOfUniqueItems)+common.HashLength)
+	numOfUniqueElements := binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfUniqueElemens])
+	incarnatonsInfo := 6 + uint32(numOfUniqueElements)*(common.HashLength) + uint32((numOfUniqueElements)*2)
+	numOfNotDefaultIncarnations := binary.BigEndian.Uint16(b[incarnatonsInfo : incarnatonsInfo+2])
+	incarnatonsStart := incarnatonsInfo + 2
 
-	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements]))
-	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2]))
-	numOfUint32 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2 : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*3]))
-
-	lenOfValsPos += storageEnodingLengthOfNumTypeOfElements * 3
-	valuesPos := lenOfValsPos + numOfUint8 + numOfUint16*2 + numOfUint32*4
-
-	incarnationPosition := lenOfValsPos + calculateIncarnationPos3(b[lenOfValsPos:], numOfUint8, numOfUint16, numOfUint32)
-	notDefaultIncarnation := make(map[uint32]uint64)
-
-	if len(b) > incarnationPosition {
-		if len(b[incarnationPosition:])%12 != 0 {
-			return fmt.Errorf("decode: incarnatin part is incorrect(%d bytes)", len(b[incarnationPosition:]))
-		}
-		for i := incarnationPosition; i < len(b); i += 12 {
-			id := binary.BigEndian.Uint32(b[i : i+4])
-			inc := ^binary.BigEndian.Uint64(b[i+4 : i+12])
-			notDefaultIncarnation[id] = inc
+	notDefaultIncarnations := make(map[uint16]uint64)
+	if numOfNotDefaultIncarnations > 0 {
+		for i := uint32(0); i < uint32(numOfNotDefaultIncarnations); i++ {
+			notDefaultIncarnations[binary.BigEndian.Uint16(b[incarnatonsStart+i*10:incarnatonsStart+i*10+2])] = binary.BigEndian.Uint64(b[incarnatonsStart+i*10+2 : incarnatonsStart+i*10+10])
 		}
 	}
 
-	addrHashMap := make(map[uint32][]byte, numOfUniqueItems)
-	for i := uint32(0); i < uint32(numOfUniqueItems); i++ {
-		elemStart := storageEnodingStartElem + storageEnodingLengthOfDict + i*(common.HashLength)
-		addrHashMap[i] = b[elemStart : elemStart+common.HashLength]
-	}
+	keysStart := incarnatonsStart + uint32(numOfNotDefaultIncarnations)*10
+	valsInfoStart := keysStart + numOfElements*common.HashLength
 
-	key := make([]byte, common.HashLength*2+common.IncarnationLength)
-	elemLength := getNumOfBytesByLen(numOfUniqueItems)
-	for i := 0; i < numOfItems; i++ {
-		elemStart := storageEnodingStartElem +
-			storageEnodingLengthOfDict +
-			numOfUniqueItems*(common.HashLength) +
-			i*(elemLength+common.HashLength)
-
-		addrIdx := getUint32(b[elemStart : elemStart+elemLength])
-		copy(key[:common.HashLength], addrHashMap[addrIdx])
-		if inc, ok := notDefaultIncarnation[addrIdx]; ok {
-			binary.BigEndian.PutUint64(key[common.HashLength:common.HashLength+common.IncarnationLength], ^inc)
-		} else {
-			binary.BigEndian.PutUint64(key[common.HashLength:common.HashLength+common.IncarnationLength], ^DefaultIncarnation)
-		}
-		//copy key hash
-		copy(
-			key[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength],
-			b[elemStart+elemLength:elemStart+elemLength+common.HashLength],
+	var addressHashID uint16
+	var id uint32
+	for i := uint32(0); i < uint32(numOfUniqueElements); i++ {
+		var (
+			startKeys uint16
+			endKeys   uint16
 		)
-		err := f(common.CopyBytes(key), findVal(b[lenOfValsPos:valuesPos], b[valuesPos:], i, numOfUint8, numOfUint16, numOfUint32))
-		if err != nil {
-			return err
+
+		if i > 0 {
+			startKeys = binary.BigEndian.Uint16(b[6+i*(common.HashLength)+(i-1)*2 : 6+i*(common.HashLength)+i*2])
 		}
+		endKeys = binary.BigEndian.Uint16(b[6+(i+1)*(common.HashLength)+i*2 : 6+(i+1)*(common.HashLength)+(i+1)*2])
+		addrHash := b[6+i*(common.HashLength)+i*2 : 6+(i+1)*(common.HashLength)+i*2]
+		incarnation := DefaultIncarnation
+		if inc, ok := notDefaultIncarnations[addressHashID]; ok {
+			incarnation = inc
+		}
+
+		for j := startKeys; j < endKeys; j++ {
+			k := make([]byte, 72)
+			copy(k[:common.HashLength], addrHash[:common.HashLength])
+			copy(k[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength], b[keysStart+uint32(j)*common.HashLength:keysStart+(uint32(j)+1)*common.HashLength])
+			binary.BigEndian.PutUint64(k[common.HashLength:common.HashLength+common.IncarnationLength], incarnation)
+			val, innerErr := FindValue(b[valsInfoStart:], id)
+			if innerErr != nil {
+				return innerErr
+			}
+			err := f(k, val)
+			if err != nil {
+				return err
+			}
+			id++
+		}
+		addressHashID++
 	}
+
 	return nil
 }
 
-func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, error) {
+func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
 	if len(b) == 0 {
 		return nil, nil
 	}
@@ -406,60 +400,110 @@ func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, er
 		return nil, fmt.Errorf("decode: input too short (%d bytes)", len(b))
 	}
 
-	numOfItems := int(binary.BigEndian.Uint32(b[:storageEnodingLengthOfNumOfElements]))
-	if numOfItems == 0 {
+	numOfElements := binary.BigEndian.Uint32(b[0:storageEnodingLengthOfNumOfElements])
+	if numOfElements == 0 {
 		return nil, nil
 	}
 
-	numOfUniqueItems := int(binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements:]))
-	var addHashID uint32
-	found := false
-
-	elemStart := storageEnodingLengthOfNumOfElements + storageEnodingLengthOfDict
-	//todo[boris] here should be binary search
-	for i := 0; i < numOfUniqueItems; i++ {
-		if bytes.Equal(addrHash, b[elemStart:elemStart+common.HashLength]) {
-			found = true
-			addHashID = uint32(i)
-			break
+	numOfUniqueElements := binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfUniqueElemens])
+	incarnatonsInfo := 6 + uint32(numOfUniqueElements)*(common.HashLength) + uint32((numOfUniqueElements)*2)
+	numOfNotDefaultIncarnations := binary.BigEndian.Uint16(b[incarnatonsInfo : incarnatonsInfo+2])
+	incarnatonsStart := incarnatonsInfo + 2
+	notDefaultIncarnations := make(map[uint16]uint64)
+	if numOfNotDefaultIncarnations > 0 {
+		for i := uint32(0); i < uint32(numOfNotDefaultIncarnations); i++ {
+			notDefaultIncarnations[binary.BigEndian.Uint16(b[incarnatonsStart+i*10:incarnatonsStart+i*10+2])] = binary.BigEndian.Uint64(b[incarnatonsStart+i*10+2 : incarnatonsStart+i*10+10])
 		}
-		elemStart += common.HashLength
 	}
-	if !found {
-		return nil, fmt.Errorf("did not find addrHash %x", addrHash)
-	}
+	keysStart := incarnatonsStart + uint32(numOfNotDefaultIncarnations)*10
+	valsInfoStart := keysStart + numOfElements*common.HashLength
 
-	elemLength := getNumOfBytesByLen(numOfUniqueItems)
-	lenOfValsPos := storageEnodingStartElem +
-		storageEnodingLengthOfDict +
-		numOfUniqueItems*common.HashLength +
-		numOfItems*(elemLength+common.HashLength)
+	addHashID := sort.Search(int(numOfUniqueElements), func(i int) bool {
+		addrHash := b[6+i*(common.HashLength)+i*2 : 6+(i+1)*(common.HashLength)+i*2]
+		cmp := bytes.Compare(addrHash, k[0:common.HashLength])
+		return cmp >= 0
+	})
 
-	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos:]))
-	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements:]))
-	numOfUint32 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2:]))
-
-	lenOfValsPos += storageEnodingLengthOfNumTypeOfElements * 3
-	valuesPos := lenOfValsPos + numOfUint8 + numOfUint16*2 + numOfUint32*4
-
-	//here should be binary search too
-	encodedAddHashID := make([]byte, elemLength)
-	writeKeyRow(addHashID, encodedAddHashID)
-	for i := 0; i < numOfItems; i++ {
-		elemStart := storageEnodingStartElem +
-			storageEnodingLengthOfDict +
-			numOfUniqueItems*(common.HashLength) +
-			i*(elemLength+common.HashLength)
-
-		if !bytes.Equal(encodedAddHashID, b[elemStart:elemStart+elemLength]) {
-			continue
-		}
-
-		if !bytes.Equal(keyHash, b[elemStart+elemLength:elemStart+elemLength+common.HashLength]) {
-			continue
-		}
-		return findVal(b[lenOfValsPos:valuesPos], b[valuesPos:], i, numOfUint8, numOfUint16, numOfUint32), nil
+	if addHashID >= int(numOfUniqueElements) {
+		return nil, ErrNotFound
 	}
 
-	return nil, ErrNotFound
+	from := uint16(0)
+	if addHashID > 0 {
+		from = binary.BigEndian.Uint16(b[6+addHashID*common.HashLength+addHashID*2-2 : 6+(addHashID)*common.HashLength+addHashID*2])
+	}
+	to := binary.BigEndian.Uint16(b[6+(addHashID+1)*common.HashLength+addHashID*2 : 6+(addHashID+1)*common.HashLength+addHashID*2+2])
+
+	keyIndex := sort.Search(int(to-from), func(i int) bool {
+		index := uint32(int(from) + i)
+		key := b[keysStart+common.HashLength*index : keysStart+common.HashLength*index+common.HashLength]
+		cmp := bytes.Compare(key, k[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength])
+		return cmp >= 0
+	})
+	if keyIndex >= int(to-from) {
+		return nil, ErrNotFound
+	}
+	index := uint32(int(from) + keyIndex)
+	return FindValue(b[valsInfoStart:], index)
+}
+
+func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, keyHashToFind []byte) ([]byte, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	if len(b) < 8 {
+		return nil, fmt.Errorf("decode: input too short (%d bytes)", len(b))
+	}
+
+	numOfElements := binary.BigEndian.Uint32(b[0:storageEnodingLengthOfNumOfElements])
+	if numOfElements == 0 {
+		return nil, nil
+	}
+
+	numOfUniqueElements := binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfUniqueElemens])
+	incarnatonsInfo := 6 + uint32(numOfUniqueElements)*(common.HashLength) + uint32((numOfUniqueElements)*2)
+	numOfNotDefaultIncarnations := binary.BigEndian.Uint16(b[incarnatonsInfo : incarnatonsInfo+2])
+	incarnatonsStart := incarnatonsInfo + 2
+	notDefaultIncarnations := make(map[uint16]uint64)
+	if numOfNotDefaultIncarnations > 0 {
+		for i := uint32(0); i < uint32(numOfNotDefaultIncarnations); i++ {
+			notDefaultIncarnations[binary.BigEndian.Uint16(b[incarnatonsStart+i*10:incarnatonsStart+i*10+2])] = binary.BigEndian.Uint64(b[incarnatonsStart+i*10+2 : incarnatonsStart+i*10+10])
+		}
+	}
+	keysStart := incarnatonsStart + uint32(numOfNotDefaultIncarnations)*10
+	valsInfoStart := keysStart + numOfElements*common.HashLength
+
+	addHashID := sort.Search(int(numOfUniqueElements), func(i int) bool {
+		addrHash := b[6+i*(common.HashLength)+i*2 : 6+(i+1)*(common.HashLength)+i*2]
+		cmp := bytes.Compare(addrHash, addrHashToFind)
+		return cmp >= 0
+
+	})
+
+	if addHashID >= int(numOfUniqueElements) {
+		return nil, ErrNotFound
+	}
+	from := uint16(0)
+	if addHashID > 0 {
+		from = binary.BigEndian.Uint16(b[6+addHashID*common.HashLength+addHashID*2-2 : 6+(addHashID)*common.HashLength+addHashID*2])
+	}
+	to := binary.BigEndian.Uint16(b[6+(addHashID+1)*common.HashLength+addHashID*2 : 6+(addHashID+1)*common.HashLength+addHashID*2+2])
+	keyIndex := sort.Search(int(to-from), func(i int) bool {
+		index := uint32(int(from) + i)
+		key := b[keysStart+common.HashLength*index : keysStart+common.HashLength*index+common.HashLength]
+		cmp := bytes.Compare(key, keyHashToFind)
+		return cmp >= 0
+	})
+	if keyIndex >= int(to-from) {
+		return nil, ErrNotFound
+	}
+	index := uint32(int(from) + keyIndex)
+	return FindValue(b[valsInfoStart:], index)
+}
+
+type contractKeys struct {
+	AddrHash    []byte
+	Incarnation uint64
+	Keys        [][]byte
+	Vals        [][]byte
 }

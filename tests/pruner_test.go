@@ -673,7 +673,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		}
 		stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changeset.Len(v))
 
-		innerErr := changeset.Walk(v, func(k, _ []byte) error {
+		innerErr := changeset.AccountChangeSetBytes(v).Walk(func(k, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(common.CopyBytes(k), timestamp)
 			_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 			if err != nil {
