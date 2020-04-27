@@ -98,10 +98,12 @@ func (hi HistoryIndexBytes) TruncateGreater(lower uint64) HistoryIndexBytes {
 	numElements := (len(hi) - 8) / 3
 	minElement := binary.BigEndian.Uint64(hi[:8])
 	elements := hi[8:]
-	idx := sort.Search(numElements, func(i int) bool {
+	// We are looking for the truncation point, i.e. the index of the first element which is strictly greater
+	// than `lower`. Then, we will use that truncation point to shrink the slice
+	truncationPoint := sort.Search(numElements, func(i int) bool {
 		return lower < minElement+(uint64(elements[i*ItemLen]&0x7f)<<16)+(uint64(elements[i*ItemLen+1])<<8)+uint64(elements[i*ItemLen+2])
 	})
-	return hi[:8+idx*ItemLen]
+	return hi[:8+truncationPoint*ItemLen] // We preserve minElement field and all elements prior to the truncation point
 }
 
 // Search looks for the element which is equal or greater of given timestamp
