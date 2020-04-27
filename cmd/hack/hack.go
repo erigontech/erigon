@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -1922,6 +1923,46 @@ func walkOverStorage(chaindata string) {
 	fmt.Printf("Success\n")
 }
 
+func checkSenders(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	nextBlockNumber := uint64(1)
+	emptyHash := common.Hash{}
+
+	for {
+		hash := rawdb.ReadCanonicalHash(db, nextBlockNumber)
+		if hash == emptyHash {
+			break
+		}
+		body := rawdb.ReadBody(db, hash, nextBlockNumber)
+		if body == nil {
+			break
+		}
+		for _, tx := range body.Transactions {
+			if !tx.HasFrom() {
+				fmt.Printf("Sender not found for tx %x, block %d\n", tx.Hash(), nextBlockNumber)
+				return
+			}
+		}
+		nextBlockNumber++
+		if nextBlockNumber%1000 == 0 {
+			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
+		}
+	}
+}
+
+func changeProgress(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	n, err := downloader.GetStageProgress(db, downloader.Senders)
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.Execution, n)
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.Senders, 0)
+	check(err)
+	fmt.Printf("Done\n")
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2050,5 +2091,11 @@ func main() {
 	}
 	if *action == "slice" {
 		dbSlice(*chaindata, common.FromHex(*hash))
+	}
+	if *action == "senders" {
+		checkSenders(*chaindata)
+	}
+	if *action == "progress" {
+		changeProgress(*chaindata)
 	}
 }

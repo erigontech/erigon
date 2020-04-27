@@ -236,6 +236,14 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 	return msg, err
 }
 
+func (tx *Transaction) SetFrom(from common.Address) {
+	tx.from.Store(from)
+}
+
+func (tx *Transaction) HasFrom() bool {
+	return tx.from.Load() != nil
+}
+
 // WithSignature returns a new transaction with the given signature.
 // This signature needs to be in the [R || S || V] format where V is 0 or 1.
 func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, error) {
