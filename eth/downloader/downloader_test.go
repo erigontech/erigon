@@ -273,6 +273,10 @@ func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks
 	return 0, nil
 }
 
+func (dl *downloadTester) Config() *params.ChainConfig {
+	return nil
+}
+
 // InsertChain injects a new batch of blocks into the simulated chain.
 func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
 	dl.lock.Lock()
