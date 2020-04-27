@@ -23,8 +23,8 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		log.Error("could not create CPU profile", "error", err)
 		return 0, err
 	}
-	if err := pprof.StartCPUProfile(f); err != nil {
-		log.Error("could not start CPU profile", "error", err)
+	if err1 := pprof.StartCPUProfile(f); err1 != nil {
+		log.Error("could not start CPU profile", "error", err1)
 		return 0, err
 	}
 
