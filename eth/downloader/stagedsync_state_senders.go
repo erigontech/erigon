@@ -39,8 +39,8 @@ func (d *Downloader) spawnRecoverSendersStage() (uint64, error) {
 			break
 		}
 		blockNumber.SetUint64(nextBlockNumber)
+		s := types.MakeSigner(config, &blockNumber)
 		for _, tx := range body.Transactions {
-			s := types.MakeSigner(config, &blockNumber)
 			from, err := types.Sender(s, tx)
 			if err != nil {
 				log.Error("Recovering sender from signature", "tx", tx.Hash(), "block", nextBlockNumber, "error", err)
