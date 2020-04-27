@@ -198,9 +198,9 @@ func Stateless(
 	engine := ethash.NewFullFaker()
 
 	if blockNum > 1 {
-		bc, errBc := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
+		blockProvider.FastFwd(blockNum - 1)
+		block, errBc := blockProvider.NextBlock()
 		check(errBc)
-		block := bc.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
 		preRoot = block.Root()
@@ -518,6 +518,6 @@ func Stateless(
 		}
 	}
 	fmt.Printf("Processed %d blocks\n", blockNum)
-	fmt.Printf("Next time specify -block %d\n", blockNum)
+	fmt.Printf("Next time specify --block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))
 }
