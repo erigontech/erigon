@@ -150,13 +150,16 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
 		copy(key[:], req.contract)
 		decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
-		if len(key) > common.HashLength {
-			startkeys = append(startkeys, key[:common.HashLength])
-		} else {
-			startkeys = append(startkeys, key)
-		}
+
+		//if len(key) > common.HashLength {
+		//	startkeys = append(startkeys, key[:common.HashLength])
+		//	req.extResolvePos = req.resolvePos + 2*pLen
+		//	fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+		//} else {
+		startkeys = append(startkeys, key)
 		req.extResolvePos = req.resolvePos + 2*pLen
 		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+		//}
 		prevReq = req
 		var minLength int
 		if req.resolvePos >= tr.topLevels {
@@ -196,18 +199,18 @@ func (tr *ResolverStateful) finaliseRoot() error {
 
 			var storageNode node
 			if tr.hbStorage.hasRoot() {
-				if len(tr.accAddrHash) > 0 {
-					hashRoot, _, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-					if err2 != nil {
-						return err2
-					}
-
-					if !bytes.Equal(tr.hbStorage.rootHash().Bytes(), hashRoot.Bytes()) {
-						msg := fmt.Sprintf("Acc: %x, %x!=%x", tr.accAddrHash, tr.hbStorage.rootHash(), hashRoot)
-						fmt.Println(msg)
-						panic(msg)
-					}
-				}
+				//if len(tr.accAddrHash) > 0 {
+				//	hashRoot, _, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+				//	if err2 != nil {
+				//		return err2
+				//	}
+				//
+				//	if !bytes.Equal(tr.hbStorage.rootHash().Bytes(), hashRoot.Bytes()) {
+				//		msg := fmt.Sprintf("Acc: %x, %x!=%x", tr.accAddrHash, tr.hbStorage.rootHash(), hashRoot)
+				//		fmt.Println(msg)
+				//		panic(msg)
+				//	}
+				//}
 
 				tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
 				storageNode = tr.hbStorage.root()
@@ -335,19 +338,19 @@ func (tr *ResolverStateful) RebuildTrie(
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
-	//trace = true
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
-	//fmt.Printf("----------\n")
-	//for _, req := range tr.requests {
-	//	fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
-	//	fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
-	//	fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
-	//}
-	//fmt.Printf("fixedbits: %d\n", fixedbits)
-	//fmt.Printf("startkey: %x\n", startkeys)
-
+	if tr.trace {
+		fmt.Printf("----------\n")
+		for _, req := range tr.requests {
+			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
+			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+			fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+		}
+		fmt.Printf("topLevels: %d, fixedbits: %d\n", tr.topLevels, fixedbits)
+		fmt.Printf("startkey: %x\n", startkeys)
+	}
 	if db == nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "ResolveWithDb(db=nil), isAccount: %t\n", isAccount)
@@ -507,7 +510,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		fmt.Printf("WalkerAccount: isIH=%v, keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		//fmt.Printf("WalkerAccount: isIH=%v, keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -572,11 +575,9 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 
 					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
 					storageNode = tr.hbStorage.root()
-
 				} else {
 					tr.a.Root = EmptyRoot
 				}
-				//fmt.Printf("Got: %x\n", tr.a.Root)
 
 				tr.hbStorage.Reset()
 				tr.groupsStorage = nil
@@ -597,6 +598,9 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				tr.accData.Nonce = tr.a.Nonce
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
+				if !tr.a.IsEmptyRoot() {
+					fmt.Printf("!!!!!!!!!!!!!!%x\n", tr.a.Root)
+				}
 
 				if !tr.a.IsEmptyCodeHash() || !tr.a.IsEmptyRoot() {
 					// the first item ends up deepest on the stack, the second item - on the top
@@ -604,6 +608,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					if err != nil {
 						return err
 					}
+
 					tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 					tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 					tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
@@ -666,7 +671,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		var isIH bool
 		for k != nil || ihK != nil {
 			if tr.trace {
-				fmt.Printf("For loop: %x, %x\n", ihK, k)
+				//fmt.Printf("For loop: %x, %x\n", ihK, k)
 			}
 
 			isIH, minKey = keyIsBefore(ihK, k)
@@ -679,7 +684,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					startKeyIndexIsBigger := startKeyIndex > minKeyIndex
 					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					if tr.trace {
-						fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
+						//fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
 					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
@@ -688,7 +693,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						}
 					} else if cmp == 0 {
 						if tr.trace {
-							fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
+							//fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
 						}
 						k1 := minKey[minKeyIndex] & mask
 						k2 := startkey[startKeyIndex] & mask

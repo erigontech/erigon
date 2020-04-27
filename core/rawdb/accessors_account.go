@@ -31,14 +31,14 @@ func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account)
 	if err = acc.DecodeForStorage(enc); err != nil {
 		return false, err
 	}
-	root, err := db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation))
-	if err != nil {
-		return false, err
-	}
-	if enc == nil || root == nil {
-		return false, nil
-	}
-	acc.Root = common.BytesToHash(root)
+	//root, err := db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation))
+	//if err != nil {
+	//	return false, err
+	//}
+	//if enc == nil || root == nil {
+	//	return false, nil
+	//}
+	//acc.Root = common.BytesToHash(root)
 
 	return true, nil
 }
@@ -49,9 +49,9 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	if err := db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
-		return err
-	}
+	//if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
+	//	return err
+	//}
 	return nil
 }
 
@@ -74,8 +74,8 @@ func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
 		return err
 	}
 
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err != nil {
-		return err
-	}
+	//if err := db.Delete(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err != nil {
+	//	return err
+	//}
 	return nil
 }
