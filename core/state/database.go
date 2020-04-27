@@ -562,18 +562,6 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, reso
 	return nil
 }
 
-type sortable [][]byte
-
-func (s sortable) Len() int {
-	return len(s)
-}
-func (s sortable) Less(i, j int) bool {
-	return bytes.Compare(s[i], s[j]) < 0
-}
-func (s sortable) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
 func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, resolveFunc trie.ResolveFunc) error {
 	var firstRequest = true
 	touches := make([][]byte, 0, len(accountTouches)+len(storageTouches))
@@ -583,8 +571,6 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	for _, storageKey := range storageTouches {
 		touches = append(touches, storageKey[:])
 	}
-
-	sort.Sort(sortable(touches))
 
 	if tds.resolver == nil {
 		tds.resolver = trie.NewResolver(0, true, tds.blockNr)

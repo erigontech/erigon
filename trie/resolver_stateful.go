@@ -56,9 +56,8 @@ type ResolverStateful struct {
 	hbStorage     *HashBuilder
 	rssStorage    []*ResolveSet
 
-	accAddrHashIsValid bool
-	accAddrHash        []byte
-	accRoot            getAccRootF
+	accAddrHash []byte
+	accRoot     getAccRootF
 }
 
 func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
@@ -100,7 +99,6 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.groupsStorage = tr.groupsStorage[:0]
 	tr.wasIHStorage = false
 	tr.rssStorage = tr.rssStorage[:0]
-	tr.accAddrHashIsValid = false
 	tr.accAddrHash = tr.accAddrHash[:0]
 }
 
@@ -194,7 +192,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 
 			var storageNode node
 			if tr.hbStorage.hasRoot() {
-				if tr.accAddrHashIsValid {
+				if len(tr.accAddrHash) > 0 {
 					hashRoot, _, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
 					if err2 != nil {
 						return err2
@@ -433,7 +431,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		// skip storage keys:
 		// - if it has wrong incarnation
 		// - if it abandoned (account deleted)
-		if tr.accAddrHashIsValid {
+		if len(tr.accAddrHash) > 0 {
 			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
 			if !bytes.HasPrefix(k, accWithInc) {
 				return nil
@@ -545,7 +543,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 
 				var storageNode node
 				if tr.hbStorage.hasRoot() {
-					if tr.accAddrHashIsValid {
+					if len(tr.accAddrHash) > 0 {
 						hashRoot, _, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
 						if err2 != nil {
 							return err2
@@ -614,7 +612,6 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		if err := tr.a.DecodeForStorage(v); err != nil {
 			return fmt.Errorf("fail DecodeForStorage: %w", err)
 		}
-		tr.accAddrHashIsValid = true
 		tr.accAddrHash = tr.accAddrHash[:0]
 		tr.accAddrHash = append(tr.accAddrHash, k...)
 	}
@@ -745,7 +742,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			canUseIntermediateHash = false
+			//canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
