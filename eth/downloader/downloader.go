@@ -574,6 +574,8 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 func (d *Downloader) cancel() {
 	// Close the current cancel channel
 	d.cancelLock.Lock()
+	defer d.cancelLock.Unlock()
+
 	if d.cancelCh != nil {
 		select {
 		case <-d.cancelCh:
@@ -582,7 +584,6 @@ func (d *Downloader) cancel() {
 			close(d.cancelCh)
 		}
 	}
-	d.cancelLock.Unlock()
 }
 
 // Cancel aborts all of the operations and waits for all download goroutines to
