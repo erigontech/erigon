@@ -36,8 +36,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 3/5. Recovering senders from tx signatures...")
 
-	syncHeadNumber := uint64(0)
-	syncHeadNumber, err = d.spawnRecoverSendersStage()
+	err = d.spawnRecoverSendersStage()
 	if err != nil {
 		return err
 	}
@@ -48,7 +47,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	/*
 	* Stage 4. Execute block bodies w/o calculating trie roots
 	 */
-	syncHeadNumber = uint64(0)
+	syncHeadNumber := uint64(0)
 	syncHeadNumber, err = d.spawnExecuteBlocksStage()
 	if err != nil {
 		return err

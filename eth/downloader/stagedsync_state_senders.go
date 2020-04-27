@@ -9,10 +9,10 @@ import (
 	"math/big"
 )
 
-func (d *Downloader) spawnRecoverSendersStage() (uint64, error) {
+func (d *Downloader) spawnRecoverSendersStage() error {
 	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Senders)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
@@ -60,18 +60,18 @@ func (d *Downloader) spawnRecoverSendersStage() (uint64, error) {
 		}
 
 		if err = SaveStageProgress(mutation, Senders, nextBlockNumber); err != nil {
-			return 0, err
+			return err
 		}
 
 		nextBlockNumber++
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if _, err = mutation.Commit(); err != nil {
-				return 0, err
+				return err
 			}
 			mutation = d.stateDB.NewBatch()
 		}
 	}
 
-	return nextBlockNumber - 1 /* the last processed block */, nil
+	return nil
 }
