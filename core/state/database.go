@@ -422,10 +422,10 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, false, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, false, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddRequest(req)
@@ -511,10 +511,10 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, true, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddCodeRequest(req)
@@ -524,10 +524,10 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, true, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddCodeRequest(req)
@@ -547,10 +547,10 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, reso
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, true, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddRequest(req)
@@ -573,10 +573,10 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	}
 
 	if tds.resolver == nil {
-		tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+		tds.resolver = trie.NewResolver(0, tds.blockNr)
 		tds.resolver.SetHistorical(tds.historical)
 	}
-	tds.resolver.Reset(0, true, tds.blockNr)
+	tds.resolver.Reset(0, tds.blockNr)
 
 	for _, touch := range touches {
 		var need bool

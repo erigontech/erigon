@@ -192,25 +192,25 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			data = &tr.hashData
 		} else {
 			var storageNode node
-			if tr.a.Incarnation == 0 {
-				tr.a.Root = EmptyRoot
-			} else {
-				err = tr.finaliseStorageRoot()
-				if err != nil {
-					return err
-				}
-
-				if tr.hbStorage.hasRoot() {
-					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
-					storageNode = tr.hbStorage.root()
-				} else {
-					tr.a.Root = EmptyRoot
-				}
-
-				tr.hbStorage.Reset()
-				tr.groupsStorage = nil
-				tr.currStorage.Reset()
+			//if tr.a.Incarnation == 0 {
+			//	tr.a.Root = EmptyRoot
+			//} else {
+			err = tr.finaliseStorageRoot()
+			if err != nil {
+				return err
 			}
+
+			if tr.hbStorage.hasRoot() {
+				tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
+				storageNode = tr.hbStorage.root()
+			} else {
+				tr.a.Root = EmptyRoot
+			}
+
+			tr.hbStorage.Reset()
+			tr.groupsStorage = nil
+			tr.currStorage.Reset()
+			//}
 
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.accData.FieldSet = AccountFieldSetNotContract
@@ -262,7 +262,9 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			tr.hbStorage.Reset()
 			tr.groupsStorage = nil
 			tr.currStorage.Reset()
-
+			if hbRoot == nil {
+				panic(fmt.Sprintf("nil node to hook:  %s\n", tr.currentReq))
+			}
 			return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 		}
 		return nil
@@ -270,6 +272,9 @@ func (tr *ResolverStateful) finaliseRoot() error {
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
+		if hbRoot == nil {
+			panic(fmt.Sprintf("nil node to hook:  %s\n", tr.currentReq))
+		}
 		if err := tr.hookFunction(tr.currentReq, hbRoot, hbHash); err != nil {
 			return err
 		}
@@ -296,16 +301,11 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 		if err != nil {
 			return err
 		}
-
 	} else {
 		// Special case when from IH we took storage root. In this case tr.currStorage.Len() == 0.
 		// But still can put value on stack.
 		if tr.wasIHStorage {
 			if err := tr.hbStorage.hash(tr.valueStorage.Bytes()); err != nil {
-				return err
-			}
-		} else {
-			if err := tr.hbStorage.hash(EmptyRoot[:]); err != nil {
 				return err
 			}
 		}
@@ -314,13 +314,7 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 	return nil
 }
 
-func (tr *ResolverStateful) RebuildTrie(
-	db ethdb.Database,
-	blockNr uint64,
-	isAccount bool,
-	historical bool,
-	trace bool) error {
-
+func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, historical bool, trace bool) error {
 	if len(tr.requests) == 0 {
 		return nil
 	}
@@ -344,7 +338,7 @@ func (tr *ResolverStateful) RebuildTrie(
 	}
 	if db == nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "ResolveWithDb(db=nil), isAccount: %t\n", isAccount)
+		fmt.Fprintf(&b, "ResolveWithDb(db=nil)\n")
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
@@ -377,7 +371,7 @@ func (tr *ResolverStateful) RebuildTrie(
 		return err
 	}
 	if err = tr.finaliseRoot(); err != nil {
-		fmt.Println("Err in finalize root, writing down resolve params", isAccount)
+		fmt.Println("Err in finalize root, writing down resolve params")
 		for _, req := range tr.requests {
 			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
 			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
@@ -423,6 +417,10 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		if len(tr.accAddrHash) > 0 {
 			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
 			if !bytes.HasPrefix(k, accWithInc) {
+				if tr.trace {
+					fmt.Printf("WalkerStorage: skip storage key %x, not compatible with acc: %x\n", k, accWithInc)
+				}
+
 				return nil
 			}
 		}
@@ -481,7 +479,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		//fmt.Printf("WalkerAccount: isIH=%v, keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		fmt.Printf("WalkerAccount: isIH=%v, keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -525,21 +523,21 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				data = &tr.hashData
 			} else {
 				var storageNode node
-				if tr.a.Incarnation == 0 {
-					tr.a.Root = EmptyRoot
-				} else {
-					err = tr.finaliseStorageRoot()
-					if err != nil {
-						return err
-					}
-
-					if tr.hbStorage.hasRoot() {
-						tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
-						storageNode = tr.hbStorage.root()
-					} else {
-						tr.a.Root = EmptyRoot
-					}
+				//if tr.a.Incarnation == 0 {
+				//	tr.a.Root = EmptyRoot
+				//} else {
+				err = tr.finaliseStorageRoot()
+				if err != nil {
+					return err
 				}
+
+				if tr.hbStorage.hasRoot() {
+					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
+					storageNode = tr.hbStorage.root()
+				} else {
+					tr.a.Root = EmptyRoot
+				}
+				//}
 
 				tr.hbStorage.Reset()
 				tr.groupsStorage = nil
@@ -627,7 +625,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		var isIH bool
 		for k != nil || ihK != nil {
 			if tr.trace {
-				//fmt.Printf("For loop: %x, %x\n", ihK, k)
+				fmt.Printf("For loop: %x, %x\n", ihK, k)
 			}
 
 			isIH, minKey = keyIsBefore(ihK, k)
@@ -640,7 +638,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					startKeyIndexIsBigger := startKeyIndex > minKeyIndex
 					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					if tr.trace {
-						//fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
+						fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
 					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
@@ -649,7 +647,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						}
 					} else if cmp == 0 {
 						if tr.trace {
-							//fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
+							fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
 						}
 						k1 := minKey[minKeyIndex] & mask
 						k2 := startkey[startKeyIndex] & mask
@@ -717,7 +715,6 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
