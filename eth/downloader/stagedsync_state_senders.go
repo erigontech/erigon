@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 
 	"github.com/pkg/errors"
 
@@ -18,7 +19,6 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 	if err != nil {
 		return err
 	}
-	lastProcessedBlockNumber = 0
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
@@ -34,46 +34,60 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 	emptyHash := common.Hash{}
 	var blockNumber big.Int
 
-	for {
-		hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
-		if hash == emptyHash {
-			break
-		}
-		body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
-		if body == nil {
-			break
-		}
-		blockNumber.SetUint64(nextBlockNumber)
-		s := types.MakeSigner(config, &blockNumber)
+	const batchSize = 10000
 
-		jobs := make(chan *senderRecoveryJob, 0)
-		out := make(chan *senderRecoveryJob, 0)
-		cancel := make(chan struct{}, 0)
+	jobs := make(chan *senderRecoveryJob, batchSize)
+	out := make(chan *senderRecoveryJob, batchSize)
 
-		fmt.Printf("before senders recovery")
-
-		go recoverSenders(jobs, out, cancel)
-		jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
-
-		<-out
-
-		fmt.Printf("after senders recovery")
-
-		close(cancel)
+	defer func() {
 		close(jobs)
 		close(out)
+	}()
 
-		rawdb.WriteBody(context.Background(), mutation, hash, nextBlockNumber, body)
+	var numOfGoroutines = runtime.NumCPU()
 
-		if nextBlockNumber%1000 == 0 {
-			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
+	for i := 0; i < numOfGoroutines; i++ {
+		go recoverSenders(jobs, out)
+	}
+	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
+
+	needExit := false
+	for !needExit {
+		written := 0
+		for i := 0; i < batchSize; i++ {
+			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
+			if hash == emptyHash {
+				needExit = true
+				break
+			}
+			body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
+			if body == nil {
+				needExit = true
+				break
+			}
+			blockNumber.SetUint64(nextBlockNumber)
+			s := types.MakeSigner(config, &blockNumber)
+
+			jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
+			written++
+
+			if err = SaveStageProgress(mutation, Senders, nextBlockNumber); err != nil {
+				return err
+			}
+
+			nextBlockNumber++
 		}
 
-		if err = SaveStageProgress(mutation, Senders, nextBlockNumber); err != nil {
-			return err
+		for i := 0; i < written; i++ {
+			j := <-out
+			if j.err != nil {
+				return errors.Wrap(j.err, "could not extract senders")
+			}
+			rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
+
 		}
 
-		nextBlockNumber++
+		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if _, err = mutation.Commit(); err != nil {
@@ -94,10 +108,13 @@ type senderRecoveryJob struct {
 	err             error
 }
 
-func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob, cancel chan struct{}) {
+func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
 	for {
 		select {
 		case job := <-in:
+			if job == nil {
+				return
+			}
 			for _, tx := range job.blockBody.Transactions {
 				from, err := types.Sender(job.signer, tx)
 				if err != nil {
@@ -111,10 +128,6 @@ func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob, can
 				}
 			}
 			out <- job
-		case <-cancel:
-			return
 		}
 	}
-
-	return
 }
