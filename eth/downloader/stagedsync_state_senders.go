@@ -71,10 +71,6 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 			jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
 			written++
 
-			if err = SaveStageProgress(mutation, Senders, nextBlockNumber); err != nil {
-				return err
-			}
-
 			nextBlockNumber++
 		}
 
@@ -84,7 +80,10 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 				return errors.Wrap(j.err, "could not extract senders")
 			}
 			rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
+		}
 
+		if err = SaveStageProgress(mutation, Senders, nextBlockNumber); err != nil {
+			return err
 		}
 
 		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
