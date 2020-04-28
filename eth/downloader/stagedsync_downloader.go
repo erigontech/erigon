@@ -4,7 +4,7 @@ import "github.com/ledgerwatch/turbo-geth/log"
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 
-	log.Info("Sync stage 1/4. Downloading headers...")
+	log.Info("Sync stage 1/5. Downloading headers...")
 
 	var err error
 
@@ -15,8 +15,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 1/4. Downloading headers... Complete!")
-	log.Info("Sync stage 2/4. Downloading block bodies...")
+	log.Info("Sync stage 1/5. Downloading headers... Complete!")
+	log.Info("Sync stage 2/5. Downloading block bodies...")
 
 	/*
 	* Stage 2. Download Block bodies
@@ -30,11 +30,22 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 2/4. Downloading block bodies... Complete!")
-	log.Info("Sync stage 3/4. Executing blocks w/o hash checks...")
+	log.Info("Sync stage 2/5. Downloading block bodies... Complete!")
+	/*
+	* Stage 3. Recover senders from tx signatures
+	 */
+	log.Info("Sync stage 3/5. Recovering senders from tx signatures...")
+
+	err = d.spawnRecoverSendersStage()
+	if err != nil {
+		return err
+	}
+
+	log.Info("Sync stage 3/5. Recovering senders from tx signatures... Complete!")
+	log.Info("Sync stage 4/5. Executing blocks w/o hash checks...")
 
 	/*
-	* Stage 3. Execute block bodies w/o calculating trie roots
+	* Stage 4. Execute block bodies w/o calculating trie roots
 	 */
 	syncHeadNumber := uint64(0)
 	syncHeadNumber, err = d.spawnExecuteBlocksStage()
@@ -42,14 +53,14 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 3/4. Executing blocks w/o hash checks... Complete!")
+	log.Info("Sync stage 4/5. Executing blocks w/o hash checks... Complete!")
 
 	// Further stages go there
-	log.Info("Sync stage 4/4. Validating final hash")
+	log.Info("Sync stage 5/5. Validating final hash")
 	if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
 		return err
 	}
-	log.Info("Sync stage 4/4. Validating final hash... Complete!")
+	log.Info("Sync stage 5/5. Validating final hash... Complete!")
 
 	return err
 }

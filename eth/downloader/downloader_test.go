@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -271,6 +272,10 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 
 func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (i int, err error) {
 	return 0, nil
+}
+
+func (dl *downloadTester) Config() *params.ChainConfig {
+	return nil
 }
 
 // InsertChain injects a new batch of blocks into the simulated chain.

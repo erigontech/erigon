@@ -220,6 +220,9 @@ type BlockChain interface {
 
 	// GetBlockByNumber is necessary for staged sync
 	GetBlockByNumber(number uint64) *types.Block
+
+	// Config is necessary for staged sync
+	Config() *params.ChainConfig
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
