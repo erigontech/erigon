@@ -198,8 +198,9 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if changeset.Len(csData) != numOfAccounts*numOfStateKeys {
-		t.FailNow()
+	cs, _ := changeset.DecodeStorage(csData)
+	if cs.Len() != numOfAccounts*numOfStateKeys {
+		t.Errorf("Length does not match, got %d, expected %d", cs.Len(), numOfAccounts*numOfStateKeys)
 	}
 
 	expectedChangeSet = changeset.NewStorageChangeSet()
