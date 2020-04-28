@@ -193,42 +193,36 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			data = &tr.hashData
 		} else {
 			var storageNode node
-			//if tr.a.Incarnation == 0 {
-			//	tr.a.Root = EmptyRoot
-			//} else {
-			err = tr.finaliseStorageRoot()
-			if err != nil {
-				return err
-			}
-
-			if tr.hbStorage.hasRoot() {
-				if len(tr.accAddrHash) > 0 {
-					hashRoot, _, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-					if err2 != nil {
-						return err2
-					}
-
-					if !bytes.Equal(tr.hbStorage.rootHash().Bytes(), hashRoot.Bytes()) {
-						msg := fmt.Sprintf("Acc: %x, %x!=%x", tr.accAddrHash, tr.hbStorage.rootHash(), hashRoot)
-						fmt.Println(msg)
-						panic(msg)
-					}
-				}
-				tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
-				storageNode = tr.hbStorage.root()
-			} else {
+			if tr.a.Incarnation == 0 {
 				tr.a.Root = EmptyRoot
-			}
+			} else {
+				err = tr.finaliseStorageRoot()
+				if err != nil {
+					return err
+				}
 
-			tr.hbStorage.Reset()
-			tr.groupsStorage = nil
-			tr.currStorage.Reset()
-			//}
+				if tr.hbStorage.hasRoot() {
+					if len(tr.accAddrHash) > 0 {
+						hashRoot, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+						if err2 != nil {
+							return err2
+						}
 
-			if tr.a.Incarnation == 0 && tr.a.Root != EmptyRoot {
-				msg := fmt.Sprintf("0 incarnation and !EmptyRoot. %x %x\n", tr.accAddrHash, tr.a.Root)
-				fmt.Println(msg)
-				panic(msg)
+						if !bytes.Equal(tr.hbStorage.rootHash().Bytes(), hashRoot.Bytes()) {
+							msg := fmt.Sprintf("Acc: %x, %x!=%x", tr.accAddrHash, tr.hbStorage.rootHash(), hashRoot)
+							fmt.Println(msg)
+							panic(msg)
+						}
+					}
+					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
+					storageNode = tr.hbStorage.root()
+				} else {
+					tr.a.Root = EmptyRoot
+				}
+
+				tr.hbStorage.Reset()
+				tr.groupsStorage = nil
+				tr.currStorage.Reset()
 			}
 
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
@@ -334,7 +328,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
-	//trace = true
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
@@ -375,23 +368,15 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
-	tr.accRoot = func(acc common.Hash, incarnation uint64) (common.Hash, node, error) {
-		var n node
+	tr.accRoot = func(acc common.Hash, incarnation uint64) (common.Hash, error) {
 		root := EmptyRoot
 		accWithInc := dbutils.GenerateStoragePrefix(acc[:], incarnation)
-		resolver := NewResolverStateful(0, []*ResolveRequest{
-			tr.currentReq.t.NewResolveRequest(accWithInc, nil, 0, nil),
-		}, func(req *ResolveRequest, nn node, hash common.Hash) error {
-			n = nn
-			root.SetBytes(common.CopyBytes(hash.Bytes()))
-
-			return nil
-		})
-		if err := resolver.RebuildTrie(db, 0, false, false); err != nil {
-			return root, nil, err
+		v, err := db.Get(dbutils.IntermediateTrieHashBucket, accWithInc)
+		if err != nil {
+			return root, err
 		}
-
-		return root, n, nil
+		root.SetBytes(common.CopyBytes(v))
+		return root, nil
 	}
 	var err error
 	if historical {
@@ -579,43 +564,37 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				data = &tr.hashData
 			} else {
 				var storageNode node
-				//if tr.a.Incarnation == 0 {
-				//	tr.a.Root = EmptyRoot
-				//} else {
-				err = tr.finaliseStorageRoot()
-				if err != nil {
-					return err
-				}
-
-				if tr.hbStorage.hasRoot() {
-					if len(tr.accAddrHash) > 0 {
-						hashRoot, _, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-						if err2 != nil {
-							return err2
-						}
-
-						if !bytes.Equal(tr.hbStorage.rootHash().Bytes(), hashRoot.Bytes()) {
-							msg := fmt.Sprintf("Acc: %x %d, %x!=%x", tr.accAddrHash, tr.a.Incarnation, tr.hbStorage.rootHash(), hashRoot)
-							fmt.Println(msg)
-							panic(msg)
-						}
-					}
-					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
-					storageNode = tr.hbStorage.root()
-				} else {
+				if tr.a.Incarnation == 0 {
 					tr.a.Root = EmptyRoot
+				} else {
+					err = tr.finaliseStorageRoot()
+					if err != nil {
+						return err
+					}
+
+					if tr.hbStorage.hasRoot() {
+						if len(tr.accAddrHash) > 0 {
+							hashRoot, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
+							if err2 != nil {
+								return err2
+							}
+
+							if !bytes.Equal(tr.hbStorage.rootHash().Bytes(), hashRoot.Bytes()) {
+								msg := fmt.Sprintf("Acc: %x %d, %x!=%x", tr.accAddrHash, tr.a.Incarnation, tr.hbStorage.rootHash(), hashRoot)
+								fmt.Println(msg)
+								panic(msg)
+							}
+						}
+						tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
+						storageNode = tr.hbStorage.root()
+					} else {
+						tr.a.Root = EmptyRoot
+					}
 				}
-				//}
 
 				tr.hbStorage.Reset()
 				tr.groupsStorage = nil
 				tr.currStorage.Reset()
-
-				if tr.a.Incarnation == 0 && tr.a.Root != EmptyRoot {
-					msg := fmt.Sprintf("0 incarnation and !EmptyRoot. %x %x\n", tr.accAddrHash, tr.a.Root)
-					fmt.Println(msg)
-					panic(msg)
-				}
 
 				if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 					tr.accData.FieldSet = AccountFieldSetNotContract
@@ -668,7 +647,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 	return nil
 }
 
-type getAccRootF = func(acc common.Hash, incarnation uint64) (common.Hash, node, error)
+type getAccRootF = func(acc common.Hash, incarnation uint64) (common.Hash, error)
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
 func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, accWalker walker, storageWalker walker, isAccount bool) error {
