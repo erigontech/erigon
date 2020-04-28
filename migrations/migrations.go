@@ -55,5 +55,5 @@ func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImage
 }
 
 var migrations = []Migration{
-	splitChangeSetMigration(splitChangesetBatchSize),
+
 }

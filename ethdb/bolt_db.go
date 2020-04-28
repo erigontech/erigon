@@ -582,7 +582,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 						if changeSetData == nil {
 							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 						}
-						data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
+						data, err1 := changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(hAddrHash, hKeyHash)
 						if err1 != nil {
 							return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
 								hAddrHash, hKeyHash,
@@ -778,9 +778,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	case bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
 		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
 	case bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
-		data, err = changeset.StorageChangeSetBytes(changeSetData).Find(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
-	default:
-		data, err = changeset.FindLast(changeSetData, key)
+		data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
 	}
 	if err != nil {
 		return nil, ErrKeyNotFound
