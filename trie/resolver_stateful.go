@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"math"
-	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -202,7 +202,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				}
 
 				if tr.hbStorage.hasRoot() {
-					if len(tr.accAddrHash) > 0 {
+					if debug.IsStoreAccountRoot() && len(tr.accAddrHash) > 0 {
 						hashRoot, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
 						if err2 != nil {
 							return err2
@@ -350,7 +350,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
-		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
+		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Callers(10))
 	}
 	if tr.trace {
 		fmt.Printf("RebuildTrie %d, blockNr %d\n", len(startkeys), blockNr)
@@ -573,7 +573,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					}
 
 					if tr.hbStorage.hasRoot() {
-						if len(tr.accAddrHash) > 0 {
+						if debug.IsStoreAccountRoot() && len(tr.accAddrHash) > 0 {
 							hashRoot, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
 							if err2 != nil {
 								return err2
