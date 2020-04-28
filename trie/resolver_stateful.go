@@ -328,6 +328,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
+	//trace = true
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
@@ -669,7 +670,16 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		}
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 
-		k, v := c.Seek(startkey)
+		var k, v []byte
+		for k, v = c.Seek(startkey); k != nil; k, v = c.Next() {
+			foundAbandonedStorage := len(startkey) <= common.HashLength && len(k) > common.HashLength
+			if !foundAbandonedStorage {
+				break
+			}
+		}
+		if tr.trace {
+			fmt.Printf("c.Seek(%x) = %x\n", startkey, k)
+		}
 
 		var ihK, ihV []byte
 		if ih != nil {
@@ -714,7 +724,12 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					}
 
 					if cmp < 0 {
-						k, v = c.SeekTo(startkey)
+						for k, v = c.SeekTo(startkey); k != nil; k, v = c.Next() {
+							foundAbandonedStorage := len(startkey) <= common.HashLength && len(k) > common.HashLength
+							if !foundAbandonedStorage {
+								break
+							}
+						}
 						ihK, ihV = ih.SeekTo(startkey)
 						if tr.trace {
 							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
