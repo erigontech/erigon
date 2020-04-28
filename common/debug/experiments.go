@@ -9,6 +9,7 @@ import (
 var gerEnv sync.Once
 
 var itcEnv sync.Once
+var storeAccRoot bool
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
 var getNodeData uint32
@@ -17,6 +18,16 @@ const (
 	gndValueFlag = 1 << iota
 	gndInitializedFlag
 )
+
+func IsStoreAccountRoot() bool {
+	itcEnv.Do(func() {
+		_, storeAccRoot = os.LookupEnv("STORE_ACCOUNT_ROOT")
+		if !storeAccRoot {
+			_, storeAccRoot = os.LookupEnv("STORE_ACCOUNT_ROOT")
+		}
+	})
+	return storeAccRoot
+}
 
 // IsGetNodeData indicates whether the GetNodeData functionality should be enabled.
 // By default that's driven by the presence or absence of DISABLE_GET_NODE_DATA environment variable.

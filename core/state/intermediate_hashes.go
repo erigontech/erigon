@@ -3,6 +3,7 @@ package state
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -34,7 +35,7 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 	}
 
 	// special case. Store Account.Root for long time
-	if len(prefixAsNibbles) == common.HashLength*2 {
+	if debug.IsStoreAccountRoot() && len(prefixAsNibbles) == common.HashLength*2 {
 		return
 	}
 
@@ -68,7 +69,7 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 	DeleteCounter.Inc(1)
 
 	// special case. Store Account.Root for long time
-	if len(prefixAsNibbles) == common.HashLength*2 {
+	if debug.IsStoreAccountRoot() && len(prefixAsNibbles) == common.HashLength*2 {
 		return
 	}
 
