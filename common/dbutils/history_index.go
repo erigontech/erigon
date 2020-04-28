@@ -87,11 +87,26 @@ func (hi HistoryIndexBytes) Len() int {
 	return (len(hi) - 8) / 3
 }
 
-//most common operation is remove one from the tail
-func (hi HistoryIndexBytes) Remove(v uint64) HistoryIndexBytes {
-	panic("not implemented")
+// Truncate all the timestamps that are strictly greater than the given bound
+func (hi HistoryIndexBytes) TruncateGreater(lower uint64) HistoryIndexBytes {
+	if len(hi) < 8 {
+		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))
+	}
+	if (len(hi)-8)%ItemLen != 0 {
+		panic(fmt.Errorf("length of index chunk should be 8 (mod %d), got %d", ItemLen, len(hi)))
+	}
+	numElements := (len(hi) - 8) / 3
+	minElement := binary.BigEndian.Uint64(hi[:8])
+	elements := hi[8:]
+	// We are looking for the truncation point, i.e. the index of the first element which is strictly greater
+	// than `lower`. Then, we will use that truncation point to shrink the slice
+	truncationPoint := sort.Search(numElements, func(i int) bool {
+		return lower < minElement+(uint64(elements[i*ItemLen]&0x7f)<<16)+(uint64(elements[i*ItemLen+1])<<8)+uint64(elements[i*ItemLen+2])
+	})
+	return hi[:8+truncationPoint*ItemLen] // We preserve minElement field and all elements prior to the truncation point
 }
 
+// Search looks for the element which is equal or greater of given timestamp
 func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool, bool) {
 	if len(hi) < 8 {
 		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))

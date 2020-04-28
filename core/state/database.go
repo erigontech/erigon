@@ -841,64 +841,63 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
-		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
-		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
-			var addrHash common.Hash
-			copy(addrHash[:], key)
-			if len(value) > 0 {
-				var acc accounts.Account
-				if err := acc.DecodeForStorage(value); err != nil {
-					return err
-				}
-				// Fetch the code hash
-				if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err == nil {
-						copy(acc.CodeHash[:], codeHash)
-					}
-				}
-				b.accountUpdates[addrHash] = &acc
-				if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
-					return err
-				}
-			} else {
-				b.accountUpdates[addrHash] = nil
-				if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
-					return err
+	accountMap, storageMap, err := tds.db.RewindData(tds.blockNr, blockNr)
+	if err != nil {
+		return err
+	}
+	for key, value := range accountMap {
+		var addrHash common.Hash
+		copy(addrHash[:], []byte(key))
+		if len(value) > 0 {
+			var acc accounts.Account
+			if err := acc.DecodeForStorage(value); err != nil {
+				return err
+			}
+			// Fetch the code hash
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err == nil {
+					copy(acc.CodeHash[:], codeHash)
 				}
 			}
-			b.accountReads[addrHash] = struct{}{}
-		} else if bytes.Equal(bucket, dbutils.StorageHistoryBucket) {
-			var addrHash common.Hash
-			copy(addrHash[:], key[:common.HashLength])
-			var keyHash common.Hash
-			copy(keyHash[:], key[common.HashLength+common.IncarnationLength:])
-			m, ok := b.storageUpdates[addrHash]
-			if !ok {
-				m = make(map[common.Hash][]byte)
-				b.storageUpdates[addrHash] = m
+			b.accountUpdates[addrHash] = &acc
+			if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
+				return err
 			}
-			m1, ok1 := b.storageReads[addrHash]
-			if !ok1 {
-				m1 = make(map[common.Hash]struct{})
-				b.storageReads[addrHash] = m1
-			}
-			m1[keyHash] = struct{}{}
-			if len(value) > 0 {
-				m[keyHash] = value
-				if err := tds.db.Put(dbutils.CurrentStateBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
-					return err
-				}
-			} else {
-				m[keyHash] = nil
-				if err := tds.db.Delete(dbutils.CurrentStateBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
-					return err
-				}
+		} else {
+			b.accountUpdates[addrHash] = nil
+			if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
+				return err
 			}
 		}
-		return nil
-	}); err != nil {
-		return err
+		b.accountReads[addrHash] = struct{}{}
+	}
+	for key, value := range storageMap {
+		var addrHash common.Hash
+		copy(addrHash[:], []byte(key)[:common.HashLength])
+		var keyHash common.Hash
+		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
+		m, ok := b.storageUpdates[addrHash]
+		if !ok {
+			m = make(map[common.Hash][]byte)
+			b.storageUpdates[addrHash] = m
+		}
+		m1, ok1 := b.storageReads[addrHash]
+		if !ok1 {
+			m1 = make(map[common.Hash]struct{})
+			b.storageReads[addrHash] = m1
+		}
+		m1[keyHash] = struct{}{}
+		if len(value) > 0 {
+			m[keyHash] = value
+			if err := tds.db.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+				return err
+			}
+		} else {
+			m[keyHash] = nil
+			if err := tds.db.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		return err
@@ -914,7 +913,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			return err
 		}
 	}
-	//TODO: Truncate history indices if required
+	if err := tds.truncateHistory(blockNr, accountMap, storageMap); err != nil {
+		return err
+	}
 	tds.clearUpdates()
 	tds.setBlockNr(blockNr)
 	return nil
@@ -938,6 +939,84 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	if len(changedStorage) > 0 {
 		if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
+	accountHistoryEffects := make(map[string][]byte)
+	startKey := make([]byte, common.HashLength+8)
+	for key := range accountMap {
+		copy(startKey, []byte(key))
+		binary.BigEndian.PutUint64(startKey[common.HashLength:], timestampTo)
+		if err := tds.db.Walk(dbutils.AccountsHistoryBucket, startKey, uint(8*common.HashLength), func(k, v []byte) (bool, error) {
+			timestamp := binary.BigEndian.Uint64(k[common.HashLength:]) // the last timestamp in the chunk
+			kStr := string(common.CopyBytes(k))
+			accountHistoryEffects[kStr] = nil
+			if timestamp > timestampTo {
+				// truncate the chunk
+				index := dbutils.WrapHistoryIndex(v)
+				index = index.TruncateGreater(timestampTo)
+				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
+					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
+					lastK := make([]byte, len(k))
+					copy(lastK, k[:common.HashLength])
+					binary.BigEndian.PutUint64(lastK[common.HashLength:], ^uint64(0))
+					accountHistoryEffects[string(lastK)] = common.CopyBytes(index)
+				}
+			}
+			return true, nil
+		}); err != nil {
+			return err
+		}
+	}
+	storageHistoryEffects := make(map[string][]byte)
+	startKey = make([]byte, 2*common.HashLength+8)
+	for key := range storageMap {
+		copy(startKey, []byte(key)[:common.HashLength])
+		copy(startKey[common.HashLength:], []byte(key)[common.HashLength+8:])
+		binary.BigEndian.PutUint64(startKey[2*common.HashLength:], timestampTo)
+		if err := tds.db.Walk(dbutils.StorageHistoryBucket, startKey, uint(8*2*common.HashLength), func(k, v []byte) (bool, error) {
+			timestamp := binary.BigEndian.Uint64(k[2*common.HashLength:]) // the last timestamp in the chunk
+			kStr := string(common.CopyBytes(k))
+			storageHistoryEffects[kStr] = nil
+			if timestamp > timestampTo {
+				index := dbutils.WrapHistoryIndex(v)
+				index = index.TruncateGreater(timestampTo)
+				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
+					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
+					lastK := make([]byte, len(k))
+					copy(lastK, k[:2*common.HashLength])
+					binary.BigEndian.PutUint64(lastK[2*common.HashLength:], ^uint64(0))
+					storageHistoryEffects[string(lastK)] = common.CopyBytes(index)
+				}
+			}
+			return true, nil
+		}); err != nil {
+			return err
+		}
+	}
+	for key, value := range accountHistoryEffects {
+		if value == nil {
+			if err := tds.db.Delete(dbutils.AccountsHistoryBucket, []byte(key)); err != nil {
+				return err
+			}
+		} else {
+			if err := tds.db.Put(dbutils.AccountsHistoryBucket, []byte(key), value); err != nil {
+				return err
+			}
+		}
+	}
+	for key, value := range storageHistoryEffects {
+		if value == nil {
+			if err := tds.db.Delete(dbutils.StorageHistoryBucket, []byte(key)); err != nil {
+				return err
+			}
+		} else {
+			if err := tds.db.Put(dbutils.StorageHistoryBucket, []byte(key), value); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
