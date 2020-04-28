@@ -108,25 +108,24 @@ type senderRecoveryJob struct {
 }
 
 func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
+	var job *senderRecoveryJob
 	for {
-		select {
-		case job := <-in:
-			if job == nil {
-				return
-			}
-			for _, tx := range job.blockBody.Transactions {
-				from, err := types.Sender(job.signer, tx)
-				if err != nil {
-					job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
-					break
-				}
-				tx.SetFrom(from)
-				if tx.Protected() && tx.ChainId().Cmp(job.signer.ChainId()) != 0 {
-					job.err = errors.New("invalid chainId")
-					break
-				}
-			}
-			out <- job
+		job = <-in
+		if job == nil {
+			return
 		}
+		for _, tx := range job.blockBody.Transactions {
+			from, err := types.Sender(job.signer, tx)
+			if err != nil {
+				job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
+				break
+			}
+			tx.SetFrom(from)
+			if tx.Protected() && tx.ChainId().Cmp(job.signer.ChainId()) != 0 {
+				job.err = errors.New("invalid chainId")
+				break
+			}
+		}
+		out <- job
 	}
 }
