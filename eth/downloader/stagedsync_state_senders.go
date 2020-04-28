@@ -21,6 +21,7 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 	}
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
+	nextBlockNumber = 1
 
 	mutation := d.stateDB.NewBatch()
 	defer func() {
@@ -115,13 +116,16 @@ func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
 				return
 			}
 			for _, tx := range job.blockBody.Transactions {
-				from, err := types.Sender(job.signer, tx)
+				from, err := job.signer.Sender(tx)
 				if err != nil {
+					log.Error("failed to recover sender", "err", err)
 					job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
 					break
 				}
+				fmt.Printf("recovered sender-> %s\n", from.Hex())
 				tx.SetFrom(from)
 				if tx.Protected() && tx.ChainId().Cmp(job.signer.ChainId()) != 0 {
+					log.Error("failed to recover sender", "err", "invalid chain ID")
 					job.err = errors.New("invalid chainId")
 					break
 				}

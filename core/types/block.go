@@ -201,6 +201,7 @@ type storageblock struct {
 
 // Copy transaction senders from body into the transactions
 func (b *Body) SendersToTxs() {
+	fmt.Printf("<--- b.Senders = %+v\n", b.Senders)
 	if b.Senders == nil {
 		return
 	}
@@ -214,11 +215,14 @@ func (b *Body) SendersToTxs() {
 // Copy transaction senders from transactions to the body
 func (b *Body) SendersFromTxs() {
 	b.Senders = make([]common.Address, len(b.Transactions))
+
 	for i, tx := range b.Transactions {
 		if sc := tx.from.Load(); sc != nil {
 			b.Senders[i] = sc.(common.Address)
 		}
 	}
+
+	fmt.Printf("---> b.Senders = %+v\n", b.Senders)
 }
 
 // NewBlock creates a new block. The input data is copied,

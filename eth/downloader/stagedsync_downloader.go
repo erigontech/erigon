@@ -1,6 +1,8 @@
 package downloader
 
-import "github.com/ledgerwatch/turbo-geth/log"
+import (
+	"github.com/ledgerwatch/turbo-geth/log"
+)
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 
@@ -11,8 +13,10 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	/*
 	* Stage 1. Download Headers
 	 */
-	if err = d.spawnSync(headersFetchers); err != nil {
-		return err
+	if false {
+		if err = d.spawnSync(headersFetchers); err != nil {
+			return err
+		}
 	}
 
 	log.Info("Sync stage 1/5. Downloading headers... Complete!")

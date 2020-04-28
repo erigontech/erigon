@@ -19,6 +19,7 @@ package types
 import (
 	"container/heap"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -229,7 +230,14 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 	}
 
 	var err error
-	msg.from, err = Sender(s, tx)
+
+	sc := tx.from.Load()
+	if sc == nil {
+		panic("sc not stored!")
+	}
+	msg.from = sc.(common.Address)
+	fmt.Printf("recovered from -> %s\n", msg.from.Hex())
+
 	if tx.Protected() && tx.ChainId().Cmp(s.ChainId()) != 0 {
 		return msg, ErrInvalidChainId
 	}
