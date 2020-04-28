@@ -188,7 +188,7 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 }
 
 func DecodeStorage(b []byte) (*ChangeSet, error) {
-	numOfUniqueElements := int(binary.BigEndian.Uint16(b[4:6]))
+	numOfUniqueElements := int(binary.BigEndian.Uint16(b))
 	if numOfUniqueElements == 0 {
 		return &ChangeSet{
 			Changes: make([]Change, 0),
@@ -197,10 +197,10 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 	}
 	keys := make([]contractKeys, numOfUniqueElements)
 	numOfSkipKeys := make([]int, numOfUniqueElements+1)
-	for i := uint32(0); i < uint32(numOfUniqueElements); i++ {
-		numOfSkipKeys[i+1] = int(binary.BigEndian.Uint16(b[2+i*(common.HashLength)+(i-1)*2 : 2+i*(common.HashLength)+(i)*2]))
-		start := 2 + i*common.HashLength + i*2
+	for i := 0; i < numOfUniqueElements; i++ {
+		start := 2 + i*(common.HashLength+2)
 		keys[i].AddrHash = b[start : start+common.HashLength]
+		numOfSkipKeys[i+1] = int(binary.BigEndian.Uint16(b[start+common.HashLength:]))
 		keys[i].Incarnation = DefaultIncarnation
 	}
 	numOfElements := numOfSkipKeys[numOfUniqueElements]
