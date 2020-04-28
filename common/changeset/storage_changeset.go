@@ -428,21 +428,20 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 	keysStart := incarnatonsStart + numOfNotDefaultIncarnations*10
 	valsInfoStart := keysStart + numOfElements*common.HashLength
 
-	addHashID := sort.Search(int(numOfUniqueElements), func(i int) bool {
-		addrHash := b[2+i*(common.HashLength)+i*2 : 2+(i+1)*(common.HashLength)+i*2]
+	addHashID := sort.Search(numOfUniqueElements, func(i int) bool {
+		addrHash := b[2+i*(common.HashLength+2) : 2+i*(common.HashLength+2)+common.HashLength]
 		cmp := bytes.Compare(addrHash, addrHashToFind)
 		return cmp >= 0
-
 	})
 
-	if addHashID >= numOfUniqueElements {
+	if addHashID == numOfUniqueElements {
 		return nil, ErrNotFound
 	}
 	from := 0
 	if addHashID > 0 {
-		from = int(binary.BigEndian.Uint16(b[2+addHashID*common.HashLength+addHashID*2-2:]))
+		from = int(binary.BigEndian.Uint16(b[2+addHashID*(common.HashLength+2)-2:]))
 	}
-	to := int(binary.BigEndian.Uint16(b[2+(addHashID+1)*common.HashLength+addHashID*2:]))
+	to := int(binary.BigEndian.Uint16(b[2+addHashID*(common.HashLength+2)+common.HashLength:]))
 	keyIndex := sort.Search(to-from, func(i int) bool {
 		index := from + i
 		key := b[keysStart+common.HashLength*index : keysStart+common.HashLength*index+common.HashLength]
@@ -450,7 +449,7 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 		return cmp >= 0
 	})
 	index := from + keyIndex
-	if index == to-from {
+	if index == to {
 		return nil, ErrNotFound
 	}
 
