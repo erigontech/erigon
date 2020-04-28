@@ -443,6 +443,24 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 	if tr.trace {
 		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
+
+	if keyIdx != tr.keyIdx {
+		if err := tr.finaliseRoot(); err != nil {
+			return err
+		}
+		tr.hb.Reset()
+		tr.groups = nil
+		tr.keyIdx = keyIdx
+		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
+		tr.currentRs = tr.rss[keyIdx]
+		tr.curr.Reset()
+
+		tr.hbStorage.Reset()
+		tr.groupsStorage = nil
+		tr.currStorage.Reset()
+		tr.accAddrHash = tr.accAddrHash[:]
+	}
+
 	if !isIH {
 		// skip storage keys:
 		// - if it has wrong incarnation
@@ -525,6 +543,11 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
 		tr.curr.Reset()
+
+		tr.hbStorage.Reset()
+		tr.groupsStorage = nil
+		tr.currStorage.Reset()
+		tr.accAddrHash = tr.accAddrHash[:]
 	}
 	if len(v) > 0 {
 		tr.curr.Reset()
