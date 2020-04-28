@@ -678,8 +678,8 @@ func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) e
 	if err := db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
-	//if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
-	//	return err
-	//}
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
+		return err
+	}
 	return nil
 }
