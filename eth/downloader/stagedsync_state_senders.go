@@ -2,11 +2,15 @@ package downloader
 
 import (
 	"context"
+	"fmt"
+	"math/big"
+
+	"github.com/pkg/errors"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"math/big"
 )
 
 func (d *Downloader) spawnRecoverSendersStage() error {
@@ -14,6 +18,7 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 	if err != nil {
 		return err
 	}
+	lastProcessedBlockNumber = 0
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
@@ -40,18 +45,23 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 		}
 		blockNumber.SetUint64(nextBlockNumber)
 		s := types.MakeSigner(config, &blockNumber)
-		for _, tx := range body.Transactions {
-			from, err1 := types.Sender(s, tx)
-			if err1 != nil {
-				log.Error("Recovering sender from signature", "tx", tx.Hash(), "block", nextBlockNumber, "error", err1)
-				break
-			}
-			tx.SetFrom(from)
-			if tx.Protected() && tx.ChainId().Cmp(s.ChainId()) != 0 {
-				log.Error("Invalid chainId", "tx", tx.Hash(), "block", nextBlockNumber, "tx.chainId", tx.ChainId(), "expected", s.ChainId())
-				break
-			}
-		}
+
+		jobs := make(chan *senderRecoveryJob, 0)
+		out := make(chan *senderRecoveryJob, 0)
+		cancel := make(chan struct{}, 0)
+
+		fmt.Printf("before senders recovery")
+
+		go recoverSenders(jobs, out, cancel)
+		jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
+
+		<-out
+
+		fmt.Printf("after senders recovery")
+
+		close(cancel)
+		close(jobs)
+		close(out)
 
 		rawdb.WriteBody(context.Background(), mutation, hash, nextBlockNumber, body)
 
@@ -74,4 +84,37 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 	}
 
 	return nil
+}
+
+type senderRecoveryJob struct {
+	signer          types.Signer
+	blockBody       *types.Body
+	hash            common.Hash
+	nextBlockNumber uint64
+	err             error
+}
+
+func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob, cancel chan struct{}) {
+	for {
+		select {
+		case job := <-in:
+			for _, tx := range job.blockBody.Transactions {
+				from, err := types.Sender(job.signer, tx)
+				if err != nil {
+					job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
+					break
+				}
+				tx.SetFrom(from)
+				if tx.Protected() && tx.ChainId().Cmp(job.signer.ChainId()) != 0 {
+					job.err = errors.New("invalid chainId")
+					break
+				}
+			}
+			out <- job
+		case <-cancel:
+			return
+		}
+	}
+
+	return
 }
