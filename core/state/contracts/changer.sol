@@ -1,4 +1,4 @@
-pragma solidity ^0.5.0;
+pragma solidity >=0.5.0;
 
 // solc --allow-paths ., --abi --bin --overwrite --optimize -o core/state/contracts/build core/state/contracts/changer.sol
 // abigen -abi core/state/contracts/build/Changer.abi -bin core/state/contracts/build/Changer.bin -pkg contracts -type changer -out core/state/contracts/gen_changer.go

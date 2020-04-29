@@ -1,4 +1,4 @@
-pragma solidity ^0.5.0;
+pragma solidity >=0.5.0;
 
 // solc --allow-paths ., --abi --bin --overwrite --optimize -o core/state/contracts/build core/state/contracts/selfdestruct.sol
 // ./build/bin/abigen -abi core/state/contracts/build/Selfdestruct.abi -bin core/state/contracts/build/Selfdestruct.bin -pkg contracts -type selfdestruct -out core/state/contracts/gen_selfdestruct.go
