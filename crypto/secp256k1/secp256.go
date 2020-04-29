@@ -52,6 +52,11 @@ func initContext() *C.secp256k1_context {
 	return context
 }
 
+func NewContext() *Context {
+	context := initContext()
+	return &Context{context}
+}
+
 var (
 	ErrInvalidMsgLen       = errors.New("invalid message length, need 32 bytes")
 	ErrInvalidSignatureLen = errors.New("invalid signature length")

@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -108,6 +109,7 @@ type senderRecoveryJob struct {
 }
 
 func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
+	cryptoContext := secp256k1.NewContext()
 	var job *senderRecoveryJob
 	for {
 		job = <-in
@@ -115,7 +117,7 @@ func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
 			return
 		}
 		for _, tx := range job.blockBody.Transactions {
-			from, err := types.Sender(job.signer, tx)
+			from, err := job.signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
 				job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
 				break
