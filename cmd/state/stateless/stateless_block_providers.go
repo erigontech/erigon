@@ -176,7 +176,7 @@ func (p *ExportFileBlockProvider) resetStream() error {
 		}
 	}
 	p.stream = rlp.NewStream(p.reader, 0)
-	p.lastBlockNumber = 0
+	p.lastBlockNumber = -1
 	return nil
 }
 
