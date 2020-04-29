@@ -841,7 +841,7 @@ func (t *Trie) touchAll(n node, hex []byte, del bool, incarnation uint64) {
 			t.observers.CodeNodeDeleted(hex)
 		} else {
 			t.observers.CodeNodeTouched(hex)
-			t.observers.BranchNodeLoaded(hex, n.Incarnation)
+			//t.observers.BranchNodeLoaded(hex, n.Incarnation)
 		}
 		if n.storage != nil {
 			t.touchAll(n.storage, hex, del, n.Incarnation)
@@ -1222,7 +1222,7 @@ func (t *Trie) EvictNode(hex []byte) {
 		idx := hex[len(hex)-1]
 		p.Children[idx] = hnode
 	case *accountNode:
-		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
+		//t.observers.WillUnloadBranchNode(hex, hn, incarnation)
 		p.storage = hnode
 	}
 }
