@@ -47,7 +47,7 @@ func initContext() *C.secp256k1_context {
 	ctx := C.secp256k1_context_create_sign_verify()
 	C.secp256k1_context_set_illegal_callback(ctx, C.callbackFunc(C.secp256k1GoPanicIllegal), nil)
 	C.secp256k1_context_set_error_callback(ctx, C.callbackFunc(C.secp256k1GoPanicError), nil)
-	return context
+	return ctx
 }
 
 func NewContext() *Context {
