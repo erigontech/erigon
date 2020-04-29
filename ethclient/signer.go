@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 )
 
 // senderFromServer is a types.Signer that remembers the sender address returned by the RPC
@@ -45,6 +46,10 @@ func (s *senderFromServer) Equal(other types.Signer) bool {
 }
 
 func (s *senderFromServer) Sender(tx *types.Transaction) (common.Address, error) {
+	return s.SenderWithContext(nil, tx)
+}
+
+func (s *senderFromServer) SenderWithContext(_ *secp256k1.Context, tx *types.Transaction) (common.Address, error) {
 	if s.blockhash == (common.Hash{}) {
 		return common.Address{}, errNotCached
 	}
