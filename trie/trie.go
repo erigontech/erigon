@@ -841,6 +841,7 @@ func (t *Trie) touchAll(n node, hex []byte, del bool, incarnation uint64) {
 			t.observers.CodeNodeDeleted(hex)
 		} else {
 			t.observers.CodeNodeTouched(hex)
+			t.observers.BranchNodeLoaded(hex, n.Incarnation)
 		}
 		if n.storage != nil {
 			t.touchAll(n.storage, hex, del, n.Incarnation)
@@ -1200,7 +1201,7 @@ func (t *Trie) EvictNode(hex []byte) {
 	}
 	copy(hn[:], nd.reference())
 	hnode := hashNode(hn[:])
-	t.observers.WillUnloadBranchNode(hex, hn, incarnation)
+	t.observers.WillUnloadNode(hex, hn)
 
 	switch p := parent.(type) {
 	case nil:
@@ -1208,6 +1209,7 @@ func (t *Trie) EvictNode(hex []byte) {
 	case *shortNode:
 		p.Val = hnode
 	case *duoNode:
+		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
@@ -1216,9 +1218,11 @@ func (t *Trie) EvictNode(hex []byte) {
 			p.child2 = hnode
 		}
 	case *fullNode:
+		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
 		idx := hex[len(hex)-1]
 		p.Children[idx] = hnode
 	case *accountNode:
+		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
 		p.storage = hnode
 	}
 }

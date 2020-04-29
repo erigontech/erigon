@@ -328,6 +328,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
+	//trace = true
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
@@ -451,6 +452,12 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		// - if it has wrong incarnation
 		// - if it abandoned (account deleted)
 		if len(tr.accAddrHash) > 0 {
+			if tr.a.Incarnation == 0 { // no storage can be here
+				if tr.trace {
+					fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
+				}
+				return nil
+			}
 			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
 			if !bytes.HasPrefix(k, accWithInc) {
 				if tr.trace {
@@ -784,7 +791,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			canUseIntermediateHash = false
+			//canUseIntermediateHash = false
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
