@@ -407,6 +407,9 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		}
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("startkey: %x\n", startkeys)
+		for i := range startkeys {
+			tr.dumpPrefix(startkeys[i])
+		}
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
 	return nil
@@ -425,6 +428,7 @@ func (tr *ResolverStateful) dumpPrefix(prefix []byte) {
 		panic(err)
 	}
 }
+
 func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*ResolveRequestForCode) error {
 	for _, req := range requests {
 		codeHash := req.codeHash
@@ -448,7 +452,7 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
-	if tr.trace && bytes.HasPrefix(k, common.FromHex("ca")) {
+	if tr.trace {
 		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
@@ -469,27 +473,32 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 
-	if !isIH {
-		// skip storage keys:
-		// - if it has wrong incarnation
-		// - if it abandoned (account deleted)
-		if len(tr.accAddrHash) > 0 {
-			if tr.a.Incarnation == 0 { // no storage can be here
-				if tr.trace {
-					fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
-				}
-				return nil
+	//if !isIH {
+	// skip storage keys:
+	// - if it has wrong incarnation
+	// - if it abandoned (account deleted)
+	if len(tr.accAddrHash) > 0 {
+		if !isIH && tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
+			if tr.trace {
+				fmt.Printf("WalkerStorage: because 0 incarnation\n")
 			}
-			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-			if !bytes.HasPrefix(k, accWithInc) {
-				if tr.trace {
-					fmt.Printf("WalkerStorage: skip %x, but accWithInc: %x\n", k, accWithInc)
-				}
+			return nil
+		}
 
-				return nil
+		// skip ih or storage if it has another incarnation
+		accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+		if !bytes.HasPrefix(k, accWithInc) {
+			if tr.trace {
+				fmt.Printf("WalkerStorage: not match accWithInc=%x\n", accWithInc)
 			}
+
+			return nil
 		}
 	}
+
+	//if isIH && len(k) < 32 {
+	//	fmt.Printf("WalkerStorage: short IH %x, %d\n", k, len(k))
+	//}
 
 	if len(v) > 0 {
 		tr.currStorage.Reset()
