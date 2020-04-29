@@ -328,7 +328,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
-	//trace = true
 	tr.trace = trace
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
@@ -444,7 +443,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		tr.hbStorage.Reset()
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
-		tr.accAddrHash = tr.accAddrHash[:]
+		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 
 	if !isIH {
@@ -455,7 +454,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
 			if !bytes.HasPrefix(k, accWithInc) {
 				if tr.trace {
-					fmt.Printf("WalkerStorage: skip %x, accInc: %d\n", k, tr.a.Incarnation)
+					fmt.Printf("WalkerStorage: skip %x, but accWithInc: %x\n", k, accWithInc)
 				}
 
 				return nil
@@ -533,7 +532,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		tr.hbStorage.Reset()
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
-		tr.accAddrHash = tr.accAddrHash[:]
+		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 	if len(v) > 0 {
 		tr.curr.Reset()
@@ -733,8 +732,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						ihK, ihV = ih.SeekTo(startkey)
 						if tr.trace {
 							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
-							fmt.Printf("[wasIH = %t], ih.SeekTo(%x) = %x\n", isIH, startkey, ihK)
-							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
+							//fmt.Printf("[wasIH = %t], ih.SeekTo(%x) = %x\n", isIH, startkey, ihK)
+							//fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
 						if k == nil && ihK == nil {
 							return nil
@@ -742,7 +741,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 						isIH, minKey = keyIsBefore(ihK, k)
 						if tr.trace {
-							fmt.Printf("wasIH, minKey = %t, %x\n", isIH, minKey)
+							//fmt.Printf("wasIH, minKey = %t, %x\n", isIH, minKey)
 						}
 					} else if cmp > 0 {
 						rangeIdx++
