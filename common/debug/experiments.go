@@ -10,6 +10,7 @@ var gerEnv sync.Once
 
 var itcEnv sync.Once
 var storeAccRoot bool
+var disableIH bool
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
 var getNodeData uint32
@@ -27,6 +28,16 @@ func IsStoreAccountRoot() bool {
 		}
 	})
 	return storeAccRoot
+}
+
+func IsDisableIH() bool {
+	itcEnv.Do(func() {
+		_, disableIH = os.LookupEnv("DISABLE_IH")
+		if !disableIH {
+			_, disableIH = os.LookupEnv("DISABLE_IH")
+		}
+	})
+	return disableIH
 }
 
 // IsGetNodeData indicates whether the GetNodeData functionality should be enabled.
