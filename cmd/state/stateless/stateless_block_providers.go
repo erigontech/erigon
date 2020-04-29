@@ -106,7 +106,7 @@ type ExportFileBlockProvider struct {
 	batch           ethdb.DbWithPendingMutations
 	fh              *os.File
 	reader          io.Reader
-	lastBlockNumber uint64
+	lastBlockNumber int64
 }
 
 func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
@@ -126,7 +126,7 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 	engine := ethash.NewFullFaker()
 	// keeping all the past block headers in memory
 	headersDb := mustCreateTempDatabase()
-	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh, reader, 0}, nil
+	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh, reader, -1}, nil
 }
 
 func getTempFileName() string {
@@ -187,10 +187,10 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 			return err
 		}
 	}
-	if p.lastBlockNumber == to-1 {
+	if p.lastBlockNumber == int64(to)-1 {
 		fmt.Println("fastfwd: nothing to do there")
 		return nil
-	} else if p.lastBlockNumber > to-1 {
+	} else if p.lastBlockNumber > int64(to)-1 {
 		fmt.Println("fastfwd: resetting stream")
 		if err := p.resetStream(); err != nil {
 			return err
@@ -204,7 +204,7 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 			return fmt.Errorf("error fast fwd: %v", err)
 		} else {
 			p.WriteHeader(b.Header())
-			p.lastBlockNumber = b.NumberU64()
+			p.lastBlockNumber = int64(b.NumberU64())
 			if b.NumberU64() >= to-1 {
 				return nil
 			}
@@ -220,7 +220,7 @@ func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {
 		return nil, fmt.Errorf("error fast fwd: %v", err)
 	}
 
-	p.lastBlockNumber = b.NumberU64()
+	p.lastBlockNumber = int64(b.NumberU64())
 	p.WriteHeader(b.Header())
 	return &b, nil
 }
