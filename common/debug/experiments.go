@@ -6,10 +6,9 @@ import (
 	"sync/atomic"
 )
 
-var gerEnv sync.Once
-
-var itcEnv sync.Once
+var storeAccRootEnv sync.Once
 var storeAccRoot bool
+var disableIHEnv sync.Once
 var disableIH bool
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
@@ -21,21 +20,15 @@ const (
 )
 
 func IsStoreAccountRoot() bool {
-	itcEnv.Do(func() {
+	storeAccRootEnv.Do(func() {
 		_, storeAccRoot = os.LookupEnv("STORE_ACCOUNT_ROOT")
-		if !storeAccRoot {
-			_, storeAccRoot = os.LookupEnv("STORE_ACCOUNT_ROOT")
-		}
 	})
 	return storeAccRoot
 }
 
 func IsDisableIH() bool {
-	itcEnv.Do(func() {
+	disableIHEnv.Do(func() {
 		_, disableIH = os.LookupEnv("DISABLE_IH")
-		if !disableIH {
-			_, disableIH = os.LookupEnv("DISABLE_IH")
-		}
 	})
 	return disableIH
 }
