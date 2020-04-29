@@ -1,4 +1,4 @@
-pragma solidity ^0.6.0;
+pragma solidity >=0.6.0;
 
 // solc --allow-paths ., --abi --bin --overwrite --optimize -o cmd/tester/contracts/build cmd/tester/contracts/revive2.sol
 // abigen -abi cmd/tester/contracts/build/Revive2.abi -bin cmd/tester/contracts/build/Revive2.bin -pkg contracts -type revive2 -out cmd/tester/contracts/gen_revive2.go

@@ -1,4 +1,4 @@
-pragma solidity ^0.5.0;
+pragma solidity >=0.5.0;
 contract eip2027 {
     mapping(address => uint) public balances;
 

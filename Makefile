@@ -229,6 +229,11 @@ geth-windows-amd64:
 
 bindings:
 	go generate ./tests/contracts/
+	go generate ./cmd/tester/contracts/
+	go generate ./core/state/contracts/
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
+
+prometheus:
+	@cd ./cmd/prometheus && docker-compose up prometheus grafana
