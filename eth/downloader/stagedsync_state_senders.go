@@ -15,6 +15,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+var numOfGoroutines int
+var cryptoContexts []*secp256k1.Context
+
+func init() {
+	// To avoid bothering with creating/releasing the resources
+	// but still not leak the contexts
+	numOfGoroutines = runtime.NumCPU()
+	cryptoContexts = make([]*secp256k1.Context, numOfGoroutines)
+	for i := 0; i < numOfGoroutines; i++ {
+		cryptoContexts[i] = secp256k1.NewContext()
+	}
+}
+
 func (d *Downloader) spawnRecoverSendersStage() error {
 	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Senders)
 	if err != nil {
@@ -45,10 +58,9 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 		close(out)
 	}()
 
-	var numOfGoroutines = runtime.NumCPU()
-
 	for i := 0; i < numOfGoroutines; i++ {
-		go recoverSenders(jobs, out)
+		// each goroutine gets it's own crypto context to make sure they are really parallel
+		go recoverSenders(cryptoContexts[i], jobs, out)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
@@ -108,8 +120,7 @@ type senderRecoveryJob struct {
 	err             error
 }
 
-func recoverSenders(in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
-	cryptoContext := secp256k1.NewContext()
+func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
 	var job *senderRecoveryJob
 	for {
 		job = <-in
