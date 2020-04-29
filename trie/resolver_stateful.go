@@ -496,10 +496,12 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 			}
 		}
 	} else {
-		accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-		if !bytes.HasPrefix(k, accWithInc) {
-			if tr.trace {
-				fmt.Printf("WalkerStorage: weird IH=%x, accWithInc=%x\n", k, accWithInc)
+		if len(tr.accAddrHash) > 0 {
+			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+			if !bytes.HasPrefix(k, accWithInc) {
+				if tr.trace {
+					fmt.Printf("WalkerStorage: weird IH=%x, accWithInc=%x\n", k, accWithInc)
+				}
 			}
 		}
 	}
