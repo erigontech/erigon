@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -79,6 +80,9 @@ func Sender(signer Signer, tx *Transaction) (common.Address, error) {
 type Signer interface {
 	// Sender returns the sender address of the transaction.
 	Sender(tx *Transaction) (common.Address, error)
+	// SenderWithContext returns the sender address of the transaction.
+	SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error)
+
 	// SignatureValues returns the raw R, S, V values corresponding to the
 	// given signature.
 	SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error)
@@ -113,6 +117,10 @@ func (s EIP155Signer) Equal(s2 Signer) bool {
 var big8 = big.NewInt(8)
 
 func (s EIP155Signer) Sender(tx *Transaction) (common.Address, error) {
+	return s.SenderWithContext(secp256k1.DefaultContext, tx)
+}
+
+func (s EIP155Signer) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
 	if !tx.Protected() {
 		return HomesteadSigner{}.Sender(tx)
 	}
@@ -121,7 +129,7 @@ func (s EIP155Signer) Sender(tx *Transaction) (common.Address, error) {
 	}
 	V := new(big.Int).Sub(tx.data.V, s.chainIdMul)
 	V.Sub(V, big8)
-	return recoverPlain(s.Hash(tx), tx.data.R, tx.data.S, V, true)
+	return recoverPlain(context, s.Hash(tx), tx.data.R, tx.data.S, V, true)
 }
 
 // SignatureValues returns signature values. This signature
@@ -172,7 +180,11 @@ func (hs HomesteadSigner) SignatureValues(tx *Transaction, sig []byte) (r, s, v 
 }
 
 func (hs HomesteadSigner) Sender(tx *Transaction) (common.Address, error) {
-	return recoverPlain(hs.Hash(tx), tx.data.R, tx.data.S, tx.data.V, true)
+	return hs.SenderWithContext(secp256k1.DefaultContext, tx)
+}
+
+func (hs HomesteadSigner) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
+	return recoverPlain(context, hs.Hash(tx), tx.data.R, tx.data.S, tx.data.V, true)
 }
 
 type FrontierSigner struct{}
@@ -208,14 +220,18 @@ func (fs FrontierSigner) Hash(tx *Transaction) common.Hash {
 }
 
 func (fs FrontierSigner) Sender(tx *Transaction) (common.Address, error) {
-	return recoverPlain(fs.Hash(tx), tx.data.R, tx.data.S, tx.data.V, false)
+	return fs.SenderWithContext(secp256k1.DefaultContext, tx)
+}
+
+func (fs FrontierSigner) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
+	return recoverPlain(context, fs.Hash(tx), tx.data.R, tx.data.S, tx.data.V, false)
 }
 
 func (fs FrontierSigner) ChainId() *big.Int {
 	return big.NewInt(0)
 }
 
-func recoverPlain(sighash common.Hash, R, S, Vb *big.Int, homestead bool) (common.Address, error) {
+func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *big.Int, homestead bool) (common.Address, error) {
 	if Vb.BitLen() > 8 {
 		return common.Address{}, ErrInvalidSig
 	}
@@ -230,7 +246,7 @@ func recoverPlain(sighash common.Hash, R, S, Vb *big.Int, homestead bool) (commo
 	copy(sig[64-len(s):64], s)
 	sig[64] = V
 	// recover the public key from the signature
-	pub, err := crypto.Ecrecover(sighash[:], sig)
+	pub, err := crypto.EcrecoverWithContext(context, sighash[:], sig)
 	if err != nil {
 		return common.Address{}, err
 	}

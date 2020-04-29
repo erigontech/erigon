@@ -32,6 +32,11 @@ func Ecrecover(hash, sig []byte) ([]byte, error) {
 	return secp256k1.RecoverPubkey(hash, sig)
 }
 
+// Ecrecover returns the uncompressed public key that created the given signature.
+func EcrecoverWithContext(context *secp256k1.Context, hash, sig []byte) ([]byte, error) {
+	return secp256k1.RecoverPubkeyWithContext(context, hash, sig)
+}
+
 // SigToPub returns the public key that created the given signature.
 func SigToPub(hash, sig []byte) (*ecdsa.PublicKey, error) {
 	s, err := Ecrecover(hash, sig)

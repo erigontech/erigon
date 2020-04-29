@@ -26,17 +26,30 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"unsafe"
 )
 
+type Context struct {
+	context *C.secp256k1_context
+}
+
 var context *C.secp256k1_context
+var DefaultContext *Context // to avoid allocating structures every time on `RecoverPubkey` w/o context
 
 func init() {
+	context = initContext()
+	DefaultContext = &Context{context}
+}
+
+func initContext() *C.secp256k1_context {
+	fmt.Println("init context called")
 	// around 20 ms on a modern CPU.
-	context = C.secp256k1_context_create_sign_verify()
+	context := C.secp256k1_context_create_sign_verify()
 	C.secp256k1_context_set_illegal_callback(context, C.callbackFunc(C.secp256k1GoPanicIllegal), nil)
 	C.secp256k1_context_set_error_callback(context, C.callbackFunc(C.secp256k1GoPanicError), nil)
+	return context
 }
 
 var (
@@ -91,6 +104,10 @@ func Sign(msg []byte, seckey []byte) ([]byte, error) {
 // sig must be a 65-byte compact ECDSA signature containing the
 // recovery id as the last element.
 func RecoverPubkey(msg []byte, sig []byte) ([]byte, error) {
+	return RecoverPubkeyWithContext(DefaultContext, msg, sig)
+}
+
+func RecoverPubkeyWithContext(context *Context, msg []byte, sig []byte) ([]byte, error) {
 	if len(msg) != 32 {
 		return nil, ErrInvalidMsgLen
 	}
@@ -103,7 +120,7 @@ func RecoverPubkey(msg []byte, sig []byte) ([]byte, error) {
 		sigdata = (*C.uchar)(unsafe.Pointer(&sig[0]))
 		msgdata = (*C.uchar)(unsafe.Pointer(&msg[0]))
 	)
-	if C.secp256k1_ext_ecdsa_recover(context, (*C.uchar)(unsafe.Pointer(&pubkey[0])), sigdata, msgdata) == 0 {
+	if C.secp256k1_ext_ecdsa_recover(context.context, (*C.uchar)(unsafe.Pointer(&pubkey[0])), sigdata, msgdata) == 0 {
 		return nil, ErrRecoverFailed
 	}
 	return pubkey, nil
