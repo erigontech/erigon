@@ -515,7 +515,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		fmt.Printf("WalkerAccount: isIH=%v, keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -634,6 +634,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		if tr.wasIH {
 			tr.value.Reset()
 			tr.value.Write(v)
+			tr.accAddrHash = tr.accAddrHash[:0]
 			return nil
 		}
 
