@@ -46,15 +46,15 @@ func init() {
 func initContext() *C.secp256k1_context {
 	fmt.Println("init context called")
 	// around 20 ms on a modern CPU.
-	context := C.secp256k1_context_create_sign_verify()
-	C.secp256k1_context_set_illegal_callback(context, C.callbackFunc(C.secp256k1GoPanicIllegal), nil)
-	C.secp256k1_context_set_error_callback(context, C.callbackFunc(C.secp256k1GoPanicError), nil)
+	ctx := C.secp256k1_context_create_sign_verify()
+	C.secp256k1_context_set_illegal_callback(ctx, C.callbackFunc(C.secp256k1GoPanicIllegal), nil)
+	C.secp256k1_context_set_error_callback(ctx, C.callbackFunc(C.secp256k1GoPanicError), nil)
 	return context
 }
 
 func NewContext() *Context {
-	context := initContext()
-	return &Context{context}
+	ctx := initContext()
+	return &Context{ctx}
 }
 
 var (
