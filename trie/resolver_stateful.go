@@ -473,32 +473,36 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 
-	//if !isIH {
-	// skip storage keys:
-	// - if it has wrong incarnation
-	// - if it abandoned (account deleted)
-	if len(tr.accAddrHash) > 0 {
-		if !isIH && tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
-			if tr.trace {
-				fmt.Printf("WalkerStorage: because 0 incarnation\n")
+	if !isIH {
+		// skip storage keys:
+		// - if it has wrong incarnation
+		// - if it abandoned (account deleted)
+		if len(tr.accAddrHash) > 0 {
+			if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
+				if tr.trace {
+					fmt.Printf("WalkerStorage: skip, because 0 incarnation\n")
+				}
+				return nil
 			}
-			return nil
-		}
 
-		// skip ih or storage if it has another incarnation
+			// skip ih or storage if it has another incarnation
+			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+			if !bytes.HasPrefix(k, accWithInc) {
+				if tr.trace {
+					fmt.Printf("WalkerStorage: skip, not match accWithInc=%x\n", accWithInc)
+				}
+
+				return nil
+			}
+		}
+	} else {
 		accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
 		if !bytes.HasPrefix(k, accWithInc) {
 			if tr.trace {
-				fmt.Printf("WalkerStorage: not match accWithInc=%x\n", accWithInc)
+				fmt.Printf("WalkerStorage: weird IH=%x, accWithInc=%x\n", k, accWithInc)
 			}
-
-			return nil
 		}
 	}
-
-	//if isIH && len(k) < 32 {
-	//	fmt.Printf("WalkerStorage: short IH %x, %d\n", k, len(k))
-	//}
 
 	if len(v) > 0 {
 		tr.currStorage.Reset()
@@ -825,6 +829,15 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			if canUseIntermediateHash && len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
+				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+				if !bytes.HasPrefix(ihK, accWithInc) {
+					if tr.trace {
+						fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
+					}
+					canUseIntermediateHash = false
+				}
+			}
 			if debug.IsDisableIH() {
 				canUseIntermediateHash = false
 			}
