@@ -493,6 +493,11 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 				return true, t.NewResolveRequest(nil, hex[:l], pos, common.CopyBytes(n))
 			}
 			// 8 is IncarnationLength
+			if incarnation == 0 {
+				//FIXME: This is a hack. Proper fix would involve figuring out proper incarnation by pre-loading
+				// account, or alternatively, excluding incarnations from the keys for ResolveSet-s
+				incarnation = 1
+			}
 			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], ^incarnation)
