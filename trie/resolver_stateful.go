@@ -342,7 +342,12 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 
 	if tr.trace {
 		fmt.Printf("----------\n")
+		fmt.Printf("RebuildTrie blockNr %d\n", blockNr)
+		if tr.topLevels > 0 {
+			fmt.Printf("tr.topLevels > 0: %d\n", tr.topLevels)
+		}
 	}
+
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if tr.trace {
 		for i := range tr.rss {
@@ -351,13 +356,10 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		for i := range tr.rssStorage {
 			fmt.Printf("tr.rssStorage[%d]->%x\n", i, tr.rssStorage[i].hexes)
 		}
-
-		for _, req := range tr.requests {
-			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
-			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
-			fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+		for i := range tr.requests {
+			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
 		}
-		fmt.Printf("topLevels: %d, fixedbits: %d\n", tr.topLevels, fixedbits)
+		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("startkey: %x\n", startkeys)
 	}
 	if db == nil {
@@ -367,12 +369,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Callers(10))
-	}
-	if tr.trace {
-		fmt.Printf("RebuildTrie %d, blockNr %d\n", len(startkeys), blockNr)
-		for _, startkey := range startkeys {
-			fmt.Printf("%x\n", startkey)
-		}
 	}
 
 	var boltDB *bolt.DB
@@ -406,16 +402,20 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 	if err = tr.finaliseRoot(); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
-		for _, req := range tr.requests {
-			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
-			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
-			fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+		for i := range tr.rss {
+			fmt.Printf("tr.rss[%d]->%x\n", i, tr.rss[i].hexes)
+		}
+		for i := range tr.rssStorage {
+			fmt.Printf("tr.rssStorage[%d]->%x\n", i, tr.rssStorage[i].hexes)
+		}
+		for i := range tr.requests {
+			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
 		}
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("startkey: %x\n", startkeys)
-		for i := range startkeys {
-			tr.dumpPrefix(startkeys[i])
-		}
+		//for i := range startkeys {
+		//	tr.dumpPrefix(startkeys[i])
+		//}
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
 	return nil
@@ -459,7 +459,7 @@ type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		//fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -486,7 +486,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		if len(tr.accAddrHash) > 0 {
 			if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
 				if tr.trace {
-					fmt.Printf("WalkerStorage: skip, because 0 incarnation\n")
+					fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
 				}
 				return nil
 			}
@@ -565,7 +565,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		//fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
