@@ -458,7 +458,7 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
-	if tr.trace {
+	if tr.trace && isIH {
 		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
@@ -837,18 +837,26 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 			if len(ihK) > 32 {
 				canUseIntermediateHash = tr.rssStorage[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
+				if canUseIntermediateHash && len(tr.accAddrHash) > 0 { // skip IH with wrong incarnation
+					if tr.a.Incarnation == 0 {
+						if tr.trace {
+							//fmt.Printf("IH skip: %x, because 0 incarnation\n", ihK)
+						}
+						canUseIntermediateHash = false
+					} else {
+						accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+						if !bytes.HasPrefix(ihK, accWithInc) {
+							if tr.trace {
+								fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
+							}
+							canUseIntermediateHash = false
+						}
+					}
+				}
 			} else {
 				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
 			}
-			if canUseIntermediateHash && len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
-				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-				if !bytes.HasPrefix(ihK, accWithInc) {
-					if tr.trace {
-						fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
-					}
-					canUseIntermediateHash = false
-				}
-			}
+
 			if debug.IsDisableIH() {
 				canUseIntermediateHash = false
 			}
@@ -877,7 +885,12 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			k, v = c.Seek(next)
+			for k, v = c.Seek(next); k != nil; k, v = c.Next() {
+				isAbandoned := len(next) <= common.HashLength && len(k) > common.HashLength
+				if !isAbandoned {
+					break
+				}
+			}
 			ihK, ihV = ih.Seek(next)
 		}
 		return nil
