@@ -489,18 +489,20 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 			incarnation = n.Incarnation
 		case hashNode:
 			if contract == nil {
-				return true, t.NewResolveRequest(nil, hex, pos, common.CopyBytes(n))
+				l := min(len(hex), common.HashLength*2) // remove termination symbol
+				return true, t.NewResolveRequest(nil, hex[:l], pos, common.CopyBytes(n))
 			}
 			// 8 is IncarnationLength
 			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], ^incarnation)
-			hexContractLen := 2 * len(contract) // Length of 'contract' prefix in HEX encoding
+			hexContractLen := 2 * common.HashLength // Length of 'contract' prefix in HEX encoding
+			l := min(len(hex), hexContractLen*2)    // remove termination symbol
 			if pos-hexContractLen < 0 {
 				// when need storage resolution for non-resolved account
-				return true, t.NewResolveRequest(prefix, hex[hexContractLen:], 0, common.CopyBytes(n))
+				return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], 0, common.CopyBytes(n))
 			}
-			return true, t.NewResolveRequest(prefix, hex[hexContractLen:], pos-hexContractLen, common.CopyBytes(n))
+			return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], pos-hexContractLen, common.CopyBytes(n))
 
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
