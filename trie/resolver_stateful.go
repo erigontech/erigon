@@ -25,23 +25,23 @@ var (
 type hookFunction func(*ResolveRequest, node, common.Hash) error
 
 type ResolverStateful struct {
-	rss        []*ResolveSet
-	rssChopped []*ResolveSet
-	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ       bytes.Buffer
-	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups     []uint16
-	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
-	hb         *HashBuilder
-	topLevels  int             // How many top levels of the trie to keep (not roll into hashes)
-	currentReq *ResolveRequest // Request currently being handled
-	currentRs  *ResolveSet     // ResolveSet currently being used
+	rss              []*ResolveSet
+	rssChopped       []*ResolveSet
+	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ             bytes.Buffer
+	value            bytes.Buffer // Current value to be used as the value tape for the hash builder
+	groups           []uint16
+	reqIndices       []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
+	hb               *HashBuilder
+	topLevels        int             // How many top levels of the trie to keep (not roll into hashes)
+	currentReq       *ResolveRequest // Request currently being handled
+	currentRs        *ResolveSet     // ResolveSet currently being used
 	currentRsChopped *ResolveSet
-	keyIdx     int
-	a          accounts.Account
-	leafData   GenStructStepLeafData
-	accData    GenStructStepAccountData
-	requests   []*ResolveRequest
+	keyIdx           int
+	a                accounts.Account
+	leafData         GenStructStepLeafData
+	accData          GenStructStepAccountData
+	requests         []*ResolveRequest
 
 	roots        []node // roots of the tries that are being built
 	hookFunction hookFunction
@@ -70,7 +70,7 @@ func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction
 		reqIndices:   []int{},
 		requests:     requests,
 		hookFunction: hookFunction,
-		accAddrHash: []byte{},
+		accAddrHash:  []byte{},
 	}
 }
 
@@ -655,7 +655,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 						tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
 						storageNode = tr.hbStorage.root()
 						if tr.trace {
-							fmt.Printf("Got root: %x\n",tr.a.Root)
+							fmt.Printf("Got root: %x\n", tr.a.Root)
 						}
 					} else {
 						tr.a.Root = EmptyRoot
