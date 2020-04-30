@@ -567,17 +567,3 @@ Date:   Thu Apr 30 15:43:50 2020 +0800
 
     core/state/snapshot: fix trie generator reporter (#21004)
 
-commit 3cebfb6664408b04f87dd0fe3d6fccdf7b7badd5
-Merge: 26d271dfb 4b6f6ffe2
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Apr 30 10:26:25 2020 +0300
-
-    Merge pull request #21003 from karalabe/snapshot-journal-nilfix
-    
-    core/state/snapshot: fix journal nil deserialziation
-
-commit 4b6f6ffe2389cc2a62a10e9e8014101e3b0a595b
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Apr 29 18:00:29 2020 +0300
-
-    core/state/snapshot: fix journal nil deserialziation
