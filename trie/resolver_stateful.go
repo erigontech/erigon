@@ -340,12 +340,18 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	//trace = true
 	tr.trace = trace
 
-	startkeys, fixedbits := tr.PrepareResolveParams()
 	if tr.trace {
 		fmt.Printf("----------\n")
+	}
+	startkeys, fixedbits := tr.PrepareResolveParams()
+	if tr.trace {
 		for i := range tr.rss {
-			fmt.Printf("tr.rss[%d]: %x\n", i, tr.rss[i].hexes)
+			fmt.Printf("tr.rss[%d]->%x\n", i, tr.rss[i].hexes)
 		}
+		for i := range tr.rssStorage {
+			fmt.Printf("tr.rssStorage[%d]->%x\n", i, tr.rssStorage[i].hexes)
+		}
+
 		for _, req := range tr.requests {
 			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
 			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
@@ -453,7 +459,7 @@ type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		//fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -559,7 +565,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		//fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -703,8 +709,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		return nil
 	}
 
-	keyAsNibbles := pool.GetBuffer(256)
-	defer pool.PutBuffer(keyAsNibbles)
+	minKeyAsNibbles := pool.GetBuffer(256)
+	defer pool.PutBuffer(minKeyAsNibbles)
 
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
@@ -820,17 +826,20 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			canUseIntermediateHash := false
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
-			currentRs := tr.rss[rangeIdx]
 
-			keyAsNibbles.Reset()
-			DecompressNibbles(minKey, &keyAsNibbles.B)
+			minKeyAsNibbles.Reset()
+			DecompressNibbles(minKey, &minKeyAsNibbles.B)
 
-			if len(keyAsNibbles.B) < currentReq.extResolvePos {
+			if len(minKeyAsNibbles.B) < currentReq.extResolvePos {
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
-			canUseIntermediateHash = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			if len(ihK) > 32 {
+				canUseIntermediateHash = tr.rssStorage[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
+			} else {
+				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
+			}
 			if canUseIntermediateHash && len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
 				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
 				if !bytes.HasPrefix(ihK, accWithInc) {
