@@ -95,16 +95,8 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	if !noHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	// Header validity is known at this point, check the uncles and transactions
-	header := block.Header()
 	if err := v.engine.VerifyUncles(v.bc, block); err != nil {
 		return err
-	}
-	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
-		return fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash)
-	}
-	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
-		return fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
 	}
 	if noHistory {
 		return nil

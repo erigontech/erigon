@@ -103,52 +103,48 @@ type keccakState interface {
 func CreateBloom(receipts Receipts) Bloom {
 	var buf [6]byte
 	sha3 := sha3.NewLegacyKeccak256().(keccakState)
-	bin := new(big.Int)
+	n := new(big.Int)
 	for _, receipt := range receipts {
-		bin.Or(bin, logsBloom(receipt.Logs, buf, sha3))
+		logsBloom(receipt.Logs, buf, n, sha3)
 	}
 
-	return BytesToBloom(bin.Bytes())
+	return BytesToBloom(n.Bytes())
 }
 
 func LogsBloom(logs []*Log) *big.Int {
 	var buf [6]byte
 	h := sha3.NewLegacyKeccak256().(keccakState)
-	return logsBloom(logs, buf, h)
+	n := new(big.Int)
+	logsBloom(logs, buf, n, h)
+	return n
 }
 
-func logsBloom(logs []*Log, buf [6]byte, h keccakState) *big.Int {
-	bin := new(big.Int)
+func logsBloom(logs []*Log, buf [6]byte, n *big.Int, h keccakState) {
 	for _, log := range logs {
-		bin.Or(bin, bloom9(log.Address.Bytes(), buf, h))
+		bloom9(log.Address.Bytes(), buf, n, h)
 		for _, b := range log.Topics {
-			bin.Or(bin, bloom9(b[:], buf, h))
+			bloom9(b[:], buf, n, h)
 		}
 	}
-
-	return bin
 }
 
-func bloom9(b []byte, buf [6]byte, h keccakState) *big.Int {
+func bloom9(b []byte, buf [6]byte, n *big.Int, h keccakState) {
 	h.Reset()
 	h.Write(b[:])
 	h.Read(buf[:]) // It only uses 6 bytes
 
-	r := new(big.Int)
-
 	for i := 0; i < 6; i += 2 {
-		t := big.NewInt(1)
 		bt := (uint(buf[i+1]) + (uint(buf[i]) << 8)) & 2047
-		r.Or(r, t.Lsh(t, bt))
+		n.SetBit(n, int(bt), 1)
 	}
-
-	return r
 }
 
 func Bloom9(b []byte) *big.Int {
 	var buf [6]byte
 	h := sha3.NewLegacyKeccak256().(keccakState)
-	return bloom9(b, buf, h)
+	n := new(big.Int)
+	bloom9(b, buf, n, h)
+	return n
 }
 
 func BloomLookup(bin Bloom, topic bytesBacked) bool {

@@ -1589,9 +1589,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		chain = append(preBlocks, chain...)
 	}
 
-	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
-	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
-
 	var k int
 	var committedK int
 	// Iterate over the blocks and insert when the verifier permits
