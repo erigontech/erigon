@@ -190,7 +190,7 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 	if err != nil {
 		return
 	}
-	root, err = tds.CalcTrieRoots(false)
+	root, err = tds.CalcTrieRoots(block.NumberU64() == 72849)
 	return receipts, allLogs, usedGas, root, err
 }
 
