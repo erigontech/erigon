@@ -25,21 +25,23 @@ var (
 type hookFunction func(*ResolveRequest, node, common.Hash) error
 
 type ResolverStateful struct {
-	rss        []*ResolveSet
-	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ       bytes.Buffer
-	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups     []uint16
-	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
-	hb         *HashBuilder
-	topLevels  int             // How many top levels of the trie to keep (not roll into hashes)
-	currentReq *ResolveRequest // Request currently being handled
-	currentRs  *ResolveSet     // ResolveSet currently being used
-	keyIdx     int
-	a          accounts.Account
-	leafData   GenStructStepLeafData
-	accData    GenStructStepAccountData
-	requests   []*ResolveRequest
+	rss              []*ResolveSet
+	rssChopped       []*ResolveSet
+	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ             bytes.Buffer
+	value            bytes.Buffer // Current value to be used as the value tape for the hash builder
+	groups           []uint16
+	reqIndices       []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
+	hb               *HashBuilder
+	topLevels        int             // How many top levels of the trie to keep (not roll into hashes)
+	currentReq       *ResolveRequest // Request currently being handled
+	currentRs        *ResolveSet     // ResolveSet currently being used
+	currentRsChopped *ResolveSet
+	keyIdx           int
+	a                accounts.Account
+	leafData         GenStructStepLeafData
+	accData          GenStructStepAccountData
+	requests         []*ResolveRequest
 
 	roots        []node // roots of the tries that are being built
 	hookFunction hookFunction
@@ -54,7 +56,6 @@ type ResolverStateful struct {
 	valueStorage  bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groupsStorage []uint16
 	hbStorage     *HashBuilder
-	rssStorage    []*ResolveSet
 
 	accAddrHash []byte
 	accRoot     getAccRootF
@@ -69,8 +70,7 @@ func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction
 		reqIndices:   []int{},
 		requests:     requests,
 		hookFunction: hookFunction,
-
-		accAddrHash: []byte{},
+		accAddrHash:  []byte{},
 	}
 }
 
@@ -82,7 +82,9 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.keyIdx = 0
 	tr.currentReq = nil
 	tr.currentRs = nil
+	tr.currentRsChopped = nil
 	tr.rss = tr.rss[:0]
+	tr.rssChopped = tr.rssChopped[:0]
 	tr.requests = requests
 	tr.hookFunction = hookFunction
 	tr.curr.Reset()
@@ -99,7 +101,6 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.hbStorage.Reset()
 	tr.groupsStorage = tr.groupsStorage[:0]
 	tr.wasIHStorage = false
-	tr.rssStorage = tr.rssStorage[:0]
 	tr.accAddrHash = tr.accAddrHash[:0]
 }
 
@@ -115,7 +116,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
 	tr.rss = tr.rss[:0]
-	tr.rssStorage = tr.rssStorage[:0]
+	tr.rssChopped = tr.rssChopped[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
@@ -124,25 +125,33 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 
 	var prevReq *ResolveRequest
 	for i, req := range tr.requests {
+		contractAsNibbles.Reset()
+		if req.contract != nil {
+			DecompressNibbles(req.contract, &contractAsNibbles.B)
+		}
 		if prevReq != nil &&
 			bytes.Equal(req.contract, prevReq.contract) &&
 			bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
 
 			if req.contract == nil {
-				tr.rss[len(tr.rss)-1].AddHex(req.resolveHex[req.resolvePos:])
+				tr.rss[len(tr.rss)-1].AddHex(req.resolveHex)
+				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			} else {
-				tr.rssStorage[len(tr.rssStorage)-1].AddHex(req.resolveHex[req.resolvePos:])
+				k := append(append([]byte{}, contractAsNibbles.B...), req.resolveHex...)
+				tr.rss[len(tr.rss)-1].AddHex(k)
+				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			}
 			continue
 		}
 		if prevReq != nil && prevReq.contract == nil && req.contract != nil {
-			DecompressNibbles(req.contract[:common.HashLength], &contractAsNibbles.B)
 			prevHex := prevReq.resolveHex
 			if len(prevHex) == 65 {
 				prevHex = prevHex[:64]
 			}
 			if bytes.Equal(prevHex[:prevReq.resolvePos], contractAsNibbles.B[:prevReq.resolvePos]) {
-				tr.rssStorage[len(tr.rssStorage)-1].AddHex(req.resolveHex[req.resolvePos:])
+				k := append(append([]byte{}, contractAsNibbles.B...), req.resolveHex...)
+				tr.rss[len(tr.rss)-1].AddHex(k)
+				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 				continue
 			}
 		}
@@ -168,17 +177,21 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		} else {
 			minLength = tr.topLevels - req.resolvePos
 		}
-		tr.rss = append(tr.rss, NewResolveSet(minLength))
-		tr.rssStorage = append(tr.rssStorage, NewResolveSet(0))
+		tr.rssChopped = append(tr.rssChopped, NewResolveSet(minLength))
+		tr.rss = append(tr.rss, NewResolveSet(0))
 		if req.contract == nil {
-			tr.rss[len(tr.rss)-1].AddHex(req.resolveHex[req.resolvePos:])
+			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
+			tr.rss[len(tr.rss)-1].AddHex(req.resolveHex)
 		} else {
-			tr.rssStorage[len(tr.rssStorage)-1].AddHex(req.resolveHex[req.resolvePos:])
+			k := append(append([]byte{}, contractAsNibbles.B...), req.resolveHex...)
+			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
+			tr.rss[len(tr.rss)-1].AddHex(k)
 		}
 	}
 
 	tr.currentReq = tr.requests[tr.reqIndices[0]]
 	tr.currentRs = tr.rss[0]
+	tr.currentRsChopped = tr.rssChopped[0]
 	return startkeys, fixedbits
 }
 
@@ -210,6 +223,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				}
 
 				tr.hbStorage.Reset()
+				tr.wasIHStorage = false
 				tr.groupsStorage = nil
 				tr.currStorage.Reset()
 				tr.succStorage.Reset()
@@ -263,7 +277,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				//	}
 			}
 		}
-		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
+		tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 		if err != nil {
 			return err
 		}
@@ -278,6 +292,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			hbHash := tr.hbStorage.rootHash()
 
 			tr.hbStorage.Reset()
+			tr.wasIHStorage = false
 			tr.groupsStorage = nil
 			tr.currStorage.Reset()
 			return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
@@ -310,7 +325,7 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 			data = &tr.leafData
 		}
-		tr.groupsStorage, err = GenStructStep(tr.rssStorage[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
+		tr.groupsStorage, err = GenStructStep(tr.rssChopped[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
 		if err != nil {
 			return err
 		}
@@ -353,8 +368,8 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		for i := range tr.rss {
 			fmt.Printf("tr.rss[%d]->%x\n", i, tr.rss[i].hexes)
 		}
-		for i := range tr.rssStorage {
-			fmt.Printf("tr.rssStorage[%d]->%x\n", i, tr.rssStorage[i].hexes)
+		for i := range tr.rssChopped {
+			fmt.Printf("tr.rssChopped[%d]->%x\n", i, tr.rssChopped[i].hexes)
 		}
 		for i := range tr.requests {
 			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
@@ -405,8 +420,8 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		for i := range tr.rss {
 			fmt.Printf("tr.rss[%d]->%x\n", i, tr.rss[i].hexes)
 		}
-		for i := range tr.rssStorage {
-			fmt.Printf("tr.rssStorage[%d]->%x\n", i, tr.rssStorage[i].hexes)
+		for i := range tr.rssChopped {
+			fmt.Printf("tr.rssChopped[%d]->%x\n", i, tr.rssChopped[i].hexes)
 		}
 		for i := range tr.requests {
 			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
@@ -467,13 +482,18 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 			return err
 		}
 		tr.hb.Reset()
+		tr.wasIH = false
 		tr.groups = nil
 		tr.keyIdx = keyIdx
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
+		tr.currentRsChopped = tr.rssChopped[keyIdx]
 		tr.curr.Reset()
-
 		tr.hbStorage.Reset()
+		tr.wasIHStorage = false
+		if tr.trace {
+			fmt.Printf("Reset hbStorage from WalkerStorage\n")
+		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
 		tr.accAddrHash = tr.accAddrHash[:0]
@@ -548,7 +568,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 				data = &tr.leafData
 			}
-			tr.groupsStorage, err = GenStructStep(tr.rssStorage[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
+			tr.groupsStorage, err = GenStructStep(tr.rssChopped[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
 			if err != nil {
 				return err
 			}
@@ -573,13 +593,19 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 			return err
 		}
 		tr.hb.Reset()
+		tr.wasIH = false
 		tr.groups = nil
 		tr.keyIdx = keyIdx
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
+		tr.currentRsChopped = tr.rssChopped[keyIdx]
 		tr.curr.Reset()
 
 		tr.hbStorage.Reset()
+		tr.wasIHStorage = false
+		if tr.trace {
+			fmt.Printf("Reset hbStorage from WalkerAccount\n")
+		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
 		tr.accAddrHash = tr.accAddrHash[:0]
@@ -617,6 +643,9 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				if tr.a.Incarnation == 0 {
 					tr.a.Root = EmptyRoot
 				} else {
+					if tr.trace {
+						fmt.Printf("Finalising storage root for %x\n", tr.accAddrHash)
+					}
 					err = tr.finaliseStorageRoot()
 					if err != nil {
 						return err
@@ -625,8 +654,14 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					if tr.hbStorage.hasRoot() {
 						tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
 						storageNode = tr.hbStorage.root()
+						if tr.trace {
+							fmt.Printf("Got root: %x\n", tr.a.Root)
+						}
 					} else {
 						tr.a.Root = EmptyRoot
+						if tr.trace {
+							fmt.Printf("Got empty root\n")
+						}
 					}
 				}
 
@@ -645,6 +680,10 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				}
 
 				tr.hbStorage.Reset()
+				tr.wasIHStorage = false
+				if tr.trace {
+					fmt.Printf("Reset hbStorage from WalkerAccount - past\n")
+				}
 				tr.groupsStorage = nil
 				tr.currStorage.Reset()
 				tr.succStorage.Reset()
@@ -676,7 +715,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
 				}
 			}
-			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
+			tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
 			}
@@ -836,25 +875,23 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			if len(ihK) > 32 {
-				canUseIntermediateHash = tr.rssStorage[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
-				if canUseIntermediateHash && len(tr.accAddrHash) > 0 { // skip IH with wrong incarnation
-					if tr.a.Incarnation == 0 {
-						if tr.trace {
-							//fmt.Printf("IH skip: %x, because 0 incarnation\n", ihK)
-						}
-						canUseIntermediateHash = false
-					} else {
-						accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-						if !bytes.HasPrefix(ihK, accWithInc) {
-							if tr.trace {
-								fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
-							}
-							canUseIntermediateHash = false
-						}
-					}
+				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[:])
+				if tr.trace {
+					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
 			} else {
-				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
+				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[:])
+				if tr.trace {
+					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
+				}
+			}
+			if canUseIntermediateHash && len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
+				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+				if !bytes.HasPrefix(ihK, accWithInc) {
+					if tr.trace {
+						fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
+					}
+				}
 			}
 
 			if debug.IsDisableIH() {

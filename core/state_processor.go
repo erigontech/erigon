@@ -186,7 +186,7 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 	}
 
 	// Calculate the state root
-	_, err = tds.ResolveStateTrie(false, false)
+	_, err = tds.ResolveStateTrie(false, block.NumberU64() == 341997)
 	if err != nil {
 		return
 	}

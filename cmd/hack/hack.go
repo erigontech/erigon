@@ -820,31 +820,32 @@ func testResolve(chaindata string) {
 		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	*/
-	currentBlockNr := 4155652
+	currentBlockNr := uint64(341997)
 	var contract []byte
-	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
-	r := trie.NewResolver(10, 10000000)
-	r.SetHistorical(true)
+	contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
+	r := trie.NewResolver(0, currentBlockNr)
 	var key []byte
-	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
-	resolveHash := common.FromHex("eff69d72861c76bbf3ffde71abff1b09609d7cc5f2be594a29b1954507d0497b")
+	key = common.FromHex("04070c040900080e0204050f0308060b0f0c010802050907030204090804070f040005030a0706010d0d0b040808000a0d06030c0302030a070b050a020a0205")
+	resolveHash := common.FromHex("55ed01850f54b14c767ecc3edda6546f3b677302d17ee4d23090b2833a45dd5a")
 	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 0, resolveHash)
+	req := t.NewResolveRequest(contract, key, 1, resolveHash)
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, 10000000, false)
+	err = r.ResolveWithDb(ethDb, currentBlockNr, true)
 	if err != nil {
 		fmt.Printf("Resolve error: %v\n", err)
 	}
-	filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
-	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		t.Print(f)
-	}
-	if err != nil {
-		fmt.Printf("%v\n", err)
-	}
+	/*
+		filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
+		fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			t.Print(f)
+		}
+		if err != nil {
+			fmt.Printf("%v\n", err)
+		}
+	*/
 	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 

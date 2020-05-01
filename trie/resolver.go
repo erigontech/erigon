@@ -199,7 +199,6 @@ func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) er
 		hookKey = append(contractHex, currentReq.resolveHex[:currentReq.resolvePos]...)
 	}
 
-	//fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
 	currentReq.t.hook(hookKey, hbRoot)
 	if len(currentReq.resolveHash) > 0 && !bytes.Equal(currentReq.resolveHash, hbHash[:]) {
 		return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
