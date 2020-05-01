@@ -186,11 +186,11 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 	}
 
 	// Calculate the state root
-	_, err = tds.ResolveStateTrie(false, block.NumberU64() == 341997)
+	_, err = tds.ResolveStateTrie(false, false)
 	if err != nil {
 		return
 	}
-	//root, err = tds.CalcTrieRoots(false)
+	root, err = tds.CalcTrieRoots(false)
 	return receipts, allLogs, usedGas, root, err
 }
 
