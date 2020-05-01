@@ -476,6 +476,9 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
 				// This adds an extra entry that wipes out the storage of the accout in the stream
 				accountTouches = append(accountTouches, addrHash)
+			} else if _, ok1 := tds.aggregateBuffer.created[addrHash]; ok1 {
+				// This adds an extra entry that wipes out the storage of the accout in the stream
+				accountTouches = append(accountTouches, addrHash)
 			}
 		}
 		accountTouches = append(accountTouches, addrHash)
