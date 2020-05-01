@@ -687,7 +687,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		genesis   = gspec.MustCommit(db)
 		genesisDb = db.MemCopy()
 	)
-	fmt.Printf("hash(contractAddr)=%x\n", crypto.Keccak256(contractAddr[:]))
 
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
