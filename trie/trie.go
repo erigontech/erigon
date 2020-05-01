@@ -19,7 +19,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -447,7 +446,7 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 		hex = keyHexToBin(hex)
 	}
 	pos := 0
-	var incarnation uint64
+	var incarnation *uint64
 	for {
 		switch n := nd.(type) {
 		case nil:
@@ -486,28 +485,27 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 				return false, nil
 			}
 			nd = n.storage
-			incarnation = n.Incarnation
+			incarnation = &n.Incarnation
 		case hashNode:
 			if contract == nil {
 				l := min(len(hex), common.HashLength*2) // remove termination symbol
 				return true, t.NewResolveRequest(nil, hex[:l], pos, common.CopyBytes(n))
 			}
-			// 8 is IncarnationLength
-			if incarnation == 0 {
-				//FIXME: This is a hack. Proper fix would involve figuring out proper incarnation by pre-loading
-				// account, or alternatively, excluding incarnations from the keys for ResolveSet-s
-				incarnation = 1
-			}
-			prefix := make([]byte, len(contract)+8)
-			copy(prefix, contract)
-			binary.BigEndian.PutUint64(prefix[len(contract):], ^incarnation)
 			hexContractLen := 2 * common.HashLength // Length of 'contract' prefix in HEX encoding
 			l := min(len(hex), hexContractLen*2)    // remove termination symbol
+			if incarnation == nil {
+				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0, common.CopyBytes(n))
+			}
+
+			// 8 is IncarnationLength
+			//prefix := make([]byte, len(contract)+8)
+			//copy(prefix, contract)
+			//binary.BigEndian.PutUint64(prefix[len(contract):], ^*incarnation)
 			if pos-hexContractLen < 0 {
 				// when need storage resolution for non-resolved account
-				return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], 0, common.CopyBytes(n))
+				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0, common.CopyBytes(n))
 			}
-			return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], pos-hexContractLen, common.CopyBytes(n))
+			return true, t.NewResolveRequest(contract, hex[hexContractLen:l], pos-hexContractLen, common.CopyBytes(n))
 
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))

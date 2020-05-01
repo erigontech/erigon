@@ -195,7 +195,11 @@ func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) er
 		hookKey = currentReq.resolveHex[:currentReq.resolvePos]
 	} else {
 		contractHex := keybytesToHex(currentReq.contract)
-		contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+		if len(currentReq.contract) == 32 {
+			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+		} else {
+			contractHex = contractHex[:len(contractHex)-1] // No incarnation in contract
+		}
 		hookKey = append(contractHex, currentReq.resolveHex[:currentReq.resolvePos]...)
 	}
 

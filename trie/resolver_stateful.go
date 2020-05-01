@@ -137,7 +137,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 				tr.rss[len(tr.rss)-1].AddHex(req.resolveHex)
 				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			} else {
-				k := append(append([]byte{}, contractAsNibbles.B...), req.resolveHex...)
+				k := append(append([]byte{}, contractAsNibbles.B[:common.HashLength*2]...), req.resolveHex...)
 				tr.rss[len(tr.rss)-1].AddHex(k)
 				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			}
@@ -149,7 +149,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 				prevHex = prevHex[:64]
 			}
 			if bytes.Equal(prevHex[:prevReq.resolvePos], contractAsNibbles.B[:prevReq.resolvePos]) {
-				k := append(append([]byte{}, contractAsNibbles.B...), req.resolveHex...)
+				k := append(append([]byte{}, contractAsNibbles.B[:common.HashLength*2]...), req.resolveHex...)
 				tr.rss[len(tr.rss)-1].AddHex(k)
 				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 				continue
@@ -157,19 +157,22 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		}
 		tr.reqIndices = append(tr.reqIndices, i)
 		pLen := len(req.contract)
-		key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
-		copy(key[:], req.contract)
-		decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
-
-		//if len(key) > common.HashLength {
-		//	startkeys = append(startkeys, key[:common.HashLength])
-		//	req.extResolvePos = req.resolvePos + 2*pLen
-		//	fixedbits = append(fixedbits, uint(4*req.extResolvePos))
-		//} else {
-		startkeys = append(startkeys, key)
 		req.extResolvePos = req.resolvePos + 2*pLen
-		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
-		//}
+
+		if pLen == 32 { // if we don't know incarnation, then just start resolution from account record
+			fixedbits = append(fixedbits, uint(4*32))
+			key := make([]byte, pLen)
+			copy(key[:], req.contract)
+			startkeys = append(startkeys, key)
+			req.extResolvePos += 16
+		} else {
+			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+			key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
+			copy(key[:], req.contract)
+			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
+
+			startkeys = append(startkeys, key)
+		}
 		prevReq = req
 		var minLength int
 		if req.resolvePos >= tr.topLevels {
@@ -352,7 +355,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
-	//trace = true
+	trace = true
 	tr.trace = trace
 
 	if tr.trace {
@@ -857,11 +860,31 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						return err
 					}
 				}
-				k, v = c.Next()
+				for k, v = c.Next(); k != nil; k, v = c.Next() {
+					if len(k) > 32 && len(tr.accAddrHash) > 0 {
+						if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
+							continue
+						}
+
+						// skip ih or storage if it has another incarnation
+						accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+						if !bytes.HasPrefix(k, accWithInc) {
+							continue
+						}
+					}
+					break
+				}
 				continue
 			}
 
 			// ih part
+			if len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
+				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
+				if !bytes.HasPrefix(ihK, accWithInc) {
+					ihK, ihV = ih.Next() // go to children, not to sibling
+					continue
+				}
+			}
 			canUseIntermediateHash := false
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
@@ -875,23 +898,17 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			if len(ihK) > 32 {
-				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[:])
+				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(append(minKeyAsNibbles.B[:common.HashLength*2], minKeyAsNibbles.B[common.HashLength*2+16:]...))
 				if tr.trace {
-					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
+					//fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
+				canUseIntermediateHash = false
 			} else {
 				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[:])
 				if tr.trace {
-					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
+					//fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
-			}
-			if canUseIntermediateHash && len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
-				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-				if !bytes.HasPrefix(ihK, accWithInc) {
-					if tr.trace {
-						fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
-					}
-				}
+				canUseIntermediateHash = false
 			}
 
 			if debug.IsDisableIH() {
