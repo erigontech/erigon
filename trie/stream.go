@@ -721,7 +721,9 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		f, err1 := os.Create(filename)
 		if err1 == nil {
 			defer f.Close()
-			hb.root().print(f)
+			tt := New(common.Hash{})
+			tt.root = hb.root()
+			tt.Print(f)
 		}
 	}
 	if hb.hasRoot() {
