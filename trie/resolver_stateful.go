@@ -158,15 +158,14 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		tr.reqIndices = append(tr.reqIndices, i)
 		pLen := len(req.contract)
 		req.extResolvePos = req.resolvePos + 2*pLen
+		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
 
 		if pLen == 32 { // if we don't know incarnation, then just start resolution from account record
-			fixedbits = append(fixedbits, uint(4*32))
 			key := make([]byte, pLen)
 			copy(key[:], req.contract)
 			startkeys = append(startkeys, key)
 			req.extResolvePos += 16
 		} else {
-			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
 			key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
 			copy(key[:], req.contract)
 			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
@@ -186,7 +185,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			tr.rss[len(tr.rss)-1].AddHex(req.resolveHex)
 		} else {
-			k := append(append([]byte{}, contractAsNibbles.B...), req.resolveHex...)
+			k := append(append([]byte{}, contractAsNibbles.B[:common.HashLength*2]...), req.resolveHex...)
 			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			tr.rss[len(tr.rss)-1].AddHex(k)
 		}
