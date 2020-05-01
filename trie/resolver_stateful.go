@@ -297,6 +297,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			tr.wasIHStorage = false
 			tr.groupsStorage = nil
 			tr.currStorage.Reset()
+			tr.succStorage.Reset()
 			return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 		}
 		return nil
