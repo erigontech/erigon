@@ -548,22 +548,3 @@ Author: Boqin Qin <Bobbqqin@gmail.com>
 Date:   Fri May 1 19:48:52 2020 +0800
 
     les: remove invalid use of t.Fatal in TestHandshake (#21012)
-
-commit 7e4d1925f06beca77dfda23c0c6a19a3ab7be8b4
-Author: Felix Lange <fjl@twurst.com>
-Date:   Fri May 1 12:51:04 2020 +0200
-
-    go.sum: run go mod tidy (#21014)
-
-commit d2d3166f35b7cdaa63c54503bfccd4c808564f18
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu Apr 30 18:57:06 2020 +0200
-
-    accounts/external: fill account-cache if that hasn't already been done, fixes #20995 (#20998)
-
-commit 2337aa64eb6f8c60641724ccb5919d1a5d7d9f82
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Thu Apr 30 15:43:50 2020 +0800
-
-    core/state/snapshot: fix trie generator reporter (#21004)
-
