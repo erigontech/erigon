@@ -1752,6 +1752,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			//}
 
 			reuseTrieDbState = false
+			if block.NumberU64() > 4000 {
+				//fmt.Printf("PostProcess block %d\n", block.NumberU64())
+			}
 			err = bc.processor.PostProcess(block, bc.trieDbState, receipts)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
