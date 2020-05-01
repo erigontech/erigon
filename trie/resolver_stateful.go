@@ -885,16 +885,6 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
 			}
-			if canUseIntermediateHash && len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
-				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-				if !bytes.HasPrefix(ihK, accWithInc) {
-					if tr.trace {
-						fmt.Printf("IH skip: %x, not match accWithInc=%x\n", ihK, accWithInc)
-					}
-				}
-			} else {
-				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[currentReq.extResolvePos:])
-			}
 
 			if debug.IsDisableIH() {
 				canUseIntermediateHash = false
