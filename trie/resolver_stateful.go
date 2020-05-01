@@ -498,6 +498,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
+		tr.succStorage.Reset()
 		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 
@@ -610,6 +611,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
+		tr.succStorage.Reset()
 		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 	if len(v) > 0 {
