@@ -354,7 +354,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
-	trace = true
 	tr.trace = trace
 
 	if tr.trace {
@@ -886,7 +885,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					continue
 				}
 			}
-			canUseIntermediateHash := false
+			var canUseIntermediateHash bool
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 
@@ -901,15 +900,13 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			if len(ihK) > 32 {
 				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(append(minKeyAsNibbles.B[:common.HashLength*2], minKeyAsNibbles.B[common.HashLength*2+16:]...))
 				if tr.trace {
-					//fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
+					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
-				canUseIntermediateHash = false
 			} else {
 				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.B[:])
 				if tr.trace {
-					//fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
+					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
-				canUseIntermediateHash = false
 			}
 
 			if debug.IsDisableIH() {
