@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -17,19 +16,19 @@ import (
 
 func NewDbStateWriter(db ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
 	return &DbStateWriter{
-		db:      db,
-		blockNr: blockNr,
-		pw:      &PreimageWriter{db: db, savePreimages: false},
-		csw:     NewChangeSetWriter(),
+		db:           db,
+		blockNr:      blockNr,
+		pw:           &PreimageWriter{db: db, savePreimages: false},
+		csw:          NewChangeSetWriter(),
 		incarnations: incarnationMap,
 	}
 }
 
 type DbStateWriter struct {
-	db      ethdb.Database
-	pw      *PreimageWriter
-	blockNr uint64
-	csw     *ChangeSetWriter
+	db           ethdb.Database
+	pw           *PreimageWriter
+	blockNr      uint64
+	csw          *ChangeSetWriter
 	incarnations map[common.Address]uint64
 }
 
@@ -140,20 +139,12 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) (uint64, error)
 
 // nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
 func (dsw *DbStateWriter) nextIncarnation(addrHash common.Hash) (uint64, error) {
-	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits uint = 8 * common.HashLength
-	copy(startkey, addrHash[:])
-	if err := dsw.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
-		copy(incarnationBytes[:], k[common.HashLength:])
-		found = true
-		return false, nil
-	}); err != nil {
+	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(dsw.db, addrHash)
+	if err != nil {
 		return 0, err
 	}
 	if found {
-		return (^binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
+		return incarnation + 1, nil
 	}
 	return FirstContractIncarnation, nil
 }

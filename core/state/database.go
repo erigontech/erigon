@@ -1229,20 +1229,12 @@ func (tds *TrieDbState) nextIncarnation(address common.Address, addrHash common.
 	if inc, ok := tds.incarnationMap[address]; ok {
 		return inc, nil
 	}
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits uint = 8 * common.HashLength
-	copy(startkey, addrHash[:])
-	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
-		copy(incarnationBytes[:], k[common.HashLength:])
-		found = true
-		return false, nil
-	}); err != nil {
+	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(tds.db, addrHash)
+	if err != nil {
 		return 0, err
 	}
 	if found {
-		return (^binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
+		return incarnation + 1, nil
 	}
 	return FirstContractIncarnation, nil
 }

@@ -17,7 +17,7 @@
 package ethdb
 
 import (
-	//"bytes"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -120,4 +120,23 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		idx++
 	}
 	return accounts, nil
+}
+
+func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation uint64, found bool, err error) {
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	err = db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	})
+	if err != nil {
+		return
+	}
+	if found {
+		incarnation = (^binary.BigEndian.Uint64(incarnationBytes[:]))
+	}
+	return
 }
