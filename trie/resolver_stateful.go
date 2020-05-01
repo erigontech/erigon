@@ -475,7 +475,7 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
-	if tr.trace && isIH {
+	if tr.trace {
 		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
@@ -564,6 +564,9 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		if tr.currStorage.Len() > 0 {
 			var err error
 			var data GenStructStepData
+			if tr.trace {
+				fmt.Printf("tr.wasIHStorage=%t\n", tr.wasIHStorage)
+			}
 			if tr.wasIHStorage {
 				tr.hashData.Hash = common.BytesToHash(tr.valueStorage.Bytes())
 				data = &tr.hashData
@@ -683,15 +686,6 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					}
 				}
 
-				tr.hbStorage.Reset()
-				tr.wasIHStorage = false
-				if tr.trace {
-					fmt.Printf("Reset hbStorage from WalkerAccount - past\n")
-				}
-				tr.groupsStorage = nil
-				tr.currStorage.Reset()
-				tr.succStorage.Reset()
-
 				if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 					tr.accData.FieldSet = AccountFieldSetNotContract
 				} else {
@@ -719,6 +713,14 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
 				}
 			}
+			tr.hbStorage.Reset()
+			tr.wasIHStorage = false
+			if tr.trace {
+				fmt.Printf("Reset hbStorage from WalkerAccount - past\n")
+			}
+			tr.groupsStorage = nil
+			tr.currStorage.Reset()
+			tr.succStorage.Reset()
 			tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
