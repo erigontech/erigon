@@ -218,12 +218,21 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				if tr.hbStorage.hasRoot() {
 					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
 					storageNode = tr.hbStorage.root()
+					if tr.trace {
+						fmt.Printf("Got root for %x: %x\n", tr.accAddrHash, tr.a.Root)
+					}
 				} else {
 					tr.a.Root = EmptyRoot
+					if tr.trace {
+						fmt.Printf("Got empty root for %x\n", tr.accAddrHash)
+					}
 				}
 
 				tr.hbStorage.Reset()
 				tr.wasIHStorage = false
+				if tr.trace {
+					fmt.Printf("Reset hbStorage finally\n")
+				}
 				tr.groupsStorage = nil
 				tr.currStorage.Reset()
 				tr.succStorage.Reset()
@@ -293,8 +302,12 @@ func (tr *ResolverStateful) finaliseRoot() error {
 
 			tr.hbStorage.Reset()
 			tr.wasIHStorage = false
+			if tr.trace {
+				fmt.Printf("hbStorage reset in the end of finaliseRoot\n")
+			}
 			tr.groupsStorage = nil
 			tr.currStorage.Reset()
+			tr.succStorage.Reset()
 			return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 		}
 		return nil
@@ -325,6 +338,9 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 			data = &tr.leafData
 		}
+		if tr.trace {
+			fmt.Printf("GenStructStep with hbStorage in finaliseStorageRoot: %x %x\n", tr.currStorage.Bytes(), tr.succStorage.Bytes())
+		}
 		tr.groupsStorage, err = GenStructStep(tr.rssChopped[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
 		if err != nil {
 			return err
@@ -333,10 +349,16 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 		// Special case when from IH we took storage root. In this case tr.currStorage.Len() == 0.
 		// But still can put value on stack.
 		if tr.wasIHStorage {
+			if tr.trace {
+				fmt.Printf("hbStorage.hash(%x) in finaliseStorageRoot\n", tr.valueStorage.Bytes())
+			}
 			if err := tr.hbStorage.hash(tr.valueStorage.Bytes()); err != nil {
 				return err
 			}
 		} else {
+			if tr.trace {
+				fmt.Printf("hbStorage.hash(empty: %x) in finaliseStorageRoot\n", EmptyRoot.Bytes())
+			}
 			if err := tr.hbStorage.hash(EmptyRoot.Bytes()); err != nil {
 				return err
 			}
@@ -496,6 +518,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
+		tr.succStorage.Reset()
 		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 
@@ -568,6 +591,9 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 				data = &tr.leafData
 			}
+			if tr.trace {
+				fmt.Printf("GenStructStep with hbStorage in the end of WalkStorage\n")
+			}
 			tr.groupsStorage, err = GenStructStep(tr.rssChopped[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
 			if err != nil {
 				return err
@@ -608,6 +634,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
+		tr.succStorage.Reset()
 		tr.accAddrHash = tr.accAddrHash[:0]
 	}
 	if len(v) > 0 {
