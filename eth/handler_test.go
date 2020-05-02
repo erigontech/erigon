@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -177,29 +178,39 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 	}
 	// Run each of the tests and verify the results against the chain
 	for i, tt := range tests {
-		peer, _ := newTestPeer("peer", protocol, pm, true)
-		defer peer.close()
-		// Collect the headers to expect in the response
-		headers := []*types.Header{}
-		for _, hash := range tt.expect {
-			headers = append(headers, pm.blockchain.GetBlockByHash(hash).Header())
-		}
-		// Send the hash request and verify the response
-		p2p.Send(peer.app, 0x03, tt.query)
-		if err := p2p.ExpectMsg(peer.app, 0x04, headers); err != nil {
-			t.Errorf("test %d: headers mismatch: %v", i, err)
-		}
-		// If the test used number origins, repeat with hashes as the too
-		if tt.query.Origin.Hash == (common.Hash{}) {
-			if origin := pm.blockchain.GetBlockByNumber(tt.query.Origin.Number); origin != nil {
-				tt.query.Origin.Hash, tt.query.Origin.Number = origin.Hash(), 0
+		i := i
+		tt := tt
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			peer, _ := newTestPeer("peer", protocol, pm, true)
+			defer peer.close()
+			// Collect the headers to expect in the response
+			headers := []*types.Header{}
+			for _, hash := range tt.expect {
+				headers = append(headers, pm.blockchain.GetBlockByHash(hash).Header())
+			}
+			// Send the hash request and verify the response
+			if err := p2p.Send(peer.app, 0x03, tt.query); err != nil {
+				t.Error(err)
+			}
+			if err := p2p.ExpectMsg(peer.app, 0x04, headers); err != nil {
+				t.Errorf("test %d: headers mismatch: %v", i, err)
+			}
+			// If the test used number origins, repeat with hashes as the too
+			if tt.query.Origin.Hash == (common.Hash{}) {
+				if origin := pm.blockchain.GetBlockByNumber(tt.query.Origin.Number); origin != nil {
+					tt.query.Origin.Hash, tt.query.Origin.Number = origin.Hash(), 0
 
-				p2p.Send(peer.app, 0x03, tt.query)
-				if err := p2p.ExpectMsg(peer.app, 0x04, headers); err != nil {
-					t.Errorf("test %d: headers mismatch: %v", i, err)
+					if err := p2p.Send(peer.app, 0x03, tt.query); err != nil {
+						t.Error(err)
+					}
+
+					if err := p2p.ExpectMsg(peer.app, 0x04, headers); err != nil {
+						t.Errorf("test %d: headers mismatch: %v", i, err)
+					}
 				}
 			}
-		}
+
+		})
 	}
 }
 

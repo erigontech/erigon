@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/golang/snappy"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -115,6 +117,16 @@ func ReadBodyRLP(tx ethdb.Tx, hash common.Hash, number uint64) (rlp.RawValue, er
 	if bucket == nil {
 		return rlp.RawValue{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
 	}
+
+	if debug.IsBlockCompressionEnabled() {
+		data, err := bucket.Get(dbutils.BlockBodyKey(number, hash))
+		if err != nil {
+			return nil, err
+		}
+
+		return snappy.Decode(nil, data)
+	}
+
 	return bucket.Get(dbutils.BlockBodyKey(number, hash))
 }
 
