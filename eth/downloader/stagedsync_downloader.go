@@ -28,7 +28,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
 		if err != nil {
-			return fmt.Errorf("error unwinding stage: %d: %v", err)
+			return fmt.Errorf("error unwinding stage: %d: %v", stage, err)
 		}
 	}
 
