@@ -80,3 +80,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 	return nextBlockNumber - 1 /* the last processed block */, nil
 }
+
+func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
+	return fmt.Errorf("unwindExecutionStage not implemented")
+}

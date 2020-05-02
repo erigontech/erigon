@@ -142,3 +142,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 		out <- job
 	}
 }
+
+func (d *Downloader) unwindSendersStage(unwindPoint uint64) error {
+	return fmt.Errorf("unwindSendersStage not implemented")
+}

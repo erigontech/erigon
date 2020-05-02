@@ -110,8 +110,8 @@ var (
 
 	// Progress of sync stages
 	SyncStageProgress = []byte("SSP")
-	// Invalidations of the sync stages
-	SyncStageInvalidation = []byte("SSI")
+	// Position to where to unwind sync stages
+	SyncStageUnwind = []byte("SSU")
 )
 
 var Buckets = [][]byte{

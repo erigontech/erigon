@@ -1499,15 +1499,9 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						var lowestCanonicalNumber uint64
 						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
 						if newCanonical {
-							// Need to invalidate further stages
-							invalid, err1 := GetStageInvalidation(d.stateDB, SyncStage(StagedSync+1))
-							if err1 != nil {
-								return fmt.Errorf("getting SyncStage invalidation for post-Headers: %v", err1)
-							}
-							if invalid == 0 || invalid > lowestCanonicalNumber {
-								if err2 := SaveStageInvalidation(d.stateDB, SyncStage(StagedSync+1), lowestCanonicalNumber); err2 != nil {
-									return fmt.Errorf("saving SyncStage for post-Headers invalidation: %v", err2)
-								}
+							// Need to unwind further stages
+							if err1 := UnwindAllStages(d.stateDB, lowestCanonicalNumber); err1 != nil {
+								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
 						}
 					} else {

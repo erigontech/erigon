@@ -25,42 +25,6 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("getting Bodies stage progress: %v", err)
 	}
-	// Check invalidation (caused by reorgs of header chain)
-	var invalidation uint64
-	invalidation, err = GetStageInvalidation(d.stateDB, Bodies)
-	if err != nil {
-		return false, fmt.Errorf("getting Bodies stage invalidation: %v", err)
-	}
-	if invalidation != 0 {
-		batch := d.stateDB.NewBatch()
-		if invalidation < origin {
-			// Rollback the progress
-			if err = SaveStageProgress(batch, Bodies, invalidation); err != nil {
-				return false, fmt.Errorf("rolling back Bodies stage progress: %v", err)
-			}
-			// In case of downloading bodies, we simply re-download the new branch of bodies
-			log.Warn("Rolling back bodies download", "from", origin, "to", invalidation)
-			origin = invalidation
-		}
-		// push invalidation onto further stages
-		if err = SaveStageInvalidation(batch, Bodies, 0); err != nil {
-			return false, fmt.Errorf("removing Bodies stage invalidation: %v", err)
-		}
-		if Bodies+1 < Finish {
-			var postInvalidation uint64
-			if postInvalidation, err = GetStageInvalidation(batch, Bodies+1); err != nil {
-				return false, fmt.Errorf("getting post-Bodies stage invalidation: %v", err)
-			}
-			if postInvalidation == 0 || invalidation < postInvalidation {
-				if err = SaveStageInvalidation(batch, Bodies+1, invalidation); err != nil {
-					return false, fmt.Errorf("pushing post-Bodies stage invalidation: %v", err)
-				}
-			}
-		}
-		if _, err = batch.Commit(); err != nil {
-			return false, fmt.Errorf("committing rollback and push invalidation post-Bodies: %v", err)
-		}
-	}
 	// Figure out how many headers we have
 	currentNumber := origin + 1
 	var missingHeader uint64
@@ -151,4 +115,8 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 			return nil
 		}
 	}
+}
+
+func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
+	return fmt.Errorf("unwindBodyDownloadStage not implemented")
 }

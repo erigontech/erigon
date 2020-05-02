@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/pkg/errors"
@@ -40,4 +41,8 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 	}
 
 	return SaveStageProgress(d.stateDB, HashCheck, blockNr)
+}
+
+func (d *Downloader) unwindHashCheckStage(unwindPoint uint64) error {
+	return fmt.Errorf("unwindHashCheckStage not implemented")
 }
