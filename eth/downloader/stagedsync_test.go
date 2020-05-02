@@ -18,18 +18,18 @@ type stagedSyncTester struct {
 	downloader *Downloader
 	db         ethdb.Database
 	peers      map[string]*stagedSyncTesterPeer
-	genesis *types.Block
-	ownHashes   []common.Hash
-	ownHeaders  map[common.Hash]*types.Header
+	genesis    *types.Block
+	ownHashes  []common.Hash
+	ownHeaders map[common.Hash]*types.Header
 	lock       sync.RWMutex
 }
 
 func newStagedSyncTester() *stagedSyncTester {
 	tester := &stagedSyncTester{
-		peers:       make(map[string]*stagedSyncTesterPeer),
-		ownHashes:   []common.Hash{testGenesis.Hash()},
-		ownHeaders:  map[common.Hash]*types.Header{testGenesis.Hash(): testGenesis.Header()},
-		genesis:     testGenesis,
+		peers:      make(map[string]*stagedSyncTesterPeer),
+		ownHashes:  []common.Hash{testGenesis.Hash()},
+		ownHeaders: map[common.Hash]*types.Header{testGenesis.Hash(): testGenesis.Header()},
+		genesis:    testGenesis,
 	}
 	tester.db = ethdb.NewMemDatabase()
 	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer)
@@ -186,7 +186,6 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	return err
 }
 
-
 type stagedSyncTesterPeer struct {
 	st    *stagedSyncTester
 	id    string
@@ -232,6 +231,10 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 
 func TestUnwind(t *testing.T) {
 	tester := newStagedSyncTester()
-	tester.newPeer("peer", 65, testChainBase)
-	tester.sync("peer", big.NewInt(1000))
+	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.sync("peer", big.NewInt(1000)); err != nil {
+		t.Fatal(err)
+	}
 }
