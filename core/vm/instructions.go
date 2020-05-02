@@ -135,6 +135,9 @@ func opExp(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byt
 	} else if cmpToOne == 0 { // Exponent is one
 		// x ^ 1 == x
 		callContext.stack.push(base)
+	} else if base.Cmp(common.Big2) == 0 && exponent.Cmp(common.Big256) < 0 {
+		base.SetBit(base, 1, 0)
+		callContext.stack.push(base.SetBit(base, int(exponent.Int64()), 1))
 	} else {
 		callContext.stack.push(math.Exp(base, exponent))
 		interpreter.intPool.putOne(base)
