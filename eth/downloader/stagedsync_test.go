@@ -2,9 +2,12 @@ package downloader
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -19,19 +22,16 @@ type stagedSyncTester struct {
 	db         ethdb.Database
 	peers      map[string]*stagedSyncTesterPeer
 	genesis    *types.Block
-	ownHashes  []common.Hash
-	ownHeaders map[common.Hash]*types.Header
 	lock       sync.RWMutex
 }
 
 func newStagedSyncTester() *stagedSyncTester {
 	tester := &stagedSyncTester{
 		peers:      make(map[string]*stagedSyncTesterPeer),
-		ownHashes:  []common.Hash{testGenesis.Hash()},
-		ownHeaders: map[common.Hash]*types.Header{testGenesis.Hash(): testGenesis.Header()},
 		genesis:    testGenesis,
 	}
 	tester.db = ethdb.NewMemDatabase()
+	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
 	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer)
 	return tester
 }
@@ -58,7 +58,7 @@ func (st *stagedSyncTester) dropPeer(id string) {
 
 // Config is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) Config() *params.ChainConfig {
-	panic("")
+	return params.GoerliChainConfig
 }
 
 // CurrentBlock is part of the implementation of BlockChain interface defined in downloader.go
@@ -111,7 +111,9 @@ func (st *stagedSyncTester) GetHeaderByHash(hash common.Hash) *types.Header {
 
 // GetTd is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) GetTd(hash common.Hash, number uint64) *big.Int {
-	panic("")
+	st.lock.RLock()
+	defer st.lock.RUnlock()
+	return st.ownChainTd[hash]
 }
 
 // HasBlock is part of the implementation of BlockChain interface defined in downloader.go
@@ -141,8 +143,31 @@ func (st *stagedSyncTester) InsertChain(_ context.Context, blocks types.Blocks) 
 }
 
 // InsertHeaderChainStaged is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertHeaderChainStaged([]*types.Header, int) (int, bool, uint64, error) {
-	panic("")
+func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, checkFreq int) (int, bool, uint64, error) {
+	st.lock.Lock()
+	defer st.lock.Unlock()
+
+	if _, ok := st.ownHeaders[headers[0].ParentHash]; !ok {
+		return 0, false, 0, errors.New("unknown parent")
+	}
+	for i := 1; i < len(headers); i++ {
+		if headers[i].ParentHash != headers[i-1].Hash() {
+			return i, false, 0, errors.New("unknown parent")
+		}
+	}
+	// Do a full insert if pre-checks passed
+	for i, header := range headers {
+		if _, ok := st.ownHeaders[header.Hash()]; ok {
+			continue
+		}
+		if _, ok := st.ownHeaders[header.ParentHash]; !ok {
+			return i, false, 0, errors.New("unknown parent")
+		}
+		ptd := hc.GetTd(st.db, header.ParentHash, header.Number.Uint64()-1)
+		rawdb.WriteTd(st.db, header.Hash(), header.Hash(), ptd.Add(ptd, header.Difficulty))
+		rawdb.WriteHeader(context.Background(), st.db, header)
+	}
+	return len(headers), false, uint64(len(headers)), nil
 }
 
 // InsertHeaderChain is part of the implementation of BlockChain interface defined in downloader.go
@@ -161,6 +186,10 @@ func (st *stagedSyncTester) NotifyHeightKnownBlock(_ uint64) {
 
 // Rollback is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) Rollback(hashes []common.Hash) {
+	fmt.Printf("Rollback %d\n", len(hashes))
+	//for _, hash := range hashes {
+		//fmt.Printf("%x\n", hash)
+	//}
 	panic("")
 }
 
@@ -189,7 +218,6 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 type stagedSyncTesterPeer struct {
 	st    *stagedSyncTester
 	id    string
-	lock  sync.RWMutex
 	chain *testChain
 }
 
