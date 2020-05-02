@@ -161,6 +161,10 @@ func (s *Stateless) ReadAccountCodeSize(address common.Address, codeHash common.
 	return 0, fmt.Errorf("could not find bytecode for hash %x", codeHash)
 }
 
+func (s *Stateless) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
 // UpdateAccountData is a part of the StateWriter interface
 // This implementation registers the account update in the `accountUpdates` map
 func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
@@ -233,16 +237,16 @@ func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Addres
 
 // CreateContract is a part of StateWriter interface
 // This implementation registers given address in the internal map `created`
-func (s *Stateless) CreateContract(address common.Address) (uint64, error) {
+func (s *Stateless) CreateContract(address common.Address) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if s.trace {
 		fmt.Printf("Stateless: CreateContract %x hash %x\n", address, addrHash)
 	}
 	s.created[addrHash] = struct{}{}
-	return 0, nil
+	return nil
 }
 
 // CheckRoot finalises the execution of a block and computes the resulting state root

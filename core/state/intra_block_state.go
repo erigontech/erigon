@@ -771,20 +771,33 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}
 
 		err = sdb.tracer.CaptureAccountWrite(addr)
-		if sdb.trace {
+		if sdb.trace && err != nil {
 			log.Error("error while CaptureAccountWrite", "err", err)
 		}
 	}
 
 	var previous *stateObject
+	var prevInc uint64
 	if contractCreation {
 		previous = sdb.getStateObject(addr)
+		if previous != nil {
+			prevInc = previous.data.Incarnation
+		} else {
+			inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
+			if sdb.trace && err != nil {
+				log.Error("error while ReadAccountIncarnation", "err", err)
+			}
+			if err == nil {
+				prevInc = inc
+			}
+		}
 	}
 
 	newObj := sdb.createObject(addr, previous)
 
 	if contractCreation {
 		newObj.created = true
+		newObj.data.Incarnation = prevInc + 1
 	}
 }
 
@@ -854,12 +867,9 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 			}
 		}
 		if stateObject.created {
-			var incarnation uint64
-			var err error
-			if incarnation, err = stateWriter.CreateContract(addr); err != nil {
+			if err := stateWriter.CreateContract(addr); err != nil {
 				return err
 			}
-			stateObject.data.Incarnation = incarnation
 			stateObject.created = false
 		}
 		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {

@@ -14,22 +14,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func NewDbStateWriter(db ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
+func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 	return &DbStateWriter{
-		db:           db,
-		blockNr:      blockNr,
-		pw:           &PreimageWriter{db: db, savePreimages: false},
-		csw:          NewChangeSetWriter(),
-		incarnations: incarnationMap,
+		db:      db,
+		blockNr: blockNr,
+		pw:      &PreimageWriter{db: db, savePreimages: false},
+		csw:     NewChangeSetWriter(),
 	}
 }
 
 type DbStateWriter struct {
-	db           ethdb.Database
-	pw           *PreimageWriter
-	blockNr      uint64
-	csw          *ChangeSetWriter
-	incarnations map[common.Address]uint64
+	db      ethdb.Database
+	pw      *PreimageWriter
+	blockNr uint64
+	csw     *ChangeSetWriter
 }
 
 func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
@@ -76,9 +74,6 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
 		return err
 	}
-	if original.Incarnation > 0 {
-		dsw.incarnations[address] = original.Incarnation + 1 // next incarnation
-	}
 	return nil
 }
 
@@ -123,30 +118,8 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	}
 }
 
-func (dsw *DbStateWriter) CreateContract(address common.Address) (uint64, error) {
-	if _, err := dsw.csw.CreateContract(address); err != nil {
-		return 0, err
-	}
-	if incarnation, ok := dsw.incarnations[address]; ok {
-		return incarnation, nil
-	}
-	addrHash, err := dsw.pw.HashAddress(address, false /*save*/)
-	if err != nil {
-		return 0, err
-	}
-	return dsw.nextIncarnation(addrHash)
-}
-
-// nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
-func (dsw *DbStateWriter) nextIncarnation(addrHash common.Hash) (uint64, error) {
-	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(dsw.db, addrHash)
-	if err != nil {
-		return 0, err
-	}
-	if found {
-		return incarnation + 1, nil
-	}
-	return FirstContractIncarnation, nil
+func (dsw *DbStateWriter) CreateContract(address common.Address) error {
+	return dsw.csw.CreateContract(address)
 }
 
 // WriteChangeSets causes accumulated change sets to be written into

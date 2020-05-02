@@ -213,6 +213,11 @@ func (r *RemoteReader) ReadAccountCodeSize(address common.Address, codeHash comm
 	return len(val), nil
 }
 
+func (r *RemoteReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	// TODO [Andrew] implement
+	return 0, nil
+}
+
 func NewRemoteContext(db ethdb.KV) *RemoteContext {
 	return &RemoteContext{
 		db: db,

@@ -28,7 +28,7 @@ import (
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-// Generates rewind data for all buckets between the timestamp
+// RewindData generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func RewindData(db Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
 	// Collect list of buckets and keys that need to be considered
@@ -122,6 +122,7 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 	return accounts, nil
 }
 
+// GetCurrentAccountIncarnation reads the latest incarnation of a contract from the database.
 func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation uint64, found bool, err error) {
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)

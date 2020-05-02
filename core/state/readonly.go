@@ -228,6 +228,22 @@ func (dbs *DbState) ReadAccountCodeSize(address common.Address, codeHash common.
 	return len(code), nil
 }
 
+// TODO [Andrew] historical account incarnation
+func (dbs *DbState) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return 0, err
+	}
+	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(dbs.db, addrHash)
+	if err != nil {
+		return 0, err
+	}
+	if found {
+		return incarnation, nil
+	}
+	return 0, nil
+}
+
 func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
@@ -263,9 +279,9 @@ func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Addres
 	return nil
 }
 
-func (dbs *DbState) CreateContract(address common.Address) (uint64, error) {
+func (dbs *DbState) CreateContract(address common.Address) error {
 	delete(dbs.storage, address)
-	return 0, nil
+	return nil
 }
 
 func (dbs *DbState) GetKey(shaKey []byte) []byte {
