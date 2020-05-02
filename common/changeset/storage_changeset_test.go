@@ -77,41 +77,35 @@ func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
 
 	for _, v := range numOfChanges {
 		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 1), func(t *testing.T) {
+		t.Run(formatTestName(v, 1), func(t *testing.T) {
 			f(t, v, 1)
 		})
 	}
 
 	for _, v := range numOfChanges {
 		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 5), func(t *testing.T) {
+		t.Run(formatTestName(v, 5), func(t *testing.T) {
 			f(t, v, 5)
 		})
 	}
 
-	t.Run("3.3", func(t *testing.T) {
-		f(t, 3, 3)
-	})
-	t.Run("10.10", func(t *testing.T) {
+	t.Run(formatTestName(10, 10), func(t *testing.T) {
 		f(t, 10, 10)
 	})
-	t.Run("50.1000", func(t *testing.T) {
+	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run("100.1000", func(t *testing.T) {
+	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
 	})
-	t.Run("1000.1000", func(t *testing.T) {
+	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
 		f(t, 1000, 1000)
 	})
-	t.Run("5.10000", func(t *testing.T) {
+	t.Run(formatTestName(5, 10000), func(t *testing.T) {
 		f(t, 5, 10000)
 	})
-	t.Run("20.30000", func(t *testing.T) {
+	t.Run(formatTestName(20, 30000), func(t *testing.T) {
 		f(t, 20, 30000)
-	})
-	t.Run("2000.30000", func(t *testing.T) {
-		f(t, 2000, 30000)
 	})
 }
 
@@ -186,25 +180,19 @@ func TestEncodingStorageNewWithDefaultIncarnation(t *testing.T) {
 		})
 	}
 
-	t.Run("3.3", func(t *testing.T) {
-		f(t, 3, 3)
-	})
-	t.Run("10.10", func(t *testing.T) {
-		f(t, 10, 10)
-	})
-	t.Run("50.1000", func(t *testing.T) {
+	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run("5.10000", func(t *testing.T) {
+	t.Run(formatTestName(5, 10000), func(t *testing.T) {
 		f(t, 5, 10000)
 	})
-	t.Run("100.1000", func(t *testing.T) {
+	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
 	})
-	t.Run("1000.1000", func(t *testing.T) {
+	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
 		f(t, 1000, 1000)
 	})
-	t.Run("20.30000", func(t *testing.T) {
+	t.Run(formatTestName(20, 30000), func(t *testing.T) {
 		f(t, 20, 30000)
 	})
 }
@@ -280,29 +268,22 @@ func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValue(t *testing.T) {
 		})
 	}
 
-	t.Run("3.3", func(t *testing.T) {
-		f(t, 3, 3)
-	})
-	t.Run("10.10", func(t *testing.T) {
-		f(t, 10, 10)
-	})
-	t.Run("50.1000", func(t *testing.T) {
+	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run("5.10000", func(t *testing.T) {
+	t.Run(formatTestName(5, 10000), func(t *testing.T) {
 		f(t, 5, 10000)
 	})
 
-	t.Run("100.1000", func(t *testing.T) {
+	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
 	})
-	t.Run("1000.1000", func(t *testing.T) {
+	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
 		f(t, 1000, 1000)
 	})
-	t.Run("20.30000", func(t *testing.T) {
+	t.Run(formatTestName(20, 30000), func(t *testing.T) {
 		f(t, 20, 30000)
 	})
-
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
@@ -359,25 +340,20 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 		})
 	}
 
-	t.Run("3.3", func(t *testing.T) {
-		f(t, 3, 3)
-	})
-	t.Run("10.10", func(t *testing.T) {
-		f(t, 10, 10)
-	})
-	t.Run("50.1000", func(t *testing.T) {
+	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run("5.10000", func(t *testing.T) {
+	t.Run(formatTestName(5, 10000), func(t *testing.T) {
 		f(t, 5, 10000)
 	})
-	t.Run("100.1000", func(t *testing.T) {
+
+	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
 	})
-	t.Run("1000.1000", func(t *testing.T) {
+	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
 		f(t, 1000, 1000)
 	})
-	t.Run("20.30000", func(t *testing.T) {
+	t.Run(formatTestName(20, 30000), func(t *testing.T) {
 		f(t, 20, 30000)
 	})
 }
@@ -428,25 +404,20 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 		})
 	}
 
-	t.Run("3.3", func(t *testing.T) {
-		f(t, 3, 3)
-	})
-	t.Run("10.10", func(t *testing.T) {
-		f(t, 10, 10)
-	})
-	t.Run("50.1000", func(t *testing.T) {
+	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run("5.10000", func(t *testing.T) {
+	t.Run(formatTestName(5, 10000), func(t *testing.T) {
 		f(t, 5, 10000)
 	})
-	t.Run("100.1000", func(t *testing.T) {
+
+	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
 	})
-	t.Run("1000.1000", func(t *testing.T) {
+	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
 		f(t, 1000, 1000)
 	})
-	t.Run("20.30000", func(t *testing.T) {
+	t.Run(formatTestName(20, 30000), func(t *testing.T) {
 		f(t, 20, 30000)
 	})
 }
@@ -577,4 +548,8 @@ func BenchmarkWalkStorage(t *testing.B) {
 	_ = b
 	_ = v
 	_ = k
+}
+
+func formatTestName(elements, keys int) string {
+	return fmt.Sprintf("elements: %d keys: %d", elements, keys)
 }
