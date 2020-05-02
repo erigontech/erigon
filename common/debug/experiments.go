@@ -2,14 +2,8 @@ package debug
 
 import (
 	"os"
-	"sync"
 	"sync/atomic"
 )
-
-var storeAccRootEnv sync.Once
-var storeAccRoot bool
-var disableIHEnv sync.Once
-var disableIH bool
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
 var getNodeData uint32
