@@ -780,16 +780,13 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	var prevInc uint64
 	if contractCreation {
 		previous = sdb.getStateObject(addr)
-		if previous != nil {
-			prevInc = previous.data.Incarnation
-		} else {
-			inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
-			if sdb.trace && err != nil {
-				log.Error("error while ReadAccountIncarnation", "err", err)
-			}
-			if err == nil {
-				prevInc = inc
-			}
+
+		inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
+		if sdb.trace && err != nil {
+			log.Error("error while ReadAccountIncarnation", "err", err)
+		}
+		if err == nil {
+			prevInc = inc
 		}
 	}
 
