@@ -406,26 +406,9 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		}
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("startkey: %x\n", startkeys)
-		//for i := range startkeys {
-		//	tr.dumpPrefix(startkeys[i])
-		//}
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
 	return nil
-}
-
-func (tr *ResolverStateful) dumpPrefix(prefix []byte) {
-	fmt.Printf("Dumping: %x\n", prefix)
-	if err := tr.dbBolt.View(func(tx *bolt.Tx) error {
-		return tx.Bucket(dbutils.CurrentStateBucket).ForEach(func(k, v []byte) error {
-			if bytes.HasPrefix(k, prefix) {
-				fmt.Printf("kv: %x\n", k)
-			}
-			return nil
-		})
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*ResolveRequestForCode) error {
