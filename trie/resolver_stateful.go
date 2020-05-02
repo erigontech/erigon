@@ -145,7 +145,6 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			data = &tr.leafData
 		} else {
 			tr.accData.FieldSet = tr.fieldSet
-			tr.accData.StorageSize = tr.a.StorageSize
 			tr.accData.Balance.Set(&tr.a.Balance)
 			tr.accData.Nonce = tr.a.Nonce
 			tr.accData.Incarnation = tr.a.Incarnation
@@ -318,7 +317,6 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 				data = &tr.leafData
 			} else {
 				tr.accData.FieldSet = tr.fieldSet
-				tr.accData.StorageSize = tr.a.StorageSize
 				tr.accData.Balance.Set(&tr.a.Balance)
 				tr.accData.Nonce = tr.a.Nonce
 				tr.accData.Incarnation = tr.a.Incarnation
@@ -367,11 +365,7 @@ func (tr *ResolverStateful) Walker(isAccount bool, isIH bool, keyIdx int, k []by
 		if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 			tr.fieldSet = AccountFieldSetNotContract
 		} else {
-			if tr.a.HasStorageSize {
-				tr.fieldSet = AccountFieldSetContractWithSize
-			} else {
-				tr.fieldSet = AccountFieldSetContract
-			}
+			tr.fieldSet = AccountFieldSetContract
 		}
 	}
 

@@ -361,22 +361,6 @@ func (so *stateObject) CodeHash() []byte {
 	return so.data.CodeHash[:]
 }
 
-func (so *stateObject) StorageSize() (bool, uint64) {
-	return so.data.HasStorageSize, so.data.StorageSize
-}
-
-func (so *stateObject) SetStorageSize(size uint64) {
-	so.db.journal.append(storageSizeChange{
-		account:  &so.address,
-		prevsize: so.data.StorageSize,
-	})
-	so.setStorageSize(true, size)
-}
-
-func (so *stateObject) setStorageSize(has bool, size uint64) {
-	so.data.HasStorageSize = has
-	so.data.StorageSize = size
-}
 
 func (so *stateObject) Balance() *big.Int {
 	return &so.data.Balance

@@ -335,8 +335,6 @@ func TestApiDetails(t *testing.T) {
 					Root:           EmptyRoot,
 					CodeHash:       EmptyCodeHash,
 					Balance:        *big.NewInt(0),
-					StorageSize:    uint64(len(storageV)),
-					HasStorageSize: len(storageV) > 0,
 				}
 				require.NoError(writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a))
 				require.NoError(db.Put(dbutils.CurrentStateBucket, storageKey(incarnation, k), storageV))
