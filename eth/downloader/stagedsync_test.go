@@ -18,32 +18,32 @@ type stagedSyncTester struct {
 	downloader *Downloader
 	db         ethdb.Database
 	peers      map[string]*stagedSyncTesterPeer
+	genesis *types.Block
+	ownHashes   []common.Hash
+	ownHeaders  map[common.Hash]*types.Header
 	lock       sync.RWMutex
 }
 
-type stagedSyncTesterPeer struct {
-	st    *stagedSyncTester
-	id    string
-	lock  sync.RWMutex
-	chain *stagedTestChain
-}
-
-type stagedTestChain struct {
-	db       ethdb.Database
-	genesis  *types.Block
-	chain    []common.Hash
-	headerm  map[common.Hash]*types.Header
-	blockm   map[common.Hash]*types.Block
-	receiptm map[common.Hash][]*types.Receipt
-	tdm      map[common.Hash]*big.Int
-	cpyLock  sync.Mutex
-}
-
 func newStagedSyncTester() *stagedSyncTester {
-	tester := &stagedSyncTester{}
+	tester := &stagedSyncTester{
+		peers:       make(map[string]*stagedSyncTesterPeer),
+		ownHashes:   []common.Hash{testGenesis.Hash()},
+		ownHeaders:  map[common.Hash]*types.Header{testGenesis.Hash(): testGenesis.Header()},
+		genesis:     testGenesis,
+	}
 	tester.db = ethdb.NewMemDatabase()
 	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer)
 	return tester
+}
+
+// newPeer registers a new block download source into the downloader.
+func (st *stagedSyncTester) newPeer(id string, version int, chain *testChain) error {
+	st.lock.Lock()
+	defer st.lock.Unlock()
+
+	peer := &stagedSyncTesterPeer{st: st, id: id, chain: chain}
+	st.peers[id] = peer
+	return st.downloader.RegisterPeer(id, version, peer)
 }
 
 // dropPeer simulates a hard peer removal from the connection pool.
@@ -73,7 +73,15 @@ func (st *stagedSyncTester) CurrentFastBlock() *types.Block {
 
 // CurrentHeader is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) CurrentHeader() *types.Header {
-	panic("")
+	st.lock.RLock()
+	defer st.lock.RUnlock()
+
+	for i := len(st.ownHashes) - 1; i >= 0; i-- {
+		if header := st.ownHeaders[st.ownHashes[i]]; header != nil {
+			return header
+		}
+	}
+	return st.genesis.Header()
 }
 
 // ExecuteBlockEuphemerally is part of the implementation of BlockChain interface defined in downloader.go
@@ -118,7 +126,8 @@ func (st *stagedSyncTester) HasFastBlock(hash common.Hash, number uint64) bool {
 
 // HasHeader is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) HasHeader(hash common.Hash, number uint64) bool {
-	panic("")
+	header, ok := st.ownHeaders[hash]
+	return ok && header.Number.Uint64() == number
 }
 
 // InsertBodyChain is part of the implementation of BlockChain interface defined in downloader.go
@@ -148,7 +157,6 @@ func (st *stagedSyncTester) InsertReceiptChain(blocks types.Blocks, receipts []t
 
 // NotifyHeightKnownBlock is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) NotifyHeightKnownBlock(_ uint64) {
-	panic("")
 }
 
 // Rollback is part of the implementation of BlockChain interface defined in downloader.go
@@ -156,6 +164,74 @@ func (st *stagedSyncTester) Rollback(hashes []common.Hash) {
 	panic("")
 }
 
+// sync starts synchronizing with a remote peer, blocking until it completes.
+func (st *stagedSyncTester) sync(id string, td *big.Int) error {
+	st.lock.RLock()
+	hash := st.peers[id].chain.headBlock().Hash()
+	// If no particular TD was requested, load from the peer's blockchain
+	if td == nil {
+		td = st.peers[id].chain.td(hash)
+	}
+	st.lock.RUnlock()
+
+	// Synchronise with the chosen peer and ensure proper cleanup afterwards
+	err := st.downloader.synchronise(id, hash, td, StagedSync)
+	select {
+	case <-st.downloader.cancelCh:
+		// Ok, downloader fully cancelled after sync cycle
+	default:
+		// Downloader is still accepting packets, can block a peer up
+		panic("downloader active post sync cycle") // panic will be caught by tester
+	}
+	return err
+}
+
+
+type stagedSyncTesterPeer struct {
+	st    *stagedSyncTester
+	id    string
+	lock  sync.RWMutex
+	chain *testChain
+}
+
+// Head is part of the implementation of Peer interface in peer.go
+func (stp *stagedSyncTesterPeer) Head() (common.Hash, *big.Int) {
+	b := stp.chain.headBlock()
+	return b.Hash(), stp.chain.td(b.Hash())
+}
+
+// RequestHeadersByHash is part of the implementation of Peer interface in peer.go
+func (stp *stagedSyncTesterPeer) RequestHeadersByHash(origin common.Hash, amount int, skip int, reverse bool) error {
+	if reverse {
+		panic("reverse header requests not supported")
+	}
+
+	result := stp.chain.headersByHash(origin, amount, skip)
+	return stp.st.downloader.DeliverHeaders(stp.id, result)
+}
+
+// RequestHeadersByNumber is part of the implementation of Peer interface in peer.go
+func (stp *stagedSyncTesterPeer) RequestHeadersByNumber(origin uint64, amount int, skip int, reverse bool) error {
+	if reverse {
+		panic("reverse header requests not supported")
+	}
+
+	result := stp.chain.headersByNumber(origin, amount, skip)
+	return stp.st.downloader.DeliverHeaders(stp.id, result)
+}
+
+// RequestBodies is part of the implementation of Peer interface in peer.go
+func (stp *stagedSyncTesterPeer) RequestBodies(hashes []common.Hash) error {
+	panic("")
+}
+
+// RequestReceipts is part of the implementation of Peer interface in peer.go
+func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
+	panic("")
+}
+
 func TestUnwind(t *testing.T) {
-	newStagedSyncTester()
+	tester := newStagedSyncTester()
+	tester.newPeer("peer", 65, testChainBase)
+	tester.sync("peer", big.NewInt(1000))
 }
