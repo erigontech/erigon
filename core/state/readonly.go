@@ -228,13 +228,12 @@ func (dbs *DbState) ReadAccountCodeSize(address common.Address, codeHash common.
 	return len(code), nil
 }
 
-// TODO [Andrew] historical account incarnation
 func (dbs *DbState) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return 0, err
 	}
-	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(dbs.db, addrHash)
+	incarnation, found, err := ethdb.GetHistoricalAccountIncarnation(dbs.db, addrHash, dbs.blockNr+1)
 	if err != nil {
 		return 0, err
 	}

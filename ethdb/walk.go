@@ -141,3 +141,23 @@ func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation 
 	}
 	return
 }
+
+// GetHistoricalAccountIncarnation reads historical incarnation of a contract from the database.
+func GetHistoricalAccountIncarnation(db Getter, addrHash common.Hash, timestamp uint64) (incarnation uint64, found bool, err error) {
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, timestamp, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	})
+	if err != nil {
+		return
+	}
+	if found {
+		incarnation = (^binary.BigEndian.Uint64(incarnationBytes[:]))
+	}
+	return
+}
