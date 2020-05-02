@@ -3,7 +3,6 @@ package state
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -31,11 +30,6 @@ func NewIntermediateHashes(putter ethdb.Putter, deleter ethdb.Deleter) *Intermed
 func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeHash common.Hash, incarnation uint64) {
 	// only put to bucket prefixes with even number of nibbles
 	if len(prefixAsNibbles) == 0 || len(prefixAsNibbles)%2 == 1 {
-		return
-	}
-
-	// special case. Store Account.Root for long time
-	if debug.IsStoreAccountRoot() && len(prefixAsNibbles) == common.HashLength*2 {
 		return
 	}
 
@@ -67,11 +61,6 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 		return
 	}
 	DeleteCounter.Inc(1)
-
-	// special case. Store Account.Root for long time
-	if debug.IsStoreAccountRoot() && len(prefixAsNibbles) == common.HashLength*2 {
-		return
-	}
 
 	buf := pool.GetBuffer(keyBufferSize)
 	defer pool.PutBuffer(buf)

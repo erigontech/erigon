@@ -19,7 +19,6 @@ package rawdb
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
@@ -33,16 +32,6 @@ func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account)
 	if err = acc.DecodeForStorage(enc); err != nil {
 		return false, err
 	}
-	if debug.IsStoreAccountRoot() {
-		root, err := db.Get(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHashBytes, acc.Incarnation))
-		if err != nil {
-			return false, err
-		}
-		if enc == nil || root == nil {
-			return false, nil
-		}
-		acc.Root = common.BytesToHash(root)
-	}
 	return true, nil
 }
 
@@ -54,12 +43,6 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
 		return err
 	}
-	if debug.IsStoreAccountRoot() {
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHashBytes, acc.Incarnation), acc.Root.Bytes()); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -70,20 +53,6 @@ type DatabaseReaderDeleter interface {
 
 func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
 	addrHashBytes := addrHash[:]
-
-	if debug.IsStoreAccountRoot() {
-		enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
-		if err != nil && err.Error() != "db: key not found" {
-			return err
-		}
-		acc := accounts.NewAccount()
-		if err = acc.DecodeForStorage(enc); err != nil {
-			return err
-		}
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHashBytes, acc.Incarnation)); err != nil {
-			return err
-		}
-	}
 
 	if err := db.Delete(dbutils.CurrentStateBucket, addrHashBytes); err != nil {
 		return err

@@ -19,20 +19,6 @@ const (
 	gndInitializedFlag
 )
 
-func IsStoreAccountRoot() bool {
-	storeAccRootEnv.Do(func() {
-		_, storeAccRoot = os.LookupEnv("STORE_ACCOUNT_ROOT")
-	})
-	return storeAccRoot
-}
-
-func IsDisableIH() bool {
-	disableIHEnv.Do(func() {
-		_, disableIH = os.LookupEnv("DISABLE_IH")
-	})
-	return disableIH
-}
-
 // IsGetNodeData indicates whether the GetNodeData functionality should be enabled.
 // By default that's driven by the presence or absence of DISABLE_GET_NODE_DATA environment variable.
 func IsGetNodeData() bool {

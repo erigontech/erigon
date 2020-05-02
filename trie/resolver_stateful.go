@@ -58,7 +58,6 @@ type ResolverStateful struct {
 	hbStorage     *HashBuilder
 
 	accAddrHash []byte
-	accRoot     getAccRootF
 	dbBolt      *bolt.DB
 }
 
@@ -231,20 +230,6 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				tr.succStorage.Reset()
 			}
 
-			if debug.IsStoreAccountRoot() && len(tr.accAddrHash) > 0 {
-				hashRoot, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-				if err2 != nil {
-					return err2
-				}
-
-				if !bytes.Equal(tr.a.Root.Bytes(), hashRoot.Bytes()) {
-					msg := fmt.Sprintf("Acc: %x, %x!=%x", tr.accAddrHash, tr.a.Root, hashRoot)
-					fmt.Println(msg)
-					tr.dumpPrefix(tr.accAddrHash[:1])
-					panic(msg)
-				}
-			}
-
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.accData.FieldSet = AccountFieldSetNotContract
 			} else {
@@ -397,16 +382,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 	tr.dbBolt = boltDB
-	tr.accRoot = func(acc common.Hash, incarnation uint64) (common.Hash, error) {
-		root := EmptyRoot
-		accWithInc := dbutils.GenerateStoragePrefix(acc[:], incarnation)
-		v, err := db.Get(dbutils.IntermediateTrieHashBucket, accWithInc)
-		if err != nil {
-			return root, err
-		}
-		root.SetBytes(common.CopyBytes(v))
-		return root, nil
-	}
+
 	var err error
 	if historical {
 		panic("historical data is not implemented")
@@ -672,20 +648,6 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					}
 				}
 
-				if debug.IsStoreAccountRoot() && len(tr.accAddrHash) > 0 {
-					hashRoot, err2 := tr.accRoot(common.BytesToHash(tr.accAddrHash), tr.a.Incarnation)
-					if err2 != nil {
-						return err2
-					}
-
-					if !bytes.Equal(tr.a.Root.Bytes(), hashRoot.Bytes()) {
-						msg := fmt.Sprintf("Acc: %x %d, %x!=%x", tr.accAddrHash, tr.a.Incarnation, tr.a.Root, hashRoot)
-						fmt.Println(msg)
-						tr.dumpPrefix(tr.accAddrHash[:2])
-						panic(msg)
-					}
-				}
-
 				if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 					tr.accData.FieldSet = AccountFieldSetNotContract
 				} else {
@@ -745,8 +707,6 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 
 	return nil
 }
-
-type getAccRootF = func(acc common.Hash, incarnation uint64) (common.Hash, error)
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
 func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, accWalker walker, storageWalker walker, isAccount bool) error {
@@ -912,9 +872,6 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				}
 			}
 
-			if debug.IsDisableIH() {
-				canUseIntermediateHash = false
-			}
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
