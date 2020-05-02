@@ -52,6 +52,7 @@ func (st *stagedSyncTester) dropPeer(id string) {
 	defer st.lock.Unlock()
 
 	delete(st.peers, id)
+	//nolint:errcheck
 	st.downloader.UnregisterPeer(id)
 }
 
