@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -17,7 +18,6 @@ type ResolveFunc func(*Resolver) error
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	accounts         bool // Is this a resolver for accounts or for storage
 	historical       bool
 	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
@@ -27,9 +27,8 @@ type Resolver struct {
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
 
-func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
+func NewResolver(topLevels int, blockNr uint64) *Resolver {
 	tr := Resolver{
-		accounts:     forAccounts,
 		requests:     []*ResolveRequest{},
 		codeRequests: []*ResolveRequestForCode{},
 		blockNr:      blockNr,
@@ -38,9 +37,8 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	return &tr
 }
 
-func (tr *Resolver) Reset(topLevels int, forAccounts bool, blockNr uint64) {
+func (tr *Resolver) Reset(topLevels int, blockNr uint64) {
 	tr.topLevels = topLevels
-	tr.accounts = forAccounts
 	tr.blockNr = blockNr
 	tr.requests = tr.requests[:0]
 	tr.codeRequests = tr.codeRequests[:0]
@@ -86,6 +84,32 @@ func min(a, b int) int {
 func (tr *Resolver) Less(i, j int) bool {
 	ci := tr.requests[i]
 	cj := tr.requests[j]
+	if ci.contract == nil && cj.contract != nil {
+		contractAsNibbles := pool.GetBuffer(256)
+		defer pool.PutBuffer(contractAsNibbles)
+		DecompressNibbles(cj.contract[:common.HashLength], &contractAsNibbles.B)
+		hex1 := ci.resolveHex
+		if len(hex1) == 65 {
+			hex1 = hex1[:64]
+		}
+		c := bytes.Compare(hex1[:ci.resolvePos], contractAsNibbles.B[:ci.resolvePos])
+		if c != 0 {
+			return c < 0
+		}
+	} else if ci.contract != nil && cj.contract == nil {
+		contractAsNibbles := pool.GetBuffer(256)
+		defer pool.PutBuffer(contractAsNibbles)
+		DecompressNibbles(ci.contract[:common.HashLength], &contractAsNibbles.B)
+		hex1 := cj.resolveHex
+		if len(hex1) == 65 {
+			hex1 = hex1[:64]
+		}
+		c := bytes.Compare(contractAsNibbles.B[:cj.resolvePos], hex1[:cj.resolvePos])
+		if c != 0 {
+			return c < 0
+		}
+	}
+
 	m := min(ci.resolvePos, cj.resolvePos)
 	c := bytes.Compare(ci.contract, cj.contract)
 	if c != 0 {
@@ -139,9 +163,8 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 	}
 
 	sort.Stable(tr)
-
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
-	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical, trace); err != nil {
+	if err := resolver.RebuildTrie(db, blockNr, tr.historical, trace); err != nil {
 		return err
 	}
 	return resolver.AttachRequestedCode(db, tr.codeRequests)
@@ -172,11 +195,14 @@ func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) er
 		hookKey = currentReq.resolveHex[:currentReq.resolvePos]
 	} else {
 		contractHex := keybytesToHex(currentReq.contract)
-		contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+		if len(currentReq.contract) == 32 {
+			contractHex = contractHex[:len(contractHex)-1] // No incarnation in contract
+		} else {
+			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+		}
 		hookKey = append(contractHex, currentReq.resolveHex[:currentReq.resolvePos]...)
 	}
 
-	//fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
 	currentReq.t.hook(hookKey, hbRoot)
 	if len(currentReq.resolveHash) > 0 && !bytes.Equal(currentReq.resolveHash, hbHash[:]) {
 		return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
