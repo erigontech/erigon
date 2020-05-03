@@ -29,7 +29,7 @@ import (
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -373,11 +373,15 @@ func (dl *downloadTester) dropPeer(id string) {
 	dl.downloader.UnregisterPeer(id)
 }
 
-func (dl *downloadTester) ExecuteBlockEuphemerally(_ *types.Block, _ state.StateReader, _ *state.DbStateWriter) error {
-	return fmt.Errorf("not implemented")
+func (dl *downloadTester) GetBlockByNumber(number uint64) *types.Block {
+	panic("not implemented and should not be called")
 }
 
-func (dl *downloadTester) GetBlockByNumber(number uint64) *types.Block {
+func (dl *downloadTester) Engine() consensus.Engine {
+	panic("not implemented and should not be called")
+}
+
+func (dl *downloadTester) GetHeader(common.Hash, uint64) *types.Header {
 	panic("not implemented and should not be called")
 }
 
