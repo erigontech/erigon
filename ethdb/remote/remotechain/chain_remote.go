@@ -123,7 +123,6 @@ func ReadBodyRLP(tx ethdb.Tx, hash common.Hash, number uint64) (rlp.RawValue, er
 		if err != nil {
 			return nil, err
 		}
-
 		return snappy.Decode(nil, data)
 	}
 
