@@ -22,6 +22,7 @@ type stagedSyncTester struct {
 	db         ethdb.Database
 	peers      map[string]*stagedSyncTesterPeer
 	genesis    *types.Block
+	currentHeader *types.Header
 	lock       sync.RWMutex
 }
 
@@ -31,7 +32,9 @@ func newStagedSyncTester() *stagedSyncTester {
 		genesis:    testGenesis,
 	}
 	tester.db = ethdb.NewMemDatabase()
+	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
+	tester.currentHeader = tester.genesis.Header()
 	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer)
 	return tester
 }
@@ -76,12 +79,7 @@ func (st *stagedSyncTester) CurrentHeader() *types.Header {
 	st.lock.RLock()
 	defer st.lock.RUnlock()
 
-	for i := len(st.ownHashes) - 1; i >= 0; i-- {
-		if header := st.ownHeaders[st.ownHashes[i]]; header != nil {
-			return header
-		}
-	}
-	return st.genesis.Header()
+	return st.currentHeader
 }
 
 // ExecuteBlockEuphemerally is part of the implementation of BlockChain interface defined in downloader.go
@@ -101,7 +99,8 @@ func (st *stagedSyncTester) GetBlockByHash(hash common.Hash) *types.Block {
 
 // GetBlockByNumber is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) GetBlockByNumber(number uint64) *types.Block {
-	panic("")
+	hash := rawdb.ReadCanonicalHash(st.db, number)
+	return rawdb.ReadBlock(st.db, hash, number)
 }
 
 // GetHeaderByHash is part of the implementation of BlockChain interface defined in downloader.go
@@ -113,7 +112,7 @@ func (st *stagedSyncTester) GetHeaderByHash(hash common.Hash) *types.Header {
 func (st *stagedSyncTester) GetTd(hash common.Hash, number uint64) *big.Int {
 	st.lock.RLock()
 	defer st.lock.RUnlock()
-	return st.ownChainTd[hash]
+	return rawdb.ReadTd(st.db, hash, number)
 }
 
 // HasBlock is part of the implementation of BlockChain interface defined in downloader.go
@@ -128,13 +127,17 @@ func (st *stagedSyncTester) HasFastBlock(hash common.Hash, number uint64) bool {
 
 // HasHeader is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) HasHeader(hash common.Hash, number uint64) bool {
-	header, ok := st.ownHeaders[hash]
-	return ok && header.Number.Uint64() == number
+	return rawdb.HasHeader(st.db, hash, number)
 }
 
 // InsertBodyChain is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (i int, err error) {
-	panic("")
+	st.lock.Lock()
+	defer st.lock.Unlock()
+	for _, block := range blocks {
+		rawdb.WriteBlock(context.Background(), st.db, block)
+	}
+	return len(blocks), nil
 }
 
 // InsertChain is part of the implementation of BlockChain interface defined in downloader.go
@@ -147,7 +150,7 @@ func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, che
 	st.lock.Lock()
 	defer st.lock.Unlock()
 
-	if _, ok := st.ownHeaders[headers[0].ParentHash]; !ok {
+	if rawdb.ReadHeaderNumber(st.db, headers[0].ParentHash) == nil {
 		return 0, false, 0, errors.New("unknown parent")
 	}
 	for i := 1; i < len(headers); i++ {
@@ -157,15 +160,19 @@ func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, che
 	}
 	// Do a full insert if pre-checks passed
 	for i, header := range headers {
-		if _, ok := st.ownHeaders[header.Hash()]; ok {
+		if rawdb.ReadHeaderNumber(st.db, header.Hash()) != nil {
 			continue
 		}
-		if _, ok := st.ownHeaders[header.ParentHash]; !ok {
+		if rawdb.ReadHeaderNumber(st.db, header.ParentHash) == nil {
 			return i, false, 0, errors.New("unknown parent")
 		}
-		ptd := hc.GetTd(st.db, header.ParentHash, header.Number.Uint64()-1)
-		rawdb.WriteTd(st.db, header.Hash(), header.Hash(), ptd.Add(ptd, header.Difficulty))
+		ptd := rawdb.ReadTd(st.db, header.ParentHash, header.Number.Uint64()-1)
+		if ptd == nil {
+			fmt.Printf("ptd == nil for block %d\n", header.Number.Uint64()-1)
+		}
+		rawdb.WriteTd(st.db, header.Hash(), header.Number.Uint64(), ptd.Add(ptd, header.Difficulty))
 		rawdb.WriteHeader(context.Background(), st.db, header)
+		st.currentHeader = header
 	}
 	return len(headers), false, uint64(len(headers)), nil
 }
