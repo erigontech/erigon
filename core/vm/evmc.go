@@ -191,7 +191,7 @@ func (host *hostContext) GetCode(addr common.Address) []byte {
 func (host *hostContext) Selfdestruct(addr common.Address, beneficiary common.Address) {
 	db := host.env.IntraBlockState
 	if !db.HasSuicided(addr) {
-		db.AddRefund(params.SuicideRefundGas)
+		db.AddRefund(params.SelfdestructRefundGas)
 	}
 	db.AddBalance(beneficiary, db.GetBalance(addr))
 	db.Suicide(addr)
