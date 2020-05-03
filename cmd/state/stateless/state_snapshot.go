@@ -329,7 +329,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	var err error
 	if blockNum > 0 {
 		t := trie.New(rootHash)
-		r := trie.NewResolver(0, true, blockNum)
+		r := trie.NewResolver(0, blockNum)
 		key := []byte{}
 		req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
@@ -364,16 +364,21 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 		panic(err)
 	}
 	fmt.Printf("Incarnation map: %v\n", incarnationMap)
+	tr := trie.New(common.Hash{})
+
 	for addrHash, account := range roots {
 		if account != nil {
-			st := trie.New(account.Root)
-			sr := trie.NewResolver(32, false, blockNum)
+			sr := trie.NewResolver(128, blockNum)
 			key := []byte{}
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
-			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
-			sr.AddRequest(streq)
+			if need, req := tr.NeedResolution(nil, addrHash[:]); need {
+				sr.AddRequest(req)
+			}
+			if need, req := tr.NeedResolution(contractPrefix, key); need {
+				sr.AddRequest(req)
+			}
 			err = sr.ResolveWithDb(stateDb, blockNum, false)
 			if err != nil {
 				fmt.Printf("%x: %v\n", addrHash, err)

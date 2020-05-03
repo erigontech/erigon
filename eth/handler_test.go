@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -292,6 +293,8 @@ func TestGetNodeData63(t *testing.T) { testGetNodeData(t, 63) }
 func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
 
 func testGetNodeData(t *testing.T, protocol int) {
+	debug.OverrideGetNodeData(true)
+	defer debug.OverrideGetNodeData(false)
 	// Assemble the test environment
 	pm, addr := setUpStorageContractA(t)
 	peer, _ := newTestPeer("peer", protocol, pm, true)

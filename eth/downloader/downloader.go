@@ -28,8 +28,8 @@ import (
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -213,16 +213,17 @@ type BlockChain interface {
 
 	NotifyHeightKnownBlock(h uint64)
 
-	// ExecuteBlockEuphemerally executes a block getting state from a specified
-	// state reader and writing it to a specified state writer
-	// then it writes it to a specified block writer
-	ExecuteBlockEuphemerally(*types.Block, state.StateReader, *state.DbStateWriter) error
-
 	// GetBlockByNumber is necessary for staged sync
 	GetBlockByNumber(number uint64) *types.Block
 
 	// Config is necessary for staged sync
 	Config() *params.ChainConfig
+
+	// Engine is necessary for staged sync
+	Engine() consensus.Engine
+
+	// GetHeader is necessary for staged sync
+	GetHeader(common.Hash, uint64) *types.Header
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -1499,15 +1500,9 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						var lowestCanonicalNumber uint64
 						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
 						if newCanonical {
-							// Need to invalidate further stages
-							invalid, err1 := GetStageInvalidation(d.stateDB, SyncStage(StagedSync+1))
-							if err1 != nil {
-								return fmt.Errorf("getting SyncStage invalidation for post-Headers: %v", err1)
-							}
-							if invalid == 0 || invalid > lowestCanonicalNumber {
-								if err2 := SaveStageInvalidation(d.stateDB, SyncStage(StagedSync+1), lowestCanonicalNumber); err2 != nil {
-									return fmt.Errorf("saving SyncStage for post-Headers invalidation: %v", err2)
-								}
+							// Need to unwind further stages
+							if err1 := UnwindAllStages(d.stateDB, lowestCanonicalNumber); err1 != nil {
+								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
 						}
 					} else {

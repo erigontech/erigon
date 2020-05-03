@@ -778,7 +778,7 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{})
-	r := trie.NewResolver(0, true, currentBlockNr)
+	r := trie.NewResolver(0, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
@@ -820,23 +820,27 @@ func testResolve(chaindata string) {
 		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	*/
-	currentBlockNr := 4155652
+	currentBlockNr := uint64(1042280)
 	var contract []byte
-	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
-	r := trie.NewResolver(10, true, 10000000)
-	r.SetHistorical(true)
+	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
+	r := trie.NewResolver(0, currentBlockNr)
 	var key []byte
-	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
-	resolveHash := common.FromHex("eff69d72861c76bbf3ffde71abff1b09609d7cc5f2be594a29b1954507d0497b")
+	key = common.FromHex("0007070c0c030502090f04020e0c030a090d050b0a08020c0f0605060f0804020803040d0401020e010c080c0f0709000800080c0f070a0e070700090f0e0801")
+	resolveHash := common.FromHex("d7bfaf1467e24373aa4b7c0a41e1e3fcadfe89b8e5708a7654231f9dcdead784")
 	t := trie.New(common.Hash{})
 	req := t.NewResolveRequest(contract, key, 0, resolveHash)
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, 10000000, false)
+	err = r.ResolveWithDb(ethDb, currentBlockNr, true)
 	if err != nil {
 		fmt.Printf("Resolve error: %v\n", err)
 	}
-	filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
-	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
+	var filename string
+	if err == nil {
+		filename = fmt.Sprintf("right_%d.txt", currentBlockNr)
+	} else {
+		filename = fmt.Sprintf("root_%d.txt", currentBlockNr)
+	}
+	fmt.Printf("Generating deep snapshot of the tries... %s\n", filename)
 	f, err := os.Create(filename)
 	if err == nil {
 		defer f.Close()

@@ -32,10 +32,10 @@ func IsGetNodeData() bool {
 }
 
 // RestoreGetNodeData enables or disables the GetNodeData functionality
-// according to the presence or absence of DISABLE_GET_NODE_DATA environment variable.
+// according to the presence or absence of GET_NODE_DATA environment variable.
 func RestoreGetNodeData() {
-	_, envVarSet := os.LookupEnv("DISABLE_GET_NODE_DATA")
-	OverrideGetNodeData(!envVarSet)
+	_, envVarSet := os.LookupEnv("GET_NODE_DATA")
+	OverrideGetNodeData(envVarSet)
 }
 
 // OverrideGetNodeData allows to explicitly enable or disable the GetNodeData functionality.

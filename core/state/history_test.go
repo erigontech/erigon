@@ -499,11 +499,11 @@ func TestUnwindTruncateHistory(t *testing.T) {
 		txWriter := tds.TrieStateWriter()
 		blockWriter := tds.DbStateWriter()
 		if blockNumber == 1 {
-			incarnation, err := txWriter.CreateContract(addr)
+			err := txWriter.CreateContract(addr)
 			if err != nil {
 				t.Fatal(err)
 			}
-			newAcc.Incarnation = incarnation
+			newAcc.Incarnation = FirstContractIncarnation
 		}
 		var oldValue common.Hash
 		var newValue common.Hash
@@ -520,7 +520,7 @@ func TestUnwindTruncateHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		if blockNumber == 1 {
-			_, err := blockWriter.CreateContract(addr)
+			err := blockWriter.CreateContract(addr)
 			if err != nil {
 				t.Fatal(err)
 			}

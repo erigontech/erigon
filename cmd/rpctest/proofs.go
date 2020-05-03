@@ -55,7 +55,7 @@ func proofs(chaindata string, url string, block int) {
 	if _, err = os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			// Resolve 6 top levels of the accounts trie
-			r := trie.NewResolver(6, true, uint64(block))
+			r := trie.NewResolver(6, uint64(block))
 			t = trie.New(common.Hash{})
 			req := t.NewResolveRequest(nil, []byte{}, 0, nil)
 			r.AddRequest(req)
@@ -240,7 +240,7 @@ func fixState(chaindata string, url string) {
 	for addrHash, account := range roots {
 		if account != nil && account.Root != trie.EmptyRoot {
 			st := trie.New(account.Root)
-			sr := trie.NewResolver(32, false, blockNum)
+			sr := trie.NewResolver(32, blockNum)
 			key := []byte{}
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])

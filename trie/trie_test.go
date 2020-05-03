@@ -30,6 +30,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -531,6 +532,8 @@ func TestDeepHash(t *testing.T) {
 }
 
 func TestHashMapLeak(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.OverrideGetNodeData(false)
 	// freeze the randomness
 	random := rand.New(rand.NewSource(794656320434))
 

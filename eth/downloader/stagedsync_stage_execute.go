@@ -2,10 +2,10 @@ package downloader
 
 import (
 	"fmt"
-	"os"
-	"runtime/pprof"
+	//"os"
+	//"runtime/pprof"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -18,16 +18,18 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
-	profileNumber := nextBlockNumber
-	f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
-	if err != nil {
-		log.Error("could not create CPU profile", "error", err)
-		return lastProcessedBlockNumber, err
-	}
-	if err1 := pprof.StartCPUProfile(f); err1 != nil {
-		log.Error("could not start CPU profile", "error", err1)
-		return lastProcessedBlockNumber, err
-	}
+	/*
+		profileNumber := nextBlockNumber
+		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
+		if err != nil {
+			log.Error("could not create CPU profile", "error", err)
+			return lastProcessedBlockNumber, err
+		}
+		if err1 := pprof.StartCPUProfile(f); err1 != nil {
+			log.Error("could not start CPU profile", "error", err1)
+			return lastProcessedBlockNumber, err
+		}
+	*/
 
 	mutation := d.stateDB.NewBatch()
 	defer func() {
@@ -37,23 +39,24 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		}
 	}()
 
-	var incarnationMap = make(map[common.Address]uint64)
-
+	chainConfig := d.blockchain.Config()
+	engine := d.blockchain.Engine()
 	for {
 		block := d.blockchain.GetBlockByNumber(nextBlockNumber)
 		if block == nil {
+			fmt.Printf("block %d nil\n", nextBlockNumber)
 			break
 		}
 
 		stateReader := state.NewDbStateReader(mutation)
-		stateWriter := state.NewDbStateWriter(mutation, nextBlockNumber, incarnationMap)
+		stateWriter := state.NewDbStateWriter(mutation, nextBlockNumber)
 
 		if nextBlockNumber%1000 == 0 {
 			log.Info("Executed blocks:", "blockNumber", nextBlockNumber)
 		}
 
 		// where the magic happens
-		err = d.blockchain.ExecuteBlockEuphemerally(block, stateReader, stateWriter)
+		err = core.ExecuteBlockEuphemerally(chainConfig, d.blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}
@@ -61,7 +64,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		if err = SaveStageProgress(mutation, Execution, nextBlockNumber); err != nil {
 			return 0, err
 		}
-
+		fmt.Printf("Executed blocks: %d\n", nextBlockNumber)
 		nextBlockNumber++
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
@@ -69,14 +72,18 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 				return 0, err
 			}
 			mutation = d.stateDB.NewBatch()
-			incarnationMap = make(map[common.Address]uint64)
 		}
-
-		if nextBlockNumber-profileNumber == 100000 {
-			// Flush the profiler
-			pprof.StopCPUProfile()
-		}
+		/*
+			if nextBlockNumber-profileNumber == 100000 {
+				// Flush the profiler
+				pprof.StopCPUProfile()
+			}
+		*/
 	}
 
 	return nextBlockNumber - 1 /* the last processed block */, nil
+}
+
+func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
+	return fmt.Errorf("unwindExecutionStage not implemented")
 }

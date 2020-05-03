@@ -81,10 +81,6 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 		return err
 	}
 
-	if incarnation == 0 {
-		incarnation = FirstContractIncarnation
-	}
-
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
 
 	o := bytes.TrimLeft(original[:], "\x00")
@@ -97,8 +93,8 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 	return nil
 }
 
-func (w *ChangeSetWriter) CreateContract(address common.Address) (uint64, error) {
-	return 0, nil
+func (w *ChangeSetWriter) CreateContract(address common.Address) error {
+	return nil
 }
 
 func (w *ChangeSetWriter) PrintChangedAccounts() {
