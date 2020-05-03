@@ -10,7 +10,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 var modulePath = "./example_vm.so"
