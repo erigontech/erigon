@@ -387,7 +387,7 @@ func TestStoragePruning(t *testing.T) {
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
 
-	var eipContract *contracts.Eip2027
+	var eipContract *contracts.Testcontract
 	blockNum := 6
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, blockNum, func(i int, block *core.BlockGen) {
@@ -399,7 +399,7 @@ func TestStoragePruning(t *testing.T) {
 
 		switch i {
 		case 0:
-			_, tx, eipContract, innerErr = contracts.DeployEip2027(transactOpts, contractBackend)
+			_, tx, eipContract, innerErr = contracts.DeployTestcontract(transactOpts, contractBackend)
 			assertNil(t, innerErr)
 			block.AddTx(tx)
 
