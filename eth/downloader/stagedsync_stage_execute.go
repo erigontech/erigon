@@ -2,9 +2,10 @@ package downloader
 
 import (
 	"fmt"
-	"os"
-	"runtime/pprof"
+	//"os"
+	//"runtime/pprof"
 
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -17,6 +18,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
+	/*
 	profileNumber := nextBlockNumber
 	f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
 	if err != nil {
@@ -27,6 +29,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		log.Error("could not start CPU profile", "error", err1)
 		return lastProcessedBlockNumber, err
 	}
+	*/
 
 	mutation := d.stateDB.NewBatch()
 	defer func() {
@@ -36,9 +39,12 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		}
 	}()
 
+	chainConfig := d.blockchain.Config()
+	engine := d.blockchain.Engine()
 	for {
 		block := d.blockchain.GetBlockByNumber(nextBlockNumber)
 		if block == nil {
+			fmt.Printf("block %d nil\n", nextBlockNumber)
 			break
 		}
 
@@ -50,7 +56,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		}
 
 		// where the magic happens
-		err = d.blockchain.ExecuteBlockEuphemerally(block, stateReader, stateWriter)
+		err = core.ExecuteBlockEuphemerally(chainConfig, d.blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}
@@ -58,7 +64,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		if err = SaveStageProgress(mutation, Execution, nextBlockNumber); err != nil {
 			return 0, err
 		}
-
+		fmt.Printf("Executed blocks: %d\n",nextBlockNumber)
 		nextBlockNumber++
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
@@ -67,11 +73,12 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			}
 			mutation = d.stateDB.NewBatch()
 		}
-
+		/*
 		if nextBlockNumber-profileNumber == 100000 {
 			// Flush the profiler
 			pprof.StopCPUProfile()
 		}
+		*/
 	}
 
 	return nextBlockNumber - 1 /* the last processed block */, nil

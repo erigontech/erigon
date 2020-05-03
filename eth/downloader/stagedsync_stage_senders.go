@@ -98,7 +98,6 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 		if err = SaveStageProgress(mutation, Senders, nextBlockNumber); err != nil {
 			return err
 		}
-
 		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
