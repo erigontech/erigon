@@ -154,7 +154,7 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
 	localTd := hc.GetTd(hc.chainDb, hc.currentHeaderHash, hc.CurrentHeader().Number.Uint64())
-	externTd := ptd.Add(ptd, header.Difficulty)
+	externTd := new(big.Int).Add(header.Difficulty, ptd)
 
 	// Irrelevant of the canonical status, write the td and header to the database
 	headerBatch := hc.chainDb.NewBatch()
