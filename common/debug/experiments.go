@@ -2,13 +2,8 @@ package debug
 
 import (
 	"os"
-	"sync"
 	"sync/atomic"
 )
-
-var gerEnv sync.Once
-
-var itcEnv sync.Once
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
 var getNodeData uint32
