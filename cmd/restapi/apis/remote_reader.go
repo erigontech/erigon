@@ -2,6 +2,7 @@ package apis
 
 import (
 	"bytes"
+	"encoding/binary"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -211,6 +212,34 @@ func (r *RemoteReader) ReadAccountCodeSize(address common.Address, codeHash comm
 		return 0, err
 	}
 	return len(val), nil
+}
+
+func (r *RemoteReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	addrHash, _ := common.HashData(address[:])
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	copy(startkey, addrHash[:])
+	found := false
+	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		c := b.Cursor()
+		k, _, err := c.Seek(startkey)
+		if err != nil {
+			return err
+		}
+		if k != nil && bytes.HasPrefix(k, addrHash[:]) {
+			copy(incarnationBytes[:], k[common.HashLength:])
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if found {
+		return (^binary.BigEndian.Uint64(incarnationBytes[:])), nil
+	}
+	return 0, nil
 }
 
 func NewRemoteContext(db ethdb.KV) *RemoteContext {

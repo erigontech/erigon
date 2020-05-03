@@ -1,6 +1,7 @@
 package stateless
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/csv"
@@ -161,11 +162,13 @@ func Stateless(
 		interruptCh <- true
 	}()
 
-	timeF, err := os.Create("timings.txt")
+	timeFF, err := os.Create("timings.txt")
 	if err != nil {
 		panic(err)
 	}
-	defer timeF.Close()
+	defer timeFF.Close()
+	timeF := bufio.NewWriter(timeFF)
+	defer timeF.Flush()
 	fmt.Fprintf(timeF, "blockNr,exec,resolve,stateless_exec,calc_root,mod_root\n")
 
 	stats, err := NewStatsFile(statsfile)

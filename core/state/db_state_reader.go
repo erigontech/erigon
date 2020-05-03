@@ -70,3 +70,18 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash c
 	}
 	return len(code), nil
 }
+
+func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return 0, err
+	}
+	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(dbr.db, addrHash)
+	if err != nil {
+		return 0, err
+	}
+	if found {
+		return incarnation, nil
+	}
+	return 0, nil
+}

@@ -17,7 +17,7 @@
 package ethdb
 
 import (
-	//"bytes"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -28,7 +28,7 @@ import (
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-// Generates rewind data for all buckets between the timestamp
+// RewindData generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func RewindData(db Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
 	// Collect list of buckets and keys that need to be considered
@@ -120,4 +120,44 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		idx++
 	}
 	return accounts, nil
+}
+
+// GetCurrentAccountIncarnation reads the latest incarnation of a contract from the database.
+func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation uint64, found bool, err error) {
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	err = db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	})
+	if err != nil {
+		return
+	}
+	if found {
+		incarnation = (^binary.BigEndian.Uint64(incarnationBytes[:]))
+	}
+	return
+}
+
+// GetHistoricalAccountIncarnation reads historical incarnation of a contract from the database.
+func GetHistoricalAccountIncarnation(db Getter, addrHash common.Hash, timestamp uint64) (incarnation uint64, found bool, err error) {
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, timestamp, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	})
+	if err != nil {
+		return
+	}
+	if found {
+		incarnation = (^binary.BigEndian.Uint64(incarnationBytes[:]))
+	}
+	return
 }
