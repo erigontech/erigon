@@ -167,7 +167,10 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				it.top--
 				return StorageStreamItem, hex, nil, nil, []byte(v)
 			case *accountNode:
-				if !it.rs.HashOnly(hex) && v.storage != nil {
+				if it.trace {
+					fmt.Printf("accountNode %x\n", hex)
+				}
+				if v.storage != nil {
 					it.hex = hex
 					it.nodeStack[l] = v.storage
 					it.iStack[l] = 0
@@ -387,7 +390,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if it.trace {
 				fmt.Printf("accountNode %x\n", hex)
 			}
-			if !it.rs.HashOnly(hex) && n.storage != nil {
+			if n.storage != nil {
 				it.hex = hex
 				it.nodeStack[l] = n.storage
 				it.iStack[l] = 0
@@ -717,7 +720,9 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		f, err1 := os.Create(filename)
 		if err1 == nil {
 			defer f.Close()
-			hb.root().print(f)
+			tt := New(common.Hash{})
+			tt.root = hb.root()
+			tt.Print(f)
 		}
 	}
 	if hb.hasRoot() {

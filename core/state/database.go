@@ -52,6 +52,7 @@ type StateReader interface {
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
 	ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error)
+	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
 type StateWriter interface {
@@ -59,7 +60,7 @@ type StateWriter interface {
 	UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
-	CreateContract(address common.Address) (uint64, error)
+	CreateContract(address common.Address) error
 }
 
 type NoopWriter struct {
@@ -85,8 +86,8 @@ func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Addr
 	return nil
 }
 
-func (nw *NoopWriter) CreateContract(address common.Address) (uint64, error) {
-	return 0, nil
+func (nw *NoopWriter) CreateContract(address common.Address) error {
+	return nil
 }
 
 // Structure holding updates, deletes, and reads registered within one change period
@@ -422,10 +423,10 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, false, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, false, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddRequest(req)
@@ -476,6 +477,9 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
 				// This adds an extra entry that wipes out the storage of the accout in the stream
 				accountTouches = append(accountTouches, addrHash)
+			} else if _, ok1 := tds.aggregateBuffer.created[addrHash]; ok1 {
+				// This adds an extra entry that wipes out the storage of the accout in the stream
+				accountTouches = append(accountTouches, addrHash)
 			}
 		}
 		accountTouches = append(accountTouches, addrHash)
@@ -511,10 +515,10 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, true, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddCodeRequest(req)
@@ -524,10 +528,10 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, true, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddCodeRequest(req)
@@ -547,15 +551,52 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, reso
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver = trie.NewResolver(0, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, true, tds.blockNr)
+				tds.resolver.Reset(0, tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddRequest(req)
 		}
 	}
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
+	}
+	return nil
+}
+
+func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, resolveFunc trie.ResolveFunc) error {
+	var firstRequest = true
+	touches := make([][]byte, 0, len(accountTouches)+len(storageTouches))
+	for _, addrHash := range accountTouches {
+		touches = append(touches, common.CopyBytes(addrHash[:]))
+	}
+	for _, storageKey := range storageTouches {
+		touches = append(touches, common.CopyBytes(storageKey[:]))
+	}
+
+	if tds.resolver == nil {
+		tds.resolver = trie.NewResolver(0, tds.blockNr)
+		tds.resolver.SetHistorical(tds.historical)
+	}
+	tds.resolver.Reset(0, tds.blockNr)
+
+	for _, touch := range touches {
+		var need bool
+		var req *trie.ResolveRequest
+		if len(touch) <= 32 {
+			need, req = tds.t.NeedResolution(nil, touch)
+		} else {
+			need, req = tds.t.NeedResolution(touch[:common.HashLength], touch[:])
+		}
+
+		if need {
+			firstRequest = false
+			tds.resolver.AddRequest(req)
+		}
+	}
+
 	if !firstRequest {
 		return resolveFunc(tds.resolver)
 	}
@@ -606,7 +647,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 
 	var err error
 
-	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
+	if err = tds.resolveAccountAndStorageTouches(accountTouches, storageTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -616,10 +657,6 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
-	}
-
-	if err = tds.resolveStorageTouches(storageTouches, resolveFunc); err != nil {
-		return err
 	}
 
 	if tds.resolveReads {
@@ -1032,7 +1069,6 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	var enc []byte
 	var a accounts.Account
 	if tds.historical {
-		// TODO: do we need to get a.Root from IH here?
 		enc, err = tds.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
@@ -1224,27 +1260,22 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 	return codeSize, nil
 }
 
-// nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
-func (tds *TrieDbState) nextIncarnation(address common.Address, addrHash common.Hash) (uint64, error) {
+func (tds *TrieDbState) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	if inc, ok := tds.incarnationMap[address]; ok {
 		return inc, nil
 	}
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits uint = 8 * common.HashLength
-	copy(startkey, addrHash[:])
-	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	if err := tds.db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
-		copy(incarnationBytes[:], k[common.HashLength:])
-		found = true
-		return false, nil
-	}); err != nil {
+	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
+	if err != nil {
+		return 0, err
+	}
+	incarnation, found, err := ethdb.GetCurrentAccountIncarnation(tds.db, addrHash)
+	if err != nil {
 		return 0, err
 	}
 	if found {
-		return (^binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
+		return incarnation, nil
 	}
-	return FirstContractIncarnation, nil
+	return 0, nil
 }
 
 var prevMemStats runtime.MemStats
@@ -1325,7 +1356,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter(), incarnations: tds.incarnationMap}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
@@ -1377,7 +1408,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = struct{}{}
 	if original.Incarnation > 0 {
-		tsw.tds.incarnationMap[address] = original.Incarnation + 1
+		tsw.tds.incarnationMap[address] = original.Incarnation
 	}
 	return nil
 }
@@ -1459,19 +1490,14 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBina
 	return t.ExtractWitness(tds.blockNr, trace, rs)
 }
 
-func (tsw *TrieStateWriter) CreateContract(address common.Address) (uint64, error) {
+func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, true /*save*/)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
-	var incarnation uint64
-	incarnation, err = tsw.tds.nextIncarnation(address, addrHash)
-	if err != nil {
-		return 0, err
-	}
-	return incarnation, nil
+	return nil
 }
 
 func (tds *TrieDbState) TriePruningDebugDump() string {
