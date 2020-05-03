@@ -56,7 +56,9 @@ func InitEVMCEVM(config string) {
 	if evmModule != nil {
 		return
 	}
+
 	evmModule = initEVMC(evmc.CapabilityEVM1, config)
+	log.Info("initialized EVMC interpreter", "path", config)
 }
 
 func InitEVMCEwasm(config string) {
