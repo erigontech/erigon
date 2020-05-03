@@ -45,16 +45,6 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 			},
 		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
 	}
 
 	b.ResetTimer()
@@ -101,16 +91,6 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 
 		{
 			name: "AccountEncodeWithCodeWithStorageSizeHack",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
 			acc: &Account{
 				Nonce:          2,
 				Balance:        *new(big.Int).SetInt64(1000),
@@ -166,16 +146,6 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 
 		{
 			name: "AccountEncodeWithCodeWithStorageSizeHack",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
 			acc: &Account{
 				Nonce:          2,
 				Balance:        *new(big.Int).SetInt64(1000),
@@ -243,16 +213,6 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 			},
 		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
 	}
 
 	b.ResetTimer()
@@ -305,16 +265,6 @@ func BenchmarkDecodingAccount(b *testing.B) {
 
 		{
 			name: "AccountEncodeWithCodeWithStorageSizeHack",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
 			acc: &Account{
 				Nonce:          2,
 				Balance:        *new(big.Int).SetInt64(1000),
@@ -386,16 +336,6 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 
 		{
 			name: "AccountEncodeWithCodeWithStorageSizeHack",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
 			acc: &Account{
 				Nonce:          2,
 				Balance:        *new(big.Int).SetInt64(1000),

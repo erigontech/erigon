@@ -124,26 +124,6 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	isAccountsEqual(t, a, decodedAccount)
 }
 
-func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
-	a := Account{
-		Initialised: true,
-		Nonce:       2,
-		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        emptyRoot,     // extAccount doesn't have Root value
-		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
-	}
-
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
-
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
-	}
-
-	isAccountsEqual(t, a, decodedAccount)
-}
 
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
