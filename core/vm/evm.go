@@ -160,7 +160,11 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 
 	// vmConfig.EVMInterpreter will be used by EVM-C, it won't be checked here
 	// as we always want to have the built-in EVM as the failover option.
-	evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
+	//evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
+
+	// from the ewasm fork
+	evm.interpreters = append(evm.interpreters, &EVMC{evmModule, evm, evmc.CapabilityEVM1, false})
+
 	evm.interpreter = evm.interpreters[0]
 
 	return evm
