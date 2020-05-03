@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 
 	// had to fork due to an issue with go modules
 	"github.com/ledgerwatch/turbo-geth/evmc"
@@ -46,18 +47,24 @@ type EVMC struct {
 var (
 	evmModule   *evmc.VM
 	ewasmModule *evmc.VM
+	evmcMux     sync.Mutex
 )
 
-// FIXME: hardcode!
-func init() {
-	InitEVMCEVM("/Users/mandrigin/Downloads/evmone-0.4.1-darwin-x86_64/lib/libevmone.dylib")
-}
-
 func InitEVMCEVM(config string) {
+	evmcMux.Lock()
+	defer evmcMux.Unlock()
+	if evmModule != nil {
+		return
+	}
 	evmModule = initEVMC(evmc.CapabilityEVM1, config)
 }
 
 func InitEVMCEwasm(config string) {
+	evmcMux.Lock()
+	defer evmcMux.Unlock()
+	if ewasmModule != nil {
+		return
+	}
 	ewasmModule = initEVMC(evmc.CapabilityEWASM, config)
 }
 

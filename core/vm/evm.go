@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/evmc"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -159,12 +160,14 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 		panic("No supported ewasm interpreter yet.")
 	}
 
-	// vmConfig.EVMInterpreter will be used by EVM-C, it won't be checked here
-	// as we always want to have the built-in EVM as the failover option.
-	//evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
-
-	// from the ewasm fork
-	evm.interpreters = append(evm.interpreters, &EVMC{evmModule, evm, evmc.CapabilityEVM1, false})
+	if vmConfig.EVMInterpreter != "" {
+		log.Info("Using EVMC interpreter", "path", vmConfig.EVMInterpreter)
+		InitEVMCEVM(vmConfig.EVMInterpreter)
+		evm.interpreters = append(evm.interpreters, &EVMC{evmModule, evm, evmc.CapabilityEVM1, false})
+	} else {
+		log.Info("Using built-in EVM interpreter")
+		evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
+	}
 
 	evm.interpreter = evm.interpreters[0]
 
