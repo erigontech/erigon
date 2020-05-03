@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -34,6 +35,8 @@ func newStagedSyncTester() *stagedSyncTester {
 		genesis: testGenesis,
 	}
 	tester.db = ethdb.NewMemDatabase()
+	// This needs to match the genesis in the file testchain_test.go
+	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
 	tester.currentHeader = tester.genesis.Header()
@@ -280,7 +283,6 @@ func TestUnwind(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", big.NewInt(1000)); err != nil {
-		fmt.Printf("Failing so far: %v", err)
-		//t.Fatal(err) //Currently failing
+		t.Fatal(err)
 	}
 }
