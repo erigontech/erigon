@@ -25,7 +25,8 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/ethereum/evmc/bindings/go/evmc"
+	// had to fork due to an issue with go modules
+	"github.com/ledgerwatch/turbo-geth/evmc"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -36,15 +37,15 @@ import (
 // EVMC represents the reference to a common EVMC-based VM instance and
 // the current execution context as required by go-ethereum design.
 type EVMC struct {
-	instance *evmc.Instance  // The reference to the EVMC VM instance.
+	instance *evmc.VM        // The reference to the EVMC VM instance.
 	env      *EVM            // The execution context.
 	cap      evmc.Capability // The supported EVMC capability (EVM or Ewasm)
 	readOnly bool            // The readOnly flag (TODO: Try to get rid of it).
 }
 
 var (
-	evmModule   *evmc.Instance
-	ewasmModule *evmc.Instance
+	evmModule   *evmc.VM
+	ewasmModule *evmc.VM
 )
 
 // FIXME: hardcode!
@@ -60,7 +61,7 @@ func InitEVMCEwasm(config string) {
 	ewasmModule = initEVMC(evmc.CapabilityEWASM, config)
 }
 
-func initEVMC(cap evmc.Capability, config string) *evmc.Instance {
+func initEVMC(cap evmc.Capability, config string) *evmc.VM {
 	options := strings.Split(config, ",")
 	path := options[0]
 
@@ -102,29 +103,29 @@ type hostContext struct {
 
 func (host *hostContext) AccountExists(addr common.Address) bool {
 	if host.env.ChainConfig().IsEIP158(host.env.BlockNumber) {
-		if !host.env.StateDB.Empty(addr) {
+		if !host.env.IntraBlockState.Empty(addr) {
 			return true
 		}
-	} else if host.env.StateDB.Exist(addr) {
+	} else if host.env.IntraBlockState.Exist(addr) {
 		return true
 	}
 	return false
 }
 
 func (host *hostContext) GetStorage(addr common.Address, key common.Hash) common.Hash {
-	return host.env.StateDB.GetState(addr, key)
+	return host.env.IntraBlockState.GetState(addr, key)
 }
 
 func (host *hostContext) SetStorage(addr common.Address, key common.Hash, value common.Hash) (status evmc.StorageStatus) {
-	oldValue := host.env.StateDB.GetState(addr, key)
+	oldValue := host.env.IntraBlockState.GetState(addr, key)
 	if oldValue == value {
 		return evmc.StorageUnchanged
 	}
 
-	current := host.env.StateDB.GetState(addr, key)
-	original := host.env.StateDB.GetCommittedState(addr, key)
+	current := host.env.IntraBlockState.GetState(addr, key)
+	original := host.env.IntraBlockState.GetCommittedState(addr, key)
 
-	host.env.StateDB.SetState(addr, key, value)
+	host.env.IntraBlockState.SetState(addr, key, value)
 
 	hasNetStorageCostEIP := host.env.ChainConfig().IsConstantinople(host.env.BlockNumber) &&
 		!host.env.ChainConfig().IsPetersburg(host.env.BlockNumber)
@@ -135,7 +136,7 @@ func (host *hostContext) SetStorage(addr common.Address, key common.Hash, value 
 		if oldValue == zero {
 			return evmc.StorageAdded
 		} else if value == zero {
-			host.env.StateDB.AddRefund(params.SstoreRefundGas)
+			host.env.IntraBlockState.AddRefund(params.SstoreRefundGas)
 			return evmc.StorageDeleted
 		}
 		return evmc.StorageModified
@@ -146,49 +147,49 @@ func (host *hostContext) SetStorage(addr common.Address, key common.Hash, value 
 			return evmc.StorageAdded
 		}
 		if value == (common.Hash{}) { // delete slot (2.1.2b)
-			host.env.StateDB.AddRefund(params.NetSstoreClearRefund)
+			host.env.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 			return evmc.StorageDeleted
 		}
 		return evmc.StorageModified
 	}
 	if original != (common.Hash{}) {
 		if current == (common.Hash{}) { // recreate slot (2.2.1.1)
-			host.env.StateDB.SubRefund(params.NetSstoreClearRefund)
+			host.env.IntraBlockState.SubRefund(params.NetSstoreClearRefund)
 		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
-			host.env.StateDB.AddRefund(params.NetSstoreClearRefund)
+			host.env.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 		}
 	}
 	if original == value {
 		if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
-			host.env.StateDB.AddRefund(params.NetSstoreResetClearRefund)
+			host.env.IntraBlockState.AddRefund(params.NetSstoreResetClearRefund)
 		} else { // reset to original existing slot (2.2.2.2)
-			host.env.StateDB.AddRefund(params.NetSstoreResetRefund)
+			host.env.IntraBlockState.AddRefund(params.NetSstoreResetRefund)
 		}
 	}
 	return evmc.StorageModifiedAgain
 }
 
 func (host *hostContext) GetBalance(addr common.Address) common.Hash {
-	return common.BigToHash(host.env.StateDB.GetBalance(addr))
+	return common.BigToHash(host.env.IntraBlockState.GetBalance(addr))
 }
 
 func (host *hostContext) GetCodeSize(addr common.Address) int {
-	return host.env.StateDB.GetCodeSize(addr)
+	return host.env.IntraBlockState.GetCodeSize(addr)
 }
 
 func (host *hostContext) GetCodeHash(addr common.Address) common.Hash {
-	if host.env.StateDB.Empty(addr) {
+	if host.env.IntraBlockState.Empty(addr) {
 		return common.Hash{}
 	}
-	return host.env.StateDB.GetCodeHash(addr)
+	return host.env.IntraBlockState.GetCodeHash(addr)
 }
 
 func (host *hostContext) GetCode(addr common.Address) []byte {
-	return host.env.StateDB.GetCode(addr)
+	return host.env.IntraBlockState.GetCode(addr)
 }
 
 func (host *hostContext) Selfdestruct(addr common.Address, beneficiary common.Address) {
-	db := host.env.StateDB
+	db := host.env.IntraBlockState
 	if !db.HasSuicided(addr) {
 		db.AddRefund(params.SuicideRefundGas)
 	}
@@ -216,7 +217,7 @@ func (host *hostContext) GetBlockHash(number int64) common.Hash {
 }
 
 func (host *hostContext) EmitLog(addr common.Address, topics []common.Hash, data []byte) {
-	host.env.StateDB.AddLog(&types.Log{
+	host.env.IntraBlockState.AddLog(&types.Log{
 		Address:     addr,
 		Topics:      topics,
 		Data:        data,
@@ -312,7 +313,7 @@ func (evm *EVMC) Run(contract *Contract, input []byte, readOnly bool) (ret []byt
 	}
 
 	kind := evmc.Call
-	if evm.env.StateDB.GetCodeSize(contract.Address()) == 0 {
+	if evm.env.IntraBlockState.GetCodeSize(contract.Address()) == 0 {
 		// Guess if this is a CREATE.
 		kind = evmc.Create
 	}
