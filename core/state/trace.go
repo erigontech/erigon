@@ -121,7 +121,6 @@ func (tds *TraceDbState) WriteAccountStorage(address common.Address, incarnation
 	copy(vv, v)
 	if len(v) == 0 {
 		return tds.currentDb.Delete(dbutils.CurrentStateBucket, compositeKey)
-	} else {
-		return tds.currentDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
+	return tds.currentDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 }
