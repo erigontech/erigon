@@ -33,11 +33,6 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 		return
 	}
 
-	// special case. Store Account.Root for long time
-	if len(prefixAsNibbles) == common.HashLength*2 {
-		return
-	}
-
 	InsertCounter.Inc(1)
 
 	buf := pool.GetBuffer(keyBufferSize)
@@ -66,11 +61,6 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 		return
 	}
 	DeleteCounter.Inc(1)
-
-	// special case. Store Account.Root for long time
-	if len(prefixAsNibbles) == common.HashLength*2 {
-		return
-	}
 
 	buf := pool.GetBuffer(keyBufferSize)
 	defer pool.PutBuffer(buf)

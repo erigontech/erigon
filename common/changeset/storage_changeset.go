@@ -5,8 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (

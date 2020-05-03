@@ -1,8 +1,36 @@
 package downloader
 
-import "github.com/ledgerwatch/turbo-geth/log"
+import (
+	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
+)
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
+	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
+	for stage := Finish - 1; stage > Headers; stage++ {
+		unwindPoint, err := GetStageUnwind(d.stateDB, stage)
+		if err != nil {
+			return err
+		}
+		if unwindPoint == 0 {
+			continue
+		}
+		switch stage {
+		case Bodies:
+			err = d.unwindBodyDownloadStage(unwindPoint)
+		case Senders:
+			err = d.unwindSendersStage(unwindPoint)
+		case Execution:
+			err = d.unwindExecutionStage(unwindPoint)
+		case HashCheck:
+			err = d.unwindHashCheckStage(unwindPoint)
+		default:
+			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
+		}
+		if err != nil {
+			return fmt.Errorf("error unwinding stage: %d: %v", stage, err)
+		}
+	}
 
 	log.Info("Sync stage 1/5. Downloading headers...")
 

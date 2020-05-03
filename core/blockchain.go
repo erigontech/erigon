@@ -1589,9 +1589,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		chain = append(preBlocks, chain...)
 	}
 
-	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
-	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
-
 	var k int
 	var committedK int
 	// Iterate over the blocks and insert when the verifier permits
@@ -2459,13 +2456,19 @@ func (bc *BlockChain) waitJobs() {
 
 // ExecuteBlockEuphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
-func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader state.StateReader, stateWriter *state.DbStateWriter) error {
+func ExecuteBlockEuphemerally(
+	chainConfig *params.ChainConfig,
+	chainContext ChainContext,
+	engine consensus.Engine,
+	block *types.Block,
+	stateReader state.StateReader,
+	stateWriter *state.DbStateWriter,
+) error {
 	ibs := state.New(stateReader)
 	header := block.Header()
-	chainConfig := bc.chainConfig
 	var receipts types.Receipts
 	usedGas := new(uint64)
-	vmConfig := bc.vmConfig
+	vmConfig := vm.Config{}
 	gp := new(GasPool).AddGas(block.GasLimit())
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
@@ -2474,7 +2477,7 @@ func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader s
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := ApplyTransaction(chainConfig, bc, nil, gp, ibs, noop, header, tx, usedGas, vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
@@ -2488,7 +2491,6 @@ func (bc *BlockChain) ExecuteBlockEuphemerally(block *types.Block, stateReader s
 		}
 	}
 
-	engine := bc.engine
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
 		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)

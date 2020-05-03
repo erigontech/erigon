@@ -13,6 +13,7 @@ type Observer interface {
 	CodeNodeSizeChanged(hex []byte, newSize uint)
 
 	WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64)
+	WillUnloadNode(key []byte, nodeHash common.Hash)
 	BranchNodeLoaded(prefixAsNibbles []byte, incarnation uint64)
 }
 
@@ -29,6 +30,7 @@ func (*NoopObserver) CodeNodeDeleted(_ []byte)                               {}
 func (*NoopObserver) CodeNodeTouched(_ []byte)                               {}
 func (*NoopObserver) CodeNodeSizeChanged(_ []byte, _ uint)                   {}
 func (*NoopObserver) WillUnloadBranchNode(_ []byte, _ common.Hash, _ uint64) {}
+func (*NoopObserver) WillUnloadNode(_ []byte, _ common.Hash)                 {}
 func (*NoopObserver) BranchNodeLoaded(_ []byte, _ uint64)                    {}
 
 // TrieObserverMux multiplies the callback methods and sends them to
@@ -88,6 +90,12 @@ func (mux *ObserverMux) CodeNodeTouched(hex []byte) {
 func (mux *ObserverMux) CodeNodeSizeChanged(hex []byte, newSize uint) {
 	for _, child := range mux.children {
 		child.CodeNodeSizeChanged(hex, newSize)
+	}
+}
+
+func (mux *ObserverMux) WillUnloadNode(key []byte, nodeHash common.Hash) {
+	for _, child := range mux.children {
+		child.WillUnloadNode(key, nodeHash)
 	}
 }
 
