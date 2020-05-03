@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	logInterval = 20 // seconds
+	logInterval = 5 // seconds
 )
 
 type progressLogger struct {
