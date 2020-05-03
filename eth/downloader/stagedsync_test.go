@@ -280,6 +280,7 @@ func TestUnwind(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", big.NewInt(1000)); err != nil {
+		fmt.Printf("Failing so far: %v", err)
 		//t.Fatal(err) //Currently failing
 	}
 }
