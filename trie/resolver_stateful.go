@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -57,19 +58,19 @@ type ResolverStateful struct {
 	groupsStorage []uint16
 	hbStorage     *HashBuilder
 
-	accAddrHash []byte
-	dbBolt      *bolt.DB
+	seenAccount        bool
+	accAddrHashWithInc []byte // valid only if `seenAccount` is true
 }
 
 func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
 	return &ResolverStateful{
-		topLevels:    topLevels,
-		hb:           NewHashBuilder(false),
-		hbStorage:    NewHashBuilder(false),
-		reqIndices:   []int{},
-		requests:     requests,
-		hookFunction: hookFunction,
-		accAddrHash:  []byte{},
+		topLevels:          topLevels,
+		hb:                 NewHashBuilder(false),
+		hbStorage:          NewHashBuilder(false),
+		reqIndices:         []int{},
+		requests:           requests,
+		hookFunction:       hookFunction,
+		accAddrHashWithInc: make([]byte, 40),
 	}
 }
 
@@ -100,7 +101,7 @@ func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hoo
 	tr.hbStorage.Reset()
 	tr.groupsStorage = tr.groupsStorage[:0]
 	tr.wasIHStorage = false
-	tr.accAddrHash = tr.accAddrHash[:0]
+	tr.seenAccount = false
 }
 
 func (tr *ResolverStateful) PopRoots() []node {
@@ -132,13 +133,12 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			bytes.Equal(req.contract, prevReq.contract) &&
 			bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
 
+			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			if req.contract == nil {
 				tr.rss[len(tr.rss)-1].AddHex(req.resolveHex)
-				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			} else {
 				k := append(append([]byte{}, contractAsNibbles.B[:common.HashLength*2]...), req.resolveHex...)
 				tr.rss[len(tr.rss)-1].AddHex(k)
-				tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			}
 			continue
 		}
@@ -160,9 +160,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
 
 		if pLen == 32 { // if we don't know incarnation, then just start resolution from account record
-			key := make([]byte, pLen)
-			copy(key[:], req.contract)
-			startkeys = append(startkeys, key)
+			startkeys = append(startkeys, req.contract)
 			req.extResolvePos += 16
 		} else {
 			key := make([]byte, pLen+int(math.Ceil(float64(req.resolvePos)/2)))
@@ -171,23 +169,19 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 
 			startkeys = append(startkeys, key)
 		}
-		prevReq = req
-		var minLength int
-		if req.resolvePos >= tr.topLevels {
-			minLength = 0
-		} else {
-			minLength = tr.topLevels - req.resolvePos
-		}
-		tr.rssChopped = append(tr.rssChopped, NewResolveSet(minLength))
+
+		tr.rssChopped = append(tr.rssChopped, NewResolveSet(max(0, tr.topLevels-req.resolvePos)))
 		tr.rss = append(tr.rss, NewResolveSet(0))
+
+		tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 		if req.contract == nil {
-			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			tr.rss[len(tr.rss)-1].AddHex(req.resolveHex)
 		} else {
 			k := append(append([]byte{}, contractAsNibbles.B[:common.HashLength*2]...), req.resolveHex...)
-			tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
 			tr.rss[len(tr.rss)-1].AddHex(k)
 		}
+
+		prevReq = req
 	}
 
 	tr.currentReq = tr.requests[tr.reqIndices[0]]
@@ -217,7 +211,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				}
 
 				if tr.hbStorage.hasRoot() {
-					tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
+					tr.a.Root.SetBytes(tr.hbStorage.rootHash().Bytes())
 					storageNode = tr.hbStorage.root()
 				} else {
 					tr.a.Root = EmptyRoot
@@ -381,7 +375,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	if boltDB == nil {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
-	tr.dbBolt = boltDB
 
 	var err error
 	if historical {
@@ -458,39 +451,27 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
 		tr.succStorage.Reset()
-		tr.accAddrHash = tr.accAddrHash[:0]
+		tr.seenAccount = false
 	}
 
-	if !isIH {
+	if !isIH && tr.seenAccount {
 		// skip storage keys:
 		// - if it has wrong incarnation
 		// - if it abandoned (account deleted)
-		if len(tr.accAddrHash) > 0 {
-			if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
-				if tr.trace {
-					fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
-				}
-				return nil
+		if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
+			if tr.trace {
+				fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
 			}
-
-			// skip ih or storage if it has another incarnation
-			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-			if !bytes.HasPrefix(k, accWithInc) {
-				if tr.trace {
-					fmt.Printf("WalkerStorage: skip, not match accWithInc=%x\n", accWithInc)
-				}
-
-				return nil
-			}
+			return nil
 		}
-	} else {
-		if len(tr.accAddrHash) > 0 {
-			accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-			if !bytes.HasPrefix(k, accWithInc) {
-				if tr.trace {
-					fmt.Printf("WalkerStorage: weird IH=%x, accWithInc=%x\n", k, accWithInc)
-				}
+
+		// skip ih or storage if it has another incarnation
+		if !bytes.HasPrefix(k, tr.accAddrHashWithInc) {
+			if tr.trace {
+				fmt.Printf("WalkerStorage: skip, not match accWithInc=%x\n", tr.accAddrHashWithInc)
 			}
+
+			return nil
 		}
 	}
 
@@ -574,7 +555,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
 		tr.succStorage.Reset()
-		tr.accAddrHash = tr.accAddrHash[:0]
+		tr.seenAccount = false
 	}
 	if len(v) > 0 {
 		tr.curr.Reset()
@@ -610,7 +591,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					tr.a.Root = EmptyRoot
 				} else {
 					if tr.trace {
-						fmt.Printf("Finalising storage root for %x\n", tr.accAddrHash)
+						fmt.Printf("Finalising storage root for %x\n", tr.accAddrHashWithInc)
 					}
 					err = tr.finaliseStorageRoot()
 					if err != nil {
@@ -618,7 +599,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 					}
 
 					if tr.hbStorage.hasRoot() {
-						tr.a.Root.SetBytes(common.CopyBytes(tr.hbStorage.rootHash().Bytes()))
+						tr.a.Root.SetBytes(tr.hbStorage.rootHash().Bytes())
 						storageNode = tr.hbStorage.root()
 						if tr.trace {
 							fmt.Printf("Got root: %x\n", tr.a.Root)
@@ -677,15 +658,16 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		if isIH {
 			tr.value.Reset()
 			tr.value.Write(v)
-			tr.accAddrHash = tr.accAddrHash[:0]
+			tr.seenAccount = false
 			return nil
 		}
 
 		if err := tr.a.DecodeForStorage(v); err != nil {
 			return fmt.Errorf("fail DecodeForStorage: %w", err)
 		}
-		tr.accAddrHash = tr.accAddrHash[:0]
-		tr.accAddrHash = append(tr.accAddrHash, k...)
+		tr.seenAccount = true
+		copy(tr.accAddrHashWithInc, k)
+		binary.BigEndian.PutUint64(tr.accAddrHashWithInc[32:40], ^tr.a.Incarnation)
 	}
 
 	return nil
@@ -740,7 +722,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				cmp := int(-1)
 				for cmp != 0 {
 					startKeyIndex := fixedbytes - 1
-					minKeyIndex := minInt(len(minKey), fixedbytes-1)
+					minKeyIndex := min(len(minKey), fixedbytes-1)
 					startKeyIndexIsBigger := startKeyIndex > minKeyIndex
 					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					if tr.trace {
@@ -807,14 +789,13 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					}
 				}
 				for k, v = c.Next(); k != nil; k, v = c.Next() {
-					if len(k) > 32 && len(tr.accAddrHash) > 0 {
+					if len(k) > common.HashLength && tr.seenAccount {
 						if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
 							continue
 						}
 
 						// skip ih or storage if it has another incarnation
-						accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-						if !bytes.HasPrefix(k, accWithInc) {
+						if !bytes.HasPrefix(k, tr.accAddrHashWithInc) {
 							continue
 						}
 					}
@@ -824,9 +805,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			// ih part
-			if len(tr.accAddrHash) > 0 && len(ihK) > 32 { // skip IH with wrong incarnation
-				accWithInc := dbutils.GenerateStoragePrefix(tr.accAddrHash, tr.a.Incarnation)
-				if !bytes.HasPrefix(ihK, accWithInc) {
+			if len(ihK) > common.HashLength && tr.seenAccount { // skip IH with wrong incarnation
+				if !bytes.HasPrefix(ihK, tr.accAddrHashWithInc) {
 					ihK, ihV = ih.Next() // go to children, not to sibling
 					continue
 				}
@@ -843,7 +823,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			if len(ihK) > 32 {
+			if len(ihK) > common.HashLength {
 				canUseIntermediateHash = tr.rss[rangeIdx].HashOnly(append(minKeyAsNibbles.B[:common.HashLength*2], minKeyAsNibbles.B[common.HashLength*2+16:]...))
 				if tr.trace {
 					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
@@ -891,10 +871,6 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		return nil
 	})
 	return err
-}
-
-func minInt(i1, i2 int) int {
-	return int(math.Min(float64(i1), float64(i2)))
 }
 
 // nextSubtree does []byte++. Returns false if overflow.
