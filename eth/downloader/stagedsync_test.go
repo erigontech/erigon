@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -18,18 +18,18 @@ import (
 )
 
 type stagedSyncTester struct {
-	downloader *Downloader
-	db         ethdb.Database
-	peers      map[string]*stagedSyncTesterPeer
-	genesis    *types.Block
+	downloader    *Downloader
+	db            ethdb.Database
+	peers         map[string]*stagedSyncTesterPeer
+	genesis       *types.Block
 	currentHeader *types.Header
-	lock       sync.RWMutex
+	lock          sync.RWMutex
 }
 
 func newStagedSyncTester() *stagedSyncTester {
 	tester := &stagedSyncTester{
-		peers:      make(map[string]*stagedSyncTesterPeer),
-		genesis:    testGenesis,
+		peers:   make(map[string]*stagedSyncTesterPeer),
+		genesis: testGenesis,
 	}
 	tester.db = ethdb.NewMemDatabase()
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
@@ -195,7 +195,7 @@ func (st *stagedSyncTester) NotifyHeightKnownBlock(_ uint64) {
 func (st *stagedSyncTester) Rollback(hashes []common.Hash) {
 	fmt.Printf("Rollback %d\n", len(hashes))
 	//for _, hash := range hashes {
-		//fmt.Printf("%x\n", hash)
+	//fmt.Printf("%x\n", hash)
 	//}
 	panic("")
 }
