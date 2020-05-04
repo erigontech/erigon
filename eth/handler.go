@@ -1122,7 +1122,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles(), nil)
 				rr.RequiresRLP = true
 
-				resolver := trie.NewResolver(0, block.NumberU64())
+				resolver := trie.NewResolver(block.NumberU64())
 				resolver.SetHistorical(true)
 				resolver.AddRequest(rr)
 
@@ -1182,7 +1182,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
 					rr.RequiresRLP = true
 
-					resolver := trie.NewResolver(0, block.NumberU64())
+					resolver := trie.NewResolver(block.NumberU64())
 					resolver.SetHistorical(true)
 					resolver.AddRequest(rr)
 
