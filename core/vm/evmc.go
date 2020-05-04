@@ -26,8 +26,7 @@ import (
 	"strings"
 	"sync"
 
-	// had to fork due to an issue with go modules
-	"github.com/ledgerwatch/turbo-geth/evmc"
+	"github.com/ledgerwatch/evmc/bindings/go/evmc"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"

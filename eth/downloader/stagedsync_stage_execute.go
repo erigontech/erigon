@@ -45,7 +45,6 @@ func (l *progressLogger) Start(numberRef *uint64) {
 				printFunc()
 			case <-l.quit:
 				printFunc()
-				fmt.Println("quiting")
 				return
 			}
 		}

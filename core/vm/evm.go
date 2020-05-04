@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/evmc/bindings/go/evmc"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/evmc"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
