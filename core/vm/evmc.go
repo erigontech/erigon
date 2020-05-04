@@ -98,7 +98,7 @@ func initEVMC(cap evmc.Capability, config string) *evmc.VM {
 	}
 
 	if !instance.HasCapability(cap) {
-		panic(fmt.Errorf("The EVMC module %s does not have requested capability %d", path, cap))
+		panic(fmt.Errorf("the EVMC module %s does not have requested capability %d", path, cap))
 	}
 	return instance
 }
