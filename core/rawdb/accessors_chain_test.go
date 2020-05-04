@@ -21,15 +21,14 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math/big"
-	"testing"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
+	"math/big"
+	"testing"
 )
 
 // Tests block header storage and retrieval operations.
