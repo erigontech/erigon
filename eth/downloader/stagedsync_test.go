@@ -285,4 +285,10 @@ func TestUnwind(t *testing.T) {
 	if err := tester.sync("peer", big.NewInt(1000)); err != nil {
 		t.Fatal(err)
 	}
+	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.sync("forkpeer", big.NewInt(2000)); err != nil {
+		t.Fatal(err)
+	}
 }
