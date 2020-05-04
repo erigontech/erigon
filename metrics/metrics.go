@@ -92,7 +92,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		diskWrites            = GetOrRegisterMeter("system/disk/writecount", DefaultRegistry)
 		diskWriteBytes        = GetOrRegisterMeter("system/disk/writedata", DefaultRegistry)
 		diskWriteBytesCounter = GetOrRegisterCounter("system/disk/writebytes", DefaultRegistry)
+
+		// copy from prometheus client
+		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
+		goThreads    = GetOrRegisterGauge("go/threads", DefaultRegistry)
 	)
+
 	// Iterate loading the different stats and updating the meters
 	for i := 1; ; i++ {
 		location1 := i % 2
@@ -121,6 +126,11 @@ func CollectProcessMetrics(refresh time.Duration) {
 			diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
 			diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
 		}
+
+		goGoroutines.Update(int64(runtime.NumGoroutine()))
+		n, _ := runtime.ThreadCreateProfile(nil)
+		goThreads.Update(int64(n))
+
 		time.Sleep(refresh)
 	}
 }
