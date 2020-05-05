@@ -553,3 +553,36 @@ func BenchmarkWalkStorage(t *testing.B) {
 func formatTestName(elements, keys int) string {
 	return fmt.Sprintf("elements: %d keys: %d", elements, keys)
 }
+
+// TestDefaultIncarnationCompress is a encoding-specific test that may need to be
+// adjusted if the encoding changes. This tests checks that default incarnations are
+// getting compressed
+func TestDefaultIncarnationCompress(t *testing.T) {
+	// We create two changsets, with the same data, except for the incarnation
+	// First changeset has incarnation == defaultIncarnation, which should be compressed
+	// Second changeset has incarnation == defautIncarnation+1, which would not be compressed
+	ch1 := NewStorageChangeSet()
+	addrHash, _ := common.HashData([]byte("addrHash"))
+	key, _ := common.HashData([]byte("key"))
+	val, _ := common.HashData([]byte("val"))
+	err := ch1.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b1, err1 := EncodeStorage(ch1)
+	if err1 != nil {
+		t.Fatal(err1)
+	}
+	ch2 := NewStorageChangeSet()
+	err = ch2.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation+1, key), val.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err2 := EncodeStorage(ch2)
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if len(b1) >= len(b2) {
+		t.Errorf("first encoding should be shorter than the second, got %d >= %d", len(b1), len(b2))
+	}
+}
