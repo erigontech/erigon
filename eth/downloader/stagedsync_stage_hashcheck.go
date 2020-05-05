@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/pkg/errors"
@@ -33,7 +34,7 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 
-	resolver := trie.NewResolver(0, blockNr)
+	resolver := trie.NewResolver(blockNr)
 	resolver.AddRequest(rr)
 	err = resolver.ResolveStateful(euphemeralMutation, blockNr, false)
 	if err != nil {
