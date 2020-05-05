@@ -1359,34 +1359,6 @@ func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
 }
 
-func accountsEqual(a1, a2 *accounts.Account) bool {
-	if a1.Nonce != a2.Nonce {
-		return false
-	}
-	if !a1.Initialised {
-		if a2.Initialised {
-			return false
-		}
-	} else if !a2.Initialised {
-		return false
-	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
-		return false
-	}
-	if a1.Root != a2.Root {
-		return false
-	}
-	if a1.CodeHash == (common.Hash{}) {
-		if a2.CodeHash != (common.Hash{}) {
-			return false
-		}
-	} else if a2.CodeHash == (common.Hash{}) {
-		return false
-	} else if a1.CodeHash != a2.CodeHash {
-		return false
-	}
-	return true
-}
-
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
