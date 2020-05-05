@@ -210,6 +210,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledgerwatch/bolt v1.4.4 h1:Pg5gDqcZPXeLjZSjKrVX5PeCrbWwCyr1il9BNi/+D/Q=
 github.com/ledgerwatch/bolt v1.4.4/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
+github.com/ledgerwatch/bolt v1.4.5-0.20200504044242-1f3c42ebc79a h1:MJk6Kk51ajOk1EtJb7YLMpj5xzJxgN3WD4rVC7t2pbc=
+github.com/ledgerwatch/bolt v1.4.5-0.20200504044242-1f3c42ebc79a/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
 github.com/ledgerwatch/evmc v0.0.0-20200504091739-ff42f8728484 h1:BjoLyGk3U8aTwE8kFhguCmY8FB9/B2wJpZvAYukzTg8=
 github.com/ledgerwatch/evmc v0.0.0-20200504091739-ff42f8728484/go.mod h1:zksoLdxVOLOs9I13pxQccQfJmo6uoyExp4Jv7pELgjM=
 github.com/ledgerwatch/evmc v1.7.1999 h1:nszxT9Tu7U3Ie4LE7aOQQRXfPk7S4x+BF1Vl0AqKTt0=
@@ -396,6 +398,8 @@ golang.org/x/sys v0.0.0-20200116001909-b77594299b42/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20200302150141-5c8b2ff67527 h1:uYVVQ9WP/Ds2ROhcaGPeIdVq0RIXVLwsHlnvJ+cT1So=
 golang.org/x/sys v0.0.0-20200302150141-5c8b2ff67527/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20200501145240-bc7a7d42d5c3 h1:5B6i6EAiSYyejWfvc5Rc9BbI3rzIsrrXfAQBWnYfn+w=
+golang.org/x/sys v0.0.0-20200501145240-bc7a7d42d5c3/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.2 h1:tW2bmiBqwgJj/UpqtC8EpXEZVYOwU0yG4iWbprSVAcs=
 golang.org/x/text v0.3.2/go.mod h1:bEr9sfX3Q8Zfm5fL9x+3itogRgK3+ptLWKqgva+5dAk=
