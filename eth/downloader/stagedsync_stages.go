@@ -62,11 +62,15 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 // unwinding needs to have in the reverse order of stages
 func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
 	for stage := Headers + 1; stage < Finish; stage++ {
-		existingPoint, err := GetStageUnwind(db, stage)
+		existingUnwindPoint, err := GetStageUnwind(db, stage)
 		if err != nil {
 			return err
 		}
-		if existingPoint > 0 && existingPoint > unwindPoint {
+		progress, err1 := GetStageProgress(db, stage)
+		if err1 != nil {
+			return err1
+		}
+		if (existingUnwindPoint == 0 || existingUnwindPoint > unwindPoint) && unwindPoint < progress {
 			// Only lower, not higher
 			err = SaveStageUnwind(db, stage, unwindPoint)
 			if err != nil {

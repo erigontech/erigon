@@ -7,8 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -80,12 +85,6 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	*/
 
 	mutation := d.stateDB.NewBatch()
-	defer func() {
-		_, dbErr := mutation.Commit()
-		if dbErr != nil {
-			log.Error("Sync (Execution): failed to write db commit", "err", dbErr)
-		}
-	}()
 
 	progressLogger := NewProgressLogger(logInterval)
 	progressLogger.Start(&nextBlockNumber)
@@ -98,7 +97,6 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 		block := d.blockchain.GetBlockByNumber(blockNum)
 		if block == nil {
-			fmt.Printf("block %d nil\n", nextBlockNumber)
 			break
 		}
 		stateReader := state.NewDbStateReader(mutation)
@@ -130,10 +128,97 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			}
 		*/
 	}
-
+	_, err = mutation.Commit()
+	if err != nil {
+		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write db commit: %v", err)
+	}
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
 
 func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
-	return fmt.Errorf("unwindExecutionStage not implemented")
+	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
+	if err != nil {
+		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
+	}
+	unwindPoint, err1 := GetStageUnwind(d.stateDB, Execution)
+	if err1 != nil {
+		return err1
+	}
+	if unwindPoint >= lastProcessedBlockNumber {
+		err = SaveStageUnwind(d.stateDB, Execution, 0)
+		if err != nil {
+			return fmt.Errorf("unwind Execution: reset: %v", err)
+		}
+		return nil
+	}
+	log.Info("Unwdind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
+	mutation := d.stateDB.NewBatch()
+	accountMap, storageMap, err2 := d.stateDB.RewindData(lastProcessedBlockNumber, unwindPoint)
+	if err2 != nil {
+		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
+	}
+	for key, value := range accountMap {
+		var addrHash common.Hash
+		copy(addrHash[:], []byte(key))
+		if len(value) > 0 {
+			var acc accounts.Account
+			if err = acc.DecodeForStorage(value); err != nil {
+				return err
+			}
+			// Fetch the code hash
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err2 := d.stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
+					copy(acc.CodeHash[:], codeHash)
+				}
+			}
+			if err = rawdb.WriteAccount(mutation, addrHash, acc); err != nil {
+				return err
+			}
+		} else {
+			if err = rawdb.DeleteAccount(mutation, addrHash); err != nil {
+				return err
+			}
+		}
+	}
+	for key, value := range storageMap {
+		var addrHash common.Hash
+		copy(addrHash[:], []byte(key)[:common.HashLength])
+		var keyHash common.Hash
+		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
+		if len(value) > 0 {
+			if err = mutation.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+				return err
+			}
+		} else {
+			if err = mutation.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i := lastProcessedBlockNumber; i > unwindPoint; i-- {
+		if err = deleteChangeSets(mutation, i); err != nil {
+			return err
+		}
+	}
+	err = SaveStageUnwind(mutation, Execution, 0)
+	if err != nil {
+		return fmt.Errorf("unwind Execution: reset: %v", err)
+	}
+	_, err = mutation.Commit()
+	if err != nil {
+		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
+	}
+	return nil
+}
+
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64) error {
+	changeSetKey := dbutils.EncodeTimestamp(timestamp)
+	if err := batch.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+		return err
+	}
+	if err := batch.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+		return err
+	}
+	return nil
 }

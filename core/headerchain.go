@@ -24,7 +24,6 @@ import (
 	"math"
 	"math/big"
 	mrand "math/rand"
-	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -150,7 +149,6 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 	// Calculate the total difficulty of the header
 	ptd := hc.GetTd(hc.chainDb, header.ParentHash, number-1)
 	if ptd == nil {
-		fmt.Printf("%s\n", debug.Stack())
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
 	localTd := hc.GetTd(hc.chainDb, hc.currentHeaderHash, hc.CurrentHeader().Number.Uint64())

@@ -45,5 +45,31 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 }
 
 func (d *Downloader) unwindHashCheckStage(unwindPoint uint64) error {
-	return fmt.Errorf("unwindHashCheckStage not implemented")
+	// Currently it does not require unwinding because it does not create any Intemediate Hash records
+	// and recomputes the state root from scratch
+	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, HashCheck)
+	if err != nil {
+		return fmt.Errorf("unwind HashCheck: get stage progress: %v", err)
+	}
+	unwindPoint, err1 := GetStageUnwind(d.stateDB, HashCheck)
+	if err1 != nil {
+		return err1
+	}
+	if unwindPoint >= lastProcessedBlockNumber {
+		err = SaveStageUnwind(d.stateDB, HashCheck, 0)
+		if err != nil {
+			return fmt.Errorf("unwind HashCheck: reset: %v", err)
+		}
+		return nil
+	}
+	mutation := d.stateDB.NewBatch()
+	err = SaveStageUnwind(mutation, HashCheck, 0)
+	if err != nil {
+		return fmt.Errorf("unwind HashCheck: reset: %v", err)
+	}
+	_, err = mutation.Commit()
+	if err != nil {
+		return fmt.Errorf("unwind HashCheck: failed to write db commit: %v", err)
+	}
+	return nil
 }

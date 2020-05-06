@@ -2157,7 +2157,7 @@ func (bc *BlockChain) insertHeaderChainStaged(chain []*types.Header) (int, int, 
 		}
 		if status == CanonStatTy {
 			number := header.Number.Uint64()
-			if newCanonical || number < lowestCanonicalNumber {
+			if !newCanonical || number < lowestCanonicalNumber {
 				lowestCanonicalNumber = number
 				newCanonical = true
 			}

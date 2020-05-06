@@ -111,7 +111,8 @@ func (st *stagedSyncTester) GetBlockByNumber(number uint64) *types.Block {
 
 // GetHeaderByHash is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) GetHeaderByHash(hash common.Hash) *types.Header {
-	panic("")
+	number := rawdb.ReadHeaderNumber(st.db, hash)
+	return rawdb.ReadHeader(st.db, hash, *number)
 }
 
 // GetTd is part of the implementation of BlockChain interface defined in downloader.go
@@ -164,24 +165,59 @@ func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, che
 			return i, false, 0, errors.New("unknown parent")
 		}
 	}
+	var newCanonical bool
+	var lowestCanonicalNumber uint64
 	// Do a full insert if pre-checks passed
 	for i, header := range headers {
 		if rawdb.ReadHeaderNumber(st.db, header.Hash()) != nil {
 			continue
 		}
 		if rawdb.ReadHeaderNumber(st.db, header.ParentHash) == nil {
-			return i, false, 0, errors.New("unknown parent")
+			return i, newCanonical, lowestCanonicalNumber, fmt.Errorf("unknown parent %x", header.ParentHash)
 		}
-		ptd := rawdb.ReadTd(st.db, header.ParentHash, header.Number.Uint64()-1)
-		if ptd == nil {
-			fmt.Printf("ptd == nil for block %d\n", header.Number.Uint64()-1)
+		number := header.Number.Uint64()
+		ptd := rawdb.ReadTd(st.db, header.ParentHash, number-1)
+		externTd := ptd.Add(ptd, header.Difficulty)
+		localTd := rawdb.ReadTd(st.db, st.currentHeader.Hash(), st.currentHeader.Number.Uint64())
+		if externTd.Cmp(localTd) > 0 {
+			batch := st.db.NewBatch()
+			// Delete any canonical number assignments above the new head
+			for i := number + 1; ; i++ {
+				hash := rawdb.ReadCanonicalHash(st.db, i)
+				if hash == (common.Hash{}) {
+					break
+				}
+				rawdb.DeleteCanonicalHash(batch, i)
+			}
+			// Overwrite any stale canonical number assignments
+			var (
+				headHash   = header.ParentHash
+				headNumber = number - 1
+				headHeader = rawdb.ReadHeader(st.db, headHash, headNumber)
+			)
+			for rawdb.ReadCanonicalHash(st.db, headNumber) != headHash {
+				rawdb.WriteCanonicalHash(batch, headHash, headNumber)
+
+				headHash = headHeader.ParentHash
+				headNumber--
+				headHeader = rawdb.ReadHeader(st.db, headHash, headNumber)
+			}
+			if _, err := batch.Commit(); err != nil {
+				return i, newCanonical, lowestCanonicalNumber, fmt.Errorf("write header markers into disk: %v", err)
+			}
+			// Last step update all in-memory head header markers
+			st.currentHeader = types.CopyHeader(header)
+			if !newCanonical || number < lowestCanonicalNumber {
+				lowestCanonicalNumber = number
+				newCanonical = true
+			}
 		}
-		rawdb.WriteTd(st.db, header.Hash(), header.Number.Uint64(), ptd.Add(ptd, header.Difficulty))
+		rawdb.WriteTd(st.db, header.Hash(), header.Number.Uint64(), externTd)
 		rawdb.WriteHeader(context.Background(), st.db, header)
 		rawdb.WriteCanonicalHash(st.db, header.Hash(), header.Number.Uint64())
 		st.currentHeader = header
 	}
-	return len(headers), false, uint64(len(headers)), nil
+	return len(headers), newCanonical, lowestCanonicalNumber, nil
 }
 
 // InsertHeaderChain is part of the implementation of BlockChain interface defined in downloader.go
@@ -279,10 +315,16 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 
 func TestUnwind(t *testing.T) {
 	tester := newStagedSyncTester()
-	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
 	}
-	if err := tester.sync("peer", big.NewInt(1000)); err != nil {
+	if err := tester.sync("peer", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
 	}
 }

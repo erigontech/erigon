@@ -6,8 +6,21 @@ import (
 )
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
+	log.Info("Sync stage 1/5. Downloading headers...")
+
+	var err error
+
+	/*
+	* Stage 1. Download Headers
+	 */
+	if err = d.spawnSync(headersFetchers); err != nil {
+		return err
+	}
+
+	log.Info("Sync stage 1/5. Downloading headers... Complete!")
+	log.Info("Checking for unwinding...")
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
-	for stage := Finish - 1; stage > Headers; stage++ {
+	for stage := Finish - 1; stage > Headers; stage-- {
 		unwindPoint, err := GetStageUnwind(d.stateDB, stage)
 		if err != nil {
 			return err
@@ -31,19 +44,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 			return fmt.Errorf("error unwinding stage: %d: %v", stage, err)
 		}
 	}
-
-	log.Info("Sync stage 1/5. Downloading headers...")
-
-	var err error
-
-	/*
-	* Stage 1. Download Headers
-	 */
-	if err = d.spawnSync(headersFetchers); err != nil {
-		return err
-	}
-
-	log.Info("Sync stage 1/5. Downloading headers... Complete!")
+	log.Info("Checking for unwinding... Complete!")
 	log.Info("Sync stage 2/5. Downloading block bodies...")
 
 	/*
