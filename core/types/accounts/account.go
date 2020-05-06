@@ -17,13 +17,11 @@ import (
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
 	Initialised    bool
-	HasStorageSize bool
 	Nonce          uint64
 	Balance        big.Int
 	Root           common.Hash // merkle root of the storage trie
 	CodeHash       common.Hash // hash of the bytecode
 	Incarnation    uint64
-	StorageSize    uint64
 }
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -64,10 +62,6 @@ func (a *Account) EncodingLengthForStorage() uint {
 		structLength += 33 // 32-byte array + 1 bytes for length
 	}
 
-	if a.HasStorageSize {
-		structLength += uint((bits.Len64(a.StorageSize)+7)/8) + 1
-	}
-
 	if a.Incarnation > 0 {
 		structLength += uint((bits.Len64(a.Incarnation)+7)/8) + 1
 	}
@@ -94,17 +88,8 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 	structLength += uint(balanceBytes + nonceBytes + 2)
 
+	//todo why do we need it?
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
-
-	if a.HasStorageSize {
-		var storageSizeBytes int
-		if a.StorageSize < 128 && a.StorageSize != 0 {
-			storageSizeBytes = 0
-		} else {
-			storageSizeBytes = (bits.Len64(a.StorageSize) + 7) / 8
-		}
-		structLength += uint(storageSizeBytes + 1)
-	}
 
 	if structLength < 56 {
 		return 1 + structLength
@@ -169,19 +154,7 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 		fieldSet |= 8
 		buffer[pos] = 32
 		copy(buffer[pos+1:], a.CodeHash.Bytes())
-		pos += 33
-	}
-	// Encoding StorageSize
-	if a.HasStorageSize {
-		fieldSet |= 16
-		storageSizeBytes := (bits.Len64(a.StorageSize) + 7) / 8
-		buffer[pos] = byte(storageSizeBytes)
-		var storageSize = a.StorageSize
-		for i := storageSizeBytes; i > 0; i-- {
-			buffer[pos+i] = byte(storageSize)
-			storageSize >>= 8
-		}
-		// pos += storageSizeBytes + 1
+		//pos += 33
 	}
 
 	buffer[0] = byte(fieldSet)
@@ -243,17 +216,6 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
-	var storageSizeBytes int
-	if a.HasStorageSize {
-		if a.StorageSize < 128 && a.StorageSize != 0 {
-			storageSizeBytes = 0
-		} else {
-			storageSizeBytes = (bits.Len64(a.StorageSize) + 7) / 8
-		}
-
-		structLength += uint(storageSizeBytes + 1)
-	}
-
 	var pos int
 	if structLength < 56 {
 		buffer[0] = byte(192 + structLength)
@@ -313,23 +275,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	buffer[pos] = 128 + 32
 	pos++
 	copy(buffer[pos:], a.CodeHash[:])
-	pos += 32
-
-	// Encoding StorageSize
-	if a.HasStorageSize {
-		if a.StorageSize < 128 && a.StorageSize != 0 {
-			buffer[pos] = byte(a.StorageSize)
-		} else {
-			buffer[pos] = byte(128 + storageSizeBytes)
-			storageSize := a.StorageSize
-			for i := storageSizeBytes; i > 0; i-- {
-				buffer[pos+i] = byte(storageSize)
-				storageSize >>= 8
-			}
-		}
-		// Commented out because of the ineffectual assignment - uncomment if adding more fields
-		//pos += 1 + storageSizeBytes
-	}
+	//pos += 32
 }
 
 // Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
@@ -340,8 +286,6 @@ func (a *Account) Copy(image *Account) {
 	copy(a.Root[:], image.Root[:])
 	copy(a.CodeHash[:], image.CodeHash[:])
 	a.Incarnation = image.Incarnation
-	a.HasStorageSize = image.HasStorageSize
-	a.StorageSize = image.StorageSize
 	a.Incarnation = image.Incarnation
 }
 
@@ -364,8 +308,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 	a.Balance.SetInt64(0)
 	a.Root = emptyRoot
 	a.CodeHash = emptyCodeHash
-	a.StorageSize = 0
-	a.HasStorageSize = false
 	if length == 0 && structure {
 		return nil
 	}
@@ -512,9 +454,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 			// Commented out because of the ineffectual assignment - uncomment if adding more fields
 			//pos = newPos + storageSizeBytes
 		}
-
-		a.StorageSize = storageSize
-		a.HasStorageSize = true
 	}
 	return nil
 }
@@ -526,8 +465,6 @@ func (a *Account) Reset() {
 	a.Balance.SetInt64(0)
 	copy(a.Root[:], emptyRoot[:])
 	copy(a.CodeHash[:], emptyCodeHash[:])
-	a.StorageSize = 0
-	a.HasStorageSize = false
 }
 
 func (a *Account) DecodeForStorage(enc []byte) error {
@@ -597,20 +534,6 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		pos += decodeLength + 1
 	}
 
-	if fieldSet&16 > 0 {
-		decodeLength := int(enc[pos])
-
-		if len(enc) < pos+decodeLength+1 {
-			return fmt.Errorf(
-				"malformed CBOR for Account.StorageSize: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		a.StorageSize = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
-		a.HasStorageSize = true
-		// pos += decodeLength + 1
-	}
-
 	return nil
 }
 
@@ -650,7 +573,5 @@ func (a *Account) Equals(acc *Account) bool {
 	return a.Nonce == acc.Nonce &&
 		a.CodeHash == acc.CodeHash &&
 		a.Balance.Cmp(&acc.Balance) == 0 &&
-		a.Incarnation == acc.Incarnation &&
-		a.HasStorageSize == acc.HasStorageSize &&
-		a.StorageSize == acc.StorageSize
+		a.Incarnation == acc.Incarnation
 }

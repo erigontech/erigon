@@ -432,25 +432,6 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 	return false
 }
 
-func (sdb *IntraBlockState) StorageSize(addr common.Address) (bool, uint64) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
-	if sdb.tracer != nil {
-		err := sdb.tracer.CaptureAccountRead(addr)
-		if sdb.trace {
-			fmt.Println("CaptureAccountRead err", err)
-		}
-
-	}
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.StorageSize()
-	}
-
-	return false, 0
-}
-
 /*
  * SETTERS
  */
@@ -609,56 +590,9 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
-func (sdb *IntraBlockState) IncreaseStorageSize(addr common.Address) {
-	sdb.changeStorageSize(addr, 1)
-}
-
-func (sdb *IntraBlockState) DecreaseStorageSize(addr common.Address) {
-	sdb.changeStorageSize(addr, -1)
-}
 
 var nullLocation = common.Hash{}
 var nullValue = common.Big0
-
-func (sdb *IntraBlockState) SetStorageSize(addr common.Address, currentLocation common.Hash, newLocation common.Hash, val *big.Int) {
-	switch {
-	case currentLocation == nullLocation && val.Cmp(nullValue) != 0:
-		// new value case
-		sdb.IncreaseStorageSize(addr)
-	case newLocation != nullLocation && currentLocation != nullLocation && val.Cmp(nullValue) == 0:
-		// remove value case
-		sdb.DecreaseStorageSize(addr)
-	}
-}
-
-func (sdb *IntraBlockState) changeStorageSize(addr common.Address, sizeDiff int64) {
-	sdb.Lock()
-	if sdb.tracer != nil {
-		err := sdb.tracer.CaptureAccountWrite(addr)
-		if sdb.trace {
-			fmt.Println("CaptureAccountWrite err", err)
-		}
-	}
-	sdb.Unlock()
-
-	stateObject := sdb.GetOrNewStateObject(addr)
-	if stateObject == nil {
-		return
-	}
-
-	hasSize, size := sdb.StorageSize(addr)
-	if !hasSize {
-		size = HugeNumber
-	}
-
-	if sizeDiff >= 0 {
-		size += uint64(sizeDiff)
-	} else {
-		size -= uint64(-sizeDiff)
-	}
-
-	stateObject.SetStorageSize(size)
-}
 
 // do not lock!!!
 // Retrieve a state object given my the address. Returns nil if not found.

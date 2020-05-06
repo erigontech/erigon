@@ -644,16 +644,12 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			switch itemType {
 			case AccountStreamItem:
 				var a *accounts.Account = aVal
-				accData.StorageSize = a.StorageSize
 				accData.Balance.Set(&a.Balance)
 				accData.Nonce = a.Nonce
 				accData.Incarnation = a.Incarnation
 				aEmptyRoot = a.IsEmptyRoot()
 				copy(aRoot[:], a.Root[:])
 				fieldSet = AccountFieldSetNotContract // base level - nonce and balance
-				if a.HasStorageSize {
-					fieldSet += AccountFieldSSizeOnly
-				}
 				if !a.IsEmptyCodeHash() {
 					fieldSet += AccountFieldCodeHashOnly
 					if err := hb.hash(a.CodeHash[:]); err != nil {

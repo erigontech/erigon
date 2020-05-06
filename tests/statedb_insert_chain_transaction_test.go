@@ -325,7 +325,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	to := common.Address{1}
 
 	var contractAddress common.Address
-	eipContract := new(contracts.Eip2027)
+	eipContract := new(contracts.Testcontract)
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
@@ -333,7 +333,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 			fromKey,
 		},
 		1: {
-			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			getBlockDeployTestContractTx(data.transactOpts[0], &contractAddress, eipContract),
 			fromKey,
 		},
 	})
@@ -395,7 +395,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	to := common.Address{1}
 
 	var contractAddress common.Address
-	eipContract := new(contracts.Eip2027)
+	eipContract := new(contracts.Testcontract)
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
@@ -403,11 +403,11 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 			fromKey,
 		},
 		1: {
-			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			getBlockDeployTestContractTx(data.transactOpts[0], &contractAddress, eipContract),
 			fromKey,
 		},
 		2: {
-			getBlockEip2027Tx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
+			getBlockTestContractTx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
 			fromKey,
 		},
 	})
@@ -465,7 +465,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	to := common.Address{1}
 
 	var contractAddress common.Address
-	eipContract := new(contracts.Eip2027)
+	eipContract := new(contracts.Testcontract)
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
@@ -473,15 +473,15 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 			fromKey,
 		},
 		1: {
-			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			getBlockDeployTestContractTx(data.transactOpts[0], &contractAddress, eipContract),
 			fromKey,
 		},
 		2: {
-			getBlockEip2027Tx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
+			getBlockTestContractTx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
 			fromKey,
 		},
 		3: {
-			getBlockEip2027Tx(data.transactOpts[0], eipContract.Update, big.NewInt(0)),
+			getBlockTestContractTx(data.transactOpts[0], eipContract.Update, big.NewInt(0)),
 			fromKey,
 		},
 	})
@@ -544,7 +544,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	to := common.Address{1}
 
 	var contractAddress common.Address
-	eipContract := new(contracts.Eip2027)
+	eipContract := new(contracts.Testcontract)
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
@@ -552,15 +552,15 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 			fromKey,
 		},
 		1: {
-			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			getBlockDeployTestContractTx(data.transactOpts[0], &contractAddress, eipContract),
 			fromKey,
 		},
 		2: {
-			getBlockEip2027Tx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
+			getBlockTestContractTx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
 			fromKey,
 		},
 		3: {
-			getBlockEip2027Tx(data.transactOpts[0], eipContract.Remove),
+			getBlockTestContractTx(data.transactOpts[0], eipContract.Remove),
 			fromKey,
 		},
 	})
@@ -729,9 +729,9 @@ func getBlockTx(from common.Address, to common.Address, amount *big.Int) blockTx
 	}
 }
 
-func getBlockDeployEip2027Tx(transactOpts *bind.TransactOpts, contractAddress *common.Address, eipContract *contracts.Eip2027) blockTx {
+func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddress *common.Address, eipContract *contracts.Testcontract) blockTx {
 	return func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool) {
-		contractAddressRes, tx, eipContractRes, err := contracts.DeployEip2027(transactOpts, backend)
+		contractAddressRes, tx, eipContractRes, err := contracts.DeployTestcontract(transactOpts, backend)
 		if err != nil {
 			panic(err)
 		}
@@ -743,7 +743,7 @@ func getBlockDeployEip2027Tx(transactOpts *bind.TransactOpts, contractAddress *c
 	}
 }
 
-func getBlockEip2027Tx(transactOpts *bind.TransactOpts, contractCall interface{}, newBalance ...*big.Int) blockTx {
+func getBlockTestContractTx(transactOpts *bind.TransactOpts, contractCall interface{}, newBalance ...*big.Int) blockTx {
 	return func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool) {
 		var (
 			tx  *types.Transaction

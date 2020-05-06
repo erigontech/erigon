@@ -218,10 +218,6 @@ func (w *wizard) manageGenesis() {
 		w.conf.Genesis.Config.EIP158Block = w.readDefaultBigInt(w.conf.Genesis.Config.EIP158Block)
 
 		fmt.Println()
-		fmt.Printf("Which block should EIP2027 come into effect? (default = %v)\n", w.conf.Genesis.Config.EIP2027Block)
-		w.conf.Genesis.Config.EIP2027Block = w.readDefaultBigInt(w.conf.Genesis.Config.EIP2027Block)
-
-		fmt.Println()
 		fmt.Printf("Which block should Byzantium come into effect? (default = %v)\n", w.conf.Genesis.Config.ByzantiumBlock)
 		w.conf.Genesis.Config.ByzantiumBlock = w.readDefaultBigInt(w.conf.Genesis.Config.ByzantiumBlock)
 
