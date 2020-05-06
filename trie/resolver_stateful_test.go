@@ -374,7 +374,7 @@ func TestApiDetails(t *testing.T) {
 	tr := New(common.Hash{})
 	{
 		resolver := NewResolver(0)
-		expectRootHash := common.HexToHash("49073ad1a55df443bb670521e9713839c15507d06e810db06079f37eabd541c8")
+		expectRootHash := common.HexToHash("9a87eff1bc257a70e62dd81ed4b5d210beb305ecdeec9ff497c717ea1c3794d4")
 
 		resolver.AddRequest(tr.NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
 		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
