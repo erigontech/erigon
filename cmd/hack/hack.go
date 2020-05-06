@@ -1936,7 +1936,7 @@ func resetState(chaindata string) {
 	err = db.DeleteBucket(dbutils.AccountChangeSetBucket)
 	check(err)
 	err = db.DeleteBucket(dbutils.StorageChangeSetBucket)
-	_,_,err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.Execution, 0)
 	check(err)
