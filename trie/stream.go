@@ -583,6 +583,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
 	var aRoot common.Hash
 	var aEmptyRoot = true
+	var isAccount bool
 	var fieldSet uint32
 	var itemType, sItemType StreamItem
 	var hashData GenStructStepHashData
@@ -597,7 +598,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		if hashRef != nil {
 			copy(hashData.Hash[:], hashRef)
 			return &hashData
-		} else if fieldSet == AccountFieldSetNotAccount {
+		} else if !isAccount {
 			leafData.Value = rlphacks.RlpSerializableBytes(value.Bytes())
 			return &leafData
 		} else {
@@ -615,6 +616,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				currStorage.Write(succStorage.Bytes())
 				succStorage.Reset()
 				if currStorage.Len() > 0 {
+					isAccount = false
 					var err error
 					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 					if err != nil {
@@ -634,6 +636,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			succ.Reset()
 			succ.Write(hex)
 			if curr.Len() > 0 {
+				isAccount = true
 				var err error
 				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 				if err != nil {
@@ -677,6 +680,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			succStorage.Reset()
 			succStorage.Write(hex[2*storagePrefixLen+1:])
 			if currStorage.Len() > 0 {
+				isAccount = false
 				var err error
 				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 				if err != nil {
@@ -701,6 +705,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		currStorage.Write(succStorage.Bytes())
 		succStorage.Reset()
 		if currStorage.Len() > 0 {
+			isAccount = false
 			var err error
 			_, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 			if err != nil {
@@ -719,6 +724,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	if curr.Len() > 0 {
+		isAccount = true
 		var err error
 		_, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 		if err != nil {

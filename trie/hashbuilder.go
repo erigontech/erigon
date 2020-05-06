@@ -264,13 +264,13 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
-	if fieldSet & AccountFieldStorageOnly != 0 {
+	if fieldSet&AccountFieldStorageOnly != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
 		copy(hb.acc.Root[:], EmptyRoot[:])
 	}
-	if fieldSet & AccountFieldCodeOnly != 0 {
+	if fieldSet&AccountFieldCodeOnly != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
