@@ -1208,13 +1208,19 @@ func (t *Trie) EvictNode(hex []byte) {
 	hnode := hashNode(hn[:])
 	t.observers.WillUnloadNode(hex, hn)
 
+	switch nd.(type) {
+	case *fullNode, *duoNode:
+		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
+	default:
+		// nothing to do
+	}
+
 	switch p := parent.(type) {
 	case nil:
 		t.root = hnode
 	case *shortNode:
 		p.Val = hnode
 	case *duoNode:
-		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
@@ -1223,7 +1229,6 @@ func (t *Trie) EvictNode(hex []byte) {
 			p.child2 = hnode
 		}
 	case *fullNode:
-		t.observers.WillUnloadBranchNode(hex, hn, incarnation)
 		idx := hex[len(hex)-1]
 		p.Children[idx] = hnode
 	case *accountNode:
