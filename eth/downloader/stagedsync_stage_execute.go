@@ -162,7 +162,7 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 		copy(addrHash[:], []byte(key))
 		if len(value) > 0 {
 			var acc accounts.Account
-			if err := acc.DecodeForStorage(value); err != nil {
+			if err = acc.DecodeForStorage(value); err != nil {
 				return err
 			}
 			// Fetch the code hash
@@ -171,11 +171,11 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 					copy(acc.CodeHash[:], codeHash)
 				}
 			}
-			if err := rawdb.WriteAccount(mutation, addrHash, acc); err != nil {
+			if err = rawdb.WriteAccount(mutation, addrHash, acc); err != nil {
 				return err
 			}
 		} else {
-			if err := rawdb.DeleteAccount(mutation, addrHash); err != nil {
+			if err = rawdb.DeleteAccount(mutation, addrHash); err != nil {
 				return err
 			}
 		}
@@ -186,11 +186,11 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 		var keyHash common.Hash
 		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
 		if len(value) > 0 {
-			if err := mutation.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+			if err = mutation.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err := mutation.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+			if err = mutation.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
 				return err
 			}
 		}
