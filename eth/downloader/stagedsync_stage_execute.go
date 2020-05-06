@@ -98,7 +98,6 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 		block := d.blockchain.GetBlockByNumber(blockNum)
 		if block == nil {
-			fmt.Printf("block %d nil\n", nextBlockNumber)
 			break
 		}
 		stateReader := state.NewDbStateReader(mutation)
