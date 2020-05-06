@@ -212,7 +212,7 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 	return nil
 }
 
-func deleteChangeSets(batch ethdb.Database, timestamp uint64) error {
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64) error {
 	changeSetKey := dbutils.EncodeTimestamp(timestamp)
 	if err := batch.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
 		return err
