@@ -334,21 +334,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Wed May 6 17:22:38 2020 +0300
 
     core/state/snapshot: don't create storage list for non-existing accounts
-
-commit 39c64d85a2af2c48c9b79447d2848c4f5f22446c
-Author: Boqin Qin <Bobbqqin@gmail.com>
-Date:   Wed May 6 21:47:59 2020 +0800
-
-    core: avoid double-lock in tx_pool_test (#20984)
-
-commit 234cc8e77f912ec33c1774e007e3f3a5065da426
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Wed May 6 15:35:04 2020 +0200
-
-    eth/downloader: minor typo fixes in comments (#21035)
-
-commit 5cdc2dffda5af375bd5e26216c525159354022aa
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed May 6 21:33:57 2020 +0800
-
-    trie: fix TestBadRangeProof unit test (#21034)
