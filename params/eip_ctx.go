@@ -12,7 +12,6 @@ const (
 	IsEIP150Enabled
 	IsEIP155Enabled
 	IsEIP158Enabled
-	IsEIP2027Enabled
 	IsByzantiumEnabled
 	IsConstantinopleEnabled
 	IsPetersburgEnabled
@@ -27,7 +26,6 @@ func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum *big.Int) cont
 	ctx = context.WithValue(ctx, IsEIP150Enabled, c.IsEIP150(blockNum))
 	ctx = context.WithValue(ctx, IsEIP155Enabled, c.IsEIP155(blockNum))
 	ctx = context.WithValue(ctx, IsEIP158Enabled, c.IsEIP158(blockNum))
-	ctx = context.WithValue(ctx, IsEIP2027Enabled, c.IsEIP2027(blockNum))
 	ctx = context.WithValue(ctx, IsByzantiumEnabled, c.IsByzantium(blockNum))
 	ctx = context.WithValue(ctx, IsConstantinopleEnabled, c.IsConstantinople(blockNum))
 	ctx = context.WithValue(ctx, IsPetersburgEnabled, c.IsPetersburg(blockNum))

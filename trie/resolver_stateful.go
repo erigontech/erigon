@@ -228,11 +228,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			if storageNode != nil || !tr.a.IsEmptyRoot() {
 				tr.accData.FieldSet |= AccountFieldStorageOnly
 			}
-			if tr.a.HasStorageSize {
-				tr.accData.FieldSet |= AccountFieldSSizeOnly
-			}
 
-			tr.accData.StorageSize = tr.a.StorageSize
 			tr.accData.Balance.Set(&tr.a.Balance)
 			if tr.a.Balance.Sign() != 0 {
 				tr.accData.FieldSet |= AccountFieldBalanceOnly
@@ -614,11 +610,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				if storageNode != nil || !tr.a.IsEmptyRoot() {
 					tr.accData.FieldSet |= AccountFieldStorageOnly
 				}
-				if tr.a.HasStorageSize {
-					tr.accData.FieldSet |= AccountFieldSSizeOnly
-				}
 
-				tr.accData.StorageSize = tr.a.StorageSize
 				tr.accData.Balance.Set(&tr.a.Balance)
 				if tr.a.Balance.Sign() != 0 {
 					tr.accData.FieldSet |= AccountFieldBalanceOnly

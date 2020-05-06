@@ -47,8 +47,6 @@ type IntraBlockState interface {
 	GetState(common.Address, common.Hash) common.Hash
 	SetState(common.Address, common.Hash, common.Hash)
 
-	SetStorageSize(addr common.Address, currentLocation common.Hash, newLocation common.Hash, val *big.Int)
-
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool
 
