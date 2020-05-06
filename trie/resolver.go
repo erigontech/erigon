@@ -21,24 +21,21 @@ type Resolver struct {
 	historical       bool
 	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
-	topLevels        int // How many top levels of the trie to keep (not roll into hashes)
 	requests         []*ResolveRequest
 	codeRequests     []*ResolveRequestForCode
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
 
-func NewResolver(topLevels int, blockNr uint64) *Resolver {
+func NewResolver(blockNr uint64) *Resolver {
 	tr := Resolver{
 		requests:     []*ResolveRequest{},
 		codeRequests: []*ResolveRequestForCode{},
 		blockNr:      blockNr,
-		topLevels:    topLevels,
 	}
 	return &tr
 }
 
-func (tr *Resolver) Reset(topLevels int, blockNr uint64) {
-	tr.topLevels = topLevels
+func (tr *Resolver) Reset(blockNr uint64) {
 	tr.blockNr = blockNr
 	tr.requests = tr.requests[:0]
 	tr.codeRequests = tr.codeRequests[:0]
@@ -170,7 +167,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 	}
 
 	sort.Stable(tr)
-	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
+	resolver := NewResolverStateful(tr.requests, hf)
 	if err := resolver.RebuildTrie(db, blockNr, tr.historical, trace); err != nil {
 		return err
 	}

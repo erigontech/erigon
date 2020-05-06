@@ -51,6 +51,31 @@ func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
 	return cs, nil
 }
 
+func accountsEqual(a1, a2 *accounts.Account) bool {
+	if a1.Nonce != a2.Nonce {
+		return false
+	}
+	if !a1.Initialised {
+		if a2.Initialised {
+			return false
+		}
+	} else if !a2.Initialised {
+		return false
+	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
+		return false
+	}
+	if a1.CodeHash == (common.Hash{}) {
+		if a2.CodeHash != (common.Hash{}) {
+			return false
+		}
+	} else if a2.CodeHash == (common.Hash{}) {
+		return false
+	} else if a1.CodeHash != a2.CodeHash {
+		return false
+	}
+	return true
+}
+
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)

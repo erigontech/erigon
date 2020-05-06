@@ -203,14 +203,6 @@ func (ch nonceChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch storageSizeChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setStorageSize(ch.prevHasSize, ch.prevsize)
-}
-
-func (ch storageSizeChange) dirtied() *common.Address {
-	return ch.account
-}
-
 func (ch codeChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setCode(ch.prevhash, ch.prevcode)
 }

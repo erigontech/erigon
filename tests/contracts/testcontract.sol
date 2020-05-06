@@ -1,5 +1,5 @@
 pragma solidity >=0.5.0;
-contract eip2027 {
+contract testcontract {
     mapping(address => uint) public balances;
 
     constructor() public {

@@ -194,8 +194,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
-	hb.acc.StorageSize = storageSize
-	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
@@ -259,8 +257,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
-	hb.acc.StorageSize = storageSize
-	hb.acc.HasStorageSize = storageSize > 0
 	hb.acc.Incarnation = incarnation
 
 	popped := 0

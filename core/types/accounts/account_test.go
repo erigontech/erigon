@@ -28,7 +28,6 @@ func TestEmptyAccount(t *testing.T) {
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
-	isStorageSizeEqual(t, a, decodedAccount)
 
 	pool.PutBuffer(encodedAccount)
 }
@@ -79,7 +78,6 @@ func TestAccountEncodeWithCode(t *testing.T) {
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
-	isStorageSizeEqual(t, a, decodedAccount)
 }
 
 func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
@@ -89,11 +87,8 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		Balance:        *new(big.Int).SetInt64(1000),
 		Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-		HasStorageSize: true,
-		StorageSize:    0,
 		Incarnation:    5,
 	}
-	a.StorageSize = 10
 
 	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
@@ -127,89 +122,8 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
-	isStorageSizeEqual(t, a, decodedAccount)
 }
 
-func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
-	account := Account{
-		Initialised: true,
-		Nonce:       2,
-		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-		Incarnation: 5,
-	}
-	account.HasStorageSize = true
-	account.StorageSize = 10
-
-	encodedLen := account.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	account.EncodeForStorage(encodedAccount)
-
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
-	}
-
-	//after enable eip2027 storage size for account with empty storage size equals to 0
-	isAccountsEqual(t, account, decodedAccount)
-	isStorageSizeEqual(t, account, decodedAccount)
-}
-
-func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
-	const HugeNumber = uint64(1 << 63)
-
-	storageSizes := []uint64{0, 1, 2, 3, 10, 23, 24, 100,
-		HugeNumber, HugeNumber + 1, HugeNumber + 2, HugeNumber + 10, HugeNumber + 100, HugeNumber + 10000000}
-
-	for _, storageSize := range storageSizes {
-		a := Account{
-			Initialised:    true,
-			Nonce:          2,
-			Balance:        *new(big.Int).SetInt64(1000),
-			Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-			CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			HasStorageSize: true,
-			StorageSize:    storageSize,
-		}
-		encodedLen := a.EncodingLengthForStorage()
-		encodedAccount := make([]byte, encodedLen)
-		a.EncodeForStorage(encodedAccount)
-
-		var decodedAccount Account
-		if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-			t.Fatal("cant decode the account", err, encodedAccount)
-		}
-
-		isAccountsEqual(t, a, decodedAccount)
-
-		if decodedAccount.StorageSize != a.StorageSize {
-			t.Fatal("cant decode the account StorageSize", decodedAccount.StorageSize, a.StorageSize)
-		}
-	}
-}
-
-func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
-	a := Account{
-		Initialised: true,
-		Nonce:       2,
-		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        emptyRoot,     // extAccount doesn't have Root value
-		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
-	}
-
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
-
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
-	}
-
-	isAccountsEqual(t, a, decodedAccount)
-	isStorageSizeEqual(t, a, decodedAccount)
-}
 
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
@@ -219,8 +133,6 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 		Root:           common.HexToHash("123"),
 		CodeHash:       common.HexToHash("123"),
 		Incarnation:    1,
-		HasStorageSize: false,
-		StorageSize:    0,
 	}
 	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
@@ -232,7 +144,6 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
-	isStorageSizeEqual(t, a, decodedAccount)
 }
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
@@ -240,8 +151,6 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 		Nonce:          0,
 		Balance:        *big.NewInt(0),
 		Incarnation:    1,
-		HasStorageSize: false,
-		StorageSize:    0,
 	}
 	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
@@ -284,20 +193,3 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 	}
 }
 
-func isStorageSizeEqual(t *testing.T, src, dst Account) {
-	t.Helper()
-
-	if !src.HasStorageSize {
-		if dst.HasStorageSize {
-			t.Fatal("cant decode the account StorageSize - should be nil", src.StorageSize, dst.StorageSize)
-		}
-	} else {
-		if src.HasStorageSize && !dst.HasStorageSize {
-			t.Fatal("cant decode the account StorageSize - should be not nil", src.StorageSize, dst.StorageSize)
-		}
-
-		if dst.StorageSize != src.StorageSize {
-			t.Fatal("cant decode the account StorageSize", src.StorageSize, dst.StorageSize)
-		}
-	}
-}

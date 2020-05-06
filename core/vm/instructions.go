@@ -637,13 +637,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 func opSstore(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	loc := common.BigToHash(callContext.stack.pop())
 	val := callContext.stack.pop()
-	locFromState := interpreter.evm.IntraBlockState.GetState(callContext.contract.Address(), loc)
 	interpreter.evm.IntraBlockState.SetState(callContext.contract.Address(), loc, common.BigToHash(val))
-	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
-		// existing value case
-		interpreter.evm.IntraBlockState.SetStorageSize(callContext.contract.Address(), locFromState, loc, val)
-	}
-
 	interpreter.intPool.putOne(val)
 	return nil, nil
 }

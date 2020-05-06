@@ -423,10 +423,10 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, tds.blockNr)
+				tds.resolver.Reset(tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddRequest(req)
@@ -515,10 +515,10 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, tds.blockNr)
+				tds.resolver.Reset(tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddCodeRequest(req)
@@ -528,10 +528,10 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, tds.blockNr)
+				tds.resolver.Reset(tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddCodeRequest(req)
@@ -551,10 +551,10 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, reso
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(0, tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
-				tds.resolver.Reset(0, tds.blockNr)
+				tds.resolver.Reset(tds.blockNr)
 			}
 			firstRequest = false
 			tds.resolver.AddRequest(req)
@@ -577,10 +577,10 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	}
 
 	if tds.resolver == nil {
-		tds.resolver = trie.NewResolver(0, tds.blockNr)
+		tds.resolver = trie.NewResolver(tds.blockNr)
 		tds.resolver.SetHistorical(tds.historical)
 	}
-	tds.resolver.Reset(0, tds.blockNr)
+	tds.resolver.Reset(tds.blockNr)
 
 	for _, touch := range touches {
 		var need bool
@@ -1357,34 +1357,6 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
-}
-
-func accountsEqual(a1, a2 *accounts.Account) bool {
-	if a1.Nonce != a2.Nonce {
-		return false
-	}
-	if !a1.Initialised {
-		if a2.Initialised {
-			return false
-		}
-	} else if !a2.Initialised {
-		return false
-	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
-		return false
-	}
-	if a1.Root != a2.Root {
-		return false
-	}
-	if a1.CodeHash == (common.Hash{}) {
-		if a2.CodeHash != (common.Hash{}) {
-			return false
-		}
-	} else if a2.CodeHash == (common.Hash{}) {
-		return false
-	} else if a1.CodeHash != a2.CodeHash {
-		return false
-	}
-	return true
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {

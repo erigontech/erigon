@@ -40,11 +40,7 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 	trie.CompressNibbles(prefixAsNibbles, &buf.B)
 
 	var key []byte
-	if len(buf.B) > common.HashLength {
-		if incarnation == 0 {
-			panic("0 incarnation")
-		}
-
+	if len(buf.B) >= common.HashLength {
 		key = dbutils.GenerateCompositeStoragePrefix(buf.B[:common.HashLength], incarnation, buf.B[common.HashLength:])
 	} else {
 		key = common.CopyBytes(buf.B)
@@ -67,10 +63,7 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 	trie.CompressNibbles(prefixAsNibbles, &buf.B)
 
 	var key []byte
-	if len(buf.B) > common.HashLength {
-		if incarnation == 0 {
-			panic("0 incarnation")
-		}
+	if len(buf.B) >= common.HashLength {
 		key = dbutils.GenerateCompositeStoragePrefix(buf.B[:common.HashLength], incarnation, buf.B[common.HashLength:])
 	} else {
 		key = common.CopyBytes(buf.B)

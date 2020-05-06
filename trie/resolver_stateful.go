@@ -62,9 +62,8 @@ type ResolverStateful struct {
 	accAddrHashWithInc []byte // valid only if `seenAccount` is true
 }
 
-func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
+func NewResolverStateful(requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
 	return &ResolverStateful{
-		topLevels:          topLevels,
 		hb:                 NewHashBuilder(false),
 		hbStorage:          NewHashBuilder(false),
 		reqIndices:         []int{},
@@ -75,8 +74,7 @@ func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction
 }
 
 // Reset prepares the Resolver for reuse
-func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) {
-	tr.topLevels = topLevels
+func (tr *ResolverStateful) Reset(requests []*ResolveRequest, hookFunction hookFunction) {
 	tr.requests = tr.requests[:0]
 	tr.reqIndices = tr.reqIndices[:0]
 	tr.keyIdx = 0
@@ -170,7 +168,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			startkeys = append(startkeys, key)
 		}
 
-		tr.rssChopped = append(tr.rssChopped, NewResolveSet(max(0, tr.topLevels-req.resolvePos)))
+		tr.rssChopped = append(tr.rssChopped, NewResolveSet(0))
 		tr.rss = append(tr.rss, NewResolveSet(0))
 
 		tr.rssChopped[len(tr.rssChopped)-1].AddHex(req.resolveHex[req.resolvePos:])
@@ -227,14 +225,9 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.accData.FieldSet = AccountFieldSetNotContract
 			} else {
-				if tr.a.HasStorageSize {
-					tr.accData.FieldSet = AccountFieldSetContractWithSize
-				} else {
-					tr.accData.FieldSet = AccountFieldSetContract
-				}
+				tr.accData.FieldSet = AccountFieldSetContract
 			}
 
-			tr.accData.StorageSize = tr.a.StorageSize
 			tr.accData.Balance.Set(&tr.a.Balance)
 			tr.accData.Nonce = tr.a.Nonce
 			tr.accData.Incarnation = tr.a.Incarnation
@@ -334,14 +327,12 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
+	//trace = true
 	tr.trace = trace
 
 	if tr.trace {
 		fmt.Printf("----------\n")
 		fmt.Printf("RebuildTrie blockNr %d\n", blockNr)
-		if tr.topLevels > 0 {
-			fmt.Printf("tr.topLevels > 0: %d\n", tr.topLevels)
-		}
 	}
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
@@ -428,7 +419,7 @@ type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		//fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -531,7 +522,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		//fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -550,7 +541,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		tr.hbStorage.Reset()
 		tr.wasIHStorage = false
 		if tr.trace {
-			fmt.Printf("Reset hbStorage from WalkerAccount\n")
+			//fmt.Printf("Reset hbStorage from WalkerAccount\n")
 		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
@@ -615,14 +606,9 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 				if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 					tr.accData.FieldSet = AccountFieldSetNotContract
 				} else {
-					if tr.a.HasStorageSize {
-						tr.accData.FieldSet = AccountFieldSetContractWithSize
-					} else {
-						tr.accData.FieldSet = AccountFieldSetContract
-					}
+					tr.accData.FieldSet = AccountFieldSetContract
 				}
 
-				tr.accData.StorageSize = tr.a.StorageSize
 				tr.accData.Balance.Set(&tr.a.Balance)
 				tr.accData.Nonce = tr.a.Nonce
 				tr.accData.Incarnation = tr.a.Incarnation
@@ -642,7 +628,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 			tr.hbStorage.Reset()
 			tr.wasIHStorage = false
 			if tr.trace {
-				fmt.Printf("Reset hbStorage from WalkerAccount - past\n")
+				//fmt.Printf("Reset hbStorage from WalkerAccount - past\n")
 			}
 			tr.groupsStorage = nil
 			tr.currStorage.Reset()

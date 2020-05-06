@@ -778,7 +778,7 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{})
-	r := trie.NewResolver(0, currentBlockNr)
+	r := trie.NewResolver(currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
@@ -823,7 +823,7 @@ func testResolve(chaindata string) {
 	currentBlockNr := uint64(1042280)
 	var contract []byte
 	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
-	r := trie.NewResolver(0, currentBlockNr)
+	r := trie.NewResolver(currentBlockNr)
 	var key []byte
 	key = common.FromHex("0007070c0c030502090f04020e0c030a090d050b0a08020c0f0605060f0804020803040d0401020e010c080c0f0709000800080c0f070a0e070700090f0e0801")
 	resolveHash := common.FromHex("d7bfaf1467e24373aa4b7c0a41e1e3fcadfe89b8e5708a7654231f9dcdead784")
