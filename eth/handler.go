@@ -830,6 +830,10 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockHashesMsg:
+		if pm.mode == downloader.StagedSync {
+			// Staged sync does not support this yet
+			return nil
+		}
 		var announces newBlockHashesData
 		if err := msg.Decode(&announces); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
@@ -850,6 +854,10 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockMsg:
+		if pm.mode == downloader.StagedSync {
+			// Staged sync does not support this yet
+			return nil
+		}
 		// Retrieve and decode the propagated block
 		var request newBlockData
 		if err := msg.Decode(&request); err != nil {
