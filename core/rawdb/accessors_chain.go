@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/golang/snappy"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -239,6 +241,13 @@ func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
 	data, _ := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
+	if debug.IsBlockCompressionEnabled() && len(data) > 0 {
+		var err error
+		data, err = snappy.Decode(nil, data)
+		if err != nil {
+			log.Warn("err on decode block", "err", err)
+		}
+	}
 	return data
 }
 
@@ -246,6 +255,9 @@ func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValu
 func WriteBodyRLP(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if common.IsCanceled(ctx) {
 		return
+	}
+	if debug.IsBlockCompressionEnabled() {
+		rlp = snappy.Encode(nil, rlp)
 	}
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)

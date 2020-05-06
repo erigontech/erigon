@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1586578723198,
+  "iteration": 1588588291032,
   "links": [],
   "panels": [
     {
@@ -55,7 +55,7 @@
         "current": false,
         "max": false,
         "min": false,
-        "rightSide": true,
+        "rightSide": false,
         "show": true,
         "total": false,
         "values": false
@@ -81,23 +81,15 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "trie_resolve_ih{quantile=\"$quantile\",instance=\"$instance\"}",
-          "format": "time_series",
-          "instant": false,
+          "expr": "trie_resolve_stateful{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "trie/resolve/ih",
-          "refId": "A"
-        },
-        {
-          "expr": "trie_resolve_stateful{quantile=\"$quantile\",instance=\"$instance\"}",
-          "interval": "",
-          "legendFormat": "trie/resolve/stateful",
+          "legendFormat": "trie_resolve_stateful: {{quantile}}, {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "trie_resolve_stateless{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "trie_resolve_stateless{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "trie/resolve/stateless",
+          "legendFormat": "trie_resolve_stateless: {{quantile}}, {{instance}}",
           "refId": "C"
         }
       ],
@@ -134,7 +126,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -157,7 +149,7 @@
         "y": 1
       },
       "hiddenSeries": false,
-      "id": 124,
+      "id": 127,
       "legend": {
         "avg": false,
         "current": false,
@@ -183,15 +175,15 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(db_ih_insert{instance=\"$instance\"}[1m])",
+          "expr": "rate(db_ih_insert{instance=~\"$instance\"}[1m])",
           "interval": "",
-          "legendFormat": "db/ih/insert",
+          "legendFormat": "db/ih/insert: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(db_ih_delete{instance=\"$instance\"}[1m])",
+          "expr": "rate(db_ih_delete{instance=~\"$instance\"}[1m])",
           "interval": "",
-          "legendFormat": "db/ih/delete",
+          "legendFormat": "db/ih/delete: {{instance}}",
           "refId": "B"
         }
       ],
@@ -294,19 +286,19 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "system_cpu_sysload{instance=\"$instance\"}",
+          "expr": "system_cpu_sysload{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "system",
+          "legendFormat": "system: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "system_cpu_syswait{instance=\"$instance\"}",
+          "expr": "system_cpu_syswait{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "iowait",
+          "legendFormat": "iowait: {{instance}}",
           "refId": "B"
         },
         {
@@ -351,7 +343,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -403,19 +395,19 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_memory_allocs{instance=\"$instance\"}[1m])",
+          "expr": "rate(system_memory_allocs{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "alloc",
+          "legendFormat": "alloc: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "system_memory_used{instance=\"$instance\"}",
+          "expr": "system_memory_used{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "used",
+          "legendFormat": "used: {{instance}}",
           "refId": "B"
         },
         {
@@ -512,19 +504,19 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_disk_readbytes{instance=\"$instance\"}[1m])",
+          "expr": "rate(system_disk_readbytes{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "read",
+          "legendFormat": "read: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(system_disk_writebytes{instance=\"$instance\"}[1m])",
+          "expr": "rate(system_disk_writebytes{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "write",
+          "legendFormat": "write: {{instance}}",
           "refId": "B"
         }
       ],
@@ -570,13 +562,198 @@
       }
     },
     {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "hiddenSeries": false,
+      "id": 124,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(system_memory_pauses{instance=~\"$instance\"}[1m])",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "system/memory/pauses: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "GC Stop the World",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "hiddenSeries": false,
+      "id": 128,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "go_goroutines{instance=~\"$instance\"}",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "go/goroutines: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "go_threads{instance=~\"$instance\"}",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "go/threads: {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "GO Goroutines and Threads",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 24
       },
       "id": 75,
       "panels": [],
@@ -595,7 +772,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 25
       },
       "hiddenSeries": false,
       "id": 96,
@@ -605,7 +782,7 @@
         "current": true,
         "max": true,
         "min": true,
-        "rightSide": true,
+        "rightSide": false,
         "show": true,
         "total": false,
         "values": true
@@ -627,19 +804,19 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(p2p_ingress{instance=\"$instance\"}[1m])",
+          "expr": "rate(p2p_ingress{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "ingress",
+          "legendFormat": "ingress: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "rate(p2p_egress{instance=\"$instance\"}[1m])",
+          "expr": "rate(p2p_egress{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "egress",
+          "legendFormat": "egress: {{instance}}",
           "refId": "C"
         }
       ],
@@ -676,7 +853,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -696,7 +873,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 25
       },
       "hiddenSeries": false,
       "id": 77,
@@ -706,7 +883,7 @@
         "current": true,
         "max": true,
         "min": true,
-        "rightSide": true,
+        "rightSide": false,
         "show": true,
         "total": false,
         "values": true
@@ -728,26 +905,27 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "p2p_peers{instance=\"$instance\"}",
+          "expr": "p2p_peers{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "peers",
+          "legendFormat": "peers: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(p2p_dials{instance=\"$instance\"}[1m])",
+          "expr": "rate(p2p_dials{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "dials",
+          "legendFormat": "dials: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "rate(p2p_serves[1m])",
+          "expr": "rate(p2p_serves{instance=~\"$instance\"}[1m])",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "serves",
+          "legendFormat": "serves: {{instance}}",
           "refId": "C"
         }
       ],
@@ -784,7 +962,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -799,7 +977,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 31
       },
       "id": 4,
       "panels": [],
@@ -828,7 +1006,7 @@
         "h": 2,
         "w": 3,
         "x": 0,
-        "y": 24
+        "y": 32
       },
       "id": 108,
       "interval": null,
@@ -869,7 +1047,9 @@
         {
           "expr": "chain_head_header",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
+          "legendFormat": "",
           "refId": "A"
         }
       ],
@@ -901,7 +1081,7 @@
         "h": 6,
         "w": 9,
         "x": 3,
-        "y": 24
+        "y": 32
       },
       "hiddenSeries": false,
       "id": 110,
@@ -931,27 +1111,27 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "chain_head_header{instance=\"$instance\"}",
+          "expr": "chain_head_header{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "header",
+          "legendFormat": "header: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "chain_head_receipt{instance=\"$instance\"}",
+          "expr": "chain_head_receipt{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "receipt",
+          "legendFormat": "receipt: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "chain_head_block{instance=\"$instance\"}",
+          "expr": "chain_head_block{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "block",
+          "legendFormat": "block: {{instance}}",
           "refId": "C"
         }
       ],
@@ -1018,7 +1198,7 @@
         "h": 2,
         "w": 3,
         "x": 12,
-        "y": 24
+        "y": 32
       },
       "id": 113,
       "interval": null,
@@ -1059,7 +1239,9 @@
         {
           "expr": "txpool_pending",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
+          "legendFormat": "",
           "refId": "A"
         }
       ],
@@ -1091,7 +1273,7 @@
         "h": 6,
         "w": 9,
         "x": 15,
-        "y": 24
+        "y": 32
       },
       "hiddenSeries": false,
       "id": 116,
@@ -1121,27 +1303,27 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "txpool_pending{instance=\"$instance\"}",
+          "expr": "txpool_pending{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "executable",
+          "legendFormat": "executable: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "txpool_queued{instance=\"$instance\"}",
+          "expr": "txpool_queued{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "gapped",
+          "legendFormat": "gapped: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "txpool_local{instance=\"$instance\"}",
+          "expr": "txpool_local{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "local",
+          "legendFormat": "local: {{instance}}",
           "refId": "C"
         }
       ],
@@ -1208,7 +1390,7 @@
         "h": 2,
         "w": 3,
         "x": 0,
-        "y": 26
+        "y": 34
       },
       "id": 111,
       "interval": null,
@@ -1249,7 +1431,9 @@
         {
           "expr": "chain_head_receipt",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
+          "legendFormat": "",
           "refId": "A"
         }
       ],
@@ -1290,7 +1474,7 @@
         "h": 2,
         "w": 3,
         "x": 12,
-        "y": 26
+        "y": 34
       },
       "id": 114,
       "interval": null,
@@ -1372,7 +1556,7 @@
         "h": 2,
         "w": 3,
         "x": 0,
-        "y": 28
+        "y": 36
       },
       "id": 109,
       "interval": null,
@@ -1454,7 +1638,7 @@
         "h": 2,
         "w": 3,
         "x": 12,
-        "y": 28
+        "y": 36
       },
       "id": 115,
       "interval": null,
@@ -1527,7 +1711,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 38
       },
       "hiddenSeries": false,
       "id": 112,
@@ -1559,93 +1743,93 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "chain_execution{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_execution{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "execution (q=$quantile)",
+          "legendFormat": "execution: {{quantile}},  {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "chain_validation{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_validation{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "validation (q=$quantile)",
+          "legendFormat": "validation: {{quantile}},  {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "chain_write{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_write{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "commit (q=$quantile)",
+          "legendFormat": "commit: {{quantile}},  {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "chain_account_reads{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_account_reads{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "account read (q=$quantile)",
+          "legendFormat": "account read: {{quantile}},  {{instance}}",
           "refId": "D"
         },
         {
-          "expr": "chain_account_updates{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_account_updates{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "account update (q=$quantile)",
+          "legendFormat": "account update: {{quantile}},  {{instance}}",
           "refId": "E"
         },
         {
-          "expr": "chain_account_hashes{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_account_hashes{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "account hashe (q=$quantile)",
+          "legendFormat": "account hashe: {{quantile}},  {{instance}}",
           "refId": "F"
         },
         {
-          "expr": "chain_account_commits{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_account_commits{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "account commit (q=$quantile)",
+          "legendFormat": "account commit: {{quantile}},  {{instance}}",
           "refId": "G"
         },
         {
-          "expr": "chain_storage_reads{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_storage_reads{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "storage read (q=$quantile)",
+          "legendFormat": "storage read: {{quantile}},  {{instance}}",
           "refId": "H"
         },
         {
-          "expr": "chain_storage_updates{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_storage_updates{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "storage update (q=$quantile)",
+          "legendFormat": "storage update: {{quantile}},  {{instance}}",
           "refId": "I"
         },
         {
-          "expr": "chain_storage_hashes{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_storage_hashes{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "storage hashe (q=$quantile)",
+          "legendFormat": "storage hashe: {{quantile}},  {{instance}}",
           "refId": "J"
         },
         {
-          "expr": "chain_storage_commits{quantile=\"$quantile\",instance=\"$instance\"}",
+          "expr": "chain_storage_commits{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "storage commit (q=$quantile)",
+          "legendFormat": "storage commit: {{quantile}},  {{instance}}",
           "refId": "K"
         }
       ],
@@ -1703,7 +1887,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 47
       },
       "hiddenSeries": false,
       "id": 117,
@@ -1735,19 +1919,19 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(txpool_valid{instance=\"$instance\"}[1m])",
+          "expr": "rate(txpool_valid{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "valid",
+          "legendFormat": "valid: {{instance}}",
           "refId": "K"
         },
         {
-          "expr": "rate(txpool_invalid{instance=\"$instance\"}[1m])",
+          "expr": "rate(txpool_invalid{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "invalid",
+          "legendFormat": "invalid: {{instance}}",
           "refId": "A"
         },
         {
@@ -1877,7 +2061,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "id": 17,
       "panels": [],
@@ -1896,7 +2080,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 49
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 35,
@@ -1928,6 +2112,7 @@
         {
           "expr": "rate(eth_db_chaindata_disk_read[1m])",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
           "legendFormat": "leveldb read",
           "refId": "B"
@@ -2007,7 +2192,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 49
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 118,
@@ -2039,6 +2224,7 @@
         {
           "expr": "eth_db_chaindata_disk_read",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
           "legendFormat": "leveldb read",
           "refId": "B"
@@ -2118,7 +2304,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 49
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 119,
@@ -2152,6 +2338,7 @@
         {
           "expr": "eth_db_chaindata_disk_size",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 1,
           "legendFormat": "leveldb",
           "refId": "B"
@@ -2212,7 +2399,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 63
       },
       "id": 37,
       "panels": [],
@@ -2231,7 +2418,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 56
+        "y": 64
       },
       "hiddenSeries": false,
       "id": 120,
@@ -2261,19 +2448,21 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(trie_memcache_clean_read[1m])",
+          "expr": "rate(trie_memcache_clean_read{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "hide": false,
+          "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "hit",
+          "legendFormat": "hit: {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "rate(trie_memcache_clean_write[1m])",
+          "expr": "rate(trie_memcache_clean_write{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "hide": false,
+          "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "miss",
+          "legendFormat": "miss: {{instance}}",
           "refId": "B"
         }
       ],
@@ -2330,7 +2519,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 56
+        "y": 64
       },
       "hiddenSeries": false,
       "id": 56,
@@ -2360,19 +2549,21 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(trie_memcache_gc_size[1m])",
+          "expr": "rate(trie_memcache_gc_size{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "hide": false,
+          "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "gc",
+          "legendFormat": "gc: {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "rate(trie_memcache_flush_size[1m])",
+          "expr": "rate(trie_memcache_flush_size{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "hide": false,
+          "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "overflow",
+          "legendFormat": "overflow: {{instance}}",
           "refId": "B"
         },
         {
@@ -2532,19 +2723,21 @@
       {
         "allValue": null,
         "current": {
-          "text": "turbo-geth:6060",
-          "value": "turbo-geth:6060"
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": "Prometheus",
-        "definition": "trie_resolve_ih",
+        "definition": "trie_resolve_stateful",
         "hide": 0,
-        "includeAll": false,
+        "includeAll": true,
         "index": -1,
         "label": "instance",
-        "multi": false,
+        "multi": true,
         "name": "instance",
         "options": [],
-        "query": "trie_resolve_ih",
+        "query": "trie_resolve_stateful",
         "refresh": 1,
         "regex": "/.*instance=\"([^\"]*).*/",
         "skipUrlSync": false,
@@ -2592,5 +2785,5 @@
   "variables": {
     "list": []
   },
-  "version": 2
+  "version": 40
 }
