@@ -250,7 +250,7 @@ func (tr *ResolverStateful) finaliseRoot() error {
 					return err
 				}
 			}
-			if !tr.a.IsEmptyCodeHash() {
+			if storageNode != nil || !tr.a.IsEmptyRoot() {
 				tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 				tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 				tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
@@ -636,7 +636,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 						return err
 					}
 				}
-				if !tr.a.IsEmptyCodeHash() {
+				if storageNode != nil || !tr.a.IsEmptyRoot() {
 					tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 					tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 					tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
