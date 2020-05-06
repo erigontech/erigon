@@ -118,5 +118,30 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 }
 
 func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
-	return fmt.Errorf("unwindBodyDownloadStage not implemented")
+	// Here we may want to remove all blocks if we wanted to
+	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Bodies)
+	if err != nil {
+		return fmt.Errorf("unwind Bodies: get stage progress: %v", err)
+	}
+	unwindPoint, err1 := GetStageUnwind(d.stateDB, Bodies)
+	if err1 != nil {
+		return err1
+	}
+	if unwindPoint >= lastProcessedBlockNumber {
+		err = SaveStageUnwind(d.stateDB, Bodies, 0)
+		if err != nil {
+			return fmt.Errorf("unwind Bodies: reset: %v", err)
+		}
+		return nil
+	}
+	mutation := d.stateDB.NewBatch()
+	err = SaveStageUnwind(mutation, Bodies, 0)
+	if err != nil {
+		return fmt.Errorf("unwind Bodies: reset: %v", err)
+	}
+	_, err = mutation.Commit()
+	if err != nil {
+		return fmt.Errorf("unwind Bodies: failed to write db commit: %v", err)
+	}
+	return nil
 }
