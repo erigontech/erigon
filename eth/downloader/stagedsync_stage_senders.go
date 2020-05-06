@@ -143,5 +143,30 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 }
 
 func (d *Downloader) unwindSendersStage(unwindPoint uint64) error {
-	return fmt.Errorf("unwindSendersStage not implemented")
+	// Does not require any special processing
+	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Senders)
+	if err != nil {
+		return fmt.Errorf("unwind Senders: get stage progress: %v", err)
+	}
+	unwindPoint, err1 := GetStageUnwind(d.stateDB, Senders)
+	if err1 != nil {
+		return err1
+	}
+	if unwindPoint >= lastProcessedBlockNumber {
+		err = SaveStageUnwind(d.stateDB, Senders, 0)
+		if err != nil {
+			return fmt.Errorf("unwind Senders: reset: %v", err)
+		}
+		return nil
+	}
+	mutation := d.stateDB.NewBatch()
+	err = SaveStageUnwind(mutation, Senders, 0)
+	if err != nil {
+		return fmt.Errorf("unwind Senders: reset: %v", err)
+	}
+	_, err = mutation.Commit()
+	if err != nil {
+		return fmt.Errorf("unwind Senders: failed to write db commit: %v", err)
+	}
+	return nil
 }

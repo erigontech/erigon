@@ -315,16 +315,16 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 
 func TestUnwind(t *testing.T) {
 	tester := newStagedSyncTester()
-	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
 	}
-	if err := tester.sync("peer", big.NewInt(1000)); err != nil {
+	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
 		t.Fatal(err)
 	}
-	if err := tester.sync("forkpeer", big.NewInt(2000)); err != nil {
+	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
 	}
 }
