@@ -621,13 +621,13 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 						return common.Hash{}, err
 					}
 					currStorage.Reset()
-					fieldSet += AccountFieldRootOnly
+					fieldSet += AccountFieldStorageOnly
 				}
 			} else if itemType == AccountStreamItem && !aEmptyRoot {
 				if err := hb.hash(aRoot[:]); err != nil {
 					return common.Hash{}, err
 				}
-				fieldSet += AccountFieldRootOnly
+				fieldSet += AccountFieldStorageOnly
 			}
 			curr.Reset()
 			curr.Write(succ.Bytes())
@@ -650,12 +650,18 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				accData.Incarnation = a.Incarnation
 				aEmptyRoot = a.IsEmptyRoot()
 				copy(aRoot[:], a.Root[:])
-				fieldSet = AccountFieldSetNotContract // base level - nonce and balance
+				fieldSet = 0
+				if a.Balance.Sign() != 0 {
+					fieldSet |= AccountFieldBalanceOnly
+				}
+				if a.Nonce != 0 {
+					fieldSet |= AccountFieldNonceOnly
+				}
 				if a.HasStorageSize {
-					fieldSet += AccountFieldSSizeOnly
+					fieldSet |= AccountFieldSSizeOnly
 				}
 				if !a.IsEmptyCodeHash() {
-					fieldSet += AccountFieldCodeHashOnly
+					fieldSet |= AccountFieldCodeOnly
 					if err := hb.hash(a.CodeHash[:]); err != nil {
 						return common.Hash{}, err
 					}
@@ -701,13 +707,13 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				return common.Hash{}, err
 			}
 			currStorage.Reset()
-			fieldSet += AccountFieldRootOnly
+			fieldSet |= AccountFieldStorageOnly
 		}
 	} else if itemType == AccountStreamItem && !aEmptyRoot {
 		if err := hb.hash(aRoot[:]); err != nil {
 			return common.Hash{}, err
 		}
-		fieldSet += AccountFieldRootOnly
+		fieldSet |= AccountFieldStorageOnly
 	}
 	curr.Reset()
 	curr.Write(succ.Bytes())

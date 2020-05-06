@@ -221,39 +221,39 @@ func (tr *ResolverStateful) finaliseRoot() error {
 				tr.currStorage.Reset()
 				tr.succStorage.Reset()
 			}
-
-			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
-				tr.accData.FieldSet = AccountFieldSetNotContract
-			} else {
-				if tr.a.HasStorageSize {
-					tr.accData.FieldSet = AccountFieldSetContractWithSize
-				} else {
-					tr.accData.FieldSet = AccountFieldSetContract
-				}
+			tr.accData.FieldSet = 0
+			if !tr.a.IsEmptyCodeHash() {
+				tr.accData.FieldSet |= AccountFieldCodeOnly
+			}
+			if storageNode != nil || !tr.a.IsEmptyRoot() {
+				tr.accData.FieldSet |= AccountFieldStorageOnly
+			}
+			if tr.a.HasStorageSize {
+				tr.accData.FieldSet |= AccountFieldSSizeOnly
 			}
 
 			tr.accData.StorageSize = tr.a.StorageSize
 			tr.accData.Balance.Set(&tr.a.Balance)
+			if tr.a.Balance.Sign() != 0 {
+				tr.accData.FieldSet |= AccountFieldBalanceOnly
+			}
 			tr.accData.Nonce = tr.a.Nonce
+			if tr.a.Nonce != 0 {
+				tr.accData.FieldSet |= AccountFieldNonceOnly
+			}
 			tr.accData.Incarnation = tr.a.Incarnation
 			data = &tr.accData
-			if !tr.a.IsEmptyCodeHash() || !tr.a.IsEmptyRoot() {
+			if !tr.a.IsEmptyCodeHash() {
 				// the first item ends up deepest on the stack, the second item - on the top
 				err = tr.hb.hash(tr.a.CodeHash[:])
 				if err != nil {
 					return err
 				}
-
-				//if tr.hb.trace {
-				//	fmt.Printf("HASH\n")
-				//}
+			}
+			if !tr.a.IsEmptyCodeHash() {
 				tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 				tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 				tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
-				//	err = tr.hb.hash(tr.a.Root[:])
-				//	if err != nil {
-				//		return err
-				//	}
 			}
 		}
 		tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
@@ -607,29 +607,36 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 						}
 					}
 				}
-
-				if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
-					tr.accData.FieldSet = AccountFieldSetNotContract
-				} else {
-					if tr.a.HasStorageSize {
-						tr.accData.FieldSet = AccountFieldSetContractWithSize
-					} else {
-						tr.accData.FieldSet = AccountFieldSetContract
-					}
+				tr.accData.FieldSet = 0
+				if !tr.a.IsEmptyCodeHash() {
+					tr.accData.FieldSet |= AccountFieldCodeOnly
+				}
+				if storageNode != nil || !tr.a.IsEmptyRoot() {
+					tr.accData.FieldSet |= AccountFieldStorageOnly
+				}
+				if tr.a.HasStorageSize {
+					tr.accData.FieldSet |= AccountFieldSSizeOnly
 				}
 
 				tr.accData.StorageSize = tr.a.StorageSize
 				tr.accData.Balance.Set(&tr.a.Balance)
+				if tr.a.Balance.Sign() != 0 {
+					tr.accData.FieldSet |= AccountFieldBalanceOnly
+				}
 				tr.accData.Nonce = tr.a.Nonce
+				if tr.a.Nonce != 0 {
+					tr.accData.FieldSet |= AccountFieldNonceOnly
+				}
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
-				if !tr.a.IsEmptyCodeHash() || !tr.a.IsEmptyRoot() {
+				if !tr.a.IsEmptyCodeHash() {
 					// the first item ends up deepest on the stack, the second item - on the top
 					err = tr.hb.hash(tr.a.CodeHash[:])
 					if err != nil {
 						return err
 					}
-
+				}
+				if !tr.a.IsEmptyCodeHash() {
 					tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 					tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 					tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
