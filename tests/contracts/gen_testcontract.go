@@ -7,12 +7,12 @@ import (
 	"math/big"
 	"strings"
 
-	ethereum "github.com/clearmatics/autonity"
-	"github.com/clearmatics/autonity/accounts/abi"
-	"github.com/clearmatics/autonity/accounts/abi/bind"
-	"github.com/clearmatics/autonity/common"
-	"github.com/clearmatics/autonity/core/types"
-	"github.com/clearmatics/autonity/event"
+	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.

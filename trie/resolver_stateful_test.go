@@ -350,8 +350,6 @@ func TestApiDetails(t *testing.T) {
 					Root:           root,
 					CodeHash:       EmptyCodeHash,
 					Balance:        *big.NewInt(0),
-					StorageSize:    uint64(len(storageV)),
-					HasStorageSize: len(storageV) > 0,
 					Incarnation:    incarnation,
 				}
 				require.NoError(writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a))
@@ -376,7 +374,7 @@ func TestApiDetails(t *testing.T) {
 	tr := New(common.Hash{})
 	{
 		resolver := NewResolver(1, 0)
-		expectRootHash := common.HexToHash("49073ad1a55df443bb670521e9713839c15507d06e810db06079f37eabd541c8")
+		expectRootHash := common.HexToHash("0x9a87eff1bc257a70e62dd81ed4b5d210beb305ecdeec9ff497c717ea1c3794d4")
 
 		resolver.AddRequest(tr.NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
 		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
@@ -485,9 +483,7 @@ func TestStorageResolver2(t *testing.T) {
 		Initialised:    true,
 		CodeHash:       EmptyCodeHash,
 		Balance:        *big.NewInt(0),
-		StorageSize:    uint64(1),
 		Incarnation:    1,
-		HasStorageSize: true,
 		Root:           EmptyRoot,
 	}
 
@@ -507,9 +503,7 @@ func TestStorageResolver2(t *testing.T) {
 		Initialised:    true,
 		CodeHash:       EmptyCodeHash,
 		Balance:        *big.NewInt(0),
-		StorageSize:    uint64(1),
 		Incarnation:    1,
-		HasStorageSize: true,
 		Root:           common.HexToHash(expectedAccRoot2),
 	}
 
@@ -530,9 +524,7 @@ func TestStorageResolver2(t *testing.T) {
 		Initialised:    true,
 		CodeHash:       EmptyCodeHash,
 		Balance:        *big.NewInt(0),
-		StorageSize:    uint64(1),
 		Incarnation:    2,
-		HasStorageSize: true,
 		Root:           common.HexToHash(expectedAccRoot3),
 	}
 
@@ -540,7 +532,7 @@ func TestStorageResolver2(t *testing.T) {
 		panic(err)
 	}
 
-	expectedRoot := "1239b601d241f42c96392f0466b4df327a9adec21c2a6a08fd78c1a65946017f"
+	expectedRoot := "3a9dc9c90290be8d88abea1c01d408e2a4173b4e295863942f0980e49bfbf375"
 
 	// abandoned storage - account was deleted, but storage still exists
 	kAcc4 := common.FromHex("0004cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83") // don't write it to db

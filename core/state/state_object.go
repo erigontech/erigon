@@ -102,9 +102,6 @@ func (so *stateObject) empty() bool {
 	return so.data.Nonce == 0 && so.data.Balance.Sign() == 0 && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
 }
 
-// huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
-const HugeNumber = uint64(1 << 63)
-
 // newObject creates a state object.
 func newObject(db *IntraBlockState, address common.Address, data, original *accounts.Account) *stateObject {
 	var so = stateObject{
