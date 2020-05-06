@@ -167,7 +167,7 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 			}
 			// Fetch the code hash
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err := d.stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err == nil {
+				if codeHash, err2 := d.stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				}
 			}
@@ -197,7 +197,7 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 	}
 
 	for i := lastProcessedBlockNumber; i > unwindPoint; i-- {
-		if err := deleteChangeSets(mutation, i); err != nil {
+		if err = deleteChangeSets(mutation, i); err != nil {
 			return err
 		}
 	}
