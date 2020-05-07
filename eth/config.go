@@ -149,7 +149,7 @@ type Config struct {
 	// for nodes to connect to.
 	DiscoveryURLs []string
 
-	NoPruning  bool // Whether to disable pruning and flush everything to disk
+	Pruning    bool // Whether to disable pruning and flush everything to disk
 	NoPrefetch bool // Whether to disable prefetching and only load state on demand
 
 	StorageMode StorageMode

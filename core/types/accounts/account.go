@@ -88,7 +88,6 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 	structLength += uint(balanceBytes + nonceBytes + 2)
 
-	//todo why do we need it?
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
 	if structLength < 56 {

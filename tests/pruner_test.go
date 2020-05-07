@@ -223,7 +223,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 	numBlocks := 10
 	engine := ethash.NewFaker()
 	cacheConfig := core.CacheConfig{
-		Disabled:            true,
+		Pruning:             false,
 		NoHistory:           true,
 		ArchiveSyncInterval: 1,
 	}
