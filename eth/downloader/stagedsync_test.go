@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -246,6 +247,10 @@ func (st *stagedSyncTester) Engine() consensus.Engine {
 
 func (st *stagedSyncTester) GetHeader(common.Hash, uint64) *types.Header {
 	panic("")
+}
+
+func (st *stagedSyncTester) GetVMConfig() *vm.Config {
+	return &vm.Config{}
 }
 
 // sync starts synchronizing with a remote peer, blocking until it completes.

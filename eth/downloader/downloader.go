@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -224,6 +225,9 @@ type BlockChain interface {
 
 	// GetHeader is necessary for staged sync
 	GetHeader(common.Hash, uint64) *types.Header
+
+	// GetVMConfig is necessary for staged sync
+	GetVMConfig() *vm.Config
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.

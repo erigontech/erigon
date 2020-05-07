@@ -304,24 +304,14 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 	return types.NewBlock(head, nil, nil, nil), statedb, tds, nil
 }
 
-// Commit writes the block and state of a genesis specification to the database.
-// The block is committed as the canonical head block.
-func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
 	batch := db.NewBatch()
-	//fmt.Printf("Generating genesis\n")
 	block, statedb, tds, err := g.ToBlock(batch, history)
 	if err != nil {
 		return nil, nil, err
 	}
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
-	}
-	config := g.Config
-	if config == nil {
-		config = params.AllEthashProtocolChanges
-	}
-	if err := config.CheckConfigForkOrder(); err != nil {
-		return nil, nil, err
 	}
 	tds.SetBlockNr(0)
 	blockWriter := tds.DbStateWriter()
@@ -341,7 +331,23 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if _, err := batch.Commit(); err != nil {
 		return nil, nil, err
 	}
-	//fmt.Printf("Generated genesis\n")
+	return block, statedb, nil
+}
+
+// Commit writes the block and state of a genesis specification to the database.
+// The block is committed as the canonical head block.
+func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err := g.CommitGenesisState(db, history)
+	if err != nil {
+		return block, statedb, err
+	}
+	config := g.Config
+	if config == nil {
+		config = params.AllEthashProtocolChanges
+	}
+	if err := config.CheckConfigForkOrder(); err != nil {
+		return nil, nil, err
+	}
 	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty)
 	rawdb.WriteBlock(context.Background(), db, block)
 	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)

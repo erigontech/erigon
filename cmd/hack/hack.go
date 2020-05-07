@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -1924,6 +1925,23 @@ func walkOverStorage(chaindata string) {
 	fmt.Printf("Success\n")
 }
 
+func resetState(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	err = db.DeleteBucket(dbutils.CurrentStateBucket)
+	check(err)
+	err = db.DeleteBucket(dbutils.AccountChangeSetBucket)
+	check(err)
+	err = db.DeleteBucket(dbutils.StorageChangeSetBucket)
+	check(err)
+	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.Execution, 0)
+	check(err)
+	fmt.Printf("Reset state done\n")
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2052,5 +2070,8 @@ func main() {
 	}
 	if *action == "slice" {
 		dbSlice(*chaindata, common.FromHex(*hash))
+	}
+	if *action == "resetState" {
+		resetState(*chaindata)
 	}
 }

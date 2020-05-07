@@ -2458,6 +2458,7 @@ func (bc *BlockChain) waitJobs() {
 // writes the result to the provided stateWriter
 func ExecuteBlockEuphemerally(
 	chainConfig *params.ChainConfig,
+	vmConfig *vm.Config,
 	chainContext ChainContext,
 	engine consensus.Engine,
 	block *types.Block,
@@ -2468,7 +2469,6 @@ func ExecuteBlockEuphemerally(
 	header := block.Header()
 	var receipts types.Receipts
 	usedGas := new(uint64)
-	vmConfig := vm.Config{}
 	gp := new(GasPool).AddGas(block.GasLimit())
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
@@ -2477,7 +2477,7 @@ func ExecuteBlockEuphemerally(
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}

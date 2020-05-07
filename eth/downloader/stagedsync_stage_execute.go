@@ -95,6 +95,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 
 	chainConfig := d.blockchain.Config()
 	engine := d.blockchain.Engine()
+	vmConfig := d.blockchain.GetVMConfig()
 	for {
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
@@ -106,7 +107,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		stateWriter := state.NewDbStateWriter(mutation, blockNum)
 
 		// where the magic happens
-		err = core.ExecuteBlockEuphemerally(chainConfig, d.blockchain, engine, block, stateReader, stateWriter)
+		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, d.blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}
