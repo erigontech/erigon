@@ -822,7 +822,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			k, v = c.SeekTo(next)
+			k, v = c.Seek(next)
 			if len(startkey) <= common.HashLength {
 				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
 				}
