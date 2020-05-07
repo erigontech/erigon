@@ -688,12 +688,9 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		}
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 
-		var k, v []byte
-		for k, v = c.Seek(startkey); k != nil; k, v = c.Next() {
-			foundAbandonedStorage := len(startkey) <= common.HashLength && len(k) > common.HashLength
-			if !foundAbandonedStorage {
-				break
-			}
+		k, v := c.Seek(startkey)
+		if len(startkey) <= common.HashLength {
+			for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {}
 		}
 		if tr.trace {
 			fmt.Printf("c.Seek(%x) = %x\n", startkey, k)
@@ -707,61 +704,37 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 		var minKey []byte
 		var isIH bool
 		for k != nil || ihK != nil {
-			if tr.trace {
-				//fmt.Printf("For loop: %x, %x\n", ihK, k)
-			}
-
 			isIH, minKey = keyIsBefore(ihK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					startKeyIndex := fixedbytes - 1
-					minKeyIndex := min(len(minKey), fixedbytes-1)
-					startKeyIndexIsBigger := startKeyIndex > minKeyIndex
-					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
-					if tr.trace {
-						//fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
-					}
-
-					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
-						if startKeyIndexIsBigger {
-							cmp = -1
-						}
-					} else if cmp == 0 {
-						if tr.trace {
-							//fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
-						}
-						k1 := minKey[minKeyIndex] & mask
-						k2 := startkey[startKeyIndex] & mask
-						if k1 < k2 {
-							cmp = -1
-						} else if k1 > k2 {
-							cmp = 1
-						}
-					}
-
-					if cmp < 0 {
-						for k, v = c.SeekTo(startkey); k != nil; k, v = c.Next() {
-							foundAbandonedStorage := len(startkey) <= common.HashLength && len(k) > common.HashLength
-							if !foundAbandonedStorage {
-								break
+					if len(minKey) < fixedbytes {
+						cmp = bytes.Compare(minKey, startkey[:len(minKey)])
+					} else {
+						cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
+						if cmp == 0 {
+							k1 := minKey[fixedbytes-1] & mask
+							k2 := startkey[fixedbytes-1] & mask
+							if k1 < k2 {
+								cmp = -1
+							} else if k1 > k2 {
+								cmp = 1
 							}
 						}
-						ihK, ihV = ih.SeekTo(startkey)
-						if tr.trace {
-							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
-							//fmt.Printf("[wasIH = %t], ih.SeekTo(%x) = %x\n", isIH, startkey, ihK)
-							//fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
+					}
+					if cmp < 0 {
+						k, v = c.SeekTo(startkey)
+						if len(startkey) <= common.HashLength {
+							for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {}
+						}
+						if ih != nil {
+							ihK, ihV = ih.SeekTo(startkey)
 						}
 						if k == nil && ihK == nil {
 							return nil
 						}
-
 						isIH, minKey = keyIsBefore(ihK, k)
-						if tr.trace {
-							//fmt.Printf("wasIH, minKey = %t, %x\n", isIH, minKey)
-						}
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -778,34 +751,23 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					if err := storageWalker(false, rangeIdx, k, v); err != nil {
 						return err
 					}
+					k, v = c.Next()
 				} else {
 					if err := accWalker(false, rangeIdx, k, v); err != nil {
 						return err
 					}
-				}
-				for k, v = c.Next(); k != nil; k, v = c.Next() {
-					if len(k) > common.HashLength && tr.seenAccount {
-						if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
-							continue
-						}
-
-						// skip ih or storage if it has another incarnation
-						if !bytes.HasPrefix(k, tr.accAddrHashWithInc) {
-							continue
-						}
+					// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
+					// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
+					// skips over all storage items
+					k, v = c.SeekTo(tr.accAddrHashWithInc)
+					if ih != nil {
+						ihK, ihV = ih.SeekTo(tr.accAddrHashWithInc)
 					}
-					break
 				}
 				continue
 			}
 
 			// ih part
-			if len(ihK) > common.HashLength && tr.seenAccount { // skip IH with wrong incarnation
-				if !bytes.HasPrefix(ihK, tr.accAddrHashWithInc) {
-					ihK, ihV = ih.Next() // go to children, not to sibling
-					continue
-				}
-			}
 			var canUseIntermediateHash bool
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
@@ -855,11 +817,9 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			for k, v = c.Seek(next); k != nil; k, v = c.Next() {
-				isAbandoned := len(next) <= common.HashLength && len(k) > common.HashLength
-				if !isAbandoned {
-					break
-				}
+			k, v = c.SeekTo(next)
+			if len(startkey) <= common.HashLength {
+				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {}
 			}
 			ihK, ihV = ih.Seek(next)
 		}
