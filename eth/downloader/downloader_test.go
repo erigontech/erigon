@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -275,6 +276,10 @@ func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks
 }
 
 func (dl *downloadTester) Config() *params.ChainConfig {
+	return nil
+}
+
+func (dl *downloadTester) GetVMConfig() *vm.Config {
 	return nil
 }
 
