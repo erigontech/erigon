@@ -1816,7 +1816,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		bc.committedBlock.Store(bc.currentBlock.Load())
 		committedK = k
-		if toCommit && bc.trieDbState != nil {
+		if bc.trieDbState != nil {
 			bc.trieDbState.EvictTries(false)
 		}
 		if toCommit {
