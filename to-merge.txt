@@ -287,15 +287,3 @@ Date:   Thu May 7 15:13:34 2020 +0200
     This finally adds the error check that the documentation of StateDB.dbErr
     promises to do. dbErr was added in 9e5f03b6c (June 2017), and the check was
     already missing in that commit. We somehow survived without it for three years.
-
-commit 1152f458499b4d91b95a873d9d33c923397a2184
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu May 7 15:06:31 2020 +0200
-
-    core/state: include zero-address in state dump if present (#21038)
-    
-    * Include 0x0000 address into the dump if it is present
-    
-    * core/state: go fmt
-    
-    Co-authored-by: Alexey Akhunov <akhounov@gmail.com>
