@@ -690,7 +690,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 		k, v := c.Seek(startkey)
 		if len(startkey) <= common.HashLength {
-			for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {}
+			for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
+			}
 		}
 		if tr.trace {
 			fmt.Printf("c.Seek(%x) = %x\n", startkey, k)
@@ -726,7 +727,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
 						if len(startkey) <= common.HashLength {
-							for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {}
+							for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
+							}
 						}
 						if ih != nil {
 							ihK, ihV = ih.SeekTo(startkey)
@@ -819,7 +821,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 
 			k, v = c.SeekTo(next)
 			if len(startkey) <= common.HashLength {
-				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {}
+				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
+				}
 			}
 			ihK, ihV = ih.Seek(next)
 		}
