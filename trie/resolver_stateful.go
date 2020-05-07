@@ -764,9 +764,11 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 					// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 					// skips over all storage items
-					k, v = c.Seek(tr.accAddrHashWithInc)
+					k, v = c.SeekTo(tr.accAddrHashWithInc)
 					if ih != nil {
-						ihK, ihV = ih.Seek(tr.accAddrHashWithInc)
+						if !bytes.HasPrefix(ihK, tr.accAddrHashWithInc) {
+							ihK, ihV = ih.SeekTo(tr.accAddrHashWithInc)
+						}
 					}
 				}
 				continue
@@ -823,7 +825,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			k, v = c.Seek(next)
-			if len(startkey) <= common.HashLength {
+			if len(next) <= common.HashLength {
 				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
 				}
 			}
