@@ -803,7 +803,6 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
 			}
-			//canUseIntermediateHash = false
 
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
