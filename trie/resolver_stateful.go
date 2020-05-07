@@ -420,7 +420,7 @@ type walker func(isIH bool, keyIdx int, k, v []byte) error
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		//fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -446,7 +446,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		tr.seenAccount = false
 	}
 
-	if !isIH && tr.seenAccount {
+	if tr.seenAccount {
 		// skip storage keys:
 		// - if it has wrong incarnation
 		// - if it abandoned (account deleted)
@@ -523,7 +523,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
 	if tr.trace {
-		//fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
+		fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -798,6 +798,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.B[:], canUseIntermediateHash)
 				}
 			}
+			//canUseIntermediateHash = false
 
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
@@ -823,6 +824,9 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				ihK, ihV = nil, nil
 				continue
 			}
+			if tr.trace {
+				fmt.Printf("next: %x\n", next)
+			}
 
 			if !bytes.HasPrefix(k, next) {
 				k, v = c.SeekTo(next)
@@ -831,8 +835,14 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
 				}
 			}
+			if tr.trace {
+				fmt.Printf("k after next: %x\n", k)
+			}
 			if !bytes.HasPrefix(ihK, next) {
 				ihK, ihV = ih.SeekTo(next)
+			}
+			if tr.trace {
+				fmt.Printf("ihK after next: %x\n", ihK)
 			}
 		}
 		return nil
