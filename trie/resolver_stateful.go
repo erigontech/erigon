@@ -824,12 +824,16 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			k, v = c.Seek(next)
+			if !bytes.HasPrefix(k, next) {
+				k, v = c.SeekTo(next)
+			}
 			if len(next) <= common.HashLength {
 				for ; k != nil && len(k) > common.HashLength; k, v = c.Next() {
 				}
 			}
-			ihK, ihV = ih.Seek(next)
+			if !bytes.HasPrefix(ihK, next) {
+				ihK, ihV = ih.SeekTo(next)
+			}
 		}
 		return nil
 	})
