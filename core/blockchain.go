@@ -1804,22 +1804,22 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		stats.usedGas += usedGas
 		toCommit := stats.needToCommit(chain, bc.db, i)
 		stats.report(chain, i, bc.db, toCommit)
-		var written uint64
-		if written, err = bc.db.Commit(); err != nil {
-			log.Error("Could not commit chainDb", "error", err)
-			bc.db.Rollback()
-			bc.setTrieDbState(nil)
-			if bc.committedBlock.Load() != nil {
-				bc.currentBlock.Store(bc.committedBlock.Load())
-			}
-			return k, err
-		}
-		bc.committedBlock.Store(bc.currentBlock.Load())
-		committedK = k
-		if bc.trieDbState != nil {
-			bc.trieDbState.EvictTries(false)
-		}
 		if toCommit {
+			var written uint64
+			if written, err = bc.db.Commit(); err != nil {
+				log.Error("Could not commit chainDb", "error", err)
+				bc.db.Rollback()
+				bc.setTrieDbState(nil)
+				if bc.committedBlock.Load() != nil {
+					bc.currentBlock.Store(bc.committedBlock.Load())
+				}
+				return k, err
+			}
+			bc.committedBlock.Store(bc.currentBlock.Load())
+			committedK = k
+			if bc.trieDbState != nil {
+				bc.trieDbState.EvictTries(false)
+			}
 			log.Info("Database", "size", bc.db.DiskSize(), "written", written)
 		}
 	}
