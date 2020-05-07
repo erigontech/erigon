@@ -104,7 +104,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			break
 		}
 		stateReader := state.NewDbStateReader(mutation, incarnationMap)
-		stateWriter := state.NewDbStateWriter(mutation, blockNum)
+		stateWriter := state.NewDbStateWriter(mutation, blockNum, incarnationMap)
 
 		// where the magic happens
 		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, d.blockchain, engine, block, stateReader, stateWriter)
