@@ -299,23 +299,3 @@ Date:   Thu May 7 15:06:31 2020 +0200
     * core/state: go fmt
     
     Co-authored-by: Alexey Akhunov <akhounov@gmail.com>
-
-commit dd88bd82c9453b01e5d8b659bf59e44396a1f572
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Thu May 7 09:24:10 2020 +0200
-
-    accounts/abi/bind: add void if no return args specified (#21002)
-    
-    * accounts/abi/bind: add void if no return args specified
-    
-    Currently the java generator generates invalid input on pure/view functions
-    that have no return type. e.g. `function f(uint u) view public {}`
-    This is not a problem in practice as people rarely ever write functions like this.
-    
-    * accounts/abi/bind: use elseif instead of nested if
-
-commit 85944c25619da8cfb69dd78ec191b219ca720f3f
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Thu May 7 15:07:59 2020 +0800
-
-    core/state/snapshot: fix typo (#21037)
