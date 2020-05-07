@@ -446,25 +446,23 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 		tr.seenAccount = false
 	}
 
-	if tr.seenAccount {
-		// skip storage keys:
-		// - if it has wrong incarnation
-		// - if it abandoned (account deleted)
-		if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
-			if tr.trace {
-				fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
-			}
-			return nil
+	// skip storage keys:
+	// - if it has wrong incarnation
+	// - if it abandoned (account deleted)
+	if tr.a.Incarnation == 0 { // skip all storage if incarnation is 0
+		if tr.trace {
+			fmt.Printf("WalkerStorage: skip %x, because 0 incarnation\n", k)
+		}
+		return nil
+	}
+
+	// skip ih or storage if it has another incarnation
+	if !bytes.HasPrefix(k, tr.accAddrHashWithInc) {
+		if tr.trace {
+			fmt.Printf("WalkerStorage: skip, not match accWithInc=%x\n", tr.accAddrHashWithInc)
 		}
 
-		// skip ih or storage if it has another incarnation
-		if !bytes.HasPrefix(k, tr.accAddrHashWithInc) {
-			if tr.trace {
-				fmt.Printf("WalkerStorage: skip, not match accWithInc=%x\n", tr.accAddrHashWithInc)
-			}
-
-			return nil
-		}
+		return nil
 	}
 
 	if len(v) > 0 {
