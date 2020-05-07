@@ -79,7 +79,7 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
@@ -565,7 +565,7 @@ func testReorgBadHashes(t *testing.T, full bool) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	ncm, err := NewBlockChain(blockchain.db, cacheConfig, blockchain.chainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	if err != nil {
@@ -686,7 +686,7 @@ func TestFastVsFullChains(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	archive, _ := NewBlockChain(archiveDb, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	defer archive.Stop()
@@ -935,7 +935,7 @@ func TestChainTxReorgs(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	blockchain.EnableReceipts(true)
@@ -1035,7 +1035,7 @@ func TestLogReorgs(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
@@ -1550,7 +1550,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 	)
 
 	cacheConfig := &CacheConfig{
-		Disabled:            true,
+		Pruning:             false,
 		BlocksBeforePruning: 1024,
 		TrieCleanLimit:      256,
 		TrieDirtyLimit:      256,
@@ -1845,7 +1845,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	chain, err := NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {
@@ -1904,7 +1904,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 	chain, err := NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {
@@ -2877,7 +2877,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 
 	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
@@ -3044,7 +3044,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 
 	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
@@ -3205,7 +3205,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
 		NoHistory:      false,
-		Disabled:       true,
+		Pruning:        false,
 	}
 
 	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)

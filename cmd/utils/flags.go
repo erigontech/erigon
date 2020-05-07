@@ -221,7 +221,7 @@ var (
 	defaultSyncMode = eth.DefaultConfig.SyncMode
 	SyncModeFlag    = TextMarshalerFlag{
 		Name:  "syncmode",
-		Usage: `Blockchain sync mode ("fast", "full", or "light")`,
+		Usage: `Blockchain sync mode ("fast", "full", "staged", or "light")`,
 		Value: &defaultSyncMode,
 	}
 	GCModePruningFlag = cli.BoolFlag{
@@ -1517,8 +1517,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
 	}
 
-	// TODO: Invert the logic there.
-	cfg.NoPruning = !ctx.GlobalBool(GCModePruningFlag.Name)
+	// todo uncomment after fix pruning
+	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
+	cfg.Pruning = false
 	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
@@ -1767,7 +1768,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 		}
 	}
 	cache := &core.CacheConfig{
-		Disabled:            true, // no pruning for auxiliary commands
+		Pruning:             false, // no pruning for auxiliary commands
 		TrieCleanLimit:      eth.DefaultConfig.TrieCleanCache,
 		TrieCleanNoPrefetch: ctx.GlobalBool(CacheNoPrefetchFlag.Name),
 		TrieDirtyLimit:      eth.DefaultConfig.TrieDirtyCache,
