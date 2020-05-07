@@ -712,6 +712,9 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				for cmp != 0 {
 					if len(minKey) < fixedbytes {
 						cmp = bytes.Compare(minKey, startkey[:len(minKey)])
+						if cmp == 0 {
+							cmp = -1
+						}
 					} else {
 						cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
 						if cmp == 0 {
