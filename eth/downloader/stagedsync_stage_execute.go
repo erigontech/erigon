@@ -89,6 +89,9 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	progressLogger := NewProgressLogger(logInterval)
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
+	// incarnationMap holds incarnations for accounts that were deleted, but their storage
+	// is not yet committed
+	var incarnationMap = make(map[common.Address]uint64)
 
 	chainConfig := d.blockchain.Config()
 	engine := d.blockchain.Engine()
@@ -99,7 +102,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		if block == nil {
 			break
 		}
-		stateReader := state.NewDbStateReader(mutation)
+		stateReader := state.NewDbStateReader(mutation, incarnationMap)
 		stateWriter := state.NewDbStateWriter(mutation, blockNum)
 
 		// where the magic happens
@@ -119,6 +122,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 				return 0, err
 			}
 			mutation = d.stateDB.NewBatch()
+			incarnationMap = make(map[common.Address]uint64)
 		}
 
 		/*

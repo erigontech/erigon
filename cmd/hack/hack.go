@@ -795,10 +795,10 @@ func dbSlice(chaindata string, prefix []byte) {
 	check(err)
 	defer db.Close()
 	err = db.View(func(tx *bolt.Tx) error {
-		st := tx.Bucket(dbutils.AccountsHistoryBucket)
+		st := tx.Bucket(dbutils.SyncStageProgress)
 		c := st.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.AccountsHistoryBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			fmt.Printf("db.Put(dbutils.SyncStageProgress, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
 		}
 		return nil
 	})
@@ -1181,10 +1181,8 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	for i := uint64(0); i < rewind; i++ {
 		var printed bool
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
-		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
 		var v []byte
-		v, err = ethDb.Get(dbutils.StorageChangeSetBucket, changeSetKey)
-		check(err)
+		v, _ = ethDb.Get(dbutils.StorageChangeSetBucket, encodedTS)
 		if v != nil {
 			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
