@@ -144,13 +144,10 @@ func (tr *Resolver) Print() {
 const (
 	AccountFieldNonceOnly           uint32 = 0x01
 	AccountFieldBalanceOnly         uint32 = 0x02
-	AccountFieldRootOnly            uint32 = 0x04
-	AccountFieldCodeHashOnly        uint32 = 0x08
+	AccountFieldStorageOnly         uint32 = 0x04
+	AccountFieldCodeOnly            uint32 = 0x08
 	AccountFieldSSizeOnly           uint32 = 0x10
 	AccountFieldSetNotAccount       uint32 = 0x00
-	AccountFieldSetNotContract      uint32 = 0x03 // Bit 0 is set for nonce, bit 1 is set for balance
-	AccountFieldSetContract         uint32 = 0x0f // Bits 0-3 are set for nonce, balance, storageRoot and codeHash
-	AccountFieldSetContractWithSize uint32 = 0x1f // Bits 0-4 are set for nonce, balance, storageRoot, codeHash and storageSize
 )
 
 // ResolveWithDb resolves and hooks subtries using a state database.
