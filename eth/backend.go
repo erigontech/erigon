@@ -128,7 +128,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", DefaultConfig.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(DefaultConfig.Miner.GasPrice)
 	}
-	if config.NoPruning && config.TrieDirtyCache > 0 {
+	if !config.Pruning && config.TrieDirtyCache > 0 {
 		config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
 		config.SnapshotCache += config.TrieDirtyCache * 3 / 5
 		config.TrieDirtyCache = 0
@@ -221,7 +221,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			EVMInterpreter:          config.EVMInterpreter,
 		}
 		cacheConfig = &core.CacheConfig{
-			Disabled:            config.NoPruning,
+			Pruning:             config.Pruning,
 			BlocksBeforePruning: config.BlocksBeforePruning,
 			BlocksToPrune:       config.BlocksToPrune,
 			PruneTimeout:        config.PruningTimeout,
@@ -580,7 +580,7 @@ func (s *Ethereum) EthVersion() int                    { return int(ProtocolVers
 func (s *Ethereum) NetVersion() uint64                 { return s.networkID }
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.protocolManager.downloader }
 func (s *Ethereum) Synced() bool                       { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
-func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
+func (s *Ethereum) ArchiveMode() bool                  { return !s.config.Pruning }
 
 // Protocols implements node.Service, returning all the currently configured
 // network protocols to start.

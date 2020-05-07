@@ -22,7 +22,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		NetworkID               uint64
 		SyncMode                downloader.SyncMode
 		DiscoveryURLs           []string
-		NoPruning               bool
+		Pruning               bool
 		NoPrefetch              bool
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		LightIngress            int                    `toml:",omitempty"`
@@ -58,7 +58,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NetworkID = c.NetworkID
 	enc.SyncMode = c.SyncMode
 	enc.DiscoveryURLs = c.DiscoveryURLs
-	enc.NoPruning = c.NoPruning
+	enc.Pruning = c.Pruning
 	enc.NoPrefetch = c.NoPrefetch
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
@@ -97,7 +97,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
 		DiscoveryURLs           []string
-		NoPruning               *bool
+		Pruning               *bool
 		NoPrefetch              *bool
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		LightIngress            *int                   `toml:",omitempty"`
@@ -144,8 +144,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.DiscoveryURLs != nil {
 		c.DiscoveryURLs = dec.DiscoveryURLs
 	}
-	if dec.NoPruning != nil {
-		c.NoPruning = *dec.NoPruning
+	if dec.Pruning != nil {
+		c.Pruning = *dec.Pruning
 	}
 	if dec.NoPrefetch != nil {
 		c.NoPrefetch = *dec.NoPrefetch
