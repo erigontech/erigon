@@ -115,7 +115,7 @@ const (
 // CacheConfig contains the configuration values for the trie caching/pruning
 // that's resident in a blockchain.
 type CacheConfig struct {
-	Disabled            bool
+	Pruning             bool
 	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
 	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
@@ -206,7 +206,7 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
-			Disabled:            true,
+			Pruning:             false,
 			BlocksBeforePruning: 1024,
 			TrieCleanLimit:      256,
 			TrieDirtyLimit:      256,
@@ -318,7 +318,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	}
 	// Take ownership of this particular state
 	go bc.update()
-	if !cacheConfig.Disabled {
+	if cacheConfig.Pruning {
 		var innerErr error
 		bc.pruner, innerErr = NewBasicPruner(db, bc, bc.cacheConfig)
 		if innerErr != nil {
