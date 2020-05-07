@@ -319,18 +319,3 @@ Author: Gary Rong <garyrong0905@gmail.com>
 Date:   Thu May 7 15:07:59 2020 +0800
 
     core/state/snapshot: fix typo (#21037)
-
-commit 87c463c47aa6d10a55a4b860bab3d53199814d01
-Merge: 39c64d85a 90af6dae6
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed May 6 18:11:15 2020 +0300
-
-    Merge pull request #21036 from karalabe/snapshot-storage-leak
-    
-    core/state/snapshot: don't create storage list for non-existing accounts
-
-commit 90af6dae6efc934e698bac11b09f773724e296bd
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed May 6 17:22:38 2020 +0300
-
-    core/state/snapshot: don't create storage list for non-existing accounts
