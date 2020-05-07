@@ -677,6 +677,10 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
+	if len(startkey) > common.HashLength {
+		// Looking for storage sub-tree
+		copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
+	}
 	err := db.View(func(tx *bolt.Tx) error {
 		ihBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		var ih *bolt.Cursor
@@ -744,7 +748,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						}
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
-						if fixedbits[rangeIdx] > 8*common.HashLength {
+						if len(startkey) > common.HashLength {
 							// Looking for storage sub-tree
 							copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
 						}
