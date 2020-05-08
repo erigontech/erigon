@@ -821,20 +821,21 @@ func testResolve(chaindata string) {
 		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	*/
-	currentBlockNr := uint64(1042280)
+	currentBlockNr := uint64(2792476)
 	var contract []byte
 	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
 	r := trie.NewResolver(currentBlockNr)
 	var key []byte
-	key = common.FromHex("0007070c0c030502090f04020e0c030a090d050b0a08020c0f0605060f0804020803040d0401020e010c080c0f0709000800080c0f070a0e070700090f0e0801")
-	resolveHash := common.FromHex("d7bfaf1467e24373aa4b7c0a41e1e3fcadfe89b8e5708a7654231f9dcdead784")
+	key = common.FromHex("03000901060b000504000f0d0f07040b010b0e0f030d010a09070e010002080800060301070401030601020b0d0f0300040f0f070f0a0e0c020b06050507020f")
+	resolveHash := common.FromHex("d7fda3e6f7cac10aa7c0756d91deda9e8bc5728bca544457555ef59ac05d8f7c")
 	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 0, resolveHash)
+	req := t.NewResolveRequest(contract, key, 4, resolveHash)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr, true)
 	if err != nil {
 		fmt.Printf("Resolve error: %v\n", err)
 	}
+	/*
 	var filename string
 	if err == nil {
 		filename = fmt.Sprintf("right_%d.txt", currentBlockNr)
@@ -850,6 +851,7 @@ func testResolve(chaindata string) {
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
+	*/
 	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 
@@ -1182,10 +1184,8 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	for i := uint64(0); i < rewind; i++ {
 		var printed bool
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
-		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
 		var v []byte
-		v, err = ethDb.Get(dbutils.StorageChangeSetBucket, changeSetKey)
-		check(err)
+		v, _ = ethDb.Get(dbutils.StorageChangeSetBucket, encodedTS)
 		if v != nil {
 			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
