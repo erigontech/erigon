@@ -277,13 +277,3 @@ Date:   Fri May 8 20:52:20 2020 +0200
     * core/state: fixed lint
     
     Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
-
-commit b0b65d017f7bfd454d6f3bcbbc4eb419e940bf5c
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu May 7 15:13:34 2020 +0200
-
-    core/state: abort commit if read errors have occurred (#21039)
-    
-    This finally adds the error check that the documentation of StateDB.dbErr
-    promises to do. dbErr was added in 9e5f03b6c (June 2017), and the check was
-    already missing in that commit. We somehow survived without it for three years.
