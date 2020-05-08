@@ -13,11 +13,13 @@ import (
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
 	db ethdb.Getter
+	incarnationMap map[common.Address]uint64
 }
 
-func NewDbStateReader(db ethdb.Getter) *DbStateReader {
+func NewDbStateReader(db ethdb.Getter, incarnationMap map[common.Address]uint64) *DbStateReader {
 	return &DbStateReader{
 		db: db,
+		incarnationMap: incarnationMap,
 	}
 }
 
@@ -72,6 +74,9 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash c
 }
 
 func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	if inc, ok := dbr.incarnationMap[address]; ok {
+		return inc, nil
+	}
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return 0, err

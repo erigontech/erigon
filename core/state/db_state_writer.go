@@ -14,20 +14,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
+func NewDbStateWriter(db ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
 	return &DbStateWriter{
-		db:      db,
-		blockNr: blockNr,
-		pw:      &PreimageWriter{db: db, savePreimages: false},
-		csw:     NewChangeSetWriter(),
+		db:             db,
+		blockNr:        blockNr,
+		pw:             &PreimageWriter{db: db, savePreimages: false},
+		csw:            NewChangeSetWriter(),
+		incarnationMap: incarnationMap,
 	}
 }
 
 type DbStateWriter struct {
-	db      ethdb.Database
-	pw      *PreimageWriter
-	blockNr uint64
-	csw     *ChangeSetWriter
+	db             ethdb.Database
+	pw             *PreimageWriter
+	blockNr        uint64
+	csw            *ChangeSetWriter
+	incarnationMap map[common.Address]uint64
 }
 
 func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
@@ -73,6 +75,9 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	}
 	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
 		return err
+	}
+	if original.Incarnation > 0 {
+		dsw.incarnationMap[address] = original.Incarnation
 	}
 	return nil
 }
