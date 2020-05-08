@@ -742,9 +742,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 							k = nil
 						}
 					}
-					if k == nil {
-						continue
-					}
+					continue
 				}
 				if len(k) > common.HashLength {
 					if err := storageWalker(false, rangeIdx, k, v); err != nil {
@@ -812,9 +810,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						ihK = nil
 					}
 				}
-				if ihK == nil {
-					continue
-				}
+				continue
 			}
 			if len(ihK) > common.HashLength {
 				if err := storageWalker(true, rangeIdx, ihK, ihV); err != nil {
