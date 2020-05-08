@@ -36,7 +36,7 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 	hb := NewHashBuilder(false)
 	rootHash, err := HashWithModifications(
 		tr,
-		common.Hashes{}, []*accounts.Account{},
+		common.Hashes{}, []*accounts.Account{}, [][]byte{},
 		common.StorageKeys{}, [][]byte{},
 		32,
 		&stream, // Streams that will be reused for old and new stream
@@ -94,7 +94,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 	hb := NewHashBuilder(false)
 	rootHash, err := HashWithModifications(
 		tr,
-		common.Hashes{}, []*accounts.Account{},
+		common.Hashes{}, []*accounts.Account{}, [][]byte{},
 		common.StorageKeys{}, [][]byte{},
 		32,
 		&stream, // Streams that will be reused for old and new stream
@@ -162,7 +162,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	hb := NewHashBuilder(false)
 	rootHash, err := HashWithModifications(
 		tr,
-		common.Hashes{insertKey}, []*accounts.Account{&insertA},
+		common.Hashes{insertKey}, []*accounts.Account{&insertA}, [][]byte{nil},
 		common.StorageKeys{}, [][]byte{},
 		32,
 		&stream, // Streams that will be reused for old and new stream
