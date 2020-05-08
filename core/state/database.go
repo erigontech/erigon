@@ -761,10 +761,8 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
-	// The following map is to prevent repeated clearouts of the storage
-	//alreadyCreated := make(map[common.Hash]struct{})
 	for i, b := range tds.buffers {
-		// For the contracts that got deleted
+		// For the contracts that got deleted, we clear the storage
 		for addrHash := range b.deleted {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
