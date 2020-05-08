@@ -821,15 +821,15 @@ func testResolve(chaindata string) {
 		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	*/
-	currentBlockNr := uint64(2792476)
+	currentBlockNr := uint64(286798)
 	var contract []byte
 	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
 	r := trie.NewResolver(currentBlockNr)
 	var key []byte
-	key = common.FromHex("03000901060b000504000f0d0f07040b010b0e0f030d010a09070e010002080800060301070401030601020b0d0f0300040f0f070f0a0e0c020b06050507020f")
-	resolveHash := common.FromHex("d7fda3e6f7cac10aa7c0756d91deda9e8bc5728bca544457555ef59ac05d8f7c")
+	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
+	resolveHash := common.FromHex("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
 	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 4, resolveHash)
+	req := t.NewResolveRequest(contract, key, 3, resolveHash)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr, true)
 	if err != nil {

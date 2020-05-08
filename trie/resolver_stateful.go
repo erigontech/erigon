@@ -566,9 +566,6 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		}
 		tr.hbStorage.Reset()
 		tr.wasIHStorage = false
-		if tr.trace {
-			//fmt.Printf("Reset hbStorage from WalkerAccount - past\n")
-		}
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
 		tr.succStorage.Reset()
