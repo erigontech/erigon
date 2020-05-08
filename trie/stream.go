@@ -462,7 +462,7 @@ func (smi *StreamMergeIterator) Reset(it *Iterator, s *Stream, trace bool) {
 }
 
 // Next returns the next item in the merged iterator
-func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValue *accounts.Account, aCoce []byte, hash []byte, value []byte) {
+func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValue *accounts.Account, aCode []byte, hash []byte, value []byte) {
 	for {
 		if smi.trace {
 			fmt.Printf("smi.hex %x, smi.ki %d, len(smi.s.keySizes) %d, smi.oldItemType %d smi.oldHex %x\n", smi.hex, smi.ki, len(smi.s.keySizes), smi.oldItemType, smi.oldHex)
