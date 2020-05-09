@@ -751,6 +751,9 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	} else {
 		hb = tds.hashBuilder
 	}
+	if len(accountKeys) == 0 && len(storageKeys) == 0 {
+		return tds.t.Hash(), nil
+	}
 	return trie.HashWithModifications(tds.t, accountKeys, aValues, aCodes, storageKeys, sValues, common.HashLength, &tds.newStream, hb, trace)
 }
 
