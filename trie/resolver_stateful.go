@@ -193,42 +193,27 @@ func (tr *ResolverStateful) finaliseRoot() error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		var err error
 		var data GenStructStepData
 		if tr.wasIH {
 			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
 			data = &tr.hashData
 		} else {
 			var storageNode node
-			if tr.a.Incarnation == 0 {
-				tr.a.Root = EmptyRoot
-			} else {
-				err = tr.finaliseStorageRoot()
-				if err != nil {
-					return err
-				}
-
-				if tr.hbStorage.hasRoot() {
-					tr.a.Root.SetBytes(tr.hbStorage.rootHash().Bytes())
-					storageNode = tr.hbStorage.root()
-				} else {
-					tr.a.Root = EmptyRoot
-				}
-
-				tr.hbStorage.Reset()
-				tr.wasIHStorage = false
-				tr.groupsStorage = nil
-				tr.currStorage.Reset()
-				tr.succStorage.Reset()
+			if err := tr.finaliseStorageRoot(); err != nil {
+				return err
 			}
+			if tr.hbStorage.hasRoot() {
+				tr.a.Root.SetBytes(tr.hbStorage.rootHash().Bytes())
+				storageNode = tr.hbStorage.root()
+			} else if tr.wasIHStorage {
+				tr.a.Root.SetBytes(tr.valueStorage.Bytes())
+			}
+			tr.hbStorage.Reset()
+			tr.wasIHStorage = false
+			tr.groupsStorage = nil
+			tr.currStorage.Reset()
+			tr.succStorage.Reset()
 			tr.accData.FieldSet = 0
-			if !tr.a.IsEmptyCodeHash() {
-				tr.accData.FieldSet |= AccountFieldCodeOnly
-			}
-			if storageNode != nil || !tr.a.IsEmptyRoot() {
-				tr.accData.FieldSet |= AccountFieldStorageOnly
-			}
-
 			tr.accData.Balance.Set(&tr.a.Balance)
 			if tr.a.Balance.Sign() != 0 {
 				tr.accData.FieldSet |= AccountFieldBalanceOnly
@@ -240,32 +225,31 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			tr.accData.Incarnation = tr.a.Incarnation
 			data = &tr.accData
 			if !tr.a.IsEmptyCodeHash() {
+				tr.accData.FieldSet |= AccountFieldCodeOnly
 				// the first item ends up deepest on the stack, the second item - on the top
-				err = tr.hb.hash(tr.a.CodeHash[:])
-				if err != nil {
+				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
 			}
 			if storageNode != nil || !tr.a.IsEmptyRoot() {
+				tr.accData.FieldSet |= AccountFieldStorageOnly
 				tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 				tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 				tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
 			}
 		}
-		tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
-		if err != nil {
+		var err error
+		if tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
 			return err
 		}
 	} else {
 		// if only storage resolution required, then no account records
-		err := tr.finaliseStorageRoot()
-		if err != nil {
+		if err := tr.finaliseStorageRoot(); err != nil {
 			return err
 		}
 		if tr.hbStorage.hasRoot() {
 			hbRoot := tr.hbStorage.root()
 			hbHash := tr.hbStorage.rootHash()
-
 			tr.hbStorage.Reset()
 			tr.wasIHStorage = false
 			tr.groupsStorage = nil
@@ -273,7 +257,6 @@ func (tr *ResolverStateful) finaliseRoot() error {
 			tr.succStorage.Reset()
 			return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 		}
-		return nil
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -292,7 +275,6 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 	tr.currStorage.Write(tr.succStorage.Bytes())
 	tr.succStorage.Reset()
 	if tr.currStorage.Len() > 0 {
-		var err error
 		var data GenStructStepData
 		if tr.wasIHStorage {
 			tr.hashData.Hash = common.BytesToHash(tr.valueStorage.Bytes())
@@ -301,21 +283,10 @@ func (tr *ResolverStateful) finaliseStorageRoot() error {
 			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 			data = &tr.leafData
 		}
+		var err error
 		tr.groupsStorage, err = GenStructStep(tr.rssChopped[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hbStorage, data, tr.groupsStorage, false)
 		if err != nil {
 			return err
-		}
-	} else {
-		// Special case when from IH we took storage root. In this case tr.currStorage.Len() == 0.
-		// But still can put value on stack.
-		if tr.wasIHStorage {
-			if err := tr.hbStorage.hash(tr.valueStorage.Bytes()); err != nil {
-				return err
-			}
-		} else {
-			if err := tr.hbStorage.hash(EmptyRoot.Bytes()); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -502,45 +473,22 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 	}
 
 	if tr.curr.Len() > 0 {
-		var err error
 		var data GenStructStepData
 		if tr.wasIH {
 			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
 			data = &tr.hashData
 		} else {
 			var storageNode node
-			if tr.a.Incarnation == 0 {
-				tr.a.Root = EmptyRoot
-			} else {
-				if tr.trace {
-					fmt.Printf("Finalising storage root for %x\n", tr.accAddrHashWithInc)
-				}
-				err = tr.finaliseStorageRoot()
-				if err != nil {
-					return err
-				}
-
-				if tr.hbStorage.hasRoot() {
-					tr.a.Root.SetBytes(tr.hbStorage.rootHash().Bytes())
-					storageNode = tr.hbStorage.root()
-					if tr.trace {
-						fmt.Printf("Got root: %x\n", tr.a.Root)
-					}
-				} else {
-					tr.a.Root = EmptyRoot
-					if tr.trace {
-						fmt.Printf("Got empty root\n")
-					}
-				}
+			if err := tr.finaliseStorageRoot(); err != nil {
+				return err
+			}
+			if tr.hbStorage.hasRoot() {
+				tr.a.Root = tr.hbStorage.rootHash()
+				storageNode = tr.hbStorage.root()
+			} else if tr.wasIHStorage {
+				tr.a.Root.SetBytes(tr.valueStorage.Bytes())
 			}
 			tr.accData.FieldSet = 0
-			if !tr.a.IsEmptyCodeHash() {
-				tr.accData.FieldSet |= AccountFieldCodeOnly
-			}
-			if storageNode != nil || !tr.a.IsEmptyRoot() {
-				tr.accData.FieldSet |= AccountFieldStorageOnly
-			}
-
 			tr.accData.Balance.Set(&tr.a.Balance)
 			if tr.a.Balance.Sign() != 0 {
 				tr.accData.FieldSet |= AccountFieldBalanceOnly
@@ -552,13 +500,14 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 			tr.accData.Incarnation = tr.a.Incarnation
 			data = &tr.accData
 			if !tr.a.IsEmptyCodeHash() {
+				tr.accData.FieldSet |= AccountFieldCodeOnly
 				// the first item ends up deepest on the stack, the second item - on the top
-				err = tr.hb.hash(tr.a.CodeHash[:])
-				if err != nil {
+				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
 			}
 			if storageNode != nil || !tr.a.IsEmptyRoot() {
+				tr.accData.FieldSet |= AccountFieldStorageOnly
 				tr.hb.hashStack = append(tr.hb.hashStack, 0x80+common.HashLength)
 				tr.hb.hashStack = append(tr.hb.hashStack, tr.a.Root[:]...)
 				tr.hb.nodeStack = append(tr.hb.nodeStack, storageNode)
@@ -569,8 +518,8 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		tr.groupsStorage = nil
 		tr.currStorage.Reset()
 		tr.succStorage.Reset()
-		tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
-		if err != nil {
+		var err error
+		if tr.groups, err = GenStructStep(tr.currentRsChopped.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
 			return err
 		}
 	}
