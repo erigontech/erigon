@@ -156,6 +156,15 @@ func (b *Buffer) merge(other *Buffer) {
 		b.codeSizeReads[address] = codeHash
 	}
 
+	for addrHash := range other.deleted {
+		b.deleted[addrHash] = struct{}{}
+		delete(b.storageUpdates, addrHash)
+		delete(b.codeUpdates, addrHash)
+	}
+	for addrHash := range other.created {
+		b.created[addrHash] = struct{}{}
+		delete(b.storageUpdates, addrHash)
+	}
 	for addrHash, om := range other.storageUpdates {
 		m, ok := b.storageUpdates[addrHash]
 		if !ok {
@@ -181,13 +190,6 @@ func (b *Buffer) merge(other *Buffer) {
 	}
 	for addrHash := range other.accountReads {
 		b.accountReads[addrHash] = struct{}{}
-	}
-	for addrHash := range other.deleted {
-		b.deleted[addrHash] = struct{}{}
-		delete(b.storageUpdates, addrHash)
-	}
-	for addrHash := range other.created {
-		b.created[addrHash] = struct{}{}
 	}
 }
 
@@ -469,9 +471,8 @@ func (tds *TrieDbState) buildAccountReads() common.Hashes {
 
 // buildAccountWrites builds a sorted list of all address hashes that were modified within the
 // period for which we are aggregating updates.
-func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account) {
+func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account, [][]byte) {
 	accountTouches := common.Hashes{}
-	var aValues []*accounts.Account
 	for addrHash, aValue := range tds.aggregateBuffer.accountUpdates {
 		if aValue != nil {
 			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
@@ -485,7 +486,8 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 		accountTouches = append(accountTouches, addrHash)
 	}
 	sort.Sort(accountTouches)
-	aValues = make([]*accounts.Account, len(accountTouches))
+	aValues := make([]*accounts.Account, len(accountTouches))
+	aCodes := make([][]byte, len(accountTouches))
 	for i, addrHash := range accountTouches {
 		if i < len(accountTouches)-1 && addrHash == accountTouches[i+1] {
 			aValues[i] = nil // Entry that would wipe out existing storage
@@ -500,9 +502,12 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 				}
 			}
 			aValues[i] = a
+			if code, ok := tds.aggregateBuffer.codeUpdates[addrHash]; ok {
+				aCodes[i] = code
+			}
 		}
 	}
-	return accountTouches, aValues
+	return accountTouches, aValues, aCodes
 }
 
 func (tds *TrieDbState) resolveCodeTouches(
@@ -736,11 +741,17 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 		fmt.Printf("len(storageKeys)=%d, len(sValues)=%d\n", len(storageKeys), len(sValues))
 	}
 	// Retrive the list of inserted/updated/deleted accounts (keys and values)
-	accountKeys, aValues := tds.buildAccountWrites()
+	accountKeys, aValues, aCodes := tds.buildAccountWrites()
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, &tds.newStream, tds.hashBuilder, trace)
+	var hb *trie.HashBuilder
+	if trace {
+		hb = trie.NewHashBuilder(true)
+	} else {
+		hb = tds.hashBuilder
+	}
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, aCodes, storageKeys, sValues, common.HashLength, &tds.newStream, hb, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
@@ -750,20 +761,16 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
-	// The following map is to prevent repeated clearouts of the storage
-	alreadyCreated := make(map[common.Hash]struct{})
 	for i, b := range tds.buffers {
+		// For the contracts that got deleted, we clear the storage
+		for addrHash := range b.deleted {
+			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
+			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+			tds.t.DeleteSubtree(addrHash[:])
+		}
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for addrHash := range b.created {
-			// Prevent repeated storage clearouts
-			if _, ok := alreadyCreated[addrHash]; ok {
-				continue
-			}
-			alreadyCreated[addrHash] = struct{}{}
-
-			//fmt.Println("updateTrieRoots del subtree", addrHash.String())
-
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
@@ -775,7 +782,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
 				tds.t.Delete(addrHash[:])
-				delete(b.codeUpdates, addrHash)
 			}
 		}
 
@@ -837,20 +843,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					account.Root = trie.EmptyRoot
 				}
 			}
-		}
-
-		// For the contracts that got deleted
-		for addrHash := range b.deleted {
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				//fmt.Printf("(b)Set empty root for addrHash %x due to deleted\n", addrHash)
-				account.Root = trie.EmptyRoot
-			}
-			if account, ok := accountUpdates[addrHash]; ok && account != nil {
-				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
-				account.Root = trie.EmptyRoot
-			}
-
-			tds.t.DeleteSubtree(addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
@@ -1378,6 +1370,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
+	delete(tsw.tds.currentBuffer.codeUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = struct{}{}
 	if original.Incarnation > 0 {
 		tsw.tds.incarnationMap[address] = original.Incarnation
@@ -1469,6 +1462,7 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
+	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	return nil
 }
 
