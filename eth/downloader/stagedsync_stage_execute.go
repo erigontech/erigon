@@ -121,15 +121,19 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		atomic.AddUint64(&nextBlockNumber, 1)
 
 		if stateBatch.BatchSize() >= StateBatchSize {
+			start := time.Now()
 			if _, err = stateBatch.Commit(); err != nil {
 				return 0, err
 			}
 			incarnationMap = make(map[common.Address]uint64)
+			log.Info("State batch committed", "in", time.Since(start))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {
+			start := time.Now()
 			if _, err = changeBatch.Commit(); err != nil {
 				return 0, err
 			}
+			log.Info("Change batch committed", "in", time.Since(start))
 		}
 			if blockNum-profileNumber == 100000 {
 				// Flush the profiler
