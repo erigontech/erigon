@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -178,7 +179,7 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
 			data = &tr.hashData
 		} else {
-			if ok, err := tr.finaliseStorageRoot(2*common.HashLength); err == nil {
+			if ok, err := tr.finaliseStorageRoot(2 * common.HashLength); err == nil {
 				if ok {
 					// There are some storage items
 					tr.accData.FieldSet |= AccountFieldStorageOnly
@@ -356,21 +357,21 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 
 type walker func(isIH bool, keyIdx int, k, v []byte) error
 
-func keyToNibblesWithoutInc(k []byte, buf *bytes.Buffer) {
+func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
 	// Transform k to nibbles, but skip the incarnation part in the middle
 	for i, b := range k {
 		if i == common.HashLength {
 			break
 		}
-		buf.WriteByte(b / 16)
-		buf.WriteByte(b % 16)
+		w.WriteByte(b / 16)
+		w.WriteByte(b % 16)
 	}
-	if len(k) > common.HashLength + common.IncarnationLength {
-		for _, b := range k[common.HashLength + common.IncarnationLength:] {
-			buf.WriteByte(b / 16)
-			buf.WriteByte(b % 16)			
+	if len(k) > common.HashLength+common.IncarnationLength {
+		for _, b := range k[common.HashLength+common.IncarnationLength:] {
+			w.WriteByte(b / 16)
+			w.WriteByte(b % 16)
 		}
-	}	
+	}
 }
 
 func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
@@ -436,7 +437,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
 			data = &tr.hashData
 		} else {
-			if ok, err := tr.finaliseStorageRoot(2*common.HashLength); err == nil {
+			if ok, err := tr.finaliseStorageRoot(2 * common.HashLength); err == nil {
 				if ok {
 					// There are some storage items
 					tr.accData.FieldSet |= AccountFieldStorageOnly
