@@ -115,11 +115,12 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			keyToNibblesWithoutInc(req.contract, &keyNibbles)
 		}
 		keyNibbles.Write(req.resolveHex)
+		k := common.CopyBytes(keyNibbles.Bytes()) // Need to copy because buffer is reused between iterations
 		if prevReq != nil &&
 			bytes.Equal(req.contract, prevReq.contract) &&
 			bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
 
-			tr.rss[len(tr.rss)-1].AddHex(keyNibbles.Bytes())
+			tr.rss[len(tr.rss)-1].AddHex(k)
 			continue
 		}
 		if prevReq != nil && prevReq.contract == nil && req.contract != nil {
@@ -127,8 +128,8 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			if len(prevHex) == 65 {
 				prevHex = prevHex[:64]
 			}
-			if bytes.Equal(prevHex[:prevReq.resolvePos], keyNibbles.Bytes()[:prevReq.resolvePos]) {
-				tr.rss[len(tr.rss)-1].AddHex(keyNibbles.Bytes())
+			if bytes.Equal(prevHex[:prevReq.resolvePos], k[:prevReq.resolvePos]) {
+				tr.rss[len(tr.rss)-1].AddHex(k)
 				continue
 			}
 		}
@@ -147,7 +148,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		}
 
 		tr.rss = append(tr.rss, NewResolveSet(0))
-		tr.rss[len(tr.rss)-1].AddHex(keyNibbles.Bytes())
+		tr.rss[len(tr.rss)-1].AddHex(k)
 		prevReq = req
 	}
 
