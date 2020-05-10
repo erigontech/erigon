@@ -272,7 +272,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	if len(tr.requests) == 0 {
 		return nil
 	}
-	trace = true
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
 	tr.trace = trace
 	tr.hb.trace = trace
