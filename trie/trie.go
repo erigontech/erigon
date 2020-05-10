@@ -19,7 +19,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -497,16 +496,11 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 			if incarnation == nil {
 				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0, common.CopyBytes(n))
 			}
-
-			// 8 is IncarnationLength
-			prefix := make([]byte, len(contract)+8)
-			copy(prefix, contract)
-			binary.BigEndian.PutUint64(prefix[len(contract):], ^*incarnation)
 			if pos-hexContractLen < 0 {
 				// when need storage resolution for non-resolved account
-				return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], 0, common.CopyBytes(n))
+				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0, common.CopyBytes(n))
 			}
-			return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], pos-hexContractLen, common.CopyBytes(n))
+			return true, t.NewResolveRequest(contract, hex[hexContractLen:l], pos-hexContractLen, common.CopyBytes(n))
 
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))

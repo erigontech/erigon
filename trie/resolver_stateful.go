@@ -208,11 +208,7 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 		// if only storage resolution required, then no account records
 		if ok, err := tr.finaliseStorageRoot(tr.currentReq.extResolvePos); err == nil {
 			if ok {
-				hbRoot := tr.hb.root()
-				hbHash := tr.hb.rootHash()
-				tr.hb.Reset()
-				tr.wasIHStorage = false
-				return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
+				return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
 			}
 		} else {
 			return err
@@ -220,12 +216,7 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 	}
 	tr.groups = tr.groups[:0]
 	if tr.hb.hasRoot() {
-		hbRoot := tr.hb.root()
-		hbHash := tr.hb.rootHash()
-		if err := tr.hookFunction(tr.currentReq, hbRoot, hbHash); err != nil {
-			return err
-		}
-		return nil
+		return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
 	}
 	return nil
 }
