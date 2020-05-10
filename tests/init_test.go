@@ -215,7 +215,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 			}
 			return nil
 		}
-		if filepath.Ext(path) == ".json" && strings.HasSuffix(path, "TransitionTests/bcHomesteadToEIP150/EIP150Transition.json") {
+		if filepath.Ext(path) == ".json" {
 			t.Run(name, func(t *testing.T) { tm.runTestFile(t, path, name, runTest) })
 		}
 		return nil
