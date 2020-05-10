@@ -232,7 +232,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
 	cutoff := 2*common.HashLength
 	succ.Write(curr.Bytes()[:cutoff - 1])
-	succ.WriteByte(curr.Bytes()[cutoff - 1] ^ 1) // Invert last bit in the last nibble
+	succ.WriteByte(curr.Bytes()[cutoff - 1] + 1)
 	if groups, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
