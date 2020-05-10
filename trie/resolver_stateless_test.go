@@ -82,21 +82,17 @@ func TestRebuildTrie(t *testing.T) {
 
 	currentTrie := 0
 
-	req1 := trie1.NewResolveRequest(nil, []byte{0x01}, 1, trie1.Hash().Bytes())
-	req2 := trie2.NewResolveRequest(nil, []byte{0x02}, 1, trie2.Hash().Bytes())
-	req21 := trie2.NewResolveRequest(nil, []byte{0x02}, 1, trie2.Hash().Bytes())
-	req3 := trie3.NewResolveRequest(nil, []byte{0x03}, 1, trie3.Hash().Bytes())
-	req31 := trie3.NewResolveRequest(nil, []byte{0x03}, 1, trie3.Hash().Bytes())
+	req1 := trie1.NewResolveRequest(nil, []byte{0x01}, 1)
+	req2 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
+	req21 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
+	req3 := trie3.NewResolveRequest(nil, []byte{0x03}, 1,)
+	req31 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
 
 	hookFunction := func(hookNibbles []byte, root node, rootHash common.Hash) error {
 		trie := New(rootHash)
 		trie.root = root
 		resolvedTries[currentTrie] = trie
 		currentTrie++
-		//if !bytes.Equal(req.resolveHash.reference(), rootHash.Bytes()) {
-		//	return fmt.Errorf("root hash mismatch: expected %x got %x",
-		//		req.resolveHash.reference(), rootHash.Bytes())
-		//}
 		return nil
 	}
 

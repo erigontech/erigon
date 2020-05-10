@@ -1127,7 +1127,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
 				prefix := request.Prefixes[i]
-				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles(), nil)
+				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
 				rr.RequiresRLP = true
 
 				resolver := trie.NewResolver(tr, block.NumberU64())
@@ -1187,7 +1187,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(1))
 					// TODO [Issue 99] support incarnations
 					storagePrefix := req.Prefixes[i]
-					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
+					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
 					rr.RequiresRLP = true
 
 					resolver := trie.NewResolver(tr, block.NumberU64())

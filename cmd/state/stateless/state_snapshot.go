@@ -331,7 +331,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 		t := trie.New(rootHash)
 		r := trie.NewResolver(t, blockNum)
 		key := []byte{}
-		req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+		req := t.NewResolveRequest(nil, key, 0)
 		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 		r.AddRequest(req)
 		if err = r.ResolveWithDb(stateDb, blockNum, false); err != nil {

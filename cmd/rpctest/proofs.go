@@ -57,7 +57,7 @@ func proofs(chaindata string, url string, block int) {
 			// Resolve 6 top levels of the accounts trie
 			t = trie.New(common.Hash{})
 			r := trie.NewResolver(t, uint64(block))
-			req := t.NewResolveRequest(nil, []byte{}, 0, nil)
+			req := t.NewResolveRequest(nil, []byte{}, 0)
 			r.AddRequest(req)
 			err = r.ResolveWithDb(ethDb, uint64(block), false)
 			if err != nil {
@@ -245,7 +245,7 @@ func fixState(chaindata string, url string) {
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
-			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
+			streq := st.NewResolveRequest(contractPrefix, key, 0)
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum, false)
 			if err != nil {

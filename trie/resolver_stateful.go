@@ -25,19 +25,18 @@ var (
 type hookFunction func(hookNibbles []byte, n node, hash common.Hash) error
 
 type ResolverStateful struct {
-	rs         *ResolveSet
-	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ       bytes.Buffer
-	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups     []uint16
-	hb         *HashBuilder
-	keyIdx     int
-	a          accounts.Account
-	leafData   GenStructStepLeafData
-	accData    GenStructStepAccountData
-	requests   []*ResolveRequest
+	rs       *ResolveSet
+	curr     bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ     bytes.Buffer
+	value    bytes.Buffer // Current value to be used as the value tape for the hash builder
+	groups   []uint16
+	hb       *HashBuilder
+	keyIdx   int
+	a        accounts.Account
+	leafData GenStructStepLeafData
+	accData  GenStructStepAccountData
+	requests []*ResolveRequest
 
-	roots        []node // roots of the tries that are being built
 	hookFunction hookFunction
 
 	wasIH        bool
@@ -83,12 +82,6 @@ func (tr *ResolverStateful) Reset(requests []*ResolveRequest, hookFunction hookF
 	tr.valueStorage.Reset()
 	tr.groupsStorage = tr.groupsStorage[:0]
 	tr.wasIHStorage = false
-}
-
-func (tr *ResolverStateful) PopRoots() []node {
-	roots := tr.roots
-	tr.roots = nil
-	return roots
 }
 
 // PrepareResolveParams prepares information for the MultiWalk

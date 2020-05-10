@@ -781,8 +781,8 @@ func testStartup() {
 	t := trie.New(common.Hash{})
 	r := trie.NewResolver(t, currentBlockNr)
 	key := []byte{}
-	rootHash := currentBlock.Root()
-	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	//rootHash := currentBlock.Root()
+	req := t.NewResolveRequest(nil, key, 0)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr, false)
 	if err != nil {
@@ -828,8 +828,8 @@ func testResolve(chaindata string) {
 	r := trie.NewResolver(t, currentBlockNr)
 	var key []byte
 	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
-	resolveHash := common.FromHex("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
-	req := t.NewResolveRequest(contract, key, 3, resolveHash)
+	//resolveHash := common.FromHex("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
+	req := t.NewResolveRequest(contract, key, 3)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr, true)
 	if err != nil {
