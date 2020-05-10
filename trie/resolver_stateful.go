@@ -25,7 +25,7 @@ var (
 type hookFunction func(*ResolveRequest, node, common.Hash) error
 
 type ResolverStateful struct {
-	rss        []*ResolveSet
+	rs         *ResolveSet
 	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
 	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
@@ -33,7 +33,6 @@ type ResolverStateful struct {
 	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
 	hb         *HashBuilder
 	currentReq *ResolveRequest // Request currently being handled
-	currentRs  *ResolveSet     // ResolveSet currently being used
 	keyIdx     int
 	a          accounts.Account
 	leafData   GenStructStepLeafData
@@ -63,6 +62,7 @@ func NewResolverStateful(requests []*ResolveRequest, hookFunction hookFunction) 
 		requests:           requests,
 		hookFunction:       hookFunction,
 		accAddrHashWithInc: make([]byte, 40),
+		rs:                 NewResolveSet(0),
 	}
 }
 
@@ -72,8 +72,7 @@ func (tr *ResolverStateful) Reset(requests []*ResolveRequest, hookFunction hookF
 	tr.reqIndices = tr.reqIndices[:0]
 	tr.keyIdx = 0
 	tr.currentReq = nil
-	tr.currentRs = nil
-	tr.rss = tr.rss[:0]
+	tr.rs = NewResolveSet(0)
 	tr.requests = requests
 	tr.hookFunction = hookFunction
 	tr.curr.Reset()
@@ -102,7 +101,6 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
-	tr.rss = tr.rss[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
@@ -116,22 +114,15 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		}
 		keyNibbles.Write(req.resolveHex)
 		k := common.CopyBytes(keyNibbles.Bytes()) // Need to copy because buffer is reused between iterations
+		tr.rs.AddHex(k)
 		if prevReq != nil &&
 			bytes.Equal(req.contract, prevReq.contract) &&
 			bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
-
-			tr.rss[len(tr.rss)-1].AddHex(k)
 			continue
 		}
-		if prevReq != nil && prevReq.contract == nil && req.contract != nil {
-			prevHex := prevReq.resolveHex
-			if len(prevHex) == 65 {
-				prevHex = prevHex[:64]
-			}
-			if bytes.Equal(prevHex[:prevReq.resolvePos], k[:prevReq.resolvePos]) {
-				tr.rss[len(tr.rss)-1].AddHex(k)
-				continue
-			}
+		if prevReq != nil && prevReq.contract == nil && req.contract != nil &&
+			bytes.Equal(prevReq.resolveHex[:prevReq.resolvePos], k[:prevReq.resolvePos]) {
+			continue
 		}
 		tr.reqIndices = append(tr.reqIndices, i)
 		pLen := len(req.contract)
@@ -149,14 +140,10 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
 		}
-
-		tr.rss = append(tr.rss, NewResolveSet(0))
-		tr.rss[len(tr.rss)-1].AddHex(k)
 		prevReq = req
 	}
 
 	tr.currentReq = tr.requests[tr.reqIndices[0]]
-	tr.currentRs = tr.rss[0]
 	return startkeys, fixedbits
 }
 
@@ -213,7 +200,7 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 			data = &tr.accData
 		}
 		var err error
-		if tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
+		if tr.groups, err = GenStructStep(tr.rs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
 			return err
 		}
 		tr.accData.FieldSet = 0
@@ -251,7 +238,7 @@ func (tr *ResolverStateful) finaliseStorageRoot(cutoff int) (bool, error) {
 			data = &tr.leafData
 		}
 		var err error
-		tr.groupsStorage, err = GenStructStep(tr.rss[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hb, data, tr.groupsStorage, false)
+		tr.groupsStorage, err = GenStructStep(tr.rs.HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hb, data, tr.groupsStorage, false)
 		if err != nil {
 			return false, err
 		}
@@ -282,9 +269,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if tr.trace {
-		for i := range tr.rss {
-			fmt.Printf("tr.rss[%d]->%x\n", i, tr.rss[i].hexes)
-		}
+		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
 		for i := range tr.requests {
 			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
 		}
@@ -320,9 +305,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	}
 	if err = tr.finaliseRoot(tr.currentReq.extResolvePos); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
-		for i := range tr.rss {
-			fmt.Printf("tr.rss[%d]->%x\n", i, tr.rss[i].hexes)
-		}
+		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
 		for i := range tr.requests {
 			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
 		}
@@ -404,7 +387,7 @@ func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) er
 			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
 			data = &tr.leafData
 		}
-		tr.groupsStorage, err = GenStructStep(tr.rss[tr.keyIdx].HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hb, data, tr.groupsStorage, false)
+		tr.groupsStorage, err = GenStructStep(tr.rs.HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hb, data, tr.groupsStorage, false)
 		if err != nil {
 			return err
 		}
@@ -463,7 +446,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 		tr.succStorage.Reset()
 		tr.groupsStorage = tr.groupsStorage[:0]
 		var err error
-		if tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
+		if tr.groups, err = GenStructStep(tr.rs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
 			return err
 		}
 		tr.accData.FieldSet = 0
@@ -617,7 +600,6 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						tr.groupsStorage = tr.groupsStorage[:0]
 						tr.keyIdx = rangeIdx
 						tr.currentReq = tr.requests[tr.reqIndices[rangeIdx]]
-						tr.currentRs = tr.rss[rangeIdx]
 						tr.curr.Reset()
 						tr.succ.Reset()
 						tr.currStorage.Reset()
@@ -676,9 +658,9 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			canUseIntermediateHash := tr.rss[rangeIdx].HashOnly(minKeyAsNibbles.Bytes())
+			canUseIntermediateHash := tr.rs.HashOnly(minKeyAsNibbles.Bytes())
 			if tr.trace {
-				fmt.Printf("tr.rss[%d].HashOnly(%x)=%t\n", rangeIdx, minKeyAsNibbles.Bytes(), canUseIntermediateHash)
+				fmt.Printf("tr.rs.HashOnly(%x)=%t\n", minKeyAsNibbles.Bytes(), canUseIntermediateHash)
 			}
 
 			if !canUseIntermediateHash { // can't use ih as is, need go to children
