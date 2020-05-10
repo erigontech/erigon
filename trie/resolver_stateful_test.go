@@ -574,11 +574,10 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, nil, keybytesToHex(kAcc2), 20, nil, false, nil})
 	sort.Stable(tr)
 	resolver := NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks, cutoffs := resolver.PrepareResolveParams()
+	startkeys, fixedbits, hooks := resolver.PrepareResolveParams()
 	assert.Equal("[0001cf1ce0 0002cf1ce0664746d39a]", fmt.Sprintf("%x", startkeys))
 	assert.Equal("[40 80]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000010c0f010c0e00 000000020c0f010c0e000606040704060d03090a]", fmt.Sprintf("%x", hooks))
-	assert.Equal("[10 20]", fmt.Sprintf("%d", cutoffs))
 	tr.Reset(0)
 
 	// if some account doesn't need resolution
@@ -589,11 +588,10 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks22), 0, nil, false, nil})
 	sort.Stable(tr)
 	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks, cutoffs = resolver.PrepareResolveParams()
+	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
 	assert.Equal("[0001cf1ce0 0002cf1ce0664746d39a]", fmt.Sprintf("%x", startkeys))
 	assert.Equal("[40 80]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000010c0f010c0e00 000000020c0f010c0e000606040704060d03090a]", fmt.Sprintf("%x", hooks))
-	assert.Equal("[10 20]", fmt.Sprintf("%d", cutoffs))
 	tr.Reset(0)
 
 	// if some account doesn't need resolution
@@ -603,14 +601,13 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks22), 0, nil, false, nil})
 	sort.Stable(tr)
 	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks, cutoffs = resolver.PrepareResolveParams()
+	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
 	assert.Equal([][]byte{
 		common.FromHex("0001cf1ce0"),
 		kAcc2WithInc,
 	}, startkeys)
 	assert.Equal("[40 320]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000010c0f010c0e00 000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
-	assert.Equal("[10 64]", fmt.Sprintf("%d", cutoffs))
 	tr.Reset(0)
 
 	// if first account doesn't need resolution
@@ -618,13 +615,12 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, kAcc2WithInc, keybytesToHex(ks22), 0, nil, false, nil})
 	sort.Stable(tr)
 	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks, cutoffs = resolver.PrepareResolveParams()
+	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
 	assert.Equal([][]byte{
 		kAcc2WithInc,
 	}, startkeys)
 	assert.Equal("[320]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
-	assert.Equal("[64]", fmt.Sprintf("%d", cutoffs))
 	tr.Reset(0)
 
 	// case when some storage requests - coming before account request which has resolve pos -> must lead to full scan
@@ -632,11 +628,10 @@ func TestPrepareResolveParams(t *testing.T) {
 	tr.AddRequest(&ResolveRequest{nil, nil, keybytesToHex(kAcc2), 0, nil, false, nil})
 	sort.Stable(tr)
 	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks, cutoffs = resolver.PrepareResolveParams()
+	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
 	assert.Equal("[]", fmt.Sprintf("%x", startkeys))
 	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[]", fmt.Sprintf("%x", hooks))
-	assert.Equal("[0]", fmt.Sprintf("%d", cutoffs))
 	tr.Reset(0)
 }
 

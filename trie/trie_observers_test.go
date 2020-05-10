@@ -296,6 +296,7 @@ func TestObserverLoadNodes(t *testing.T) {
 	trie.AddObserver(observer)
 
 	hash := subtrie.Hash()
+	//nolint:errcheck
 	trie.hook([]byte{}, subtrie.root, hash[:])
 
 	// fullNode
