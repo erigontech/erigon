@@ -354,12 +354,16 @@ func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
 		if i == common.HashLength {
 			break
 		}
+		//nolint:errcheck
 		w.WriteByte(b / 16)
+		//nolint:errcheck
 		w.WriteByte(b % 16)
 	}
 	if len(k) > common.HashLength+common.IncarnationLength {
 		for _, b := range k[common.HashLength+common.IncarnationLength:] {
+			//nolint:errcheck
 			w.WriteByte(b / 16)
+			//nolint:errcheck
 			w.WriteByte(b % 16)
 		}
 	}
