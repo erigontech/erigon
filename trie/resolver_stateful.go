@@ -32,7 +32,6 @@ type ResolverStateful struct {
 	groups     []uint16
 	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
 	hb         *HashBuilder
-	topLevels  int             // How many top levels of the trie to keep (not roll into hashes)
 	currentReq *ResolveRequest // Request currently being handled
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	keyIdx     int
