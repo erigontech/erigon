@@ -85,7 +85,7 @@ func TestRebuildTrie(t *testing.T) {
 	req1 := trie1.NewResolveRequest(nil, []byte{0x01}, 1)
 	req2 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
 	req21 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
-	req3 := trie3.NewResolveRequest(nil, []byte{0x03}, 1,)
+	req3 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
 	req31 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
 
 	hookFunction := func(hookNibbles []byte, root node, rootHash common.Hash) error {
