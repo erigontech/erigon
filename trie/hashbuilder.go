@@ -573,7 +573,7 @@ func (hb *HashBuilder) RootHash() (common.Hash, error) {
 
 func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
-	copy(hash[:], hb.hashStack[1:hashStackStride])
+	copy(hash[:], hb.hashStack[len(hb.hashStack)-hashStackStride+1:])
 	return hash
 }
 

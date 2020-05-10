@@ -165,6 +165,17 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 	if tr.trace {
 		fmt.Printf("finaliseRoot(%d)\n", cutoff)
 	}
+	if cutoff >= 2*common.HashLength {
+		// if only storage resolution required, then no account records
+		if ok, err := tr.finaliseStorageRoot(tr.currentReq.extResolvePos); err == nil {
+			if ok {
+				return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
+			}
+			return nil
+		} else {
+			return err
+		}		
+	}
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
@@ -203,15 +214,6 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 			return err
 		}
 		tr.accData.FieldSet = 0
-	} else {
-		// if only storage resolution required, then no account records
-		if ok, err := tr.finaliseStorageRoot(tr.currentReq.extResolvePos); err == nil {
-			if ok {
-				return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
-			}
-		} else {
-			return err
-		}
 	}
 	tr.groups = tr.groups[:0]
 	if tr.hb.hasRoot() {
@@ -254,6 +256,9 @@ func (tr *ResolverStateful) finaliseStorageRoot(cutoff int) (bool, error) {
 		tr.currStorage.Reset()
 		tr.succStorage.Reset()
 		tr.wasIHStorage = false
+		if tr.trace {
+			fmt.Printf("storage root: %x\n", tr.hb.rootHash())
+		}
 		return true, nil
 	}
 	return false, nil
