@@ -22,7 +22,7 @@ var (
 	trieResolveStatefulTimer = metrics.NewRegisteredTimer("trie/resolve/stateful", nil)
 )
 
-type hookFunction func(*ResolveRequest, node, common.Hash) error
+type hookFunction func(hookNibbles []byte, n node, hash common.Hash) error
 
 type ResolverStateful struct {
 	rs         *ResolveSet
@@ -97,12 +97,20 @@ func (tr *ResolverStateful) PopRoots() []node {
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
-func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
+// Returns the following slices
+// `startkeys` - DB prefixes for each range that the resolver has to walk through
+// `fixedbits` - how many bits in the `startkeys` need to be taken into account (this is important when the prefix has odd number of nibbles)
+// `hooks` - prefixes in the state trie (in nibble form) corresponding to each range
+// `cutoffs` - for each range, how many nibbles deep is the attachment point into the state trie. These values cannot be computed
+// from `fixedbits` because `fixedbits` do include incarnations (extra 64 bits), and cutoffs do not include (so there is no extra 16 nibbles)
+func (tr *ResolverStateful) PrepareResolveParams() (startkeys [][]byte, fixedbits []int, hooks [][]byte, cutoffs []int) {
 	// Remove requests strictly contained in the preceding ones
-	startkeys := [][]byte{}
-	fixedbits := []uint{}
+	startkeys = [][]byte{}
+	fixedbits = []int{}
+	cutoffs = []int{}
+	hooks = [][]byte{}
 	if len(tr.requests) == 0 {
-		return startkeys, fixedbits
+		return startkeys, fixedbits, hooks, cutoffs
 	}
 	var keyNibbles bytes.Buffer
 
@@ -126,12 +134,14 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		}
 		tr.reqIndices = append(tr.reqIndices, i)
 		pLen := len(req.contract)
-		req.extResolvePos = req.resolvePos
+		var cutoff int
 		if req.contract != nil {
-			req.extResolvePos += 2 * common.HashLength
+			cutoff = req.resolvePos + 2*common.HashLength
+		} else {
+			cutoff = req.resolvePos
 		}
-		fixedbits = append(fixedbits, uint(4*(2*pLen+req.resolvePos)))
-
+		cutoffs = append(cutoffs, cutoff)
+		fixedbits = append(fixedbits, 4*(2*pLen+req.resolvePos))
 		if pLen == 32 { // if we don't know incarnation, then just start resolution from account record
 			startkeys = append(startkeys, req.contract)
 		} else {
@@ -140,26 +150,27 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
 		}
+		hooks = append(hooks, k[:cutoff])
 		prevReq = req
 	}
 
 	tr.currentReq = tr.requests[tr.reqIndices[0]]
-	return startkeys, fixedbits
+	return startkeys, fixedbits, hooks, cutoffs
 }
 
 // cutoff specifies how many nibbles have to be cut from the beginning of the storage keys
 // to fit the insertion point.
 // We create a fake branch node at the cutoff point by modifying the last
 // nibble of the `succ` key
-func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
+func (tr *ResolverStateful) finaliseRoot(hookNibbles []byte, cutoff int) error {
 	if tr.trace {
-		fmt.Printf("finaliseRoot(%d)\n", cutoff)
+		fmt.Printf("finaliseRoot(%x, %d)\n", hookNibbles, cutoff)
 	}
 	if cutoff >= 2*common.HashLength {
 		// if only storage resolution required, then no account records
-		if ok, err := tr.finaliseStorageRoot(tr.currentReq.extResolvePos); err == nil {
+		if ok, err := tr.finaliseStorageRoot(cutoff); err == nil {
 			if ok {
-				return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
+				return tr.hookFunction(hookNibbles, tr.hb.root(), tr.hb.rootHash())
 			}
 		} else {
 			return err
@@ -207,7 +218,7 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 	}
 	tr.groups = tr.groups[:0]
 	if tr.hb.hasRoot() {
-		return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
+		return tr.hookFunction(hookNibbles, tr.hb.root(), tr.hb.rootHash())
 	}
 	return nil
 }
@@ -267,7 +278,7 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 		fmt.Printf("RebuildTrie blockNr %d\n", blockNr)
 	}
 
-	startkeys, fixedbits := tr.PrepareResolveParams()
+	startkeys, fixedbits, hooks, cutoffs := tr.PrepareResolveParams()
 	if tr.trace {
 		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
 		for i := range tr.requests {
@@ -298,12 +309,12 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, blockNr uint64, histo
 	if historical {
 		panic("historical data is not implemented")
 	} else {
-		err = tr.MultiWalk2(boltDB, startkeys, fixedbits, tr.WalkerAccount, tr.WalkerStorage, true)
+		err = tr.MultiWalk2(boltDB, startkeys, fixedbits, hooks, cutoffs, tr.WalkerAccount, tr.WalkerStorage, true)
 	}
 	if err != nil {
 		return err
 	}
-	if err = tr.finaliseRoot(tr.currentReq.extResolvePos); err != nil {
+	if err = tr.finaliseRoot(hooks[len(hooks)-1], cutoffs[len(cutoffs)-1]); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
 		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
 		for i := range tr.requests {
@@ -477,7 +488,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []uint, accWalker walker, storageWalker walker, isAccount bool) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []int, hooks [][]byte, cutoffs []int, accWalker walker, storageWalker walker, isAccount bool) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -489,6 +500,8 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
+	hookNibbles := hooks[rangeIdx]
+	cutoff := cutoffs[rangeIdx]
 	if len(startkey) > common.HashLength {
 		// Looking for storage sub-tree
 		copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
@@ -584,15 +597,17 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
+						if err := tr.finaliseRoot(hookNibbles, cutoff); err != nil {
+							return err
+						}
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 						if len(startkey) > common.HashLength {
 							// Looking for storage sub-tree
 							copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
 						}
-						if err := tr.finaliseRoot(tr.currentReq.extResolvePos); err != nil {
-							return err
-						}
+						hookNibbles = hooks[rangeIdx]
+						cutoff = cutoffs[rangeIdx]
 						tr.hb.Reset()
 						tr.wasIH = false
 						tr.wasIHStorage = false
@@ -648,12 +663,10 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			}
 
 			// ih part
-			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
-
 			minKeyAsNibbles.Reset()
 			keyToNibblesWithoutInc(minKey, &minKeyAsNibbles)
 
-			if minKeyAsNibbles.Len() < currentReq.extResolvePos {
+			if minKeyAsNibbles.Len() < cutoff {
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}

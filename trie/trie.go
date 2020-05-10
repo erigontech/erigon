@@ -395,7 +395,6 @@ type ResolveRequest struct {
 	contract      []byte   // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
 	resolveHex    []byte   // Key for which the resolution is requested
 	resolvePos    int      // Position in the key for which resolution is requested
-	extResolvePos int      // Internal field, does not need to be set when ResolveRequest is created
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
 	RequiresRLP   bool     // whether to output node's RLP
 	NodeRLP       []byte   // [OUT] RLP of the resolved node
@@ -758,16 +757,20 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool, uint64) {
 	return nd, parent, true, incarnation
 }
 
-func (t *Trie) hook(hex []byte, n node) {
+func (t *Trie) hook(hex []byte, n node, hash []byte) error {
 	nd, parent, ok, incarnation := t.getNode(hex, true)
 	if !ok {
-		return
+		return nil
 	}
 	if _, ok := nd.(valueNode); ok {
-		return
+		return nil
 	}
-	if _, ok := nd.(hashNode); !ok && nd != nil {
-		return
+	if hn, ok := nd.(hashNode); ok {
+		if !bytes.Equal([]byte(hn), hash) {
+			return fmt.Errorf("wrong hash when hooking, expected %s, sub-tree hash %x", hn, hash)
+		}
+	} else if nd != nil {
+		return fmt.Errorf("expected hash node at %x, got %T", hex, nd)
 	}
 
 	t.touchAll(n, hex, false, incarnation)
@@ -790,6 +793,7 @@ func (t *Trie) hook(hex []byte, n node) {
 	case *accountNode:
 		p.storage = n
 	}
+	return nil
 }
 
 func (t *Trie) touchAll(n node, hex []byte, del bool, incarnation uint64) {

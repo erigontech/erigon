@@ -120,18 +120,18 @@ func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byt
 }
 
 // WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
+func (m *mutation) Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
 	return m.db.Walk(bucket, startkey, fixedbits, walker)
 }
 
 // WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
 
-func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
 	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
@@ -278,15 +278,15 @@ func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
 	atomic.AddUint64(&d.DBCounterStats.Has, 1)
 	return d.Database.Has(bucket, key)
 }
-func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
+func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
 	return d.Database.Walk(bucket, startkey, fixedbits, walker)
 }
-func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
 	return d.Database.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
-func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.WalkAsOf, 1)
 	return d.Database.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
