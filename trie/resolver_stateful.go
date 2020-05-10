@@ -137,9 +137,9 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		pLen := len(req.contract)
 		req.extResolvePos = req.resolvePos
 		if req.contract != nil {
-			req.extResolvePos += 2*common.HashLength
+			req.extResolvePos += 2 * common.HashLength
 		}
-		fixedbits = append(fixedbits, uint(4*(2*pLen + req.resolvePos)))
+		fixedbits = append(fixedbits, uint(4*(2*pLen+req.resolvePos)))
 
 		if pLen == 32 { // if we don't know incarnation, then just start resolution from account record
 			startkeys = append(startkeys, req.contract)
