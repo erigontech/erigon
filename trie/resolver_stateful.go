@@ -171,10 +171,10 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 			if ok {
 				return tr.hookFunction(tr.currentReq, tr.hb.root(), tr.hb.rootHash())
 			}
-			return nil
 		} else {
 			return err
-		}		
+		}
+		return nil
 	}
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
