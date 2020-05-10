@@ -112,7 +112,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 	for i, req := range tr.requests {
 		keyNibbles.Reset()
 		if req.contract != nil {
-			keyToNibblesWithoutInc(req.contract, &keyNibbles)
+			keyToNibblesWithoutInc(req.contract[:common.HashLength], &keyNibbles)
 		}
 		keyNibbles.Write(req.resolveHex)
 		k := common.CopyBytes(keyNibbles.Bytes()) // Need to copy because buffer is reused between iterations
@@ -135,8 +135,11 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 		}
 		tr.reqIndices = append(tr.reqIndices, i)
 		pLen := len(req.contract)
-		req.extResolvePos = req.resolvePos + 2*pLen
-		fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+		req.extResolvePos = req.resolvePos
+		if req.contract != nil {
+			req.extResolvePos += 2*common.HashLength
+		}
+		fixedbits = append(fixedbits, uint(4*(2*pLen + req.resolvePos)))
 
 		if pLen == 32 { // if we don't know incarnation, then just start resolution from account record
 			startkeys = append(startkeys, req.contract)
