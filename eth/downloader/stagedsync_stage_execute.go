@@ -3,6 +3,7 @@ package downloader
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"sync/atomic"
 	"time"
@@ -61,8 +62,8 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 4000000
-const ChangeBatchSize = 100
+const StateBatchSize = 1000000
+const ChangeBatchSize = 1000
 
 func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
@@ -133,7 +134,10 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			if _, err = changeBatch.Commit(); err != nil {
 				return 0, err
 			}
-			log.Info("Change batch committed", "in", time.Since(start))
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Change batch committed", "in", time.Since(start), "state-batch-size", stateBatch.BatchSize(),
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 			if blockNum-profileNumber == 100000 {
 				// Flush the profiler
