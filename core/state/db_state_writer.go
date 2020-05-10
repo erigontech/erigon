@@ -14,18 +14,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func NewDbStateWriter(db ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
+func NewDbStateWriter(stateDb, changeDb ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
 	return &DbStateWriter{
-		db:             db,
+		stateDb:        stateDb,
+		changeDb:       changeDb,
 		blockNr:        blockNr,
-		pw:             &PreimageWriter{db: db, savePreimages: false},
+		pw:             &PreimageWriter{db: stateDb, savePreimages: false},
 		csw:            NewChangeSetWriter(),
 		incarnationMap: incarnationMap,
 	}
 }
 
 type DbStateWriter struct {
-	db             ethdb.Database
+	stateDb        ethdb.Database
+	changeDb       ethdb.Database
 	pw             *PreimageWriter
 	blockNr        uint64
 	csw            *ChangeSetWriter
@@ -59,7 +61,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
-	if err := rawdb.WriteAccount(dsw.db, addrHash, *account); err != nil {
+	if err := rawdb.WriteAccount(dsw.stateDb, addrHash, *account); err != nil {
 		return err
 	}
 	return nil
@@ -73,7 +75,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err != nil {
 		return err
 	}
-	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
+	if err := rawdb.DeleteAccount(dsw.stateDb, addrHash); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
@@ -87,11 +89,11 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 		return err
 	}
 	//save contract code mapping
-	if err := dsw.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+	if err := dsw.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
 	//save contract to codeHash mapping
-	return dsw.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:])
+	return dsw.stateDb.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:])
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -117,9 +119,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
-		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey)
+		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return dsw.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
+		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }
 
@@ -140,7 +142,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		return err
 	}
 	key := dbutils.EncodeTimestamp(dsw.blockNr)
-	if err = dsw.db.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
+	if err = dsw.changeDb.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
 	storageChanges, err := dsw.csw.GetStorageChanges()
@@ -153,7 +155,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		if err != nil {
 			return err
 		}
-		if err = dsw.db.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
+		if err = dsw.changeDb.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
 			return err
 		}
 	}
@@ -185,7 +187,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
 	for _, change := range changes.Changes {
 		currentChunkKey := dbutils.IndexChunkKey(change.Key, ^uint64(0))
-		indexBytes, err := dsw.db.Get(bucket, currentChunkKey)
+		indexBytes, err := dsw.changeDb.Get(bucket, currentChunkKey)
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
@@ -202,7 +204,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 				return err
 			}
 			// Flush the old chunk
-			if err := dsw.db.Put(bucket, indexKey, index); err != nil {
+			if err := dsw.changeDb.Put(bucket, indexKey, index); err != nil {
 				return err
 			}
 			// Start a new chunk
@@ -212,7 +214,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		}
 		index = index.Append(v, len(change.Value) == 0)
 
-		if err := dsw.db.Put(bucket, currentChunkKey, index); err != nil {
+		if err := dsw.changeDb.Put(bucket, currentChunkKey, index); err != nil {
 			return err
 		}
 	}

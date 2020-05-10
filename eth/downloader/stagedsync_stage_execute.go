@@ -61,6 +61,9 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
+const StateBatchSize = 4000000
+const ChangeBatchSize = 100
+
 func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
 	if err != nil {
@@ -82,7 +85,8 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			return lastProcessedBlockNumber, err
 		}
 
-	mutation := d.stateDB.NewBatch()
+	stateBatch := d.stateDB.NewBatch()
+	changeBatch := d.stateDB.NewBatch()
 
 	progressLogger := NewProgressLogger(logInterval)
 	progressLogger.Start(&nextBlockNumber)
@@ -101,8 +105,8 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		if block == nil {
 			break
 		}
-		stateReader := state.NewDbStateReader(mutation, incarnationMap)
-		stateWriter := state.NewDbStateWriter(mutation, blockNum, incarnationMap)
+		stateReader := state.NewDbStateReader(stateBatch, incarnationMap)
+		stateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, incarnationMap)
 
 		// where the magic happens
 		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, d.blockchain, engine, block, stateReader, stateWriter)
@@ -110,28 +114,35 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			return 0, err
 		}
 
-		if err = SaveStageProgress(mutation, Execution, blockNum); err != nil {
+		if err = SaveStageProgress(stateBatch, Execution, blockNum); err != nil {
 			return 0, err
 		}
 
 		atomic.AddUint64(&nextBlockNumber, 1)
 
-		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if _, err = mutation.Commit(); err != nil {
+		if stateBatch.BatchSize() >= StateBatchSize {
+			if _, err = stateBatch.Commit(); err != nil {
 				return 0, err
 			}
-			mutation = d.stateDB.NewBatch()
 			incarnationMap = make(map[common.Address]uint64)
 		}
-
+		if changeBatch.BatchSize() >= ChangeBatchSize {
+			if _, err = changeBatch.Commit(); err != nil {
+				return 0, err
+			}
+		}
 			if blockNum-profileNumber == 100000 {
 				// Flush the profiler
 				pprof.StopCPUProfile()
 			}
 	}
-	_, err = mutation.Commit()
+	_, err = stateBatch.Commit()
 	if err != nil {
-		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write db commit: %v", err)
+		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
+	}
+	_, err = changeBatch.Commit()
+	if err != nil {
+		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
