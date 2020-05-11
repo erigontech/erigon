@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -129,4 +130,13 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 // and the storage keys of the same account
 func (rs *ResolveSet) Current() []byte {
 	return rs.hexes[rs.lteIndex]
+}
+
+// Rewind lets us reuse this list from the beginning
+func (rs *ResolveSet) Rewind() {
+	rs.lteIndex = 0
+}
+
+func (rs *ResolveSet) String() string {
+	return fmt.Sprintf("%x", rs.hexes)
 }

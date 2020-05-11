@@ -418,29 +418,6 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	return storageTouches, values
 }
 
-// Expands the storage tries (by loading data from the database) if it is required
-// for accessing storage slots containing in the storageTouches map
-func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys, resolveFunc func(*trie.Resolver) error) error {
-	var firstRequest = true
-	for _, storageKey := range storageTouches {
-		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
-			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
-				tds.resolver.SetHistorical(tds.historical)
-			} else if firstRequest {
-				tds.resolver.Reset(tds.blockNr)
-			}
-			firstRequest = false
-			tds.resolver.AddRequest(req)
-		}
-	}
-	if !firstRequest {
-		res := resolveFunc(tds.resolver)
-		return res
-	}
-	return nil
-}
-
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageKeys) error { //nolint
 	for _, storageKey := range storageTouches {
@@ -521,7 +498,6 @@ func (tds *TrieDbState) resolveCodeTouches(
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
 			if tds.resolver == nil {
 				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
-				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
 			}
@@ -534,7 +510,6 @@ func (tds *TrieDbState) resolveCodeTouches(
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
 				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
-				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
 			}
@@ -544,68 +519,36 @@ func (tds *TrieDbState) resolveCodeTouches(
 	}
 
 	if !firstRequest {
-		return resolveFunc(tds.resolver)
-	}
-	return nil
-}
-
-// Expands the accounts trie (by loading data from the database) if it is required
-// for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc trie.ResolveFunc) error {
-	var firstRequest = true
-	for _, addrHash := range accountTouches {
-		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
-			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
-				tds.resolver.SetHistorical(tds.historical)
-			} else if firstRequest {
-				tds.resolver.Reset(tds.blockNr)
-			}
-			firstRequest = false
-			tds.resolver.AddRequest(req)
-		}
-	}
-	if !firstRequest {
-		return resolveFunc(tds.resolver)
+		return resolveFunc(tds.resolver, nil, nil, nil, nil)
 	}
 	return nil
 }
 
 func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, resolveFunc trie.ResolveFunc) error {
-	var firstRequest = true
-	touches := make([][]byte, 0, len(accountTouches)+len(storageTouches))
+	// Build the retain list
+	rs := trie.NewResolveSet(0)
 	for _, addrHash := range accountTouches {
-		touches = append(touches, common.CopyBytes(addrHash[:]))
+		var nibbles = make([]byte, 2*len(addrHash))
+		for i, b := range addrHash[:] {
+			nibbles[i*2] = b / 16
+			nibbles[i*2+1] = b % 16
+		}
+		rs.AddHex(nibbles)
 	}
 	for _, storageKey := range storageTouches {
-		touches = append(touches, common.CopyBytes(storageKey[:]))
-	}
-
-	if tds.resolver == nil {
-		tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
-		tds.resolver.SetHistorical(tds.historical)
-	}
-	tds.resolver.Reset(tds.blockNr)
-
-	for _, touch := range touches {
-		var need bool
-		var req *trie.ResolveRequest
-		if len(touch) <= 32 {
-			need, req = tds.t.NeedResolution(nil, touch)
-		} else {
-			need, req = tds.t.NeedResolution(touch[:common.HashLength], touch[:])
+		var nibbles = make([]byte, 2*len(storageKey))
+		for i, b := range storageKey[:] {
+			nibbles[i*2] = b / 16
+			nibbles[i*2+1] = b % 16
 		}
-
-		if need {
-			firstRequest = false
-			tds.resolver.AddRequest(req)
-		}
+		rs.AddHex(nibbles)
 	}
 
-	if !firstRequest {
-		return resolveFunc(tds.resolver)
-	}
-	return nil
+	dbPrefixes, fixedbits, hooks := tds.t.CreateLoadingPrefixes(rs)
+	// CreateLoadingPrefixes would have gone through the entire rs, so we need to rewind to the beginning
+	rs.Rewind()
+	resolver := trie.NewResolver(tds.t, tds.blockNr)
+	return resolveFunc(resolver, rs, dbPrefixes, fixedbits, hooks)
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
@@ -677,12 +620,12 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
 	var witnesses []*trie.Witness
 
-	resolveFunc := func(resolver *trie.Resolver) error {
+	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) error {
 		if resolver == nil {
 			return nil
 		}
 		resolver.CollectWitnesses(extractWitnesses)
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr, trace); err != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr, rs, dbPrefixes, fixedbits, hooks, trace); err != nil {
 			return err
 		}
 
@@ -713,7 +656,7 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*
 // ResolveStateTrieStateless uses a witness DB to resolve subtries
 func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
 	var startPos int64
-	resolveFunc := func(resolver *trie.Resolver) error {
+	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) error {
 		if resolver == nil {
 			return nil
 		}

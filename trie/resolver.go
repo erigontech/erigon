@@ -12,14 +12,13 @@ import (
 
 var emptyHash [32]byte
 
-type ResolveFunc func(*Resolver) error
+type ResolveFunc func(*Resolver, *ResolveSet, [][]byte, []int, [][]byte) error
 
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
 	t                *Trie
-	historical       bool
 	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
 	requests         []*ResolveRequest
@@ -43,7 +42,6 @@ func (tr *Resolver) Reset(blockNr uint64) {
 	tr.codeRequests = tr.codeRequests[:0]
 	tr.witnesses = nil
 	tr.collectWitnesses = false
-	tr.historical = false
 }
 
 func (tr *Resolver) CollectWitnesses(c bool) {
@@ -55,10 +53,6 @@ func (tr *Resolver) PopCollectedWitnesses() []*Witness {
 	result := tr.witnesses
 	tr.witnesses = nil
 	return result
-}
-
-func (tr *Resolver) SetHistorical(h bool) {
-	tr.historical = h
 }
 
 // AddCodeRequest add a request for code resolution
@@ -153,11 +147,11 @@ const (
 )
 
 // ResolveWithDb resolves and hooks subtries using a state database.
-func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, trace bool) error {
-	return tr.ResolveStateful(db, blockNr, trace)
+func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) error {
+	return tr.ResolveStateful(db, rs, dbPrefixes, fixedbits, hooks, trace)
 }
 
-func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace bool) error {
+func (tr *Resolver) ResolveStateful(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -167,7 +161,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 
 	sort.Stable(tr)
 	resolver := NewResolverStateful(tr.requests, hf)
-	if err := resolver.RebuildTrie(db, blockNr, tr.historical, trace); err != nil {
+	if err := resolver.RebuildTrie(db, rs, dbPrefixes, fixedbits, hooks, trace); err != nil {
 		return err
 	}
 	return resolver.AttachRequestedCode(db, tr.codeRequests)

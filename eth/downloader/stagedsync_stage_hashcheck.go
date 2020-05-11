@@ -36,7 +36,8 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 
 	resolver := trie.NewResolver(tr, blockNr)
 	resolver.AddRequest(rr)
-	err = resolver.ResolveStateful(euphemeralMutation, blockNr, false)
+	rs := trie.NewResolveSet(0)
+	err = resolver.ResolveStateful(euphemeralMutation, rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false)
 	if err != nil {
 		return errors.Wrap(err, "checking root hash failed")
 	}
