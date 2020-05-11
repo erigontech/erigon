@@ -3,16 +3,30 @@ package changeset
 import (
 	"bytes"
 	"fmt"
+	"reflect"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/stretchr/testify/assert"
-	"reflect"
-	"strconv"
-	"testing"
 )
 
-func TestEncodingAccount(t *testing.T) {
-	// empty StorageChangeSset first
+type csAccountBytes interface {
+	Walk(func([]byte, []byte) error) error
+	FindLast([]byte) ([]byte, error)
+}
+
+func TestEncodingAccountHashed(t *testing.T) {
 	ch := NewAccountChangeSet()
+	runTestAccountEncoding(t, ch, true /*isHashed*/)
+}
+
+func TestEncodingAccountPlain(t *testing.T) {
+	ch := NewAccountChangeSetPlain()
+	runTestAccountEncoding(t, ch, false /*isHashed*/)
+}
+
+func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
+	// empty StorageChangeSset first
 	_, err := EncodeAccounts(ch)
 	assert.NoError(t, err)
 
@@ -23,19 +37,35 @@ func TestEncodingAccount(t *testing.T) {
 	}
 	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		err = ch.Add(addrHash.Bytes(), vals[i])
+		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		if isHashed {
+			addrHash, _ := common.HashData(address[:])
+			err = ch.Add(addrHash.Bytes(), vals[i])
+		} else {
+			err = ch.Add(address[:], vals[i])
+		}
+
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	b, err := EncodeAccounts(ch)
+	encFunc := EncodeAccountsPlain
+	if isHashed {
+		encFunc = EncodeAccounts
+	}
+
+	b, err := encFunc(ch)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ch2, err := DecodeAccounts(b)
+	decFunc := DecodeAccountsPlain
+	if isHashed {
+		decFunc = DecodeAccounts
+	}
+
+	ch2, err := decFunc(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +83,17 @@ func TestEncodingAccount(t *testing.T) {
 				fmt.Println("v2", common.Bytes2Hex(ch2.Changes[i].Value))
 			}
 		}
+		fmt.Printf("%+v %+v\n", ch, ch2)
 		t.Fatal("not equal")
 	}
 
-	csBytes := AccountChangeSetBytes(b)
+	var csBytes csAccountBytes
+
+	if isHashed {
+		csBytes = AccountChangeSetBytes(b)
+	} else {
+		csBytes = AccountChangeSetPlainBytes(b)
+	}
 	i := 0
 	err = csBytes.Walk(func(k, v []byte) error {
 		if !bytes.Equal(k, ch2.Changes[i].Key) || !bytes.Equal(v, ch2.Changes[i].Value) {

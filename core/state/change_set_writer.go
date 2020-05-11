@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
@@ -12,11 +11,45 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
+type changesetFactory func() *changeset.ChangeSet
+type accountKeyGen func(common.Address) ([]byte, error)
+type storageKeyGen func(common.Address, uint64, common.Hash) ([]byte, error)
+
+func plainAccountKeyGen(a common.Address) ([]byte, error) {
+	return a[:], nil
+}
+
+func hashedAccountKeyGen(a common.Address) ([]byte, error) {
+	addrHash, err := common.HashData(a[:])
+	return addrHash[:], err
+}
+
+func hashedStorageKeyGen(address common.Address, incarnation uint64, key common.Hash) ([]byte, error) {
+	secKey, err := common.HashData(key[:])
+	if err != nil {
+		return nil, err
+	}
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	return dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey), nil
+}
+
+func plainStorageKeyGen(address common.Address, incarnation uint64, key common.Hash) ([]byte, error) {
+	return dbutils.PlainGenerateCompositeStorageKey(address, incarnation, key), nil
+}
+
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
 	accountChanges map[common.Address][]byte
 	storageChanged map[common.Address]bool
 	storageChanges map[string][]byte
+	storageFactory changesetFactory
+	accountFactory changesetFactory
+	accountKeyGen  accountKeyGen
+	storageKeyGen  storageKeyGen
 }
 
 func NewChangeSetWriter() *ChangeSetWriter {
@@ -24,25 +57,39 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
+		storageFactory: changeset.NewStorageChangeSet,
+		accountFactory: changeset.NewAccountChangeSet,
+		accountKeyGen:  hashedAccountKeyGen,
+		storageKeyGen:  hashedStorageKeyGen,
+	}
+}
+func NewChangeSetWriterPlain() *ChangeSetWriter {
+	return &ChangeSetWriter{
+		accountChanges: make(map[common.Address][]byte),
+		storageChanged: make(map[common.Address]bool),
+		storageChanges: make(map[string][]byte),
+		storageFactory: changeset.NewStorageChangeSetPlain,
+		accountFactory: changeset.NewAccountChangeSetPlain,
+		accountKeyGen:  plainAccountKeyGen,
+		storageKeyGen:  plainStorageKeyGen,
 	}
 }
 
 func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
-	cs := changeset.NewAccountChangeSet()
-	for key, val := range w.accountChanges {
-		addrHash, err := common.HashData(key[:])
+	cs := w.accountFactory()
+	for address, val := range w.accountChanges {
+		key, err := w.accountKeyGen(address)
 		if err != nil {
 			return nil, err
 		}
-		if err := cs.Add(addrHash[:], val); err != nil {
+		if err := cs.Add(key, val); err != nil {
 			return nil, err
 		}
 	}
 	return cs, nil
 }
-
 func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
-	cs := changeset.NewStorageChangeSet()
+	cs := w.storageFactory()
 	for key, val := range w.storageChanges {
 		if err := cs.Add([]byte(key), val); err != nil {
 			return nil, err
@@ -83,7 +130,7 @@ func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.
 	return nil
 }
 
-func (w *ChangeSetWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *ChangeSetWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
@@ -97,18 +144,12 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 		return nil
 	}
 
-	secKey, err := common.HashData(key[:])
-	if err != nil {
-		return err
-	}
-	addrHash, err := common.HashData(address[:])
+	compositeKey, err := w.storageKeyGen(address, incarnation, *key)
 	if err != nil {
 		return err
 	}
 
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
-
-	o := bytes.TrimLeft(original[:], "\x00")
+	o := cleanUpTrailingZeroes(original[:])
 	originalValue := make([]byte, len(o))
 	copy(originalValue, o)
 

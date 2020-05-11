@@ -3,32 +3,112 @@ package changeset
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"math/rand"
 	"reflect"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
 	defaultIncarnation = 1
 )
 
+func getDefaultIncarnation() uint64 { return defaultIncarnation }
+func getRandomIncarnation() uint64  { return rand.Uint64() }
+
+func hashValueGenerator(j int) []byte {
+	val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
+	return val.Bytes()
+}
+
+func emptyValueGenerator(j int) []byte {
+	return []byte{}
+}
+
+type csStorageBytes interface {
+	Walk(func([]byte, []byte) error) error
+	Find([]byte) ([]byte, error)
+	FindWithoutIncarnation([]byte, []byte) ([]byte, error)
+}
+
+func getHashedBytes(b []byte) csStorageBytes {
+	return StorageChangeSetBytes(b)
+}
+
+func getPlainBytes(b []byte) csStorageBytes {
+	return StorageChangeSetPlainBytes(b)
+}
+
 var numOfChanges = []int{1, 3, 10, 100, 1000, 10000}
 
-func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
+func getTestDataAtIndex(i, j int, inc uint64, generator func(common.Address, uint64, common.Hash) []byte) []byte {
+	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+	key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+	return generator(address, inc, key)
+}
+
+func hashKeyGenerator(address common.Address, inc uint64, key common.Hash) []byte {
+	addrHash, _ := common.HashData(address[:])
+	return dbutils.GenerateCompositeStorageKey(addrHash, inc, key)
+}
+
+func plainKeyGenerator(address common.Address, inc uint64, key common.Hash) []byte {
+	return dbutils.PlainGenerateCompositeStorageKey(address, inc, key)
+}
+
+type encodeFunc func(*ChangeSet) ([]byte, error)
+type decodeFunc func([]byte) (*ChangeSet, error)
+
+func TestEncodingStorageNewWithRandomIncarnationHashed(t *testing.T) {
+	ch := NewStorageChangeSet()
+	doTestEncodingStorageNew(t, ch, hashKeyGenerator, getRandomIncarnation, hashValueGenerator, EncodeStorage, DecodeStorage)
+}
+
+func TestEncodingStorageNewWithRandomIncarnationPlain(t *testing.T) {
+	ch := NewStorageChangeSetPlain()
+	doTestEncodingStorageNew(t, ch, plainKeyGenerator, getRandomIncarnation, hashValueGenerator, EncodeStoragePlain, DecodeStoragePlain)
+}
+
+func TestEncodingStorageNewWithDefaultIncarnationHashed(t *testing.T) {
+	ch := NewStorageChangeSet()
+	doTestEncodingStorageNew(t, ch, hashKeyGenerator, getDefaultIncarnation, hashValueGenerator, EncodeStorage, DecodeStorage)
+}
+
+func TestEncodingStorageNewWithDefaultIncarnationPlain(t *testing.T) {
+	ch := NewStorageChangeSetPlain()
+	doTestEncodingStorageNew(t, ch, plainKeyGenerator, getDefaultIncarnation, hashValueGenerator, EncodeStoragePlain, DecodeStoragePlain)
+}
+
+func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValueHashed(t *testing.T) {
+	ch := NewStorageChangeSet()
+	doTestEncodingStorageNew(t, ch, hashKeyGenerator, getDefaultIncarnation, emptyValueGenerator, EncodeStorage, DecodeStorage)
+}
+
+func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValuePlain(t *testing.T) {
+	ch := NewStorageChangeSetPlain()
+	doTestEncodingStorageNew(t, ch, plainKeyGenerator, getDefaultIncarnation, emptyValueGenerator, EncodeStoragePlain, DecodeStoragePlain)
+}
+
+func doTestEncodingStorageNew(
+	t *testing.T,
+	ch *ChangeSet,
+	keyGen func(common.Address, uint64, common.Hash) []byte,
+	incarnationGenerator func() uint64,
+	valueGenerator func(int) []byte,
+	encodeFunc encodeFunc,
+	decodeFunc decodeFunc,
+) {
 	f := func(t *testing.T, numOfElements int, numOfKeys int) {
-		// empty StorageChangeSet first
-		ch := NewStorageChangeSet()
 		var err error
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-			inc := rand.Uint64()
+			inc := incarnationGenerator()
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, inc, key), val.Bytes())
+				key := getTestDataAtIndex(i, j, inc, keyGen)
+				val := valueGenerator(j)
+				err = ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -36,12 +116,12 @@ func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
 			}
 		}
 
-		b, err := EncodeStorage(ch)
+		b, err := encodeFunc(ch)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		ch2, err := DecodeStorage(b)
+		ch2, err := decodeFunc(b)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,205 +189,42 @@ func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
 	})
 }
 
-func TestEncodingStorageNewWithDefaultIncarnation(t *testing.T) {
-	f := func(t *testing.T, numOfElements int, numOfKeys int) {
-		// empty StorageChangeSet first
-		ch := NewStorageChangeSet()
-		var err error
-		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
-				if err != nil {
-					t.Fatal(err)
-				}
-
-			}
-		}
-
-		b, err := EncodeStorage(ch)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		ch2, err := DecodeStorage(b)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		for i := range ch.Changes {
-			if !bytes.Equal(ch.Changes[i].Key, ch2.Changes[i].Key) {
-				t.Log(common.Bytes2Hex(ch.Changes[i].Key))
-				t.Log(common.Bytes2Hex(ch2.Changes[i].Key))
-				t.Error("not equal", i)
-			}
-		}
-		for i := range ch.Changes {
-			if !bytes.Equal(ch.Changes[i].Value, ch2.Changes[i].Value) {
-				t.Log(common.Bytes2Hex(ch.Changes[i].Value))
-				t.Log(common.Bytes2Hex(ch2.Changes[i].Value))
-				t.Fatal("not equal", i)
-			}
-		}
-
-		if !reflect.DeepEqual(ch, ch2) {
-			for i, v := range ch.Changes {
-				if !bytes.Equal(v.Key, ch2.Changes[i].Key) || !bytes.Equal(v.Value, ch2.Changes[i].Value) {
-					fmt.Println("Diff ", i)
-					fmt.Println("k1", common.Bytes2Hex(v.Key), len(v.Key))
-					fmt.Println("k2", common.Bytes2Hex(ch2.Changes[i].Key))
-					fmt.Println("v1", common.Bytes2Hex(v.Value))
-					fmt.Println("v2", common.Bytes2Hex(ch2.Changes[i].Value))
-				}
-			}
-			t.Error("not equal")
-		}
-	}
-
-	for _, v := range numOfChanges {
-		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 1), func(t *testing.T) {
-			f(t, v, 1)
-		})
-	}
-
-	for _, v := range numOfChanges {
-		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 5), func(t *testing.T) {
-			f(t, v, 5)
-		})
-	}
-
-	t.Run(formatTestName(50, 1000), func(t *testing.T) {
-		f(t, 50, 1000)
-	})
-	t.Run(formatTestName(5, 10000), func(t *testing.T) {
-		f(t, 5, 10000)
-	})
-	t.Run(formatTestName(100, 1000), func(t *testing.T) {
-		f(t, 100, 1000)
-	})
-	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
-		f(t, 1000, 1000)
-	})
-	t.Run(formatTestName(20, 30000), func(t *testing.T) {
-		f(t, 20, 30000)
-	})
+func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkHashed(t *testing.T) {
+	ch := NewStorageChangeSet()
+	doTestWalk(t, ch, hashKeyGenerator, EncodeStorage, getHashedBytes)
 }
 
-func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValue(t *testing.T) {
-	f := func(t *testing.T, numOfElements int, numOfKeys int) {
-		// empty StorageChangeSet first
-		ch := NewStorageChangeSet()
-		var err error
-		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-				val := []byte{}
-				err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-			}
-		}
-
-		b, err := EncodeStorage(ch)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		ch2, err := DecodeStorage(b)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		for i := range ch.Changes {
-			if !bytes.Equal(ch.Changes[i].Key, ch2.Changes[i].Key) {
-				t.Log(common.Bytes2Hex(ch.Changes[i].Key))
-				t.Log(common.Bytes2Hex(ch2.Changes[i].Key))
-				t.Error("not equal", i)
-			}
-		}
-		for i := range ch.Changes {
-			if !bytes.Equal(ch.Changes[i].Value, ch2.Changes[i].Value) {
-				t.Log(common.Bytes2Hex(ch.Changes[i].Value))
-				t.Log(common.Bytes2Hex(ch2.Changes[i].Value))
-				t.Fatal("not equal", i)
-			}
-		}
-
-		if !reflect.DeepEqual(ch, ch2) {
-			for i, v := range ch.Changes {
-				if !bytes.Equal(v.Key, ch2.Changes[i].Key) || !bytes.Equal(v.Value, ch2.Changes[i].Value) {
-					fmt.Println("Diff ", i)
-					fmt.Println("k1", common.Bytes2Hex(v.Key), len(v.Key))
-					fmt.Println("k2", common.Bytes2Hex(ch2.Changes[i].Key))
-					fmt.Println("v1", common.Bytes2Hex(v.Value))
-					fmt.Println("v2", common.Bytes2Hex(ch2.Changes[i].Value))
-				}
-			}
-			t.Error("not equal")
-		}
-	}
-
-	for _, v := range numOfChanges {
-		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 1), func(t *testing.T) {
-			f(t, v, 1)
-		})
-	}
-
-	for _, v := range numOfChanges {
-		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 5), func(t *testing.T) {
-			f(t, v, 5)
-		})
-	}
-
-	t.Run(formatTestName(50, 1000), func(t *testing.T) {
-		f(t, 50, 1000)
-	})
-	t.Run(formatTestName(5, 10000), func(t *testing.T) {
-		f(t, 5, 10000)
-	})
-
-	t.Run(formatTestName(100, 1000), func(t *testing.T) {
-		f(t, 100, 1000)
-	})
-	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
-		f(t, 1000, 1000)
-	})
-	t.Run(formatTestName(20, 30000), func(t *testing.T) {
-		f(t, 20, 30000)
-	})
+func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkPlain(t *testing.T) {
+	ch := NewStorageChangeSetPlain()
+	doTestWalk(t, ch, plainKeyGenerator, EncodeStoragePlain, getPlainBytes)
 }
 
-func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
+func doTestWalk(
+	t *testing.T,
+	ch *ChangeSet,
+	generator func(common.Address, uint64, common.Hash) []byte,
+	encodeFunc encodeFunc,
+	csStorageBytes func([]byte) csStorageBytes,
+) {
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
-		ch := NewStorageChangeSet()
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err := ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+				val := hashValueGenerator(j)
+				key := getTestDataAtIndex(i, j, defaultIncarnation, generator)
+				err := ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 		}
 
-		b, err := EncodeStorage(ch)
+		b, err := encodeFunc(ch)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		i := 0
-		err = StorageChangeSetBytes(b).Walk(func(k, v []byte) error {
+		err = csStorageBytes(b).Walk(func(k, v []byte) error {
 			if !bytes.Equal(k, ch.Changes[i].Key) {
 				t.Log(common.Bytes2Hex(ch.Changes[i].Key))
 				t.Log(common.Bytes2Hex(k))
@@ -358,34 +275,79 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 	})
 }
 
-func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
-	f := func(t *testing.T, numOfElements, numOfKeys int) {
-		ch := NewStorageChangeSet()
+func TestEncodingStorageNewWithoutNotDefaultIncarnationFindHashed(t *testing.T) {
+	ch := NewStorageChangeSet()
+	doTestFind(t, ch, hashKeyGenerator, EncodeStorage, getHashedBytes, regularFindFunc)
+}
 
+func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
+	ch := NewStorageChangeSetPlain()
+	doTestFind(t, ch, plainKeyGenerator, EncodeStoragePlain, getPlainBytes, regularFindFunc)
+}
+
+func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationHashed(t *testing.T) {
+	ch := NewStorageChangeSet()
+	doTestFind(t, ch, hashKeyGenerator, EncodeStorage, getHashedBytes, findWithoutIncarnationFunc)
+}
+
+func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPlain(t *testing.T) {
+	ch := NewStorageChangeSetPlain()
+	doTestFind(t, ch, plainKeyGenerator, EncodeStoragePlain, getPlainBytes, findWithoutIncarnationFunc)
+}
+
+func regularFindFunc(b csStorageBytes, k []byte) ([]byte, error) {
+	return b.Find(k)
+}
+
+func findWithoutIncarnationFunc(b csStorageBytes, k []byte) ([]byte, error) {
+	isHashed := len(k) == 2*common.HashLength+common.IncarnationLength
+	var addrBytes []byte
+	var keyBytes []byte
+	if isHashed {
+		addrHash, _, key := dbutils.ParseCompositeStorageKey(k)
+		addrBytes = addrHash[:]
+		keyBytes = key[:]
+	} else {
+		addr, _, key := dbutils.PlainParseCompositeStorageKey(k)
+		addrBytes = addr[:]
+		keyBytes = key[:]
+	}
+	return b.FindWithoutIncarnation(addrBytes, keyBytes)
+}
+
+func doTestFind(
+	t *testing.T,
+	ch *ChangeSet,
+	generator func(common.Address, uint64, common.Hash) []byte,
+	encodeFunc encodeFunc,
+	csStorageBytes func([]byte) csStorageBytes,
+	findFunc func(csStorageBytes, []byte) ([]byte, error),
+) {
+	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err := ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+				val := hashValueGenerator(j)
+				key := getTestDataAtIndex(i, j, defaultIncarnation, generator)
+				err := ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 		}
 
-		b, err := EncodeStorage(ch)
+		b, err := encodeFunc(ch)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		for i, v := range ch.Changes {
-			val, err := StorageChangeSetBytes(b).Find(v.Key)
+			val, err := findFunc(csStorageBytes(b), v.Key)
 			if err != nil {
 				t.Error(err, i)
 			}
 			if !bytes.Equal(val, v.Value) {
-				t.Error("value not equal for ") //, v, val)
+				t.Error("value not equal for ", v, val)
+				panic("boom!")
 			}
 		}
 	}
@@ -557,28 +519,43 @@ func formatTestName(elements, keys int) string {
 // TestDefaultIncarnationCompress is a encoding-specific test that may need to be
 // adjusted if the encoding changes. This tests checks that default incarnations are
 // getting compressed
-func TestDefaultIncarnationCompress(t *testing.T) {
+func TestDefaultIncarnationCompressHashed(t *testing.T) {
+	ch1 := NewStorageChangeSet()
+	ch2 := NewStorageChangeSet()
+	doTestDefaultIncarnationCompress(t, ch1, ch2, hashKeyGenerator, EncodeStorage)
+}
+
+func TestDefaultIncarnationCompressPlain(t *testing.T) {
+	ch1 := NewStorageChangeSetPlain()
+	ch2 := NewStorageChangeSetPlain()
+	doTestDefaultIncarnationCompress(t, ch1, ch2, plainKeyGenerator, EncodeStoragePlain)
+}
+
+func doTestDefaultIncarnationCompress(t *testing.T,
+	ch1 *ChangeSet,
+	ch2 *ChangeSet,
+	generator func(common.Address, uint64, common.Hash) []byte,
+	encodeFunc encodeFunc,
+) {
 	// We create two changsets, with the same data, except for the incarnation
 	// First changeset has incarnation == defaultIncarnation, which should be compressed
 	// Second changeset has incarnation == defautIncarnation+1, which would not be compressed
-	ch1 := NewStorageChangeSet()
-	addrHash, _ := common.HashData([]byte("addrHash"))
-	key, _ := common.HashData([]byte("key"))
-	val, _ := common.HashData([]byte("val"))
-	err := ch1.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+	key1 := getTestDataAtIndex(0, 0, defaultIncarnation, generator)
+	key2 := getTestDataAtIndex(0, 0, defaultIncarnation+1, generator)
+	val := hashValueGenerator(0)
+	err := ch1.Add(key1, val)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b1, err1 := EncodeStorage(ch1)
+	b1, err1 := encodeFunc(ch1)
 	if err1 != nil {
 		t.Fatal(err1)
 	}
-	ch2 := NewStorageChangeSet()
-	err = ch2.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation+1, key), val.Bytes())
+	err = ch2.Add(key2, val)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, err2 := EncodeStorage(ch2)
+	b2, err2 := encodeFunc(ch2)
 	if err2 != nil {
 		t.Fatal(err2)
 	}

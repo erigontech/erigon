@@ -12,13 +12,13 @@ import (
 
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
-	db ethdb.Getter
+	db             ethdb.Getter
 	incarnationMap map[common.Address]uint64
 }
 
 func NewDbStateReader(db ethdb.Getter, incarnationMap map[common.Address]uint64) *DbStateReader {
 	return &DbStateReader{
-		db: db,
+		db:             db,
 		incarnationMap: incarnationMap,
 	}
 }
@@ -53,7 +53,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 	return enc, nil
 }
 
-func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
+func (dbr *DbStateReader) ReadAccountCode(_ common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -61,7 +61,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 	return code, err
 }
 
-func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
+func (dbr *DbStateReader) ReadAccountCodeSize(_ common.Address, codeHash common.Hash) (codeSize int, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}

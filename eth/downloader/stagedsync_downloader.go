@@ -2,8 +2,11 @@ package downloader
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/log"
 )
+
+const enableHashChecks = false // FIXME: when we can move the hashed state forward.
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 	log.Info("Sync stage 1/5. Downloading headers...")
@@ -34,9 +37,11 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		case Senders:
 			err = d.unwindSendersStage(unwindPoint)
 		case Execution:
-			err = d.unwindExecutionStage(unwindPoint)
+			err = unwindExecutionStage(unwindPoint, d.stateDB)
 		case HashCheck:
-			err = d.unwindHashCheckStage(unwindPoint)
+			if enableHashChecks {
+				err = d.unwindHashCheckStage(unwindPoint)
+			}
 		default:
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
@@ -76,8 +81,9 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	/*
 	* Stage 4. Execute block bodies w/o calculating trie roots
 	 */
-	syncHeadNumber := uint64(0)
-	syncHeadNumber, err = d.spawnExecuteBlocksStage()
+
+	var syncHeadNumber uint64
+	syncHeadNumber, err = spawnExecuteBlocksStage(d.stateDB, d.blockchain)
 	if err != nil {
 		return err
 	}
@@ -86,8 +92,10 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/5. Validating final hash")
-	if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
-		return err
+	if enableHashChecks {
+		if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
+			return err
+		}
 	}
 	log.Info("Sync stage 5/5. Validating final hash... Complete!")
 
