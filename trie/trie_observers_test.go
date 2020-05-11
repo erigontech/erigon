@@ -295,7 +295,9 @@ func TestObserverLoadNodes(t *testing.T) {
 	trie := newEmpty()
 	trie.AddObserver(observer)
 
-	trie.hook([]byte{}, subtrie.root)
+	hash := subtrie.Hash()
+	//nolint:errcheck
+	trie.hook([]byte{}, subtrie.root, hash[:])
 
 	// fullNode
 	assert.Equal(t, 1, observer.reloadedNodes["000000"], "should reload structure nodes")

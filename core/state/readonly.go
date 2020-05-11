@@ -302,7 +302,7 @@ func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes,
 	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(1))
 	copy(startkey[common.HashLength+common.IncarnationLength:], prefix.Data)
 
-	fixedbits := (common.HashLength + common.IncarnationLength + uint(len(prefix.Data))) * 8
+	fixedbits := (common.HashLength + common.IncarnationLength + len(prefix.Data)) * 8
 	if prefix.Odd {
 		fixedbits -= 4
 	}
@@ -331,7 +331,7 @@ func (dbs *DbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walk
 	startkey := make([]byte, common.HashLength)
 	copy(startkey, prefix.Data)
 
-	fixedbits := uint(len(prefix.Data)) * 8
+	fixedbits := len(prefix.Data) * 8
 	if prefix.Odd {
 		fixedbits -= 4
 	}

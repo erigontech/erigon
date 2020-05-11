@@ -170,7 +170,7 @@ func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uin
 	return dat, err
 }
 
-func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
@@ -201,7 +201,7 @@ func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walk
 	return err
 }
 
-func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -269,7 +269,7 @@ func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixed
 	return err
 }
 
-func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
@@ -368,7 +368,7 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 	return err
 }
 
-func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []int, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}

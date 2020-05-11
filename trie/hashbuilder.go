@@ -184,7 +184,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSeria
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -249,7 +249,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
@@ -573,7 +573,7 @@ func (hb *HashBuilder) RootHash() (common.Hash, error) {
 
 func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
-	copy(hash[:], hb.hashStack[1:hashStackStride])
+	copy(hash[:], hb.hashStack[len(hb.hashStack)-hashStackStride+1:])
 	return hash
 }
 

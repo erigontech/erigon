@@ -18,6 +18,7 @@ type ResolveFunc func(*Resolver) error
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
+	t                *Trie
 	historical       bool
 	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
@@ -26,8 +27,9 @@ type Resolver struct {
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
 
-func NewResolver(blockNr uint64) *Resolver {
+func NewResolver(t *Trie, blockNr uint64) *Resolver {
 	tr := Resolver{
+		t:            t,
 		requests:     []*ResolveRequest{},
 		codeRequests: []*ResolveRequestForCode{},
 		blockNr:      blockNr,
@@ -142,12 +144,12 @@ func (tr *Resolver) Print() {
 
 // Various values of the account field set
 const (
-	AccountFieldNonceOnly           uint32 = 0x01
-	AccountFieldBalanceOnly         uint32 = 0x02
-	AccountFieldStorageOnly         uint32 = 0x04
-	AccountFieldCodeOnly            uint32 = 0x08
-	AccountFieldSSizeOnly           uint32 = 0x10
-	AccountFieldSetNotAccount       uint32 = 0x00
+	AccountFieldNonceOnly     uint32 = 0x01
+	AccountFieldBalanceOnly   uint32 = 0x02
+	AccountFieldStorageOnly   uint32 = 0x04
+	AccountFieldCodeOnly      uint32 = 0x08
+	AccountFieldSSizeOnly     uint32 = 0x10
+	AccountFieldSetNotAccount uint32 = 0x00
 )
 
 // ResolveWithDb resolves and hooks subtries using a state database.
@@ -160,7 +162,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
 	} else {
-		hf = hookSubtrie
+		hf = tr.hookSubtrie
 	}
 
 	sort.Stable(tr)
@@ -175,45 +177,16 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64, trace boo
 // the state DB.
 func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64) (int64, error) {
 	sort.Stable(tr)
-	resolver := NewResolverStateless(tr.requests, hookSubtrie)
+	resolver := NewResolverStateless(tr.requests, tr.hookSubtrie)
 	// we expect CodeNodes to be already attached to the trie in stateless resolution
 	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos)
 }
 
-func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) error {
-	if currentReq.RequiresRLP {
-		hasher := newHasher(false)
-		defer returnHasherToPool(hasher)
-		h, err := hasher.hashChildren(hbRoot, 0)
-		if err != nil {
-			return err
-		}
-		currentReq.NodeRLP = h
-	}
-
-	var hookKey []byte
-	if currentReq.contract == nil {
-		hookKey = currentReq.resolveHex[:currentReq.resolvePos]
-	} else {
-		contractHex := keybytesToHex(currentReq.contract)
-		if len(currentReq.contract) == 32 {
-			contractHex = contractHex[:len(contractHex)-1] // No incarnation in contract
-		} else {
-			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
-		}
-		hookKey = append(contractHex, currentReq.resolveHex[:currentReq.resolvePos]...)
-	}
-
-	currentReq.t.hook(hookKey, hbRoot)
-	if len(currentReq.resolveHash) > 0 && !bytes.Equal(currentReq.resolveHash, hbHash[:]) {
-		return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
-			currentReq.resolveHash, hbHash, currentReq.contract, currentReq.resolveHex, currentReq.resolvePos)
-	}
-
-	return nil
+func (tr *Resolver) hookSubtrie(hookNibbles []byte, hbRoot node, hbHash common.Hash) error {
+	return tr.t.hook(hookNibbles, hbRoot, hbHash[:])
 }
 
-func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) error {
+func (tr *Resolver) extractWitnessAndHookSubtrie(hookNibbles []byte, hbRoot node, hbHash common.Hash) error {
 	if tr.witnesses == nil {
 		tr.witnesses = make([]*Witness, 0)
 	}
@@ -225,5 +198,5 @@ func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbR
 
 	tr.witnesses = append(tr.witnesses, witness)
 
-	return hookSubtrie(currentReq, hbRoot, hbHash)
+	return tr.hookSubtrie(hookNibbles, hbRoot, hbHash)
 }

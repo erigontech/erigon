@@ -53,12 +53,12 @@ type Getter interface {
 	// Only the keys whose first fixedbits match those of startkey are iterated over.
 	// walker is called for each eligible entry.
 	// If walker returns false or an error, the walk stops.
-	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
+	Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error
 
 	// MultiWalk is similar to multiple Walk calls folded into one.
-	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error
+	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error
 
-	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
+	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
 }
 
 type GetterPutter interface {

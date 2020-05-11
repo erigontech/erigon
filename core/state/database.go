@@ -425,7 +425,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
@@ -520,7 +520,7 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
@@ -533,7 +533,7 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
@@ -556,7 +556,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, reso
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
@@ -582,7 +582,7 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	}
 
 	if tds.resolver == nil {
-		tds.resolver = trie.NewResolver(tds.blockNr)
+		tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
 		tds.resolver.SetHistorical(tds.historical)
 	}
 	tds.resolver.Reset(tds.blockNr)
@@ -982,7 +982,7 @@ func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[strin
 	for key := range accountMap {
 		copy(startKey, []byte(key))
 		binary.BigEndian.PutUint64(startKey[common.HashLength:], timestampTo)
-		if err := tds.db.Walk(dbutils.AccountsHistoryBucket, startKey, uint(8*common.HashLength), func(k, v []byte) (bool, error) {
+		if err := tds.db.Walk(dbutils.AccountsHistoryBucket, startKey, 8*common.HashLength, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[common.HashLength:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
 			accountHistoryEffects[kStr] = nil
@@ -1009,7 +1009,7 @@ func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[strin
 		copy(startKey, []byte(key)[:common.HashLength])
 		copy(startKey[common.HashLength:], []byte(key)[common.HashLength+8:])
 		binary.BigEndian.PutUint64(startKey[2*common.HashLength:], timestampTo)
-		if err := tds.db.Walk(dbutils.StorageHistoryBucket, startKey, uint(8*2*common.HashLength), func(k, v []byte) (bool, error) {
+		if err := tds.db.Walk(dbutils.StorageHistoryBucket, startKey, 8*2*common.HashLength, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[2*common.HashLength:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
 			storageHistoryEffects[kStr] = nil

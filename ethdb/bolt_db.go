@@ -259,8 +259,8 @@ func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byt
 	return accWithRoot, nil
 }
 
-func Bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
-	fixedbytes = int((fixedbits + 7) / 8)
+func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
+	fixedbytes = (fixedbits + 7) / 8
 	shiftbits := fixedbits & 7
 	mask = byte(0xff)
 	if shiftbits != 0 {
@@ -269,7 +269,7 @@ func Bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
 	return fixedbytes, mask
 }
 
-func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -293,7 +293,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 	return err
 }
 
-func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
@@ -347,7 +347,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
-func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
@@ -470,7 +470,7 @@ type splitCursor struct {
 	part3start int // Position in the key where the third part starts
 }
 
-func newSplitCursor(b *bolt.Bucket, startkey []byte, matchBits uint, part1end, part2start, part3start int) *splitCursor {
+func newSplitCursor(b *bolt.Bucket, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
 	var sc splitCursor
 	sc.c = b.Cursor()
 	sc.startkey = startkey
@@ -513,7 +513,7 @@ func (sc *splitCursor) Next() (key1, key2, key3, val []byte) {
 	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v
 }
 
-func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
@@ -616,7 +616,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 	return err
 }
 
-func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
 	if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
 		return db.walkAsOfThinAccounts(startkey, fixedbits, timestamp, walker)

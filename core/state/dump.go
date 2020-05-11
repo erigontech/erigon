@@ -197,7 +197,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 				dbutils.CurrentStateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
-				8*uint(common.HashLength+common.IncarnationLength),
+				8*(common.HashLength+common.IncarnationLength),
 				d.blockNumber,
 				func(ks, vs []byte) (bool, error) {
 					storageMap[common.BytesToHash(ks[common.HashLength:])] = common.CopyBytes(vs)
