@@ -497,7 +497,7 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.blockNr)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
 			}
@@ -509,7 +509,7 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
-				tds.resolver = trie.NewResolver(tds.t, tds.blockNr)
+				tds.resolver = trie.NewResolver(tds.blockNr)
 			} else if firstRequest {
 				tds.resolver.Reset(tds.blockNr)
 			}
@@ -519,7 +519,9 @@ func (tds *TrieDbState) resolveCodeTouches(
 	}
 
 	if !firstRequest {
-		return resolveFunc(tds.resolver, nil, nil, nil, nil)
+		if _, err := resolveFunc(tds.resolver, nil, nil, nil, nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -547,8 +549,12 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	dbPrefixes, fixedbits, hooks := tds.t.CreateLoadingPrefixes(rs)
 	// CreateLoadingPrefixes would have gone through the entire rs, so we need to rewind to the beginning
 	rs.Rewind()
-	resolver := trie.NewResolver(tds.t, tds.blockNr)
-	return resolveFunc(resolver, rs, dbPrefixes, fixedbits, hooks)
+	resolver := trie.NewResolver(tds.blockNr)
+	subTries, err := resolveFunc(resolver, rs, dbPrefixes, fixedbits, hooks)
+	if err != nil {
+		return err
+	}
+	return tds.t.HookSubTries(subTries)
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
@@ -594,7 +600,6 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 	codeSizeTouches := tds.buildCodeSizeTouches()
 
 	var err error
-
 	if err = tds.resolveAccountAndStorageTouches(accountTouches, storageTouches, resolveFunc); err != nil {
 		return err
 	}
@@ -620,31 +625,22 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
 	var witnesses []*trie.Witness
 
-	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) error {
+	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) (trie.SubTries, error) {
 		if resolver == nil {
-			return nil
+			return trie.SubTries{}, nil
 		}
-		resolver.CollectWitnesses(extractWitnesses)
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr, rs, dbPrefixes, fixedbits, hooks, trace); err != nil {
-			return err
+		subTries, err := resolver.ResolveWithDb(tds.db, tds.blockNr, rs, dbPrefixes, fixedbits, hooks, trace)
+		if err != nil {
+			return subTries, err
 		}
 
 		if !extractWitnesses {
-			return nil
+			return subTries, nil
 		}
 
-		resolverWitnesses := resolver.PopCollectedWitnesses()
-		if len(resolverWitnesses) == 0 {
-			return nil
-		}
-
-		if witnesses == nil {
-			witnesses = resolverWitnesses
-		} else {
-			witnesses = append(witnesses, resolverWitnesses...)
-		}
-
-		return nil
+		rs.Rewind()
+		witnesses, err = trie.ExtractWitnesses(subTries, trace, rs)
+		return subTries, err
 	}
 	if err := tds.resolveStateTrieWithFunc(resolveFunc); err != nil {
 		return nil, err
@@ -656,18 +652,18 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*
 // ResolveStateTrieStateless uses a witness DB to resolve subtries
 func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
 	var startPos int64
-	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) error {
+	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) (trie.SubTries, error) {
 		if resolver == nil {
-			return nil
+			return trie.SubTries{}, nil
 		}
 
-		pos, err := resolver.ResolveStateless(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos, hooks)
+		subTries, pos, err := resolver.ResolveStateless(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos, hooks)
 		if err != nil {
-			return err
+			return subTries, err
 		}
 
 		startPos = pos
-		return nil
+		return subTries, nil
 	}
 
 	return tds.resolveStateTrieWithFunc(resolveFunc)

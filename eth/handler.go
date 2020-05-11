@@ -1123,17 +1123,17 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			tr := trie.New(common.Hash{})
+			//tr := trie.New(common.Hash{})
 
 			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
 				//prefix := request.Prefixes[i]
 				//rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
 				//rr.RequiresRLP = true
 
-				resolver := trie.NewResolver(tr, block.NumberU64())
+				resolver := trie.NewResolver(block.NumberU64())
 
 				rs := trie.NewResolveSet(0)
-				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
+				if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
 					return err2
 				}
 				/*
@@ -1179,7 +1179,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					return err
 				}
 
-				tr := trie.New(common.Hash{})
+				//tr := trie.New(common.Hash{})
 
 				for i := 0; i < n && responseSize < softResponseLimit; i++ {
 					contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
@@ -1190,10 +1190,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					//rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
 					//rr.RequiresRLP = true
 
-					resolver := trie.NewResolver(tr, block.NumberU64())
+					resolver := trie.NewResolver(block.NumberU64())
 
 					rs := trie.NewResolveSet(0)
-					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
+					if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
 						return err2
 					}
 					/*

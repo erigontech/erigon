@@ -21,15 +21,13 @@ type MerklePathLimiter struct {
 
 type WitnessBuilder struct {
 	root     node
-	blockNr  uint64
 	trace    bool
 	operands []WitnessOperator
 }
 
-func NewWitnessBuilder(root node, blockNr uint64, trace bool) *WitnessBuilder {
+func NewWitnessBuilder(root node, trace bool) *WitnessBuilder {
 	return &WitnessBuilder{
 		root:     root,
-		blockNr:  blockNr,
 		trace:    trace,
 		operands: make([]WitnessOperator, 0),
 	}

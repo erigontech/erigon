@@ -762,6 +762,17 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool, uint64) {
 	return nd, parent, true, incarnation
 }
 
+func (t *Trie) HookSubTries(subTries SubTries) error {
+	for i, hookNibbles := range subTries.Hooks {
+		root := subTries.roots[i]
+		hash := subTries.Hashes[i]
+		if err := t.hook(hookNibbles, root, hash[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (t *Trie) hook(hex []byte, n node, hash []byte) error {
 	nd, parent, ok, incarnation := t.getNode(hex, true)
 	if !ok {

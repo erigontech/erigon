@@ -5,13 +5,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -21,8 +19,6 @@ import (
 var (
 	trieResolveStatefulTimer = metrics.NewRegisteredTimer("trie/resolve/stateful", nil)
 )
-
-type hookFunction func(hookNibbles []byte, n node, hash common.Hash) error
 
 type ResolverStateful struct {
 	rs       *ResolveSet
@@ -36,7 +32,7 @@ type ResolverStateful struct {
 	leafData GenStructStepLeafData
 	accData  GenStructStepAccountData
 
-	hookFunction hookFunction
+	subTries SubTries
 
 	wasIH        bool
 	wasIHStorage bool
@@ -51,19 +47,17 @@ type ResolverStateful struct {
 	accAddrHashWithInc []byte // Concatenation of addrHash of the currently build account with its incarnation encoding
 }
 
-func NewResolverStateful(hookFunction hookFunction) *ResolverStateful {
+func NewResolverStateful() *ResolverStateful {
 	return &ResolverStateful{
 		hb:                 NewHashBuilder(false),
-		hookFunction:       hookFunction,
 		accAddrHashWithInc: make([]byte, 40),
 	}
 }
 
 // Reset prepares the Resolver for reuse
-func (tr *ResolverStateful) Reset(hookFunction hookFunction) {
+func (tr *ResolverStateful) Reset() {
 	tr.keyIdx = 0
 	tr.rs = NewResolveSet(0)
-	tr.hookFunction = hookFunction
 	tr.curr.Reset()
 	tr.succ.Reset()
 	tr.value.Reset()
@@ -77,6 +71,7 @@ func (tr *ResolverStateful) Reset(hookFunction hookFunction) {
 	tr.valueStorage.Reset()
 	tr.groupsStorage = tr.groupsStorage[:0]
 	tr.wasIHStorage = false
+	tr.subTries = SubTries{}
 }
 
 // cutoff specifies how many nibbles have to be cut from the beginning of the storage keys
@@ -91,7 +86,9 @@ func (tr *ResolverStateful) finaliseRoot(hookNibbles []byte) error {
 		// if only storage resolution required, then no account records
 		if ok, err := tr.finaliseStorageRoot(len(hookNibbles)); err == nil {
 			if ok {
-				return tr.hookFunction(hookNibbles, tr.hb.root(), tr.hb.rootHash())
+				tr.subTries.Hooks = append(tr.subTries.Hooks, hookNibbles)
+				tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
+				tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
 			}
 		} else {
 			return err
@@ -139,7 +136,9 @@ func (tr *ResolverStateful) finaliseRoot(hookNibbles []byte) error {
 	}
 	tr.groups = tr.groups[:0]
 	if tr.hb.hasRoot() {
-		return tr.hookFunction(hookNibbles, tr.hb.root(), tr.hb.rootHash())
+		tr.subTries.Hooks = append(tr.subTries.Hooks, hookNibbles)
+		tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
+		tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
 	}
 	return nil
 }
@@ -186,9 +185,9 @@ func (tr *ResolverStateful) finaliseStorageRoot(cutoff int) (bool, error) {
 	return false, nil
 }
 
-func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) error {
+func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) (SubTries, error) {
 	if len(dbPrefixes) == 0 {
-		return nil
+		return SubTries{}, nil
 	}
 	defer trieResolveStatefulTimer.UpdateSince(time.Now())
 	tr.trace = trace
@@ -206,14 +205,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 		fmt.Printf("dbPrefixes(%d): %x\n", len(dbPrefixes), dbPrefixes)
 		fmt.Printf("hooks(%d): %x\n", len(hooks), hooks)
 	}
-	if db == nil {
-		var b strings.Builder
-		fmt.Fprintf(&b, "ResolveWithDb(db=nil)\n")
-		for i, sk := range dbPrefixes {
-			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
-		}
-		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Callers(10))
-	}
 
 	var boltDB *bolt.DB
 	if hasBolt, ok := db.(ethdb.HasKV); ok {
@@ -221,11 +212,11 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 	}
 
 	if boltDB == nil {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
+		return SubTries{}, fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
 	if err := tr.MultiWalk2(boltDB, dbPrefixes, fixedbits, hooks, tr.WalkerAccount, tr.WalkerStorage); err != nil {
-		return err
+		return tr.subTries, err
 	}
 	if err := tr.finaliseRoot(hooks[len(hooks)-1]); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
@@ -233,9 +224,9 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes: %x\n", dbPrefixes)
 		fmt.Printf("hooks: %x\n", hooks)
-		return fmt.Errorf("error in finaliseRoot %w", err)
+		return tr.subTries, fmt.Errorf("error in finaliseRoot %w", err)
 	}
-	return nil
+	return tr.subTries, nil
 }
 
 func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*ResolveRequestForCode) error {
