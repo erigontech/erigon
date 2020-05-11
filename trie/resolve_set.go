@@ -48,8 +48,12 @@ func NewBinaryResolveSet(minLength int) *ResolveSet {
 
 // AddKey adds a new key (in KEY encoding) to the set
 func (rs *ResolveSet) AddKey(key []byte) {
-	hex := keybytesToHex(key)
-	rs.AddHex(hex)
+	var nibbles = make([]byte, 2*len(key))
+	for i, b := range key {
+		nibbles[i*2] = b / 16
+		nibbles[i*2+1] = b % 16
+	}
+	rs.AddHex(nibbles)
 }
 
 // AddHex adds a new key (in HEX encoding) to the set

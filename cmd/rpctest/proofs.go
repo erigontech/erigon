@@ -241,11 +241,6 @@ func fixState(chaindata string, url string) {
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
-			var nibbles = make([]byte, 2*len(contractPrefix))
-			for i, b := range contractPrefix {
-				nibbles[i*2] = b / 16
-				nibbles[i*2+1] = b % 16
-			}
 			rs := trie.NewResolveSet(0)
 			subTries, err1 := sr.ResolveWithDb(stateDb, blockNum, rs, [][]byte{contractPrefix}, []int{8*len(contractPrefix)}, false)
 			if err1 != nil || subTries.Hashes[0] != account.Root {

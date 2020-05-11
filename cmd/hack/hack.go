@@ -834,7 +834,7 @@ func testResolve(chaindata string) {
 		fmt.Printf("Resolve error: %v\n", err1)
 	}
 	if subTries.Hashes[0] != resolveHash {
-		fmt.Printf("Has mismatch, got %x, expected %x\n", subTries.Hashes[0] != resolveHash)
+		fmt.Printf("Has mismatch, got %x, expected %x\n", subTries.Hashes[0], resolveHash)
 	}
 	/*
 	var filename string

@@ -21,31 +21,27 @@ func TestResolve1(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
-
-	req := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
-		resolvePos:  10, // 5 bytes is 10 nibbles
-	}
-	r := NewResolver(tr, 0)
-	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0, false)
+	r := NewResolver(0)
+	rs := NewResolveSet(0)
+	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
+	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
 	require.NoError(err)
-
-	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	tr := New(common.Hash{})
+	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	x, ok := tr.Get(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaa"))
 	assert.True(ok)
+	assert.NotNil(x)
 }
 
 func TestResolve2(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -53,24 +49,23 @@ func TestResolve2(t *testing.T) {
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	req := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
-		resolvePos:  10, // 5 bytes is 10 nibbles
-	}
-	r := NewResolver(tr, 0)
-	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0, false)
+	r := NewResolver(0)
+	rs := NewResolveSet(0)
+	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
+	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
-	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	tr := New(common.Hash{})
+	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	x, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	assert.True(ok)
+	assert.NotNil(x)
 }
 
 func TestResolve2Keep(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -78,24 +73,23 @@ func TestResolve2Keep(t *testing.T) {
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	req := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  10, // 5 bytes is 10 nibbles
-	}
-	r := NewResolver(tr, 0)
-	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0, false)
+	r := NewResolver(0)
+	rs := NewResolveSet(0)
+	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
-	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	tr := New(common.Hash{})
+	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	x, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	assert.True(ok)
+	assert.NotNil(x)
 }
 
 func TestResolve3Keep(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -104,17 +98,17 @@ func TestResolve3Keep(t *testing.T) {
 	putStorage("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	req := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  10, // 5 bytes is 10 nibbles
-	}
-	r := NewResolver(tr, 0)
-	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0, false)
-	require.NoError(err, "resolve error")
+	r := NewResolver(0)
+	rs := NewResolveSet(0)
+	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	require.NoError(err)
 
-	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	tr := New(common.Hash{})
+	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	x, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	assert.True(ok)
+	assert.NotNil(x)
 }
 
 func TestTrieResolver(t *testing.T) {
@@ -134,35 +128,20 @@ func TestTrieResolver(t *testing.T) {
 	putStorage("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	putStorage("bccccccccccccccccccccccccccccccc", "")
 
-	req1 := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  10, // 5 bytes is 10 nibbles
-	}
-	req2 := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  2, // 1 bytes is 2 nibbles
-	}
-	req3 := &ResolveRequest{
-		resolveHex:  keybytesToHex(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  2, // 1 bytes is 2 nibbles
-	}
-	resolver := NewResolver(tr, 0)
-	resolver.AddRequest(req3)
-	resolver.AddRequest(req2)
-	resolver.AddRequest(req1)
-
-	err := resolver.ResolveWithDb(db, 0, false)
+	resolver := NewResolver(0)
+	rs := NewResolveSet(0)
+	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	rs.AddKey(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	rs.AddKey(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	_, err := resolver.ResolveWithDb(db, 0, rs,
+		[][]byte{common.Hex2Bytes("aaaaa"), common.Hex2Bytes("bb")}, []int{40, 8}, false)
 	require.NoError(err, "resolve error")
-
-	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	assert.True(ok)
 }
 
 func TestTwoStorageItems(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 
 	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5f5")
 	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7f5")
@@ -188,17 +167,15 @@ func TestTwoStorageItems(t *testing.T) {
 	rootHash := common.HexToHash("85737b049107f866fedbd6d787077fc2c245f4748e28896a3e8ee82c377ecdcf")
 	assert.Equal(rootHash, crypto.Keccak256Hash(rootRlp))
 
-	req := &ResolveRequest{
-		resolveHex:  []byte{},
-		resolvePos:  0,
-	}
-	resolver := NewResolver(tr, 0)
-	resolver.AddRequest(req)
+	resolver := NewResolver(0)
+	rs := NewResolveSet(0)
+	subTries, err1 := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	require.NoError(err1, "resolve error")
 
-	err = resolver.ResolveWithDb(db, 0, false)
-	require.NoError(err, "resolve error")
-
-	assert.Equal(rootHash.String(), tr.Hash().String())
+	assert.Equal(rootHash.String(), subTries.Hashes[0].String())
+	tr := New(common.Hash{})
+	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	assert.NoError(err)
 
 	// Resolve the branch node
 
@@ -207,20 +184,18 @@ func TestTwoStorageItems(t *testing.T) {
 	//	t.Errorf("failed ot hash children: %v", err)
 	//}
 
-	req2 := &ResolveRequest{
-		resolveHex:  []byte{0xd},
-		resolvePos:  1,
-	}
-	resolver2 := NewResolver(tr, 0)
-	resolver2.AddRequest(req2)
-
-	err = resolver2.ResolveWithDb(db, 0, false)
+	resolver2 := NewResolver(0)
+	rs2 := NewResolveSet(0)
+	rs2.AddHex([]byte{0xd})
+	subTries, err = resolver2.ResolveWithDb(db, 0, rs2, [][]byte{[]byte{0xd0}}, []int{4}, false)
 	require.NoError(err, "resolve error")
 
-	assert.Equal(rootHash.String(), tr.Hash().String())
+	err = tr.HookSubTries(subTries, [][]byte{[]byte{0xd}}) // hook up to the prefix 0xd
+	assert.NoError(err)
 
-	_, ok := tr.Get(key1)
+	x, ok := tr.Get(key1)
 	assert.True(ok)
+	assert.NotNil(x)
 }
 
 func TestTwoAccounts(t *testing.T) {
