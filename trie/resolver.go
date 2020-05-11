@@ -12,12 +12,11 @@ var emptyHash [32]byte
 // If the loading is done for verification and testing purposes, then usually only
 // sub-tree root hash would be queried
 type SubTries struct {
-	Hooks [][]byte // Attachment points for each returned sub-trie. These are in nibbles
 	Hashes []common.Hash // Root hashes of the sub-tries
 	roots []node   // Sub-tries
 }
 
-type ResolveFunc func(*Resolver, *ResolveSet, [][]byte, []int, [][]byte) (SubTries, error)
+type ResolveFunc func(*Resolver, *ResolveSet, [][]byte, []int) (SubTries, error)
 
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
@@ -56,13 +55,13 @@ const (
 )
 
 // ResolveWithDb resolves and hooks subtries using a state database.
-func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) (SubTries, error) {
-	return tr.ResolveStateful(db, rs, dbPrefixes, fixedbits, hooks, trace)
+func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
+	return tr.ResolveStateful(db, rs, dbPrefixes, fixedbits, trace)
 }
 
-func (tr *Resolver) ResolveStateful(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) (SubTries, error) {
+func (tr *Resolver) ResolveStateful(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
 	resolver := NewResolverStateful()
-	subTries, err := resolver.RebuildTrie(db, rs, dbPrefixes, fixedbits, hooks, trace)
+	subTries, err := resolver.RebuildTrie(db, rs, dbPrefixes, fixedbits, trace)
 	if err != nil {
 		return subTries, err
 	}
@@ -74,8 +73,8 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, rs *ResolveSet, dbPrefixe
 
 // ResolveStateless resolves and hooks subtries using a witnesses database instead of
 // the state DB.
-func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, hooks [][]byte) (SubTries, int64, error) {
+func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, count int) (SubTries, int64, error) {
 	resolver := NewResolverStateless()
 	// we expect CodeNodes to be already attached to the trie in stateless resolution
-	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos, hooks)
+	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos, count)
 }

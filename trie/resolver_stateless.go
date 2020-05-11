@@ -19,7 +19,7 @@ func NewResolverStateless() *ResolverStateless {
 	return &ResolverStateless{}
 }
 
-func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, hooks [][]byte) (SubTries, int64, error) {
+func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, count int) (SubTries, int64, error) {
 	defer trieResolveStatelessTimer.UpdateSince(time.Now())
 
 	serializedWitness, err := db.GetWitnessesForBlock(blockNr, trieLimit)
@@ -31,7 +31,7 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 		return SubTries{}, 0, err
 	}
 	var subTries SubTries
-	for _, hookNibbles := range hooks {
+	for i := 0; i < count; i++ {
 		witness, err := NewWitnessFromReader(witnessReader, false /*trace*/)
 		if err != nil {
 			return SubTries{}, 0, err
@@ -42,7 +42,6 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 		}
 		rootNode := trie.root
 		rootHash := trie.Hash()
-		subTries.Hooks = append(subTries.Hooks, hookNibbles)
 		subTries.roots = append(subTries.roots, rootNode)
 		subTries.Hashes = append(subTries.Hashes, rootHash)
 	}

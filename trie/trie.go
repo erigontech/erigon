@@ -762,8 +762,8 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool, uint64) {
 	return nd, parent, true, incarnation
 }
 
-func (t *Trie) HookSubTries(subTries SubTries) error {
-	for i, hookNibbles := range subTries.Hooks {
+func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
+	for i, hookNibbles := range hooks {
 		root := subTries.roots[i]
 		hash := subTries.Hashes[i]
 		if err := t.hook(hookNibbles, root, hash[:]); err != nil {

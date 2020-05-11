@@ -78,17 +78,19 @@ func (tr *ResolverStateful) Reset() {
 // to fit the insertion point.
 // We create a fake branch node at the cutoff point by modifying the last
 // nibble of the `succ` key
-func (tr *ResolverStateful) finaliseRoot(hookNibbles []byte) error {
+func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 	if tr.trace {
-		fmt.Printf("finaliseRoot(%x)\n", hookNibbles)
+		fmt.Printf("finaliseRoot(%d)\n", cutoff)
 	}
-	if len(hookNibbles) >= 2*common.HashLength {
+	if cutoff >= 2*common.HashLength {
 		// if only storage resolution required, then no account records
-		if ok, err := tr.finaliseStorageRoot(len(hookNibbles)); err == nil {
+		if ok, err := tr.finaliseStorageRoot(cutoff); err == nil {
 			if ok {
-				tr.subTries.Hooks = append(tr.subTries.Hooks, hookNibbles)
 				tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
 				tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
+			} else {
+				tr.subTries.roots = append(tr.subTries.roots, nil)
+				tr.subTries.Hashes = append(tr.subTries.Hashes, common.Hash{})				
 			}
 		} else {
 			return err
@@ -99,9 +101,9 @@ func (tr *ResolverStateful) finaliseRoot(hookNibbles []byte) error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		if len(hookNibbles) > 0 {
-			tr.succ.Write(tr.curr.Bytes()[:len(hookNibbles)-1])
-			tr.succ.WriteByte(tr.curr.Bytes()[len(hookNibbles)-1] + 1) // Modify last nibble before the cutoff point
+		if cutoff > 0 {
+			tr.succ.Write(tr.curr.Bytes()[:cutoff-1])
+			tr.succ.WriteByte(tr.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
 		}
 		var data GenStructStepData
 		if tr.wasIH {
@@ -135,11 +137,8 @@ func (tr *ResolverStateful) finaliseRoot(hookNibbles []byte) error {
 		tr.accData.FieldSet = 0
 	}
 	tr.groups = tr.groups[:0]
-	if tr.hb.hasRoot() {
-		tr.subTries.Hooks = append(tr.subTries.Hooks, hookNibbles)
-		tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
-		tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
-	}
+	tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
+	tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
 	return nil
 }
 
@@ -185,7 +184,7 @@ func (tr *ResolverStateful) finaliseStorageRoot(cutoff int) (bool, error) {
 	return false, nil
 }
 
-func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte, trace bool) (SubTries, error) {
+func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
 	if len(dbPrefixes) == 0 {
 		return SubTries{}, nil
 	}
@@ -203,7 +202,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes(%d): %x\n", len(dbPrefixes), dbPrefixes)
-		fmt.Printf("hooks(%d): %x\n", len(hooks), hooks)
 	}
 
 	var boltDB *bolt.DB
@@ -215,15 +213,23 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 		return SubTries{}, fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
-	if err := tr.MultiWalk2(boltDB, dbPrefixes, fixedbits, hooks, tr.WalkerAccount, tr.WalkerStorage); err != nil {
+	cutoffs := make([]int, len(fixedbits))
+	for i, bits := range fixedbits {
+		if bits >= 256 /* addrHash */ + 64 /* incarnation */ {
+			cutoffs[i] = bits/4 - 16 // Remove incarnation
+		} else {
+			cutoffs[i] = bits/4
+		}
+	}
+
+	if err := tr.MultiWalk2(boltDB, dbPrefixes, fixedbits, cutoffs, tr.WalkerAccount, tr.WalkerStorage); err != nil {
 		return tr.subTries, err
 	}
-	if err := tr.finaliseRoot(hooks[len(hooks)-1]); err != nil {
+	if err := tr.finaliseRoot(cutoffs[len(cutoffs)-1]); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
 		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes: %x\n", dbPrefixes)
-		fmt.Printf("hooks: %x\n", hooks)
 		return tr.subTries, fmt.Errorf("error in finaliseRoot %w", err)
 	}
 	return tr.subTries, nil
@@ -390,7 +396,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []int, hooks [][]byte, accWalker walker, storageWalker walker) error {
+func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []int, cutoffs []int, accWalker walker, storageWalker walker) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -402,7 +408,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	hookNibbles := hooks[rangeIdx]
+	cutoff := cutoffs[rangeIdx]
 	if len(startkey) > common.HashLength {
 		// Looking for storage sub-tree
 		copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
@@ -498,7 +504,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						if err := tr.finaliseRoot(hookNibbles); err != nil {
+						if err := tr.finaliseRoot(cutoff); err != nil {
 							return err
 						}
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
@@ -507,7 +513,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 							// Looking for storage sub-tree
 							copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
 						}
-						hookNibbles = hooks[rangeIdx]
+						cutoff = cutoffs[rangeIdx]
 						tr.hb.Reset()
 						tr.wasIH = false
 						tr.wasIHStorage = false
@@ -565,7 +571,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			minKeyAsNibbles.Reset()
 			keyToNibblesWithoutInc(minKey, &minKeyAsNibbles)
 
-			if minKeyAsNibbles.Len() < len(hookNibbles) {
+			if minKeyAsNibbles.Len() < cutoff {
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}

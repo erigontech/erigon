@@ -519,7 +519,7 @@ func (tds *TrieDbState) resolveCodeTouches(
 	}
 
 	if !firstRequest {
-		if _, err := resolveFunc(tds.resolver, nil, nil, nil, nil); err != nil {
+		if _, err := resolveFunc(tds.resolver, nil, nil, nil); err != nil {
 			return err
 		}
 	}
@@ -550,11 +550,11 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	// CreateLoadingPrefixes would have gone through the entire rs, so we need to rewind to the beginning
 	rs.Rewind()
 	resolver := trie.NewResolver(tds.blockNr)
-	subTries, err := resolveFunc(resolver, rs, dbPrefixes, fixedbits, hooks)
+	subTries, err := resolveFunc(resolver, rs, dbPrefixes, fixedbits)
 	if err != nil {
 		return err
 	}
-	return tds.t.HookSubTries(subTries)
+	return tds.t.HookSubTries(subTries, hooks)
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
@@ -625,11 +625,11 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
 	var witnesses []*trie.Witness
 
-	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) (trie.SubTries, error) {
+	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int) (trie.SubTries, error) {
 		if resolver == nil {
 			return trie.SubTries{}, nil
 		}
-		subTries, err := resolver.ResolveWithDb(tds.db, tds.blockNr, rs, dbPrefixes, fixedbits, hooks, trace)
+		subTries, err := resolver.ResolveWithDb(tds.db, tds.blockNr, rs, dbPrefixes, fixedbits, trace)
 		if err != nil {
 			return subTries, err
 		}
@@ -652,12 +652,12 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*
 // ResolveStateTrieStateless uses a witness DB to resolve subtries
 func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
 	var startPos int64
-	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int, hooks [][]byte) (trie.SubTries, error) {
+	resolveFunc := func(resolver *trie.Resolver, rs *trie.ResolveSet, dbPrefixes [][]byte, fixedbits []int) (trie.SubTries, error) {
 		if resolver == nil {
 			return trie.SubTries{}, nil
 		}
 
-		subTries, pos, err := resolver.ResolveStateless(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos, hooks)
+		subTries, pos, err := resolver.ResolveStateless(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos, len(dbPrefixes))
 		if err != nil {
 			return subTries, err
 		}

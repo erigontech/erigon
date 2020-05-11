@@ -1133,7 +1133,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				resolver := trie.NewResolver(block.NumberU64())
 
 				rs := trie.NewResolveSet(0)
-				if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
+				if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, false); err2 != nil {
 					return err2
 				}
 				/*
@@ -1193,7 +1193,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					resolver := trie.NewResolver(block.NumberU64())
 
 					rs := trie.NewResolveSet(0)
-					if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
+					if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, false); err2 != nil {
 						return err2
 					}
 					/*
