@@ -251,29 +251,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Mon May 11 10:14:49 2020 +0300
 
     core/state: make GetCodeSize mirror GetCode implementation wise
-
-commit e29e4c2376ae9718208178b226bd9ee86d2ffa4f
-Author: ligi <ligi@ligi.de>
-Date:   Mon May 11 09:05:37 2020 +0200
-
-    build: fix CLI params for windows LNK files (#21055)
-    
-    * build: Fix CLI params for windows LNK files
-    
-    closes #21054
-    
-    * Remove parameters
-
-commit 82f9ed49fa6a6831c997582821dd1c5ba4f14116
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri May 8 20:52:20 2020 +0200
-
-    core/state: avoid statedb.dbErr due to emptyCode (#21051)
-    
-    * core/state: more verbose stateb errors
-    
-    * core/state: fix flaw
-    
-    * core/state: fixed lint
-    
-    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
