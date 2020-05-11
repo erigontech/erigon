@@ -1,12 +1,9 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
-	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -21,7 +18,6 @@ type Resolver struct {
 	t                *Trie
 	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
-	requests         []*ResolveRequest
 	codeRequests     []*ResolveRequestForCode
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
@@ -29,7 +25,6 @@ type Resolver struct {
 func NewResolver(t *Trie, blockNr uint64) *Resolver {
 	tr := Resolver{
 		t:            t,
-		requests:     []*ResolveRequest{},
 		codeRequests: []*ResolveRequestForCode{},
 		blockNr:      blockNr,
 	}
@@ -38,7 +33,6 @@ func NewResolver(t *Trie, blockNr uint64) *Resolver {
 
 func (tr *Resolver) Reset(blockNr uint64) {
 	tr.blockNr = blockNr
-	tr.requests = tr.requests[:0]
 	tr.codeRequests = tr.codeRequests[:0]
 	tr.witnesses = nil
 	tr.collectWitnesses = false
@@ -58,82 +52,6 @@ func (tr *Resolver) PopCollectedWitnesses() []*Witness {
 // AddCodeRequest add a request for code resolution
 func (tr *Resolver) AddCodeRequest(req *ResolveRequestForCode) {
 	tr.codeRequests = append(tr.codeRequests, req)
-}
-
-// Resolver implements sort.Interface
-// and sorts by resolve requests
-// (more general requests come first)
-func (tr *Resolver) Len() int {
-	return len(tr.requests)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func (tr *Resolver) Less(i, j int) bool {
-	ci := tr.requests[i]
-	cj := tr.requests[j]
-	if ci.contract == nil && cj.contract != nil {
-		contractAsNibbles := pool.GetBuffer(256)
-		defer pool.PutBuffer(contractAsNibbles)
-		DecompressNibbles(cj.contract[:common.HashLength], &contractAsNibbles.B)
-		hex1 := ci.resolveHex
-		if len(hex1) == 65 {
-			hex1 = hex1[:64]
-		}
-		c := bytes.Compare(hex1[:ci.resolvePos], contractAsNibbles.B[:ci.resolvePos])
-		if c != 0 {
-			return c < 0
-		}
-	} else if ci.contract != nil && cj.contract == nil {
-		contractAsNibbles := pool.GetBuffer(256)
-		defer pool.PutBuffer(contractAsNibbles)
-		DecompressNibbles(ci.contract[:common.HashLength], &contractAsNibbles.B)
-		hex1 := cj.resolveHex
-		if len(hex1) == 65 {
-			hex1 = hex1[:64]
-		}
-		c := bytes.Compare(contractAsNibbles.B[:cj.resolvePos], hex1[:cj.resolvePos])
-		if c != 0 {
-			return c < 0
-		}
-	}
-
-	m := min(ci.resolvePos, cj.resolvePos)
-	c := bytes.Compare(ci.contract, cj.contract)
-	if c != 0 {
-		return c < 0
-	}
-	c = bytes.Compare(ci.resolveHex[:m], cj.resolveHex[:m])
-	if c != 0 {
-		return c < 0
-	}
-	return ci.resolvePos < cj.resolvePos
-}
-
-func (tr *Resolver) Swap(i, j int) {
-	tr.requests[i], tr.requests[j] = tr.requests[j], tr.requests[i]
-}
-
-func (tr *Resolver) AddRequest(req *ResolveRequest) {
-	tr.requests = append(tr.requests, req)
-}
-
-func (tr *Resolver) Print() {
-	for _, req := range tr.requests {
-		fmt.Printf("%s\n", req.String())
-	}
 }
 
 // Various values of the account field set
@@ -159,8 +77,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, rs *ResolveSet, dbPrefixe
 		hf = tr.hookSubtrie
 	}
 
-	sort.Stable(tr)
-	resolver := NewResolverStateful(tr.requests, hf)
+	resolver := NewResolverStateful(hf)
 	if err := resolver.RebuildTrie(db, rs, dbPrefixes, fixedbits, hooks, trace); err != nil {
 		return err
 	}
@@ -169,11 +86,10 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, rs *ResolveSet, dbPrefixe
 
 // ResolveStateless resolves and hooks subtries using a witnesses database instead of
 // the state DB.
-func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64) (int64, error) {
-	sort.Stable(tr)
-	resolver := NewResolverStateless(tr.requests, tr.hookSubtrie)
+func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, hooks [][]byte) (int64, error) {
+	resolver := NewResolverStateless(tr.hookSubtrie)
 	// we expect CodeNodes to be already attached to the trie in stateless resolution
-	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos)
+	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos, hooks)
 }
 
 func (tr *Resolver) hookSubtrie(hookNibbles []byte, hbRoot node, hbHash common.Hash) error {

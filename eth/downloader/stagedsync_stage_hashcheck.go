@@ -29,13 +29,10 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	tr := trie.New(syncHeadBlock.Root())
-	// making resolve request for the trie root, so we only get a hash
-	rr := tr.NewResolveRequest(nil, []byte{}, 0)
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 
 	resolver := trie.NewResolver(tr, blockNr)
-	resolver.AddRequest(rr)
 	rs := trie.NewResolveSet(0)
 	err = resolver.ResolveStateful(euphemeralMutation, rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false)
 	if err != nil {

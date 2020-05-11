@@ -1126,22 +1126,22 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			tr := trie.New(common.Hash{})
 
 			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
-				prefix := request.Prefixes[i]
-				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
-				rr.RequiresRLP = true
+				//prefix := request.Prefixes[i]
+				//rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
+				//rr.RequiresRLP = true
 
 				resolver := trie.NewResolver(tr, block.NumberU64())
-				resolver.AddRequest(rr)
 
 				rs := trie.NewResolveSet(0)
 				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
 					return err2
 				}
-
+				/*
 				node := rr.NodeRLP
 				response.Nodes[i] = make([]byte, len(node))
 				copy(response.Nodes[i], node)
 				responseSize += len(node)
+				*/
 			}
 		} else {
 			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
@@ -1186,22 +1186,22 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					copy(contractPrefix, addrHash.Bytes())
 					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(1))
 					// TODO [Issue 99] support incarnations
-					storagePrefix := req.Prefixes[i]
-					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
-					rr.RequiresRLP = true
+					//storagePrefix := req.Prefixes[i]
+					//rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
+					//rr.RequiresRLP = true
 
 					resolver := trie.NewResolver(tr, block.NumberU64())
-					resolver.AddRequest(rr)
 
 					rs := trie.NewResolveSet(0)
 					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, [][]byte{nil}, false); err2 != nil {
 						return err2
 					}
-
+					/*
 					node := rr.NodeRLP
 					response.Nodes[j][i] = make([]byte, len(node))
 					copy(response.Nodes[j][i], node)
 					responseSize += len(node)
+					*/
 				}
 			}
 		} else {

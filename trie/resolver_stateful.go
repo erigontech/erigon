@@ -35,7 +35,6 @@ type ResolverStateful struct {
 	a        accounts.Account
 	leafData GenStructStepLeafData
 	accData  GenStructStepAccountData
-	requests []*ResolveRequest
 
 	hookFunction hookFunction
 
@@ -52,22 +51,18 @@ type ResolverStateful struct {
 	accAddrHashWithInc []byte // Concatenation of addrHash of the currently build account with its incarnation encoding
 }
 
-func NewResolverStateful(requests []*ResolveRequest, hookFunction hookFunction) *ResolverStateful {
+func NewResolverStateful(hookFunction hookFunction) *ResolverStateful {
 	return &ResolverStateful{
 		hb:                 NewHashBuilder(false),
-		requests:           requests,
 		hookFunction:       hookFunction,
 		accAddrHashWithInc: make([]byte, 40),
-		rs:                 NewResolveSet(0),
 	}
 }
 
 // Reset prepares the Resolver for reuse
-func (tr *ResolverStateful) Reset(requests []*ResolveRequest, hookFunction hookFunction) {
-	tr.requests = tr.requests[:0]
+func (tr *ResolverStateful) Reset(hookFunction hookFunction) {
 	tr.keyIdx = 0
 	tr.rs = NewResolveSet(0)
-	tr.requests = requests
 	tr.hookFunction = hookFunction
 	tr.curr.Reset()
 	tr.succ.Reset()
@@ -207,9 +202,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 
 	if tr.trace {
 		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
-		for i := range tr.requests {
-			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
-		}
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes(%d): %x\n", len(dbPrefixes), dbPrefixes)
 		fmt.Printf("hooks(%d): %x\n", len(hooks), hooks)
@@ -238,9 +230,6 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 	if err := tr.finaliseRoot(hooks[len(hooks)-1]); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
 		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
-		for i := range tr.requests {
-			fmt.Printf("req[%d]->%s\n", i, tr.requests[i])
-		}
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes: %x\n", dbPrefixes)
 		fmt.Printf("hooks: %x\n", hooks)
