@@ -234,7 +234,7 @@ func (db *BadgerDatabase) Has(bucket, key []byte) (bool, error) {
 // Only the keys whose first fixedbits match those of startkey are iterated over.
 // walker is called for each eligible entry.
 // If walker returns false or an error, the walk stops.
-func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	prefix := bucketKey(bucket, startkey)
 	err := db.db.View(func(tx *badger.Txn) error {
@@ -270,7 +270,7 @@ func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker f
 }
 
 // MultiWalk is similar to multiple Walk calls folded into one.
-func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -421,7 +421,7 @@ func (db *BadgerDatabase) MemCopy() Database {
 
 // TODO [Issue 144] Implement the methods
 
-func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	panic("Not implemented")
 }
 

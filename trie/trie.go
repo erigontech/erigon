@@ -391,12 +391,9 @@ func (rr *ResolveRequestForCode) String() string {
 // so that one can perform reads, inserts, and deletes on those keys without needing to do
 // any more resolving.
 type ResolveRequest struct {
-	t             *Trie    // trie to act upon
 	contract      []byte   // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
 	resolveHex    []byte   // Key for which the resolution is requested
 	resolvePos    int      // Position in the key for which resolution is requested
-	extResolvePos int      // Internal field, does not need to be set when ResolveRequest is created
-	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
 	RequiresRLP   bool     // whether to output node's RLP
 	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
@@ -405,12 +402,12 @@ type ResolveRequest struct {
 
 // NewResolveRequest creates a new ResolveRequest.
 // contract must be either address hash + incarnation (32+8 bytes) or nil
-func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
-	return &ResolveRequest{t: t, contract: contract, resolveHex: hex, resolvePos: pos, resolveHash: hashNode(resolveHash)}
+func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int) *ResolveRequest {
+	return &ResolveRequest{contract: contract, resolveHex: hex, resolvePos: pos}
 }
 
 func (rr *ResolveRequest) String() string {
-	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
+	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d}", rr.contract, rr.resolveHex, rr.resolvePos)
 }
 
 func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *ResolveRequestForCode {
@@ -490,23 +487,22 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 		case hashNode:
 			if contract == nil {
 				l := min(len(hex), common.HashLength*2) // remove termination symbol
-				return true, t.NewResolveRequest(nil, hex[:l], pos, common.CopyBytes(n))
+				return true, t.NewResolveRequest(nil, hex[:l], pos)
 			}
 			hexContractLen := 2 * common.HashLength // Length of 'contract' prefix in HEX encoding
 			l := min(len(hex), hexContractLen*2)    // remove termination symbol
 			if incarnation == nil {
-				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0, common.CopyBytes(n))
+				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0)
 			}
-
 			// 8 is IncarnationLength
 			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], ^*incarnation)
 			if pos-hexContractLen < 0 {
 				// when need storage resolution for non-resolved account
-				return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], 0, common.CopyBytes(n))
+				return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], 0)
 			}
-			return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], pos-hexContractLen, common.CopyBytes(n))
+			return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], pos-hexContractLen)
 
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
@@ -759,16 +755,20 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool, uint64) {
 	return nd, parent, true, incarnation
 }
 
-func (t *Trie) hook(hex []byte, n node) {
+func (t *Trie) hook(hex []byte, n node, hash []byte) error {
 	nd, parent, ok, incarnation := t.getNode(hex, true)
 	if !ok {
-		return
+		return nil
 	}
 	if _, ok := nd.(valueNode); ok {
-		return
+		return nil
 	}
-	if _, ok := nd.(hashNode); !ok && nd != nil {
-		return
+	if hn, ok := nd.(hashNode); ok {
+		if !bytes.Equal([]byte(hn), hash) {
+			return fmt.Errorf("wrong hash when hooking, expected %s, sub-tree hash %x", hn, hash)
+		}
+	} else if nd != nil {
+		return fmt.Errorf("expected hash node at %x, got %T", hex, nd)
 	}
 
 	t.touchAll(n, hex, false, incarnation)
@@ -791,6 +791,7 @@ func (t *Trie) hook(hex []byte, n node) {
 	case *accountNode:
 		p.storage = n
 	}
+	return nil
 }
 
 func (t *Trie) touchAll(n node, hex []byte, del bool, incarnation uint64) {

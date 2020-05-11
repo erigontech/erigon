@@ -69,7 +69,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
 			incarnaton := uint64(0)
 
-			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, incarnaton, fieldSet); err != nil {
+			if err := hb.accountLeaf(len(op.Key), op.Key, balance, nonce, incarnaton, fieldSet); err != nil {
 				return nil, err
 			}
 		case *OperatorEmptyRoot:

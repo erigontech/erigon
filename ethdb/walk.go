@@ -126,7 +126,7 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation uint64, found bool, err error) {
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits uint = 8 * common.HashLength
+	var fixedbits int = 8 * common.HashLength
 	copy(startkey, addrHash[:])
 	err = db.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
@@ -146,7 +146,7 @@ func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation 
 func GetHistoricalAccountIncarnation(db Getter, addrHash common.Hash, timestamp uint64) (incarnation uint64, found bool, err error) {
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits uint = 8 * common.HashLength
+	var fixedbits int = 8 * common.HashLength
 	copy(startkey, addrHash[:])
 	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, timestamp, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])

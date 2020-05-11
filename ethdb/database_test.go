@@ -264,7 +264,7 @@ var hexEntries = map[string]string{
 }
 
 var startKey = common.FromHex("a0")
-var fixedBits uint = 3
+var fixedBits int = 3
 
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 

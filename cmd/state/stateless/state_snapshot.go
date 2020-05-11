@@ -329,9 +329,9 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	var err error
 	if blockNum > 0 {
 		t := trie.New(rootHash)
-		r := trie.NewResolver(blockNum)
+		r := trie.NewResolver(t, blockNum)
 		key := []byte{}
-		req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+		req := t.NewResolveRequest(nil, key, 0)
 		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 		r.AddRequest(req)
 		if err = r.ResolveWithDb(stateDb, blockNum, false); err != nil {
@@ -368,7 +368,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 
 	for addrHash, account := range roots {
 		if account != nil {
-			sr := trie.NewResolver(blockNum)
+			sr := trie.NewResolver(tr, blockNum)
 			key := []byte{}
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])

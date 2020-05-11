@@ -779,10 +779,10 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{})
-	r := trie.NewResolver(currentBlockNr)
+	r := trie.NewResolver(t, currentBlockNr)
 	key := []byte{}
-	rootHash := currentBlock.Root()
-	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	//rootHash := currentBlock.Root()
+	req := t.NewResolveRequest(nil, key, 0)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr, false)
 	if err != nil {
@@ -824,12 +824,12 @@ func testResolve(chaindata string) {
 	currentBlockNr := uint64(286798)
 	var contract []byte
 	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
-	r := trie.NewResolver(currentBlockNr)
+	t := trie.New(common.Hash{})
+	r := trie.NewResolver(t, currentBlockNr)
 	var key []byte
 	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
-	resolveHash := common.FromHex("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
-	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 3, resolveHash)
+	//resolveHash := common.FromHex("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
+	req := t.NewResolveRequest(contract, key, 3)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr, true)
 	if err != nil {
@@ -1094,7 +1094,7 @@ func loadAccount() {
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
+	if err := ethDb.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, len(accountBytes)*8, blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v)
@@ -1105,7 +1105,7 @@ func loadAccount() {
 	}
 	fmt.Printf("After %d updates, reconstructed storage root: %x\n", count, t.Hash())
 	var keys [][]byte
-	if err := ethDb.Walk(dbutils.StorageHistoryBucket, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(dbutils.StorageHistoryBucket, accountBytes, len(accountBytes)*8, func(k, v []byte) (bool, error) {
 		if !bytes.HasSuffix(k, blockSuffix) {
 			return true, nil
 		}
@@ -1225,7 +1225,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits uint = 8 * common.HashLength
+	var fixedbits int = 8 * common.HashLength
 	copy(startkey, addrHash[:])
 	if err := ethDb.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])

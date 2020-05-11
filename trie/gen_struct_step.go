@@ -30,8 +30,8 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
 	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -52,7 +52,6 @@ type GenStructStepData interface {
 
 type GenStructStepAccountData struct {
 	FieldSet    uint32
-	StorageSize uint64
 	Balance     big.Int
 	Nonce       uint64
 	Incarnation uint64
@@ -137,11 +136,11 @@ func GenStructStep(
 				buildExtensions = true
 			case *GenStructStepAccountData:
 				if emitHash {
-					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}

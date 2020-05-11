@@ -39,6 +39,7 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 
 	var prevReq *ResolveRequest
 	requestIndex := 0
+	var hookNibbles bytes.Buffer
 
 	for witnessReader.Len() > 0 && requestIndex < len(r.requests) {
 		req := r.requests[requestIndex]
@@ -58,7 +59,13 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 			rootNode := trie.root
 			rootHash := trie.Hash()
 
-			err = r.hookFunction(req, rootNode, rootHash)
+			hookNibbles.Reset()
+			if req.contract != nil {
+				keyToNibblesWithoutInc(req.contract[:32], &hookNibbles)
+			}
+			hookNibbles.Write(req.resolveHex[:req.resolvePos])
+			// We can use hookNibbles.Bytes() without copying because it is discarded after hookFunction
+			err = r.hookFunction(hookNibbles.Bytes(), rootNode, rootHash)
 			if err != nil {
 				return 0, err
 			}
