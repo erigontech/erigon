@@ -83,7 +83,7 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err))
 	}

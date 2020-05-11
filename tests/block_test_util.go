@@ -121,6 +121,11 @@ func (t *BlockTest) Run(_ bool) error {
 		engine = ethash.NewShared()
 	}
 	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil)
+	if snapshotter {
+		cache.SnapshotLimit = 1
+		cache.SnapshotWait = true
+	}
+	chain, err := core.NewBlockChain(db, cache, config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		return err
 	}

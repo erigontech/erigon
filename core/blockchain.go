@@ -150,6 +150,7 @@ type BlockChain struct {
 	db     ethdb.DbWithPendingMutations // Low level persistent database to store final content in
 	triegc *prque.Prque                 // Priority queue mapping block numbers to tries to gc
 	gcproc time.Duration                // Accumulates canonical block processing for trie dumping
+	txLookupLimit uint64
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -203,7 +204,7 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -262,6 +263,23 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		return nil, ErrNoGenesis
 	}
 
+	var nilBlock *types.Block
+	bc.currentBlock.Store(nilBlock)
+	bc.currentFastBlock.Store(nilBlock)
+
+	// Initialize the chain with ancient data if it isn't empty.
+	var txIndexBlock uint64
+
+	if bc.empty() {
+		rawdb.InitDatabaseFromFreezer(bc.db)
+		// If ancient database is not empty, reconstruct all missing
+		// indices in the background.
+		frozen, _ := bc.db.Ancients()
+		if frozen > 0 {
+			txIndexBlock = frozen
+		}
+	}
+
 	if err := bc.loadLastState(); err != nil {
 		return nil, err
 	}
@@ -318,6 +336,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	}
 	// Take ownership of this particular state
 	go bc.update()
+	if txLookupLimit != nil {
+		bc.txLookupLimit = *txLookupLimit
+		go bc.maintainTxIndex(txIndexBlock)
+	}
 	if cacheConfig.Pruning {
 		var innerErr error
 		bc.pruner, innerErr = NewBasicPruner(db, bc, bc.cacheConfig)
@@ -1119,13 +1141,28 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				}
 
 				// Turbo-Geth doesn't have fast sync support
-
 				// Flush data into ancient database.
 				size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
 				if bc.enableTxLookupIndex {
 					rawdb.WriteTxLookupEntries(bc.db, block)
 				}
 
+				// Write tx indices if any condition is satisfied:
+ 				// * If user requires to reserve all tx indices(txlookuplimit=0)
+ 				// * If all ancient tx indices are required to be reserved(txlookuplimit is even higher than ancientlimit)
+ 				// * If block number is large enough to be regarded as a recent block
+ 				// It means blocks below the ancientLimit-txlookupLimit won't be indexed.
+ 				//
+ 				// But if the `TxIndexTail` is not nil, e.g. Geth is initialized with
+ 				// an external ancient database, during the setup, blockchain will start
+ 				// a background routine to re-indexed all indices in [ancients - txlookupLimit, ancients)
+ 				// range. In this case, all tx indices of newly imported blocks should be
+ 				// generated.
+ 				if bc.txLookupLimit == 0 || ancientLimit <= bc.txLookupLimit || block.NumberU64() >= ancientLimit-bc.txLookupLimit {
+ 					rawdb.WriteTxLookupEntries(batch, block)
+ 				} else if rawdb.ReadTxIndexTail(bc.db) != nil {
+ 					rawdb.WriteTxLookupEntries(batch, block)
+ 				}
 				stats.processed++
 			}
 
@@ -1207,14 +1244,27 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		return 0, nil
 	}
 
-	// Write downloaded chain data and corresponding receipt chain data.
 	/*
+		// Write downloaded chain data and corresponding receipt chain data
 		if len(ancientBlocks) > 0 {
 			if n, err := writeAncient(ancientBlocks, ancientReceipts); err != nil {
 				if err == errInsertionInterrupted {
 					return 0, nil
 				}
 				return n, err
+			
+		}
+		// Write the tx index tail (block number from where we index) before write any live blocks
+		if len(liveBlocks) > 0 && liveBlocks[0].NumberU64() == ancientLimit+1 {
+			// The tx index tail can only be one of the following two options:
+			// * 0: all ancient blocks have been indexed
+			// * ancient-limit: the indices of blocks before ancient-limit are ignored
+			if tail := rawdb.ReadTxIndexTail(bc.db); tail == nil {
+				if bc.txLookupLimit == 0 || ancientLimit <= bc.txLookupLimit {
+					rawdb.WriteTxIndexTail(bc.db, 0)
+				} else {
+					rawdb.WriteTxIndexTail(bc.db, ancientLimit-bc.txLookupLimit)
+				}
 			}
 		}
 	*/
@@ -1239,6 +1289,18 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	log.Info("Imported new block receipts", context...)
 
 	return 0, nil
+}
+
+// SetTxLookupLimit is responsible for updating the txlookup limit to the
+// original one stored in db if the new mismatches with the old one.
+func (bc *BlockChain) SetTxLookupLimit(limit uint64) {
+	bc.txLookupLimit = limit
+}
+
+// TxLookupLimit retrieves the txlookup limit used by blockchain to prune
+// stale transaction indices.
+func (bc *BlockChain) TxLookupLimit() uint64 {
+	return bc.txLookupLimit
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
@@ -1349,14 +1411,16 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		if len(logs) > 0 {
 			bc.logsFeed.Send(logs)
 		}
-	}
-	// In theory we should fire a ChainHeadEvent when we inject
-	// a canonical block, but sometimes we can insert a batch of
-	// canonicial blocks. Avoid firing too much ChainHeadEvents,
-	// we will fire an accumulated ChainHeadEvent and disable fire
-	// event here.
-	if emitHeadEvent && execute {
-		bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		// In theory we should fire a ChainHeadEvent when we inject
+		// a canonical block, but sometimes we can insert a batch of
+		// canonicial blocks. Avoid firing too much ChainHeadEvents,
+		// we will fire an accumulated ChainHeadEvent and disable fire
+		// event here.
+		if emitHeadEvent {
+			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		}
+	} else {
+		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
 	return status, nil
 }
@@ -2055,28 +2119,6 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	return nil
 }
 
-// PostChainEvents iterates over the events generated by a chain insertion and
-// posts them into the event feed.
-// TODO: Should not expose PostChainEvents. The chain events should be posted in WriteBlock.
-func (bc *BlockChain) PostChainEvents(events []interface{}, logs []*types.Log) {
-	// post event logs for further processing
-	if logs != nil {
-		bc.logsFeed.Send(logs)
-	}
-	for _, event := range events {
-		switch ev := event.(type) {
-		case ChainEvent:
-			bc.chainFeed.Send(ev)
-
-		case ChainHeadEvent:
-			bc.chainHeadFeed.Send(ev)
-
-		case ChainSideEvent:
-			bc.chainSideFeed.Send(ev)
-		}
-	}
-}
-
 func (bc *BlockChain) update() {
 	futureTimer := time.NewTicker(5 * time.Second)
 	defer futureTimer.Stop()
@@ -2089,6 +2131,87 @@ func (bc *BlockChain) update() {
 		}
 	}
 }
+
+ // maintainTxIndex is responsible for the construction and deletion of the
+ // transaction index.
+ //
+ // User can use flag `txlookuplimit` to specify a "recentness" block, below
+ // which ancient tx indices get deleted. If `txlookuplimit` is 0, it means
+ // all tx indices will be reserved.
+ //
+ // The user can adjust the txlookuplimit value for each launch after fast
+ // sync, Geth will automatically construct the missing indices and delete
+ // the extra indices.
+ func (bc *BlockChain) maintainTxIndex(ancients uint64) {
+	// Before starting the actual maintenance, we need to handle a special case,
+	// where user might init Geth with an external ancient database. If so, we
+	// need to reindex all necessary transactions before starting to process any
+	// pruning requests.
+	if ancients > 0 {
+		var from = uint64(0)
+		if bc.txLookupLimit != 0 && ancients > bc.txLookupLimit {
+			from = ancients - bc.txLookupLimit
+		}
+		rawdb.IndexTransactions(bc.db, from, ancients)
+	}
+	// indexBlocks reindexes or unindexes transactions depending on user configuration
+	indexBlocks := func(tail *uint64, head uint64, done chan struct{}) {
+		defer func() { done <- struct{}{} }()
+
+		 // If the user just upgraded Geth to a new version which supports transaction
+		// index pruning, write the new tail and remove anything older.
+		if tail == nil {
+			if bc.txLookupLimit == 0 || head < bc.txLookupLimit {
+				// Nothing to delete, write the tail and return
+				rawdb.WriteTxIndexTail(bc.db, 0)
+			} else {
+				// Prune all stale tx indices and record the tx index tail
+				rawdb.UnindexTransactions(bc.db, 0, head-bc.txLookupLimit+1)
+			}
+			return
+		}
+		// If a previous indexing existed, make sure that we fill in any missing entries
+		if bc.txLookupLimit == 0 || head < bc.txLookupLimit {
+			if *tail > 0 {
+				rawdb.IndexTransactions(bc.db, 0, *tail)
+			}
+			return
+		}
+		// Update the transaction index to the new chain state
+		if head-bc.txLookupLimit+1 < *tail {
+			// Reindex a part of missing indices and rewind index tail to HEAD-limit
+			rawdb.IndexTransactions(bc.db, head-bc.txLookupLimit+1, *tail)
+		} else {
+			// Unindex a part of stale indices and forward index tail to HEAD-limit
+			rawdb.UnindexTransactions(bc.db, *tail, head-bc.txLookupLimit+1)
+		}
+	}
+	// Any reindexing done, start listening to chain events and moving the index window
+	var (
+		done   chan struct{}                  // Non-nil if background unindexing or reindexing routine is active.
+		headCh = make(chan ChainHeadEvent, 1) // Buffered to avoid locking up the event feed
+	)
+	sub := bc.SubscribeChainHeadEvent(headCh)
+	if sub == nil {
+		return
+	}
+	defer sub.Unsubscribe()
+
+	 for {
+		select {
+		case head := <-headCh:
+			if done == nil {
+				done = make(chan struct{})
+				go indexBlocks(rawdb.ReadTxIndexTail(bc.db), head.Block.NumberU64(), done)
+			}
+		case <-done:
+			done = nil
+		case <-bc.quit:
+			return
+		}
+	}
+}
+
 
 // BadBlocks returns a list of the last 'bad blocks' that the client has seen on the network
 func (bc *BlockChain) BadBlocks() []*types.Block {
