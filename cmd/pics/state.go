@@ -579,7 +579,7 @@ func initialState1() error {
 
 	var witness *trie.Witness
 
-	if witness, err = quadTrie.ExtractWitness(0, false, rl); err != nil {
+	if witness, err = quadTrie.ExtractWitness(false, rl); err != nil {
 		return err
 	}
 
