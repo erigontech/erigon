@@ -108,9 +108,9 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 	}
 	var addrHashP *common.Hash
 	if dbr.codeCache != nil {
-		addrHash, err := common.HashData(address[:])
-		if err != nil {
-			return nil, err
+		addrHash, err1 := common.HashData(address[:])
+		if err1 != nil {
+			return nil, err1
 		}
 		if cached, ok := dbr.codeCache.Get(addrHash); ok {
 			return cached.([]byte), nil
@@ -130,9 +130,9 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash c
 	}
 	var addrHashP *common.Hash
 	if dbr.codeSizeCache != nil {
-		addrHash, err := common.HashData(address[:])
-		if err != nil {
-			return 0, err
+		addrHash, err1 := common.HashData(address[:])
+		if err1 != nil {
+			return 0, err1
 		}
 		if cached, ok := dbr.codeSizeCache.Get(addrHash); ok {
 			return cached.(int), nil
