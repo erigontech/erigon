@@ -778,9 +778,9 @@ func testStartup() {
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	r := trie.NewResolver(currentBlockNr)
-	rs := trie.NewResolveSet(0)
-	subTries, err1 := r.ResolveWithDb(ethDb, currentBlockNr, rs, [][]byte{nil}, []int{0}, false)
+	l := trie.NewSubTrieLoader(currentBlockNr)
+	rl := trie.NewRetainList(0)
+	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
 		fmt.Printf("%v\n", err1)
 	}
@@ -824,12 +824,12 @@ func testResolve(chaindata string) {
 	//var contract []byte
 	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
 	resolveHash := common.HexToHash("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
-	r := trie.NewResolver(currentBlockNr)
+	l := trie.NewSubTrieLoader(currentBlockNr)
 	var key []byte
 	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
-	rs := trie.NewResolveSet(0)
-	rs.AddHex(key[:3])
-	subTries, err1 := r.ResolveWithDb(ethDb, currentBlockNr, rs, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
+	rl := trie.NewRetainList(0)
+	rl.AddHex(key[:3])
+	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
 	if err1 != nil {
 		fmt.Printf("Resolve error: %v\n", err1)
 	}

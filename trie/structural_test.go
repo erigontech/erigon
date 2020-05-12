@@ -73,7 +73,7 @@ func TestV2HashBuilding(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
+			groups, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -88,7 +88,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
+	if _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -114,14 +114,14 @@ func TestV2Resolution(t *testing.T) {
 	trieHash := tr.Hash()
 
 	// Choose some keys to be resolved
-	var rs ResolveSet
+	var rl RetainList
 	// First, existing keys
 	for i := 0; i < 1000; i += 200 {
-		rs.AddKey([]byte(keys[i]))
+		rl.AddKey([]byte(keys[i]))
 	}
 	// Next, some non-exsiting keys
 	for i := 0; i < 1000; i++ {
-		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
+		rl.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
 	hb := NewHashBuilder(false)
@@ -141,7 +141,7 @@ func TestV2Resolution(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(rs.HashOnly, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
+			groups, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -152,7 +152,7 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(rs.HashOnly, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
+	if _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(common.Hash{})
@@ -162,7 +162,7 @@ func TestV2Resolution(t *testing.T) {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
 	// Check the availability of the resolved keys
-	for _, hex := range rs.hexes {
+	for _, hex := range rl.hexes {
 		key := hexToKeybytes(hex)
 		_, found := tr1.Get(key)
 		if !found {
@@ -220,7 +220,7 @@ func TestEmbeddedStorage(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false)
+			groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -233,7 +233,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	cutoff := 2 * common.HashLength
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
-	if groups, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false); err != nil {
+	if groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()

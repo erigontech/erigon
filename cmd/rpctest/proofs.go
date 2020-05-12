@@ -55,9 +55,9 @@ func proofs(chaindata string, url string, block int) {
 	if _, err = os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			// Resolve 6 top levels of the accounts trie
-			r := trie.NewResolver(uint64(block))
-			rs := trie.NewResolveSet(6)
-			subTries, err1 := r.ResolveWithDb(ethDb, uint64(block), rs, [][]byte{nil}, []int{0}, false)
+			l := trie.NewSubTrieLoader(uint64(block))
+			rl := trie.NewRetainList(6)
+			subTries, err1 := l.LoadSubTries(ethDb, uint64(block), rl, [][]byte{nil}, []int{0}, false)
 			if err1 != nil {
 				panic(err1)
 			}
@@ -237,12 +237,12 @@ func fixState(chaindata string, url string) {
 	}
 	for addrHash, account := range roots {
 		if account != nil && account.Root != trie.EmptyRoot {
-			sr := trie.NewResolver(blockNum)
+			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
-			rs := trie.NewResolveSet(0)
-			subTries, err1 := sr.ResolveWithDb(stateDb, blockNum, rs, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
+			rl := trie.NewRetainList(0)
+			subTries, err1 := sl.LoadSubTries(stateDb, blockNum, rl, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err1 != nil || subTries.Hashes[0] != account.Root {
 				fmt.Printf("%x: error %v, got hash %x, expected hash %x\n", addrHash, err1, subTries.Hashes[0], account.Root)
 				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])
