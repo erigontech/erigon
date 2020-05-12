@@ -28,7 +28,7 @@ import (
 )
 
 func (t *Trie) Print(w io.Writer) {
-	witness, err := t.ExtractWitness(1, false, nil)
+	witness, err := t.ExtractWitness(false, nil)
 	if err != nil {
 		panic(err)
 	}

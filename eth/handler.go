@@ -1123,25 +1123,25 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			tr := trie.New(common.Hash{})
+			//tr := trie.New(common.Hash{})
 
 			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
-				prefix := request.Prefixes[i]
-				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
-				rr.RequiresRLP = true
+				//prefix := request.Prefixes[i]
+				//rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
+				//rr.RequiresRLP = true
 
-				resolver := trie.NewResolver(tr, block.NumberU64())
-				resolver.SetHistorical(true)
-				resolver.AddRequest(rr)
+				loader := trie.NewSubTrieLoader(block.NumberU64())
 
-				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), false); err2 != nil {
+				rl := trie.NewRetainList(0)
+				if _, err2 := loader.LoadSubTries(pm.blockchain.ChainDb(), block.NumberU64(), rl, [][]byte{nil}, []int{0}, false); err2 != nil {
 					return err2
 				}
-
+				/*
 				node := rr.NodeRLP
 				response.Nodes[i] = make([]byte, len(node))
 				copy(response.Nodes[i], node)
 				responseSize += len(node)
+				*/
 			}
 		} else {
 			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
@@ -1179,29 +1179,29 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					return err
 				}
 
-				tr := trie.New(common.Hash{})
+				//tr := trie.New(common.Hash{})
 
 				for i := 0; i < n && responseSize < softResponseLimit; i++ {
 					contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 					copy(contractPrefix, addrHash.Bytes())
 					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(1))
 					// TODO [Issue 99] support incarnations
-					storagePrefix := req.Prefixes[i]
-					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
-					rr.RequiresRLP = true
+					//storagePrefix := req.Prefixes[i]
+					//rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
+					//rr.RequiresRLP = true
 
-					resolver := trie.NewResolver(tr, block.NumberU64())
-					resolver.SetHistorical(true)
-					resolver.AddRequest(rr)
+					loader := trie.NewSubTrieLoader(block.NumberU64())
 
-					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), false); err2 != nil {
+					rl := trie.NewRetainList(0)
+					if _, err2 := loader.LoadSubTries(pm.blockchain.ChainDb(), block.NumberU64(), rl, [][]byte{nil}, []int{0}, false); err2 != nil {
 						return err2
 					}
-
+					/*
 					node := rr.NodeRLP
 					response.Nodes[j][i] = make([]byte, len(node))
 					copy(response.Nodes[j][i], node)
 					responseSize += len(node)
+					*/
 				}
 			}
 		} else {

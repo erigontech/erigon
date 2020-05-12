@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type testWitnessStorage []byte
@@ -35,17 +33,17 @@ func TestRebuildTrie(t *testing.T) {
 	trie2 := buildTestTrie(10)
 	trie3 := buildTestTrie(100)
 
-	w1, err := extractWitnessFromRootNode(trie1.root, 1, false, nil)
+	w1, err := extractWitnessFromRootNode(trie1.root, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w2, err := extractWitnessFromRootNode(trie2.root, 1, false, nil)
+	w2, err := extractWitnessFromRootNode(trie2.root, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w3, err := extractWitnessFromRootNode(trie3.root, 1, false, nil)
+	w3, err := extractWitnessFromRootNode(trie3.root, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
@@ -78,51 +76,48 @@ func TestRebuildTrie(t *testing.T) {
 
 	storage := testWitnessStorage(buff.Bytes())
 
-	resolvedTries := make([]*Trie, 3)
+	loadedTries := make([]*Trie, 3)
 
-	currentTrie := 0
+	// it should ignore duplicate loaded requests
+	loader := NewWitnessDbSubTrieLoader()
 
-	req1 := trie1.NewResolveRequest(nil, []byte{0x01}, 1)
-	req2 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
-	req21 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
-	req3 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
-	req31 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
-
-	hookFunction := func(hookNibbles []byte, root node, rootHash common.Hash) error {
-		trie := New(rootHash)
-		trie.root = root
-		resolvedTries[currentTrie] = trie
-		currentTrie++
-		return nil
-	}
-
-	// it should ignore duplicate resolve requests
-	resolver := NewResolverStateless([]*ResolveRequest{req1, req2, req21}, hookFunction)
-
-	pos, err := resolver.RebuildTrie(&storage, 1, 1, 0)
+	subTries, pos, err := loader.LoadSubTries(&storage, 1, 1, 0, 2)
 	if err != nil {
 		t.Error(err)
+	}
+	currentTrie := 0
+	for i, root := range subTries.roots {
+		tr := New(subTries.Hashes[i])
+		tr.root = root
+		loadedTries[currentTrie] = tr
+		currentTrie++
 	}
 
 	// we also support partial resolution with continuation (for storage tries)
-	// so basically we first resolve accounts, then storages separately
+	// so basically we first load accounts, then storages separately
 	// but we still want to keep one entry in a DB per block, so we store the last read position
 	// and then use it as a start
-	resolver = NewResolverStateless([]*ResolveRequest{req3, req31}, hookFunction)
-	_, err = resolver.RebuildTrie(&storage, 1, 1, pos)
+	loader = NewWitnessDbSubTrieLoader()
+	subTries, _, err = loader.LoadSubTries(&storage, 1, 1, pos, 1)
 	if err != nil {
 		t.Error(err)
 	}
+	for i, root := range subTries.roots {
+		tr := New(subTries.Hashes[i])
+		tr.root = root
+		loadedTries[currentTrie] = tr
+		currentTrie++
+	}
 
-	if !bytes.Equal(resolvedTries[0].Hash().Bytes(), trie1.Hash().Bytes()) {
+	if !bytes.Equal(loadedTries[0].Hash().Bytes(), trie1.Hash().Bytes()) {
 		t.Errorf("tries are different")
 	}
 
-	if !bytes.Equal(resolvedTries[1].Hash().Bytes(), trie2.Hash().Bytes()) {
+	if !bytes.Equal(loadedTries[1].Hash().Bytes(), trie2.Hash().Bytes()) {
 		t.Errorf("tries are different")
 	}
 
-	if !bytes.Equal(resolvedTries[2].Hash().Bytes(), trie3.Hash().Bytes()) {
+	if !bytes.Equal(loadedTries[2].Hash().Bytes(), trie3.Hash().Bytes()) {
 		t.Errorf("tries are different")
 	}
 }

@@ -326,16 +326,16 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 
 func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
-	var err error
 	if blockNum > 0 {
-		t := trie.New(rootHash)
-		r := trie.NewResolver(t, blockNum)
-		key := []byte{}
-		req := t.NewResolveRequest(nil, key, 0)
+		l := trie.NewSubTrieLoader(blockNum)
 		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
-		r.AddRequest(req)
-		if err = r.ResolveWithDb(stateDb, blockNum, false); err != nil {
+		rl := trie.NewRetainList(0)
+		subTries, err := l.LoadSubTries(stateDb, blockNum, rl, [][]byte{nil}, []int{0}, false)
+		if err != nil {
 			fmt.Printf("%v\n", err)
+		}
+		if subTries.Hashes[0] != rootHash {
+			fmt.Printf("State root hash mismatch, got %x, expected %x\n", subTries.Hashes[0], rootHash)
 		}
 		fmt.Printf("Trie computation took %v\n", time.Since(startTime))
 	} else {
@@ -344,13 +344,13 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	startTime = time.Now()
 	roots := make(map[common.Hash]*accounts.Account)
 	incarnationMap := make(map[uint64]int)
-	err = stateDb.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+	if err := stateDb.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
 		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {
 			account := &accounts.Account{}
-			if ok, err2 := rawdb.ReadAccount(stateDb, addrHash, account); err2 != nil {
-				return false, err2
+			if ok, err := rawdb.ReadAccount(stateDb, addrHash, account); err != nil {
+				return false, err
 			} else if !ok {
 				roots[addrHash] = nil
 			} else {
@@ -359,30 +359,25 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 			}
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		panic(err)
 	}
 	fmt.Printf("Incarnation map: %v\n", incarnationMap)
-	tr := trie.New(common.Hash{})
 
 	for addrHash, account := range roots {
 		if account != nil {
-			sr := trie.NewResolver(tr, blockNum)
-			key := []byte{}
+			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
-			if need, req := tr.NeedResolution(nil, addrHash[:]); need {
-				sr.AddRequest(req)
-			}
-			if need, req := tr.NeedResolution(contractPrefix, key); need {
-				sr.AddRequest(req)
-			}
-			err = sr.ResolveWithDb(stateDb, blockNum, false)
+			rl := trie.NewRetainList(0)
+			subTries, err := sl.LoadSubTries(stateDb, blockNum, rl, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err != nil {
 				fmt.Printf("%x: %v\n", addrHash, err)
 				fmt.Printf("incarnation: %d, account.Root: %x\n", account.Incarnation, account.Root)
+			}
+			if subTries.Hashes[0] != account.Root {
+				fmt.Printf("Storage root hash mismatch for %x, got %x, expected %x\n", addrHash, subTries.Hashes[0], account.Root)
 			}
 		}
 	}

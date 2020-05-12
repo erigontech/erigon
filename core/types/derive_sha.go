@@ -69,7 +69,7 @@ func DeriveSha(list DerivableList) common.Hash {
 		if curr.Len() > 0 {
 			value.Write(list.GetRlp(i))
 			leafData.Value = rlphacks.RlpEncodedBytes(value.Bytes())
-			groups, _ = trie.GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, &leafData, groups, false)
+			groups, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, &leafData, groups, false)
 		}
 	})
 
@@ -124,8 +124,8 @@ func traverseInLexOrder(list DerivableList, traverser func(int, int)) {
 	}
 }
 
-func hashOnly(_ []byte) bool {
-	return true
+func retain(_ []byte) bool {
+	return false
 }
 
 func encodeUint(i uint, buffer bytesWriter) {

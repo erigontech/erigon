@@ -366,55 +366,24 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 	return nil
 }
 
-// ResolveRequestFor Code expresses the need to fetch code from the DB (by its hash) and attach
+// LoadRequestForCode Code expresses the need to fetch code from the DB (by its hash) and attach
 // to a specific account leaf in the trie.
-type ResolveRequestForCode struct {
+type LoadRequestForCode struct {
 	t        *Trie
 	addrHash common.Hash // contract address hash
 	codeHash common.Hash
 	bytecode bool // include the bytecode too
 }
 
-func (rr *ResolveRequestForCode) String() string {
-	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", rr.addrHash, rr.codeHash, rr.bytecode)
+func (lrc *LoadRequestForCode) String() string {
+	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", lrc.addrHash, lrc.codeHash, lrc.bytecode)
 }
 
-// ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
-// subtrie is specified by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
-// is useful to ensure that specific leaves of the trie are fully expanded (and not rolled into
-// the hashes). One might think of two uses of ResolveRequests (and perhaps we need to consider
-// splitting them into two types). First type is to fetch certain number of levels of a given
-// subtrie, but specifying resolveHex and resolvePos such that resolvePos == len(resolveHex).
-// In such situations, it want to also set topLevels field in the Resolver to a non-zero
-// value, otherwise only a hashNode will be resolved.
-// Second type is to fetch a subtrie in such a way that a set of keys will be fully expanded,
-// so that one can perform reads, inserts, and deletes on those keys without needing to do
-// any more resolving.
-type ResolveRequest struct {
-	contract      []byte   // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
-	resolveHex    []byte   // Key for which the resolution is requested
-	resolvePos    int      // Position in the key for which resolution is requested
-	RequiresRLP   bool     // whether to output node's RLP
-	NodeRLP       []byte   // [OUT] RLP of the resolved node
+func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *LoadRequestForCode {
+	return &LoadRequestForCode{t, addrHash, codeHash, bytecode}
 }
 
-/* add code hash there, if nil -- don't do anything with the code */
-
-// NewResolveRequest creates a new ResolveRequest.
-// contract must be either address hash + incarnation (32+8 bytes) or nil
-func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int) *ResolveRequest {
-	return &ResolveRequest{contract: contract, resolveHex: hex, resolvePos: pos}
-}
-
-func (rr *ResolveRequest) String() string {
-	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d}", rr.contract, rr.resolveHex, rr.resolvePos)
-}
-
-func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *ResolveRequestForCode {
-	return &ResolveRequestForCode{t, addrHash, codeHash, bytecode}
-}
-
-func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *ResolveRequestForCode) {
+func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *LoadRequestForCode) {
 	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
 		return false, nil
 	}
@@ -426,88 +395,118 @@ func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash, 
 		_, ok = t.GetAccountCodeSize(addrHash[:])
 	}
 	if !ok {
-		return true, t.NewResolveRequestForCode(addrHash, codeHash, bytecode)
+		return true, t.NewLoadRequestForCode(addrHash, codeHash, bytecode)
 	}
 
 	return false, nil
 }
 
-// NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
-// from the database, if one were to access the key specified
-// In the case of "Yes", also returns a corresponding ResolveRequest
-// contract, if not empty, must be equal to the address hash
-// storageKey must be the concatenation of contract's address hash and the hash of the item's key, in the KEYBYTES encoding
-func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *ResolveRequest) {
-	var nd = t.root
-	hex := keybytesToHex(storageKey)
-	if t.binary {
-		hex = keyHexToBin(hex)
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-	pos := 0
-	var incarnation *uint64
-	for {
-		switch n := nd.(type) {
-		case nil:
-			return false, nil
-		case *shortNode:
-			matchlen := prefixLen(hex[pos:], n.Key)
-			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-				nd = n.Val
-			} else {
-				return false, nil
-			}
-			pos += matchlen
-		case *duoNode:
-			i1, i2 := n.childrenIdx()
-			switch hex[pos] {
-			case i1:
-				nd = n.child1
-				pos++
-			case i2:
-				nd = n.child2
-				pos++
-			default:
-				return false, nil
-			}
-		case *fullNode:
-			child := n.Children[hex[pos]]
-			if child == nil {
-				return false, nil
-			}
-			nd = child
-			pos++
-		case valueNode:
-			return false, nil
-		case *accountNode:
-			if pos == len(hex) {
-				return false, nil
-			}
-			nd = n.storage
-			incarnation = &n.Incarnation
-		case hashNode:
-			if contract == nil {
-				l := min(len(hex), common.HashLength*2) // remove termination symbol
-				return true, t.NewResolveRequest(nil, hex[:l], pos)
-			}
-			hexContractLen := 2 * common.HashLength // Length of 'contract' prefix in HEX encoding
-			l := min(len(hex), hexContractLen*2)    // remove termination symbol
-			if incarnation == nil {
-				return true, t.NewResolveRequest(contract, hex[hexContractLen:l], 0)
-			}
-			// 8 is IncarnationLength
-			prefix := make([]byte, len(contract)+8)
-			copy(prefix, contract)
-			binary.BigEndian.PutUint64(prefix[len(contract):], ^*incarnation)
-			if pos-hexContractLen < 0 {
-				// when need storage resolution for non-resolved account
-				return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], 0)
-			}
-			return true, t.NewResolveRequest(prefix, hex[hexContractLen:l], pos-hexContractLen)
+	return b
+}
 
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
+// FindSubTriesToLoad walks over the trie and creates the list of DB prefixes and
+// corresponding list of valid bits in the prefix (for the cases when prefix contains an
+// odd number of nibbles) that would allow loading the missing information from the database
+// It also create list of `hooks`, the paths in the trie (in nibbles) where the loaded
+// sub-tries need to be inserted.
+func (t *Trie) FindSubTriesToLoad(rl *RetainList) (prefixes [][]byte, fixedbits []int, hooks [][]byte) {
+	return findSubTriesToLoad(t.root, nil, rl, nil, 0, nil, nil, nil)
+}
+
+var bytes8 [8]byte
+
+func findSubTriesToLoad(nd node, nibblePath []byte, rl *RetainList, dbPrefix []byte, bits int,
+	prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
+	switch n := nd.(type) {
+	case *shortNode:
+		nKey := n.Key
+		if nKey[len(nKey)-1] == 16 {
+			nKey = nKey[:len(nKey)-1]
 		}
+		newNibblePath := append(nibblePath, nKey...)
+		if !rl.Retain(newNibblePath) {
+			return prefixes, fixedbits, hooks
+		}
+		for _, b := range nKey {
+			if bits%8 == 0 {
+				dbPrefix = append(dbPrefix, b<<4)
+			} else {
+				dbPrefix[len(dbPrefix)-1] &= 0xf0
+				dbPrefix[len(dbPrefix)-1] |= (b & 0xf)
+			}
+			bits += 4
+		}
+		return findSubTriesToLoad(n.Val, newNibblePath, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		newPrefixes = prefixes
+		newFixedBits = fixedbits
+		newHooks = hooks
+		newNibblePath := append(nibblePath, i1)
+		if rl.Retain(newNibblePath) {
+			var newDbPrefix []byte
+			if bits%8 == 0 {
+				newDbPrefix = append(dbPrefix, i1<<4)
+			} else {
+				newDbPrefix = dbPrefix
+				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
+				newDbPrefix[len(newDbPrefix)-1] |= (i1 & 0xf)
+			}
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+		}
+		newNibblePath = append(nibblePath, i2)
+		if rl.Retain(newNibblePath) {
+			var newDbPrefix []byte
+			if bits%8 == 0 {
+				newDbPrefix = append(dbPrefix, i2<<4)
+			} else {
+				newDbPrefix = dbPrefix
+				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
+				newDbPrefix[len(newDbPrefix)-1] |= (i2 & 0xf)
+			}
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+		}
+		return newPrefixes, newFixedBits, newHooks
+	case *fullNode:
+		newPrefixes = prefixes
+		newFixedBits = fixedbits
+		newHooks = hooks
+		var newNibblePath []byte
+		for i, child := range n.Children {
+			if child != nil {
+				newNibblePath = append(nibblePath, byte(i))
+				if rl.Retain(newNibblePath) {
+					var newDbPrefix []byte
+					if bits%8 == 0 {
+						newDbPrefix = append(dbPrefix, byte(i)<<4)
+					} else {
+						newDbPrefix = dbPrefix
+						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
+						newDbPrefix[len(newDbPrefix)-1] |= (byte(i) & 0xf)
+					}
+					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+				}
+			}
+		}
+		return newPrefixes, newFixedBits, newHooks
+	case *accountNode:
+		if n.storage == nil {
+			return prefixes, fixedbits, hooks
+		}
+		binary.BigEndian.PutUint64(bytes8[:], ^n.Incarnation)
+		dbPrefix = append(dbPrefix, bytes8[:]...)
+		return findSubTriesToLoad(n.storage, nibblePath, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
+	case hashNode:
+		newPrefixes = append(prefixes, common.CopyBytes(dbPrefix))
+		newFixedBits = append(fixedbits, bits)
+		newHooks = append(hooks, common.CopyBytes(nibblePath))
+		return newPrefixes, newFixedBits, newHooks
 	}
+	return prefixes, fixedbits, hooks
 }
 
 // can pass incarnation=0 if start from root, method internally will
@@ -753,6 +752,17 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool, uint64) {
 		}
 	}
 	return nd, parent, true, incarnation
+}
+
+func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
+	for i, hookNibbles := range hooks {
+		root := subTries.roots[i]
+		hash := subTries.Hashes[i]
+		if err := t.hook(hookNibbles, root, hash[:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *Trie) hook(hex []byte, n node, hash []byte) error {

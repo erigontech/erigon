@@ -8,28 +8,26 @@ import (
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)
-type HashOnly interface {
-	HashOnly([]byte) bool
+type RetainDecider interface {
+	Retain([]byte) bool
 	IsCodeTouched(common.Hash) bool
 	Current() []byte
 }
 
 type MerklePathLimiter struct {
-	HashOnly HashOnly
+	RetainDecider RetainDecider
 	HashFunc HashNodeFunc
 }
 
 type WitnessBuilder struct {
 	root     node
-	blockNr  uint64
 	trace    bool
 	operands []WitnessOperator
 }
 
-func NewWitnessBuilder(root node, blockNr uint64, trace bool) *WitnessBuilder {
+func NewWitnessBuilder(root node, trace bool) *WitnessBuilder {
 	return &WitnessBuilder{
 		root:     root,
-		blockNr:  blockNr,
 		trace:    trace,
 		operands: make([]WitnessOperator, 0),
 	}
@@ -155,12 +153,12 @@ func (b *WitnessBuilder) addEmptyRoot() error {
 	return nil
 }
 
-func (b *WitnessBuilder) processAccountCode(n *accountNode, hashOnly HashOnly) error {
+func (b *WitnessBuilder) processAccountCode(n *accountNode, retainDec RetainDecider) error {
 	if n.IsEmptyRoot() && n.IsEmptyCodeHash() {
 		return nil
 	}
 
-	if n.code == nil || (hashOnly != nil && !hashOnly.IsCodeTouched(n.CodeHash)) {
+	if n.code == nil || (retainDec != nil && !retainDec.IsCodeTouched(n.CodeHash)) {
 		return b.addHashOp(hashNode(n.CodeHash[:]))
 	}
 
@@ -184,11 +182,11 @@ func (b *WitnessBuilder) makeBlockWitness(
 	nd node, hex []byte, limiter *MerklePathLimiter, force bool) error {
 
 	processAccountNode := func(key []byte, storageKey []byte, n *accountNode) error {
-		var hashOnly HashOnly
+		var retainDec RetainDecider
 		if limiter != nil {
-			hashOnly = limiter.HashOnly
+			retainDec = limiter.RetainDecider
 		}
-		if err := b.processAccountCode(n, hashOnly); err != nil {
+		if err := b.processAccountCode(n, retainDec); err != nil {
 			return err
 		}
 		if err := b.processAccountStorage(n, storageKey, limiter); err != nil {
@@ -224,9 +222,9 @@ func (b *WitnessBuilder) makeBlockWitness(
 			return b.addExtensionOp(n.Key)
 		}
 	case *duoNode:
-		hashOnly := limiter != nil && limiter.HashOnly.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		hashOnly := limiter != nil && !limiter.RetainDecider.Retain(hex) // Save this because rl can move on to other keys during the recursive invocation
 		if b.trace {
-			fmt.Printf("b.hashOnly.HashOnly(%x) -> %v\n", hex, hashOnly)
+			fmt.Printf("b.retainDec.Retain(%x) -> %v\n", hex, !hashOnly)
 		}
 		if hashOnly {
 			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
@@ -247,7 +245,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 		return b.addBranchOp(n.mask)
 
 	case *fullNode:
-		hashOnly := limiter != nil && limiter.HashOnly.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		hashOnly := limiter != nil && !limiter.RetainDecider.Retain(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
 			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
 			if err != nil {
@@ -268,16 +266,16 @@ func (b *WitnessBuilder) makeBlockWitness(
 		return b.addBranchOp(mask)
 
 	case hashNode:
-		hashOnly := limiter == nil || limiter.HashOnly.HashOnly(hex)
+		hashOnly := limiter == nil || !limiter.RetainDecider.Retain(hex)
 		if !hashOnly {
-			if c := limiter.HashOnly.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
+			if c := limiter.RetainDecider.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
 				hashOnly = true
 			}
 		}
 		if hashOnly {
 			return b.addHashOp(n)
 		}
-		return fmt.Errorf("unexpected hashNode: %s, at hex: %x, rs.Current: %x (%d)", n, hex, limiter.HashOnly.Current(), len(hex))
+		return fmt.Errorf("unexpected hashNode: %s, at hex: %x, rs.Current: %x (%d)", n, hex, limiter.RetainDecider.Current(), len(hex))
 	default:
 		return fmt.Errorf("unexpected node type: %T", nd)
 	}

@@ -55,15 +55,13 @@ func proofs(chaindata string, url string, block int) {
 	if _, err = os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			// Resolve 6 top levels of the accounts trie
-			t = trie.New(common.Hash{})
-			r := trie.NewResolver(t, uint64(block))
-			req := t.NewResolveRequest(nil, []byte{}, 0)
-			r.AddRequest(req)
-			err = r.ResolveWithDb(ethDb, uint64(block), false)
-			if err != nil {
-				panic(err)
+			l := trie.NewSubTrieLoader(uint64(block))
+			rl := trie.NewRetainList(6)
+			subTries, err1 := l.LoadSubTries(ethDb, uint64(block), rl, [][]byte{nil}, []int{0}, false)
+			if err1 != nil {
+				panic(err1)
 			}
-			fmt.Printf("Resolved with hash: %x\n", t.Hash())
+			fmt.Printf("Resolved with hash: %x\n", subTries.Hashes[0])
 			f, err1 := os.Create(fileName)
 			if err1 == nil {
 				defer f.Close()
@@ -239,17 +237,14 @@ func fixState(chaindata string, url string) {
 	}
 	for addrHash, account := range roots {
 		if account != nil && account.Root != trie.EmptyRoot {
-			st := trie.New(account.Root)
-			sr := trie.NewResolver(st, blockNum)
-			key := []byte{}
+			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
-			streq := st.NewResolveRequest(contractPrefix, key, 0)
-			sr.AddRequest(streq)
-			err = sr.ResolveWithDb(stateDb, blockNum, false)
-			if err != nil {
-				fmt.Printf("%x: %v\n", addrHash, err)
+			rl := trie.NewRetainList(0)
+			subTries, err1 := sl.LoadSubTries(stateDb, blockNum, rl, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
+			if err1 != nil || subTries.Hashes[0] != account.Root {
+				fmt.Printf("%x: error %v, got hash %x, expected hash %x\n", addrHash, err1, subTries.Hashes[0], account.Root)
 				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])
 				template := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
 				sm := make(map[common.Hash]storageEntry)

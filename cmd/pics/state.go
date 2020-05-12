@@ -563,23 +563,23 @@ func initialState1() error {
 		return err
 	}
 
-	rs := trie.NewResolveSet(0)
+	rl := trie.NewRetainList(0)
 	touches, storageTouches := tds.ExtractTouches()
 	var touchQuads = make([][]byte, len(touches))
 	for _, touch := range touches {
 		touchQuad := trie.KeyToQuad(touch)
-		rs.AddHex(touchQuad)
+		rl.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
 	for _, touch := range storageTouches {
 		touchQuad := trie.KeyToQuad(touch)
-		rs.AddHex(touchQuad)
+		rl.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
 
 	var witness *trie.Witness
 
-	if witness, err = quadTrie.ExtractWitness(0, false, rs); err != nil {
+	if witness, err = quadTrie.ExtractWitness(false, rl); err != nil {
 		return err
 	}
 
