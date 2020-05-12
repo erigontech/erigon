@@ -21,7 +21,7 @@ func NewRetainListBuilder() *RetainListBuilder {
 }
 
 // AddTouch adds a key (in KEY encoding) into the read/change set of account keys
-func (rlb* RetainListBuilder) AddTouch(touch []byte) {
+func (rlb *RetainListBuilder) AddTouch(touch []byte) {
 	rlb.touches = append(rlb.touches, common.CopyBytes(touch))
 }
 
@@ -79,7 +79,7 @@ func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
 	for _, touch := range storageTouches {
 		rl.AddKey(touch)
 	}
-	for codeHash, _ := range codeTouches {
+	for codeHash := range codeTouches {
 		rl.AddCodeTouch(codeHash)
 	}
 

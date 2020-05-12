@@ -2,7 +2,7 @@ package trie
 
 import "errors"
 
-func (t *Trie) ExtractWitness(blockNr uint64, trace bool, rl *RetainList) (*Witness, error) {
+func (t *Trie) ExtractWitness(blockNr uint64, trace bool, rl RetainDecider) (*Witness, error) {
 	var rd RetainDecider
 	if rl != nil {
 		rd = rl
@@ -10,7 +10,7 @@ func (t *Trie) ExtractWitness(blockNr uint64, trace bool, rl *RetainList) (*Witn
 	return extractWitnessFromRootNode(t.root, blockNr, trace, rd)
 }
 
-func (t *Trie) ExtractWitnessForPrefix(prefix []byte, blockNr uint64, trace bool, rl *RetainList) (*Witness, error) {
+func (t *Trie) ExtractWitnessForPrefix(prefix []byte, blockNr uint64, trace bool, rl RetainDecider) (*Witness, error) {
 	foundNode, _, found, _ := t.getNode(prefix, false)
 	if !found {
 		return nil, errors.New("no data found for given prefix")
