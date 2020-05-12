@@ -829,7 +829,7 @@ func testResolve(chaindata string) {
 	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
 	rs := trie.NewResolveSet(0)
 	rs.AddHex(key[:3])
-	subTries, err1 := r.ResolveWithDb(ethDb, currentBlockNr, rs, [][]byte{[]byte{0xa8, 0xd0}}, []int{12}, true)
+	subTries, err1 := r.ResolveWithDb(ethDb, currentBlockNr, rs, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
 	if err1 != nil {
 		fmt.Printf("Resolve error: %v\n", err1)
 	}
@@ -837,21 +837,21 @@ func testResolve(chaindata string) {
 		fmt.Printf("Has mismatch, got %x, expected %x\n", subTries.Hashes[0], resolveHash)
 	}
 	/*
-	var filename string
-	if err == nil {
-		filename = fmt.Sprintf("right_%d.txt", currentBlockNr)
-	} else {
-		filename = fmt.Sprintf("root_%d.txt", currentBlockNr)
-	}
-	fmt.Printf("Generating deep snapshot of the tries... %s\n", filename)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		t.Print(f)
-	}
-	if err != nil {
-		fmt.Printf("%v\n", err)
-	}
+		var filename string
+		if err == nil {
+			filename = fmt.Sprintf("right_%d.txt", currentBlockNr)
+		} else {
+			filename = fmt.Sprintf("root_%d.txt", currentBlockNr)
+		}
+		fmt.Printf("Generating deep snapshot of the tries... %s\n", filename)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			t.Print(f)
+		}
+		if err != nil {
+			fmt.Printf("%v\n", err)
+		}
 	*/
 	fmt.Printf("Took %v\n", time.Since(startTime))
 }

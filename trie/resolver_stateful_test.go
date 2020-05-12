@@ -30,7 +30,7 @@ func TestResolve1(t *testing.T) {
 	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
 	require.NoError(err)
 	tr := New(common.Hash{})
-	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	assert.NoError(tr.HookSubTries(subTries, [][]byte{nil})) // hook up to the root of the trie
 	x, ok := tr.Get(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaa"))
 	assert.True(ok)
 	assert.NotNil(x)
@@ -54,7 +54,7 @@ func TestResolve2(t *testing.T) {
 	require.NoError(err)
 
 	tr := New(common.Hash{})
-	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	assert.NoError(tr.HookSubTries(subTries, [][]byte{nil})) // hook up to the root of the trie
 	x, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	assert.True(ok)
 	assert.NotNil(x)
@@ -78,7 +78,7 @@ func TestResolve2Keep(t *testing.T) {
 	require.NoError(err)
 
 	tr := New(common.Hash{})
-	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	assert.NoError(tr.HookSubTries(subTries, [][]byte{nil})) // hook up to the root of the trie
 	x, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	assert.True(ok)
 	assert.NotNil(x)
@@ -103,7 +103,7 @@ func TestResolve3Keep(t *testing.T) {
 	require.NoError(err)
 
 	tr := New(common.Hash{})
-	tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root of the trie
+	assert.NoError(tr.HookSubTries(subTries, [][]byte{nil})) // hook up to the root of the trie
 	x, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	assert.True(ok)
 	assert.NotNil(x)

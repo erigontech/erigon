@@ -242,7 +242,7 @@ func fixState(chaindata string, url string) {
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
 			rs := trie.NewResolveSet(0)
-			subTries, err1 := sr.ResolveWithDb(stateDb, blockNum, rs, [][]byte{contractPrefix}, []int{8*len(contractPrefix)}, false)
+			subTries, err1 := sr.ResolveWithDb(stateDb, blockNum, rs, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err1 != nil || subTries.Hashes[0] != account.Root {
 				fmt.Printf("%x: error %v, got hash %x, expected hash %x\n", addrHash, err1, subTries.Hashes[0], account.Root)
 				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])
