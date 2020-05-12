@@ -53,4 +53,3 @@ func extractWitnessFromRootNode(root node, blockNr uint64, trace bool, hashOnly 
 	}
 	return builder.Build(limiter)
 }
-

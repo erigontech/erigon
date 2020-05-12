@@ -184,10 +184,10 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver2 := NewResolver(0)
 	rs2 := NewResolveSet(0)
 	rs2.AddHex([]byte{0xd})
-	subTries, err = resolver2.ResolveWithDb(db, 0, rs2, [][]byte{[]byte{0xd0}}, []int{4}, false)
+	subTries, err = resolver2.ResolveWithDb(db, 0, rs2, [][]byte{{0xd0}}, []int{4}, false)
 	require.NoError(err, "resolve error")
 
-	err = tr.HookSubTries(subTries, [][]byte{[]byte{0xd}}) // hook up to the prefix 0xd
+	err = tr.HookSubTries(subTries, [][]byte{{0xd}}) // hook up to the prefix 0xd
 	assert.NoError(err)
 
 	x, ok := tr.Get(key1)
@@ -283,12 +283,12 @@ func TestApiDetails(t *testing.T) {
 				a := accounts.Account{
 					// Using Nonce field as an ID of account.
 					// Will check later if value which we .Get() from Trie has expected ID.
-					Nonce:          uint64(i*10 + j),
-					Initialised:    true,
-					Root:           root,
-					CodeHash:       EmptyCodeHash,
-					Balance:        *big.NewInt(0),
-					Incarnation:    incarnation,
+					Nonce:       uint64(i*10 + j),
+					Initialised: true,
+					Root:        root,
+					CodeHash:    EmptyCodeHash,
+					Balance:     *big.NewInt(0),
+					Incarnation: incarnation,
 				}
 				require.NoError(writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a))
 				require.NoError(db.Put(dbutils.CurrentStateBucket, storageKey(incarnation, k), storageV))
@@ -419,12 +419,12 @@ func TestStorageResolver2(t *testing.T) {
 
 	kAcc1 := common.FromHex("0000cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	a1 := accounts.Account{
-		Nonce:          uint64(1),
-		Initialised:    true,
-		CodeHash:       EmptyCodeHash,
-		Balance:        *big.NewInt(0),
-		Incarnation:    1,
-		Root:           EmptyRoot,
+		Nonce:       uint64(1),
+		Initialised: true,
+		CodeHash:    EmptyCodeHash,
+		Balance:     *big.NewInt(0),
+		Incarnation: 1,
+		Root:        EmptyRoot,
 	}
 
 	if err := writeAccount(db, common.BytesToHash(kAcc1), a1); err != nil {
@@ -439,12 +439,12 @@ func TestStorageResolver2(t *testing.T) {
 	expectedAccStorageRoot := "28d28aa6f1d0179248560a25a1a4ad69be1cdeab9e2b24bc9f9c70608e3a7ec0"
 	expectedAccRoot2 := expectedAccStorageRoot
 	a2 := accounts.Account{
-		Nonce:          uint64(1),
-		Initialised:    true,
-		CodeHash:       EmptyCodeHash,
-		Balance:        *big.NewInt(0),
-		Incarnation:    1,
-		Root:           common.HexToHash(expectedAccRoot2),
+		Nonce:       uint64(1),
+		Initialised: true,
+		CodeHash:    EmptyCodeHash,
+		Balance:     *big.NewInt(0),
+		Incarnation: 1,
+		Root:        common.HexToHash(expectedAccRoot2),
 	}
 
 	if err := writeAccount(db, common.BytesToHash(kAcc2), a2); err != nil {
@@ -460,12 +460,12 @@ func TestStorageResolver2(t *testing.T) {
 
 	expectedAccRoot3 := expectedAccStorageRoot
 	a3 := accounts.Account{
-		Nonce:          uint64(1),
-		Initialised:    true,
-		CodeHash:       EmptyCodeHash,
-		Balance:        *big.NewInt(0),
-		Incarnation:    2,
-		Root:           common.HexToHash(expectedAccRoot3),
+		Nonce:       uint64(1),
+		Initialised: true,
+		CodeHash:    EmptyCodeHash,
+		Balance:     *big.NewInt(0),
+		Incarnation: 2,
+		Root:        common.HexToHash(expectedAccRoot3),
 	}
 
 	if err := writeAccount(db, common.BytesToHash(kAcc3), a3); err != nil {
@@ -506,7 +506,7 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	acc1.Incarnation = 1
 	acc1.Initialised = true
 	tr.UpdateAccount(kAcc1, &acc1)
-	tr.Update(concat(kAcc1, ks1...), []byte{1,2,3})
+	tr.Update(concat(kAcc1, ks1...), []byte{1, 2, 3})
 
 	kAcc2 := common.FromHex("0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	ks2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
@@ -516,8 +516,8 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	acc2.Incarnation = 1
 	acc2.Initialised = true
 	tr.UpdateAccount(kAcc2, &acc2)
-	tr.Update(concat(kAcc2, ks2...), []byte{4,5,6})
-	tr.Update(concat(kAcc2, ks22...), []byte{7,8,9})
+	tr.Update(concat(kAcc2, ks2...), []byte{4, 5, 6})
+	tr.Update(concat(kAcc2, ks22...), []byte{7, 8, 9})
 	tr.Hash()
 
 	// Evict accounts only
