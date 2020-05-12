@@ -9,18 +9,18 @@ import (
 )
 
 var (
-	trieResolveStatelessTimer = metrics.NewRegisteredTimer("trie/resolve/stateless", nil)
+	trieWitnessDbSubTrieLoaderTimer = metrics.NewRegisteredTimer("trie/subtrieloader/witnessdb", nil)
 )
 
-type ResolverStateless struct {
+type WitnessDbSubTrieLoader struct {
 }
 
-func NewResolverStateless() *ResolverStateless {
-	return &ResolverStateless{}
+func NewWitnessDbSubTrieLoader() *WitnessDbSubTrieLoader {
+	return &WitnessDbSubTrieLoader{}
 }
 
-func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, count int) (SubTries, int64, error) {
-	defer trieResolveStatelessTimer.UpdateSince(time.Now())
+func (wstl *WitnessDbSubTrieLoader) LoadSubTries(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, count int) (SubTries, int64, error) {
+	defer trieWitnessDbSubTrieLoaderTimer.UpdateSince(time.Now())
 
 	serializedWitness, err := db.GetWitnessesForBlock(blockNr, trieLimit)
 	if err != nil {

@@ -84,7 +84,7 @@ func (s *Stream) Reset() {
 
 // Iterator helps iterate over a trie according to a given resolve set
 type Iterator struct {
-	rs           *ResolveSet
+	rl           *RetainList
 	hex          []byte
 	nodeStack    []node
 	iStack       []int
@@ -96,9 +96,9 @@ type Iterator struct {
 }
 
 // NewIterator creates a new iterator from scratch from a given trie and resolve set
-func NewIterator(t *Trie, rs *ResolveSet, trace bool) *Iterator {
+func NewIterator(t *Trie, rl *RetainList, trace bool) *Iterator {
 	return &Iterator{
-		rs:           rs,
+		rl:           rl,
 		hex:          []byte{},
 		nodeStack:    []node{t.root},
 		iStack:       []int{0},
@@ -111,8 +111,8 @@ func NewIterator(t *Trie, rs *ResolveSet, trace bool) *Iterator {
 }
 
 // Reset prepares iterator to be reused
-func (it *Iterator) Reset(t *Trie, rs *ResolveSet, trace bool) {
-	it.rs = rs
+func (it *Iterator) Reset(t *Trie, rl *RetainList, trace bool) {
+	it.rl = rl
 	it.hex = it.hex[:0]
 	if len(it.nodeStack) > 0 {
 		it.nodeStack = it.nodeStack[:0]
@@ -189,7 +189,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			it.hex = hex
 			it.nodeStack[l] = n.Val
 			it.iStack[l] = 0
-			it.goDeepStack[l] = !it.rs.HashOnly(hex)
+			it.goDeepStack[l] = it.rl.Retain(hex)
 			it.lenStack[l] = len(hex)
 			it.accountStack[l] = accounts
 		case *duoNode:
@@ -216,7 +216,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 					return SHashStreamItem, hex, nil, []byte(v), nil
 				case *duoNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
 							return AHashStreamItem, hex, nil, v.reference(), nil
@@ -224,7 +224,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
 							return AHashStreamItem, hex, nil, v.reference(), nil
@@ -259,7 +259,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 					return SHashStreamItem, hex, nil, []byte(v), nil
 				case *duoNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
 						if accounts {
@@ -268,7 +268,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
 						if accounts {
@@ -322,7 +322,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 					return SHashStreamItem, hex, nil, []byte(v), nil
 				case *duoNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
 							return AHashStreamItem, hex, nil, v.reference(), nil
@@ -330,7 +330,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
 							return AHashStreamItem, hex, nil, v.reference(), nil
@@ -365,7 +365,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 					return SHashStreamItem, hex, nil, []byte(v), nil
 				case *duoNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
 						if accounts {
@@ -374,7 +374,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
-					childGoDeep = !it.rs.HashOnly(hex)
+					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
 						if accounts {
@@ -611,7 +611,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		}
 	}
 
-	hashOnly := func(_ []byte) bool { return !trace }
+	retain := func(_ []byte) bool { return trace }
 	for newItemType, hex, aVal, aCode, hash, val := it.Next(); newItemType != NoItem; newItemType, hex, aVal, aCode, hash, val = it.Next() {
 		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
 			// If there was an open storage "sub-stream", close it and set the storage flag on
@@ -622,7 +622,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				if currStorage.Len() > 0 {
 					isAccount = false
 					var err error
-					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage), sGroups, trace)
+					sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage), sGroups, trace)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -642,7 +642,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			if curr.Len() > 0 {
 				isAccount = true
 				var err error
-				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
+				groups, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -687,7 +687,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			if currStorage.Len() > 0 {
 				isAccount = false
 				var err error
-				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage), sGroups, trace)
+				sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage), sGroups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -712,7 +712,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		if currStorage.Len() > 0 {
 			isAccount = false
 			var err error
-			_, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage), sGroups, trace)
+			_, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage), sGroups, trace)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -731,7 +731,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	if curr.Len() > 0 {
 		isAccount = true
 		var err error
-		_, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
+		_, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -832,16 +832,16 @@ func HashWithModifications(
 			fmt.Printf("%x: %x\n", key, sValues[i])
 		}
 	}
-	rs := NewResolveSet(0)
+	rl := NewRetainList(0)
 	offset = 0
 	for _, size := range stream.keySizes {
-		rs.AddHex(stream.keyBytes[offset : offset+int(size)])
+		rl.AddHex(stream.keyBytes[offset : offset+int(size)])
 		offset += int(size)
 	}
 	// Now we merge old and new streams, preferring the new
 	newStream.Reset()
 
-	oldIt := NewIterator(t, rs, trace)
+	oldIt := NewIterator(t, rl, trace)
 
 	it := NewStreamMergeIterator(oldIt, &stream, trace)
 	return StreamHash(it, storagePrefixLen, hb, trace)

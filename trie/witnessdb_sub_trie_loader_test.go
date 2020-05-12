@@ -76,12 +76,12 @@ func TestRebuildTrie(t *testing.T) {
 
 	storage := testWitnessStorage(buff.Bytes())
 
-	resolvedTries := make([]*Trie, 3)
+	loadedTries := make([]*Trie, 3)
 
-	// it should ignore duplicate resolve requests
-	resolver := NewResolverStateless()
+	// it should ignore duplicate loaded requests
+	loader := NewWitnessDbSubTrieLoader()
 
-	subTries, pos, err := resolver.RebuildTrie(&storage, 1, 1, 0, 2)
+	subTries, pos, err := loader.LoadSubTries(&storage, 1, 1, 0, 2)
 	if err != nil {
 		t.Error(err)
 	}
@@ -89,35 +89,35 @@ func TestRebuildTrie(t *testing.T) {
 	for i, root := range subTries.roots {
 		tr := New(subTries.Hashes[i])
 		tr.root = root
-		resolvedTries[currentTrie] = tr
+		loadedTries[currentTrie] = tr
 		currentTrie++
 	}
 
 	// we also support partial resolution with continuation (for storage tries)
-	// so basically we first resolve accounts, then storages separately
+	// so basically we first load accounts, then storages separately
 	// but we still want to keep one entry in a DB per block, so we store the last read position
 	// and then use it as a start
-	resolver = NewResolverStateless()
-	subTries, _, err = resolver.RebuildTrie(&storage, 1, 1, pos, 1)
+	loader = NewWitnessDbSubTrieLoader()
+	subTries, _, err = loader.LoadSubTries(&storage, 1, 1, pos, 1)
 	if err != nil {
 		t.Error(err)
 	}
 	for i, root := range subTries.roots {
 		tr := New(subTries.Hashes[i])
 		tr.root = root
-		resolvedTries[currentTrie] = tr
+		loadedTries[currentTrie] = tr
 		currentTrie++
 	}
 
-	if !bytes.Equal(resolvedTries[0].Hash().Bytes(), trie1.Hash().Bytes()) {
+	if !bytes.Equal(loadedTries[0].Hash().Bytes(), trie1.Hash().Bytes()) {
 		t.Errorf("tries are different")
 	}
 
-	if !bytes.Equal(resolvedTries[1].Hash().Bytes(), trie2.Hash().Bytes()) {
+	if !bytes.Equal(loadedTries[1].Hash().Bytes(), trie2.Hash().Bytes()) {
 		t.Errorf("tries are different")
 	}
 
-	if !bytes.Equal(resolvedTries[2].Hash().Bytes(), trie3.Hash().Bytes()) {
+	if !bytes.Equal(loadedTries[2].Hash().Bytes(), trie3.Hash().Bytes()) {
 		t.Errorf("tries are different")
 	}
 }

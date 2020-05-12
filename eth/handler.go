@@ -1130,10 +1130,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				//rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles())
 				//rr.RequiresRLP = true
 
-				resolver := trie.NewResolver(block.NumberU64())
+				loader := trie.NewSubTrieLoader(block.NumberU64())
 
-				rs := trie.NewResolveSet(0)
-				if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, false); err2 != nil {
+				rl := trie.NewRetainList(0)
+				if _, err2 := loader.LoadSubTries(pm.blockchain.ChainDb(), block.NumberU64(), rl, [][]byte{nil}, []int{0}, false); err2 != nil {
 					return err2
 				}
 				/*
@@ -1190,10 +1190,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					//rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles())
 					//rr.RequiresRLP = true
 
-					resolver := trie.NewResolver(block.NumberU64())
+					loader := trie.NewSubTrieLoader(block.NumberU64())
 
-					rs := trie.NewResolveSet(0)
-					if _, err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), rs, [][]byte{nil}, []int{0}, false); err2 != nil {
+					rl := trie.NewRetainList(0)
+					if _, err2 := loader.LoadSubTries(pm.blockchain.ChainDb(), block.NumberU64(), rl, [][]byte{nil}, []int{0}, false); err2 != nil {
 						return err2
 					}
 					/*

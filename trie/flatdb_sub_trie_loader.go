@@ -17,11 +17,11 @@ import (
 )
 
 var (
-	trieResolveStatefulTimer = metrics.NewRegisteredTimer("trie/resolve/stateful", nil)
+	trieFlatDbSubTrieLoaderTimer = metrics.NewRegisteredTimer("trie/subtrieloader/flatdb", nil)
 )
 
-type ResolverStateful struct {
-	rs       *ResolveSet
+type FlatDbSubTrieLoader struct {
+	rl       *RetainList
 	curr     bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ     bytes.Buffer
 	value    bytes.Buffer // Current value to be used as the value tape for the hash builder
@@ -47,98 +47,98 @@ type ResolverStateful struct {
 	accAddrHashWithInc []byte // Concatenation of addrHash of the currently build account with its incarnation encoding
 }
 
-func NewResolverStateful() *ResolverStateful {
-	return &ResolverStateful{
+func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
+	return &FlatDbSubTrieLoader{
 		hb:                 NewHashBuilder(false),
 		accAddrHashWithInc: make([]byte, 40),
 	}
 }
 
-// Reset prepares the Resolver for reuse
-func (tr *ResolverStateful) Reset() {
-	tr.keyIdx = 0
-	tr.rs = NewResolveSet(0)
-	tr.curr.Reset()
-	tr.succ.Reset()
-	tr.value.Reset()
-	tr.groups = tr.groups[:0]
-	tr.a.Reset()
-	tr.hb.Reset()
-	tr.wasIH = false
+// Reset prepares the loader for reuse
+func (fstl *FlatDbSubTrieLoader) Reset() {
+	fstl.keyIdx = 0
+	fstl.rl = NewRetainList(0)
+	fstl.curr.Reset()
+	fstl.succ.Reset()
+	fstl.value.Reset()
+	fstl.groups = fstl.groups[:0]
+	fstl.a.Reset()
+	fstl.hb.Reset()
+	fstl.wasIH = false
 
-	tr.currStorage.Reset()
-	tr.succStorage.Reset()
-	tr.valueStorage.Reset()
-	tr.groupsStorage = tr.groupsStorage[:0]
-	tr.wasIHStorage = false
-	tr.subTries = SubTries{}
+	fstl.currStorage.Reset()
+	fstl.succStorage.Reset()
+	fstl.valueStorage.Reset()
+	fstl.groupsStorage = fstl.groupsStorage[:0]
+	fstl.wasIHStorage = false
+	fstl.subTries = SubTries{}
 }
 
 // cutoff specifies how many nibbles have to be cut from the beginning of the storage keys
 // to fit the insertion point.
 // We create a fake branch node at the cutoff point by modifying the last
 // nibble of the `succ` key
-func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
-	if tr.trace {
+func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
+	if fstl.trace {
 		fmt.Printf("finaliseRoot(%d)\n", cutoff)
 	}
 	if cutoff >= 2*common.HashLength {
 		// if only storage resolution required, then no account records
-		if ok, err := tr.finaliseStorageRoot(cutoff); err == nil {
+		if ok, err := fstl.finaliseStorageRoot(cutoff); err == nil {
 			if ok {
-				tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
-				tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
+				fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+				fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
 			} else {
-				tr.subTries.roots = append(tr.subTries.roots, nil)
-				tr.subTries.Hashes = append(tr.subTries.Hashes, common.Hash{})
+				fstl.subTries.roots = append(fstl.subTries.roots, nil)
+				fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
 			}
 		} else {
 			return err
 		}
 		return nil
 	}
-	tr.curr.Reset()
-	tr.curr.Write(tr.succ.Bytes())
-	tr.succ.Reset()
-	if tr.curr.Len() > 0 {
+	fstl.curr.Reset()
+	fstl.curr.Write(fstl.succ.Bytes())
+	fstl.succ.Reset()
+	if fstl.curr.Len() > 0 {
 		if cutoff > 0 {
-			tr.succ.Write(tr.curr.Bytes()[:cutoff-1])
-			tr.succ.WriteByte(tr.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
+			fstl.succ.Write(fstl.curr.Bytes()[:cutoff-1])
+			fstl.succ.WriteByte(fstl.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
 		}
 		var data GenStructStepData
-		if tr.wasIH {
-			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
-			data = &tr.hashData
+		if fstl.wasIH {
+			fstl.hashData.Hash = common.BytesToHash(fstl.value.Bytes())
+			data = &fstl.hashData
 		} else {
-			if ok, err := tr.finaliseStorageRoot(2 * common.HashLength); err == nil {
+			if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
 				if ok {
 					// There are some storage items
-					tr.accData.FieldSet |= AccountFieldStorageOnly
+					fstl.accData.FieldSet |= AccountFieldStorageOnly
 				}
 			} else {
 				return err
 			}
-			tr.wasIHStorage = false
-			tr.accData.Balance.Set(&tr.a.Balance)
-			if tr.a.Balance.Sign() != 0 {
-				tr.accData.FieldSet |= AccountFieldBalanceOnly
+			fstl.wasIHStorage = false
+			fstl.accData.Balance.Set(&fstl.a.Balance)
+			if fstl.a.Balance.Sign() != 0 {
+				fstl.accData.FieldSet |= AccountFieldBalanceOnly
 			}
-			tr.accData.Nonce = tr.a.Nonce
-			if tr.a.Nonce != 0 {
-				tr.accData.FieldSet |= AccountFieldNonceOnly
+			fstl.accData.Nonce = fstl.a.Nonce
+			if fstl.a.Nonce != 0 {
+				fstl.accData.FieldSet |= AccountFieldNonceOnly
 			}
-			tr.accData.Incarnation = tr.a.Incarnation
-			data = &tr.accData
+			fstl.accData.Incarnation = fstl.a.Incarnation
+			data = &fstl.accData
 		}
 		var err error
-		if tr.groups, err = GenStructStep(tr.rs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
+		if fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.curr.Bytes(), fstl.succ.Bytes(), fstl.hb, data, fstl.groups, false); err != nil {
 			return err
 		}
-		tr.accData.FieldSet = 0
+		fstl.accData.FieldSet = 0
 	}
-	tr.groups = tr.groups[:0]
-	tr.subTries.roots = append(tr.subTries.roots, tr.hb.root())
-	tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
+	fstl.groups = fstl.groups[:0]
+	fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+	fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
 	return nil
 }
 
@@ -149,57 +149,57 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 // contract's storage, cutoff point will be deeper than that.
 // We create a fake branch node at the cutoff point by modifying the last
 // nibble of the `succ` key
-func (tr *ResolverStateful) finaliseStorageRoot(cutoff int) (bool, error) {
-	if tr.trace {
-		fmt.Printf("finaliseStorageRoot(%d), succStorage.Len() = %d\n", cutoff, tr.succStorage.Len())
+func (fstl *FlatDbSubTrieLoader) finaliseStorageRoot(cutoff int) (bool, error) {
+	if fstl.trace {
+		fmt.Printf("finaliseStorageRoot(%d), succStorage.Len() = %d\n", cutoff, fstl.succStorage.Len())
 	}
-	tr.currStorage.Reset()
-	tr.currStorage.Write(tr.succStorage.Bytes())
-	tr.succStorage.Reset()
-	if tr.currStorage.Len() > 0 {
-		tr.succStorage.Write(tr.currStorage.Bytes()[:cutoff-1])
-		tr.succStorage.WriteByte(tr.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+	fstl.currStorage.Reset()
+	fstl.currStorage.Write(fstl.succStorage.Bytes())
+	fstl.succStorage.Reset()
+	if fstl.currStorage.Len() > 0 {
+		fstl.succStorage.Write(fstl.currStorage.Bytes()[:cutoff-1])
+		fstl.succStorage.WriteByte(fstl.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
 		var data GenStructStepData
-		if tr.wasIHStorage {
-			tr.hashData.Hash = common.BytesToHash(tr.valueStorage.Bytes())
-			data = &tr.hashData
+		if fstl.wasIHStorage {
+			fstl.hashData.Hash = common.BytesToHash(fstl.valueStorage.Bytes())
+			data = &fstl.hashData
 		} else {
-			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
-			data = &tr.leafData
+			fstl.leafData.Value = rlphacks.RlpSerializableBytes(fstl.valueStorage.Bytes())
+			data = &fstl.leafData
 		}
 		var err error
-		tr.groupsStorage, err = GenStructStep(tr.rs.HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hb, data, tr.groupsStorage, false)
+		fstl.groupsStorage, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groupsStorage, false)
 		if err != nil {
 			return false, err
 		}
-		tr.groupsStorage = tr.groupsStorage[:0]
-		tr.currStorage.Reset()
-		tr.succStorage.Reset()
-		tr.wasIHStorage = false
-		if tr.trace {
-			fmt.Printf("storage root: %x\n", tr.hb.rootHash())
+		fstl.groupsStorage = fstl.groupsStorage[:0]
+		fstl.currStorage.Reset()
+		fstl.succStorage.Reset()
+		fstl.wasIHStorage = false
+		if fstl.trace {
+			fmt.Printf("storage root: %x\n", fstl.hb.rootHash())
 		}
 		return true, nil
 	}
 	return false, nil
 }
 
-func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
+func (fstl *FlatDbSubTrieLoader) LoadSubTries(db ethdb.Database, rl *RetainList, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
 	if len(dbPrefixes) == 0 {
 		return SubTries{}, nil
 	}
-	defer trieResolveStatefulTimer.UpdateSince(time.Now())
-	tr.trace = trace
-	tr.hb.trace = trace
-	tr.rs = rs
+	defer trieFlatDbSubTrieLoaderTimer.UpdateSince(time.Now())
+	fstl.trace = trace
+	fstl.hb.trace = trace
+	fstl.rl = rl
 
-	if tr.trace {
+	if fstl.trace {
 		fmt.Printf("----------\n")
 		fmt.Printf("RebuildTrie\n")
 	}
 
-	if tr.trace {
-		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
+	if fstl.trace {
+		fmt.Printf("fstl.rl: %x\n", fstl.rl.hexes)
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes(%d): %x\n", len(dbPrefixes), dbPrefixes)
 	}
@@ -222,20 +222,20 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 		}
 	}
 
-	if err := tr.MultiWalk2(boltDB, dbPrefixes, fixedbits, cutoffs, tr.WalkerAccount, tr.WalkerStorage); err != nil {
-		return tr.subTries, err
+	if err := fstl.MultiWalk2(boltDB, dbPrefixes, fixedbits, cutoffs, fstl.WalkerAccount, fstl.WalkerStorage); err != nil {
+		return fstl.subTries, err
 	}
-	if err := tr.finaliseRoot(cutoffs[len(cutoffs)-1]); err != nil {
+	if err := fstl.finaliseRoot(cutoffs[len(cutoffs)-1]); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
-		fmt.Printf("tr.rs: %x\n", tr.rs.hexes)
+		fmt.Printf("fstl.rs: %x\n", fstl.rl.hexes)
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("dbPrefixes: %x\n", dbPrefixes)
-		return tr.subTries, fmt.Errorf("error in finaliseRoot %w", err)
+		return fstl.subTries, fmt.Errorf("error in finaliseRoot %w", err)
 	}
-	return tr.subTries, nil
+	return fstl.subTries, nil
 }
 
-func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*ResolveRequestForCode) error {
+func (fstl *FlatDbSubTrieLoader) AttachRequestedCode(db ethdb.Getter, requests []*LoadRequestForCode) error {
 	for _, req := range requests {
 		codeHash := req.codeHash
 		code, err := db.Get(dbutils.CodeBucket, codeHash[:])
@@ -278,117 +278,117 @@ func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
 	}
 }
 
-func (tr *ResolverStateful) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
-	if tr.trace {
+func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, keyIdx int, k, v []byte) error {
+	if fstl.trace {
 		fmt.Printf("WalkerStorage: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
 
-	tr.currStorage.Reset()
-	tr.currStorage.Write(tr.succStorage.Bytes())
-	tr.succStorage.Reset()
+	fstl.currStorage.Reset()
+	fstl.currStorage.Write(fstl.succStorage.Bytes())
+	fstl.succStorage.Reset()
 	// Transform k to nibbles, but skip the incarnation part in the middle
-	keyToNibblesWithoutInc(k, &tr.succStorage)
+	keyToNibblesWithoutInc(k, &fstl.succStorage)
 
 	if !isIH {
-		tr.succStorage.WriteByte(16)
+		fstl.succStorage.WriteByte(16)
 	}
 
-	if tr.currStorage.Len() > 0 {
+	if fstl.currStorage.Len() > 0 {
 		var err error
 		var data GenStructStepData
-		if tr.trace {
-			fmt.Printf("tr.wasIHStorage=%t\n", tr.wasIHStorage)
+		if fstl.trace {
+			fmt.Printf("fstl.wasIHStorage=%t\n", fstl.wasIHStorage)
 		}
-		if tr.wasIHStorage {
-			tr.hashData.Hash = common.BytesToHash(tr.valueStorage.Bytes())
-			data = &tr.hashData
+		if fstl.wasIHStorage {
+			fstl.hashData.Hash = common.BytesToHash(fstl.valueStorage.Bytes())
+			data = &fstl.hashData
 		} else {
-			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.valueStorage.Bytes())
-			data = &tr.leafData
+			fstl.leafData.Value = rlphacks.RlpSerializableBytes(fstl.valueStorage.Bytes())
+			data = &fstl.leafData
 		}
-		tr.groupsStorage, err = GenStructStep(tr.rs.HashOnly, tr.currStorage.Bytes(), tr.succStorage.Bytes(), tr.hb, data, tr.groupsStorage, false)
+		fstl.groupsStorage, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groupsStorage, false)
 		if err != nil {
 			return err
 		}
 	}
 	// Remember the current key and value
-	tr.wasIHStorage = isIH
-	tr.valueStorage.Reset()
-	tr.valueStorage.Write(v)
+	fstl.wasIHStorage = isIH
+	fstl.valueStorage.Reset()
+	fstl.valueStorage.Write(v)
 
 	return nil
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
-	if tr.trace {
+func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, keyIdx int, k, v []byte) error {
+	if fstl.trace {
 		fmt.Printf("WalkerAccount: isIH=%v keyIdx=%d key=%x value=%x\n", isIH, keyIdx, k, v)
 	}
-	tr.curr.Reset()
-	tr.curr.Write(tr.succ.Bytes())
-	tr.succ.Reset()
+	fstl.curr.Reset()
+	fstl.curr.Write(fstl.succ.Bytes())
+	fstl.succ.Reset()
 	for _, b := range k {
-		tr.succ.WriteByte(b / 16)
-		tr.succ.WriteByte(b % 16)
+		fstl.succ.WriteByte(b / 16)
+		fstl.succ.WriteByte(b % 16)
 	}
 	if !isIH {
-		tr.succ.WriteByte(16)
+		fstl.succ.WriteByte(16)
 	}
 
-	if tr.curr.Len() > 0 {
+	if fstl.curr.Len() > 0 {
 		var data GenStructStepData
-		if tr.wasIH {
-			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
-			data = &tr.hashData
+		if fstl.wasIH {
+			fstl.hashData.Hash = common.BytesToHash(fstl.value.Bytes())
+			data = &fstl.hashData
 		} else {
-			if ok, err := tr.finaliseStorageRoot(2 * common.HashLength); err == nil {
+			if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
 				if ok {
 					// There are some storage items
-					tr.accData.FieldSet |= AccountFieldStorageOnly
+					fstl.accData.FieldSet |= AccountFieldStorageOnly
 				}
 			} else {
 				return err
 			}
-			tr.accData.Balance.Set(&tr.a.Balance)
-			if tr.a.Balance.Sign() != 0 {
-				tr.accData.FieldSet |= AccountFieldBalanceOnly
+			fstl.accData.Balance.Set(&fstl.a.Balance)
+			if fstl.a.Balance.Sign() != 0 {
+				fstl.accData.FieldSet |= AccountFieldBalanceOnly
 			}
-			tr.accData.Nonce = tr.a.Nonce
-			if tr.a.Nonce != 0 {
-				tr.accData.FieldSet |= AccountFieldNonceOnly
+			fstl.accData.Nonce = fstl.a.Nonce
+			if fstl.a.Nonce != 0 {
+				fstl.accData.FieldSet |= AccountFieldNonceOnly
 			}
-			tr.accData.Incarnation = tr.a.Incarnation
-			data = &tr.accData
+			fstl.accData.Incarnation = fstl.a.Incarnation
+			data = &fstl.accData
 		}
-		tr.wasIHStorage = false
-		tr.currStorage.Reset()
-		tr.succStorage.Reset()
-		tr.groupsStorage = tr.groupsStorage[:0]
+		fstl.wasIHStorage = false
+		fstl.currStorage.Reset()
+		fstl.succStorage.Reset()
+		fstl.groupsStorage = fstl.groupsStorage[:0]
 		var err error
-		if tr.groups, err = GenStructStep(tr.rs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false); err != nil {
+		if fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.curr.Bytes(), fstl.succ.Bytes(), fstl.hb, data, fstl.groups, false); err != nil {
 			return err
 		}
-		tr.accData.FieldSet = 0
+		fstl.accData.FieldSet = 0
 	}
 	// Remember the current key and value
-	tr.wasIH = isIH
+	fstl.wasIH = isIH
 
 	if isIH {
-		tr.value.Reset()
-		tr.value.Write(v)
+		fstl.value.Reset()
+		fstl.value.Write(v)
 		return nil
 	}
 
-	if err := tr.a.DecodeForStorage(v); err != nil {
+	if err := fstl.a.DecodeForStorage(v); err != nil {
 		return fmt.Errorf("fail DecodeForStorage: %w", err)
 	}
-	copy(tr.accAddrHashWithInc, k)
-	binary.BigEndian.PutUint64(tr.accAddrHashWithInc[32:40], ^tr.a.Incarnation)
+	copy(fstl.accAddrHashWithInc, k)
+	binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:40], ^fstl.a.Incarnation)
 	// Place code on the stack first, the storage will follow
-	if !tr.a.IsEmptyCodeHash() {
+	if !fstl.a.IsEmptyCodeHash() {
 		// the first item ends up deepest on the stack, the second item - on the top
-		tr.accData.FieldSet |= AccountFieldCodeOnly
-		if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
+		fstl.accData.FieldSet |= AccountFieldCodeOnly
+		if err := fstl.hb.hash(fstl.a.CodeHash[:]); err != nil {
 			return err
 		}
 	}
@@ -396,7 +396,7 @@ func (tr *ResolverStateful) WalkerAccount(isIH bool, keyIdx int, k, v []byte) er
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []int, cutoffs []int, accWalker walker, storageWalker walker) error {
+func (fstl *FlatDbSubTrieLoader) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbits []int, cutoffs []int, accWalker walker, storageWalker walker) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -411,7 +411,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 	cutoff := cutoffs[rangeIdx]
 	if len(startkey) > common.HashLength {
 		// Looking for storage sub-tree
-		copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
+		copy(fstl.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
 	}
 
 	err := db.View(func(tx *bolt.Tx) error {
@@ -431,7 +431,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				k = nil
 			}
 		}
-		if tr.trace {
+		if fstl.trace {
 			fmt.Printf("c.Seek(%x) = %x\n", startkey, k)
 		}
 
@@ -504,35 +504,35 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						if err := tr.finaliseRoot(cutoff); err != nil {
+						if err := fstl.finaliseRoot(cutoff); err != nil {
 							return err
 						}
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 						if len(startkey) > common.HashLength {
 							// Looking for storage sub-tree
-							copy(tr.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
+							copy(fstl.accAddrHashWithInc, startkey[:common.HashLength+common.IncarnationLength])
 						}
 						cutoff = cutoffs[rangeIdx]
-						tr.hb.Reset()
-						tr.wasIH = false
-						tr.wasIHStorage = false
-						tr.groups = tr.groups[:0]
-						tr.groupsStorage = tr.groupsStorage[:0]
-						tr.keyIdx = rangeIdx
-						tr.curr.Reset()
-						tr.succ.Reset()
-						tr.currStorage.Reset()
-						tr.succStorage.Reset()
+						fstl.hb.Reset()
+						fstl.wasIH = false
+						fstl.wasIHStorage = false
+						fstl.groups = fstl.groups[:0]
+						fstl.groupsStorage = fstl.groupsStorage[:0]
+						fstl.keyIdx = rangeIdx
+						fstl.curr.Reset()
+						fstl.succ.Reset()
+						fstl.currStorage.Reset()
+						fstl.succStorage.Reset()
 					}
 				}
 			}
 
 			if !isIH {
-				if len(k) > common.HashLength && !bytes.HasPrefix(k, tr.accAddrHashWithInc) {
-					if bytes.Compare(k, tr.accAddrHashWithInc) < 0 {
+				if len(k) > common.HashLength && !bytes.HasPrefix(k, fstl.accAddrHashWithInc) {
+					if bytes.Compare(k, fstl.accAddrHashWithInc) < 0 {
 						// Skip all the irrelevant storage in the middle
-						k, v = c.SeekTo(tr.accAddrHashWithInc)
+						k, v = c.SeekTo(fstl.accAddrHashWithInc)
 					} else {
 						if nextAccount(k, nextAccountKey) {
 							k, v = c.SeekTo(nextAccountKey)
@@ -547,7 +547,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 						return err
 					}
 					k, v = c.Next()
-					if tr.trace {
+					if fstl.trace {
 						fmt.Printf("k after storageWalker and Next: %x\n", k)
 					}
 				} else {
@@ -557,10 +557,10 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 					// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 					// skips over all storage items
-					k, v = c.SeekTo(tr.accAddrHashWithInc)
+					k, v = c.SeekTo(fstl.accAddrHashWithInc)
 					if ih != nil {
-						if !bytes.HasPrefix(ihK, tr.accAddrHashWithInc) {
-							ihK, ihV = ih.SeekTo(tr.accAddrHashWithInc)
+						if !bytes.HasPrefix(ihK, fstl.accAddrHashWithInc) {
+							ihK, ihV = ih.SeekTo(fstl.accAddrHashWithInc)
 						}
 					}
 				}
@@ -576,20 +576,20 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 				continue
 			}
 
-			canUseIntermediateHash := tr.rs.HashOnly(minKeyAsNibbles.Bytes())
-			if tr.trace {
-				fmt.Printf("tr.rs.HashOnly(%x)=%t\n", minKeyAsNibbles.Bytes(), canUseIntermediateHash)
+			retain := fstl.rl.Retain(minKeyAsNibbles.Bytes())
+			if fstl.trace {
+				fmt.Printf("fstl.rl.Retain(%x)=%t\n", minKeyAsNibbles.Bytes(), retain)
 			}
 
-			if !canUseIntermediateHash { // can't use ih as is, need go to children
+			if retain { // can't use ih as is, need go to children
 				ihK, ihV = ih.Next() // go to children, not to sibling
 				continue
 			}
 
-			if len(ihK) > common.HashLength && !bytes.HasPrefix(ihK, tr.accAddrHashWithInc) {
-				if bytes.Compare(ihK, tr.accAddrHashWithInc) < 0 {
+			if len(ihK) > common.HashLength && !bytes.HasPrefix(ihK, fstl.accAddrHashWithInc) {
+				if bytes.Compare(ihK, fstl.accAddrHashWithInc) < 0 {
 					// Skip all the irrelevant storage in the middle
-					ihK, ihV = ih.SeekTo(tr.accAddrHashWithInc)
+					ihK, ihV = ih.SeekTo(fstl.accAddrHashWithInc)
 				} else {
 					if nextAccount(ihK, nextAccountKey) {
 						ihK, ihV = ih.SeekTo(nextAccountKey)
@@ -612,13 +612,13 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 			// skip subtree
 			next, ok := nextSubtree(ihK)
 			if !ok { // no siblings left
-				if canUseIntermediateHash { // last sub-tree was taken from IH, then nothing to look in the main bucket. Can stop.
+				if !retain { // last sub-tree was taken from IH, then nothing to look in the main bucket. Can stop.
 					break
 				}
 				ihK, ihV = nil, nil
 				continue
 			}
-			if tr.trace {
+			if fstl.trace {
 				fmt.Printf("next: %x\n", next)
 			}
 
@@ -633,7 +633,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					k = nil
 				}
 			}
-			if tr.trace {
+			if fstl.trace {
 				fmt.Printf("k after next: %x\n", k)
 			}
 			if !bytes.HasPrefix(ihK, next) {
@@ -647,7 +647,7 @@ func (tr *ResolverStateful) MultiWalk2(db *bolt.DB, startkeys [][]byte, fixedbit
 					ihK = nil
 				}
 			}
-			if tr.trace {
+			if fstl.trace {
 				fmt.Printf("ihK after next: %x\n", ihK)
 			}
 		}

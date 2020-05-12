@@ -15,8 +15,8 @@ func TestBlockWitnessBinary(t *testing.T) {
 
 	trBin := HexToBin(tr)
 
-	rs := NewBinaryResolveSet(2)
-	rs.AddKey([]byte("ABCD0001"))
+	rl := NewBinaryRetainList(2)
+	rl.AddKey([]byte("ABCD0001"))
 
 	bwb := NewWitnessBuilder(trBin.Trie().root, false)
 
@@ -25,7 +25,7 @@ func TestBlockWitnessBinary(t *testing.T) {
 
 	var w *Witness
 	var err error
-	if w, err = bwb.Build(&MerklePathLimiter{rs, hr.hash}); err != nil {
+	if w, err = bwb.Build(&MerklePathLimiter{rl, hr.hash}); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
@@ -54,8 +54,8 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 
 	trBin := HexToBin(tr)
 
-	rs := NewBinaryResolveSet(2)
-	rs.AddKey([]byte("ABCD0001"))
+	rl := NewBinaryRetainList(2)
+	rl.AddKey([]byte("ABCD0001"))
 
 	bwb := NewWitnessBuilder(trBin.Trie().root, false)
 
@@ -64,7 +64,7 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 
 	var w *Witness
 	var err error
-	if w, err = bwb.Build(&MerklePathLimiter{rs, hr.hash}); err != nil {
+	if w, err = bwb.Build(&MerklePathLimiter{rl, hr.hash}); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 

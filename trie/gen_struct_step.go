@@ -72,11 +72,9 @@ type GenStructStepHashData struct {
 func (GenStructStepHashData) GenStructStepData() {}
 
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
-// `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
-// compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
-// implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
-// `isHashNode` parameter is set to true if `curr` key corresponds not to a leaf but to a hash node (which is "folded" respresentation
-// of a branch node).
+// `retain` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
+// compressed into just hash (if `false` is returned), or constructed (if `true` is returned). Usually the `retain` function is
+// implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see RetainList.Retain function).
 // `buildExtensions` is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf or hash
 // `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
@@ -87,7 +85,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 func GenStructStep(
-	hashOnly func(prefix []byte) bool,
+	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
 	data GenStructStepData,
@@ -125,8 +123,6 @@ func GenStructStep(
 		remainderLen := len(curr) - remainderStart
 
 		if !buildExtensions {
-			emitHash := hashOnly(curr[:maxLen])
-
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				/* building a hash */
@@ -135,23 +131,23 @@ func GenStructStep(
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				if emitHash {
-					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+				if retain(curr[:maxLen]) {
+					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}
 			case *GenStructStepLeafData:
 				/* building leafs */
-				if emitHash {
-					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
+				if retain(curr[:maxLen]) {
+					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
+					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
 						return nil, err
 					}
 				}
@@ -166,12 +162,12 @@ func GenStructStep(
 					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
 				}
 				/* building extensions */
-				if hashOnly(curr[:maxLen]) {
-					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+				if retain(curr[:maxLen]) {
+					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
 						return nil, err
 					}
 				}
@@ -183,12 +179,12 @@ func GenStructStep(
 		}
 		// Close the immediately encompassing prefix group, if needed
 		if len(succ) > 0 || precExists {
-			if hashOnly(curr[:maxLen]) {
-				if err := e.branchHash(groups[maxLen]); err != nil {
+			if retain(curr[:maxLen]) {
+				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, err
 				}
 			} else {
-				if err := e.branch(groups[maxLen]); err != nil {
+				if err := e.branchHash(groups[maxLen]); err != nil {
 					return nil, err
 				}
 			}

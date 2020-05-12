@@ -24,10 +24,10 @@ func TestResolve1(t *testing.T) {
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
-	r := NewResolver(0)
-	rs := NewResolveSet(0)
+	r := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
-	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
 	require.NoError(err)
 	tr := New(common.Hash{})
 	assert.NoError(tr.HookSubTries(subTries, [][]byte{nil})) // hook up to the root of the trie
@@ -47,10 +47,10 @@ func TestResolve2(t *testing.T) {
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	r := NewResolver(0)
-	rs := NewResolveSet(0)
+	r := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
-	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
 	tr := New(common.Hash{})
@@ -71,10 +71,10 @@ func TestResolve2Keep(t *testing.T) {
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	r := NewResolver(0)
-	rs := NewResolveSet(0)
+	r := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
 	tr := New(common.Hash{})
@@ -96,10 +96,10 @@ func TestResolve3Keep(t *testing.T) {
 	putStorage("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	r := NewResolver(0)
-	rs := NewResolveSet(0)
+	r := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	subTries, err := r.ResolveWithDb(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
 	tr := New(common.Hash{})
@@ -109,7 +109,7 @@ func TestResolve3Keep(t *testing.T) {
 	assert.NotNil(x)
 }
 
-func TestTrieResolver(t *testing.T) {
+func TestTrieSubTrieLoader(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
 	require, _, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
@@ -125,12 +125,12 @@ func TestTrieResolver(t *testing.T) {
 	putStorage("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	putStorage("bccccccccccccccccccccccccccccccc", "")
 
-	resolver := NewResolver(0)
-	rs := NewResolveSet(0)
+	resolver := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	_, err := resolver.ResolveWithDb(db, 0, rs,
+	_, err := resolver.LoadSubTries(db, 0, rs,
 		[][]byte{common.Hex2Bytes("aaaaa"), common.Hex2Bytes("bb")}, []int{40, 8}, false)
 	require.NoError(err, "resolve error")
 }
@@ -164,9 +164,9 @@ func TestTwoStorageItems(t *testing.T) {
 	rootHash := common.HexToHash("85737b049107f866fedbd6d787077fc2c245f4748e28896a3e8ee82c377ecdcf")
 	assert.Equal(rootHash, crypto.Keccak256Hash(rootRlp))
 
-	resolver := NewResolver(0)
-	rs := NewResolveSet(0)
-	subTries, err1 := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	resolver := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
+	subTries, err1 := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	require.NoError(err1, "resolve error")
 
 	assert.Equal(rootHash.String(), subTries.Hashes[0].String())
@@ -181,10 +181,10 @@ func TestTwoStorageItems(t *testing.T) {
 	//	t.Errorf("failed ot hash children: %v", err)
 	//}
 
-	resolver2 := NewResolver(0)
-	rs2 := NewResolveSet(0)
+	resolver2 := NewSubTrieLoader(0)
+	rs2 := NewRetainList(0)
 	rs2.AddHex([]byte{0xd})
-	subTries, err = resolver2.ResolveWithDb(db, 0, rs2, [][]byte{{0xd0}}, []int{4}, false)
+	subTries, err = resolver2.LoadSubTries(db, 0, rs2, [][]byte{{0xd0}}, []int{4}, false)
 	require.NoError(err, "resolve error")
 
 	err = tr.HookSubTries(subTries, [][]byte{{0xd}}) // hook up to the prefix 0xd
@@ -215,10 +215,10 @@ func TestTwoAccounts(t *testing.T) {
 
 	expect := common.HexToHash("925002c3260b44e44c3edebad1cc442142b03020209df1ab8bb86752edbd2cd7")
 
-	resolver := NewResolver(0)
-	rs := NewResolveSet(0)
+	resolver := NewSubTrieLoader(0)
+	rs := NewRetainList(0)
 	rs.AddKey(key1)
-	subTries, err1 := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	require.NoError(err1, "resolve error")
 	assert.Equal(expect.String(), subTries.Hashes[0].String())
 
@@ -241,9 +241,9 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 
 	putAccount("0000000000000000000000000000000000000000000000000000000000000000")
 
-	rs := NewResolveSet(0)
-	resolver := NewResolver(0)
-	_, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	rs := NewRetainList(0)
+	resolver := NewSubTrieLoader(0)
+	_, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	require.NotNil(t, err)
 }
 
@@ -257,7 +257,7 @@ func TestApiDetails(t *testing.T) {
 		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
 
-	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached Resolvers
+	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached SubTrieLoaders
 	// Test works with keys like: {base}{i}{j}{zeroes}
 	// base = 0 or f - it covers edge cases - first/last subtrees
 	//
@@ -310,14 +310,14 @@ func TestApiDetails(t *testing.T) {
 	putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
 
 	{
-		resolver := NewResolver(0)
+		resolver := NewSubTrieLoader(0)
 		expectRootHash := common.HexToHash("9a87eff1bc257a70e62dd81ed4b5d210beb305ecdeec9ff497c717ea1c3794d4")
 
-		rs := NewResolveSet(0)
+		rs := NewRetainList(0)
 		rs.AddHex(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)))
 		rs.AddHex(common.Hex2Bytes("000202"))
 		rs.AddHex(common.Hex2Bytes("0f"))
-		subTries, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, true)
+		subTries, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, true)
 
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
@@ -361,7 +361,7 @@ func TestApiDetails(t *testing.T) {
 			putIH("ff", "71c0df1d41959526a6961cca7e5831982848074c4cc556fbef4f8a1fad6621ca")
 
 			for i, resolverName := range []string{Stateful, StatefulCached} {
-				resolver := NewResolver(32, false, 0)
+				resolver := NewSubTrieLoader(32, false, 0)
 				expectRootHash := common.HexToHash("494e295f60cfde19548157facc0c425d8b254f791a006b74173dc71113f56df0")
 
 				resolver.AddRequest(tries[i].NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0))
@@ -414,7 +414,7 @@ func TestApiDetails(t *testing.T) {
 	*/
 }
 
-func TestStorageResolver2(t *testing.T) {
+func TestStorageSubTrieLoader2(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 
 	kAcc1 := common.FromHex("0000cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
@@ -480,17 +480,17 @@ func TestStorageResolver2(t *testing.T) {
 	require.NoError(db.Put(dbutils.CurrentStateBucket, ks4, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
 
 	{
-		resolver := NewResolver(0)
-		rs := NewResolveSet(0)
+		resolver := NewSubTrieLoader(0)
+		rs := NewRetainList(0)
 		rs.AddHex(common.FromHex("00000001"))
-		_, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+		_, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 	}
 	{
-		resolver := NewResolver(0)
-		rs := NewResolveSet(0)
+		resolver := NewSubTrieLoader(0)
+		rs := NewRetainList(0)
 		rs.AddKey(dbutils.GenerateStoragePrefix(kAcc2, a2.Incarnation))
-		_, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+		_, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 	}
 }
@@ -523,11 +523,11 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	// Evict accounts only
 	tr.EvictNode(keybytesToHex(kAcc1))
 	tr.EvictNode(keybytesToHex(kAcc2))
-	rs := NewResolveSet(0)
+	rs := NewRetainList(0)
 	rs.AddKey(concat(kAcc1, ks1...))
 	rs.AddKey(concat(kAcc2, ks2...))
 	rs.AddKey(concat(kAcc2, ks22...))
-	dbPrefixes, fixedbits, hooks := tr.CreateLoadingPrefixes(rs)
+	dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
 	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe]", fmt.Sprintf("%x", dbPrefixes))
 	assert.Equal("[320 320]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000010c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803 000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
@@ -535,10 +535,10 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	// Evict everytning
 	tr.EvictNode([]byte{})
 	// if resolve only accounts
-	rs = NewResolveSet(0)
+	rs = NewRetainList(0)
 	rs.AddKey(kAcc1)
 	rs.AddKey(kAcc2)
-	dbPrefixes, fixedbits, hooks = tr.CreateLoadingPrefixes(rs)
+	dbPrefixes, fixedbits, hooks = tr.FindSubTriesToLoad(rs)
 	assert.Equal("[]", fmt.Sprintf("%x", dbPrefixes))
 	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[]", fmt.Sprintf("%x", hooks))

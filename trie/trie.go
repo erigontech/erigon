@@ -366,24 +366,24 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 	return nil
 }
 
-// ResolveRequestFor Code expresses the need to fetch code from the DB (by its hash) and attach
+// LoadRequestForCode Code expresses the need to fetch code from the DB (by its hash) and attach
 // to a specific account leaf in the trie.
-type ResolveRequestForCode struct {
+type LoadRequestForCode struct {
 	t        *Trie
 	addrHash common.Hash // contract address hash
 	codeHash common.Hash
 	bytecode bool // include the bytecode too
 }
 
-func (rr *ResolveRequestForCode) String() string {
-	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", rr.addrHash, rr.codeHash, rr.bytecode)
+func (lrc *LoadRequestForCode) String() string {
+	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", lrc.addrHash, lrc.codeHash, lrc.bytecode)
 }
 
-func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *ResolveRequestForCode {
-	return &ResolveRequestForCode{t, addrHash, codeHash, bytecode}
+func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *LoadRequestForCode {
+	return &LoadRequestForCode{t, addrHash, codeHash, bytecode}
 }
 
-func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *ResolveRequestForCode) {
+func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *LoadRequestForCode) {
 	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
 		return false, nil
 	}
@@ -395,7 +395,7 @@ func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash, 
 		_, ok = t.GetAccountCodeSize(addrHash[:])
 	}
 	if !ok {
-		return true, t.NewResolveRequestForCode(addrHash, codeHash, bytecode)
+		return true, t.NewLoadRequestForCode(addrHash, codeHash, bytecode)
 	}
 
 	return false, nil
@@ -408,20 +408,19 @@ func min(a, b int) int {
 	return b
 }
 
-// CreateLoadingPrefixes walks over the trie and creates the list of DB prefixes and
+// FindSubTriesToLoad walks over the trie and creates the list of DB prefixes and
 // corresponding list of valid bits in the prefix (for the cases when prefix contains an
 // odd number of nibbles) that would allow loading the missing information from the database
 // It also create list of `hooks`, the paths in the trie (in nibbles) where the loaded
 // sub-tries need to be inserted.
-func (t *Trie) CreateLoadingPrefixes(rs *ResolveSet) (prefixes [][]byte, fixedbits []int, hooks [][]byte) {
-	return loadingPrefixes(t.root, nil, rs, nil, 0, nil, nil, nil)
+func (t *Trie) FindSubTriesToLoad(rl *RetainList) (prefixes [][]byte, fixedbits []int, hooks [][]byte) {
+	return findSubTriesToLoad(t.root, nil, rl, nil, 0, nil, nil, nil)
 }
 
 var bytes8 [8]byte
 
-func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte, bits int,
+func findSubTriesToLoad(nd node, nibblePath []byte, rl *RetainList, dbPrefix []byte, bits int,
 	prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
-	//fmt.Printf("loadingPrefixes %T, nibblePath %x, dbPrefix %x, bits %d\n", nd, nibblePath, dbPrefix, bits)
 	switch n := nd.(type) {
 	case *shortNode:
 		nKey := n.Key
@@ -429,7 +428,7 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 			nKey = nKey[:len(nKey)-1]
 		}
 		newNibblePath := append(nibblePath, nKey...)
-		if rs.HashOnly(newNibblePath) {
+		if !rl.Retain(newNibblePath) {
 			return prefixes, fixedbits, hooks
 		}
 		for _, b := range nKey {
@@ -441,14 +440,14 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 			}
 			bits += 4
 		}
-		return loadingPrefixes(n.Val, newNibblePath, rs, dbPrefix, bits, prefixes, fixedbits, hooks)
+		return findSubTriesToLoad(n.Val, newNibblePath, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
 		newNibblePath := append(nibblePath, i1)
-		if !rs.HashOnly(newNibblePath) {
+		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
 				newDbPrefix = append(dbPrefix, i1<<4)
@@ -457,10 +456,10 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
 				newDbPrefix[len(newDbPrefix)-1] |= (i1 & 0xf)
 			}
-			newPrefixes, newFixedBits, newHooks = loadingPrefixes(n.child1, newNibblePath, rs, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
 		newNibblePath = append(nibblePath, i2)
-		if !rs.HashOnly(newNibblePath) {
+		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
 				newDbPrefix = append(dbPrefix, i2<<4)
@@ -469,7 +468,7 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
 				newDbPrefix[len(newDbPrefix)-1] |= (i2 & 0xf)
 			}
-			newPrefixes, newFixedBits, newHooks = loadingPrefixes(n.child2, newNibblePath, rs, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *fullNode:
@@ -480,7 +479,7 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 		for i, child := range n.Children {
 			if child != nil {
 				newNibblePath = append(nibblePath, byte(i))
-				if !rs.HashOnly(newNibblePath) {
+				if rl.Retain(newNibblePath) {
 					var newDbPrefix []byte
 					if bits%8 == 0 {
 						newDbPrefix = append(dbPrefix, byte(i)<<4)
@@ -489,7 +488,7 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
 						newDbPrefix[len(newDbPrefix)-1] |= (byte(i) & 0xf)
 					}
-					newPrefixes, newFixedBits, newHooks = loadingPrefixes(child, newNibblePath, rs, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 				}
 			}
 		}
@@ -500,7 +499,7 @@ func loadingPrefixes(nd node, nibblePath []byte, rs *ResolveSet, dbPrefix []byte
 		}
 		binary.BigEndian.PutUint64(bytes8[:], ^n.Incarnation)
 		dbPrefix = append(dbPrefix, bytes8[:]...)
-		return loadingPrefixes(n.storage, nibblePath, rs, dbPrefix, bits+64, prefixes, fixedbits, hooks)
+		return findSubTriesToLoad(n.storage, nibblePath, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
 	case hashNode:
 		newPrefixes = append(prefixes, common.CopyBytes(dbPrefix))
 		newFixedBits = append(fixedbits, bits)
