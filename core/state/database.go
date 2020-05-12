@@ -1373,7 +1373,7 @@ func (tds *TrieDbState) ExtractWitnessForPrefix(prefix []byte, trace bool, isBin
 	return tds.makeBlockWitnessForPrefix(prefix, trace, rs, isBinary)
 }
 
-func (tds *TrieDbState) makeBlockWitnessForPrefix(prefix []byte, trace bool, rl *trie.RetainList, isBinary bool) (*trie.Witness, error) {
+func (tds *TrieDbState) makeBlockWitnessForPrefix(prefix []byte, trace bool, rl trie.RetainDecider, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
@@ -1385,7 +1385,7 @@ func (tds *TrieDbState) makeBlockWitnessForPrefix(prefix []byte, trace bool, rl 
 	return t.ExtractWitnessForPrefix(prefix, tds.blockNr, trace, rl)
 }
 
-func (tds *TrieDbState) makeBlockWitness(trace bool, rl *trie.RetainList, isBinary bool) (*trie.Witness, error) {
+func (tds *TrieDbState) makeBlockWitness(trace bool, rl trie.RetainDecider, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
