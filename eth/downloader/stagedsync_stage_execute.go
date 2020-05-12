@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -62,7 +64,7 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 1000000
+const StateBatchSize = 100000
 const ChangeBatchSize = 1000
 
 func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
@@ -99,6 +101,10 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	chainConfig := d.blockchain.Config()
 	engine := d.blockchain.Engine()
 	vmConfig := d.blockchain.GetVMConfig()
+	accountCache, _ := lru.New(1000000)
+	storageCache, _ := lru.New(1000000)
+	codeCache, _ := lru.New(1000)
+	codeSizeCache, _ := lru.New(1000000)
 	for {
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
@@ -107,7 +113,15 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			break
 		}
 		stateReader := state.NewDbStateReader(stateBatch, incarnationMap)
+		stateReader.SetAccountCache(accountCache)
+		stateReader.SetStorageCache(storageCache)
+		stateReader.SetCodeCache(codeCache)
+		stateReader.SetCodeSizeCache(codeSizeCache)
 		stateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, incarnationMap)
+		stateWriter.SetAccountCache(accountCache)
+		stateWriter.SetStorageCache(storageCache)
+		stateWriter.SetCodeCache(codeCache)
+		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
 		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, d.blockchain, engine, block, stateReader, stateWriter)

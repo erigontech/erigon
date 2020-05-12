@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -32,6 +34,26 @@ type DbStateWriter struct {
 	blockNr        uint64
 	csw            *ChangeSetWriter
 	incarnationMap map[common.Address]uint64
+	accountCache *lru.Cache
+	storageCache *lru.Cache
+	codeCache *lru.Cache
+	codeSizeCache *lru.Cache
+}
+
+func (dsw *DbStateWriter) SetAccountCache(accountCache *lru.Cache) {
+	dsw.accountCache = accountCache
+}
+
+func (dsw *DbStateWriter) SetStorageCache(storageCache *lru.Cache) {
+	dsw.storageCache = storageCache
+}
+
+func (dsw *DbStateWriter) SetCodeCache(codeCache *lru.Cache) {
+	dsw.codeCache = codeCache
+}
+
+func (dsw *DbStateWriter) SetCodeSizeCache(codeSizeCache *lru.Cache) {
+	dsw.codeSizeCache = codeSizeCache
 }
 
 func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
@@ -64,6 +86,9 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err := rawdb.WriteAccount(dsw.stateDb, addrHash, *account); err != nil {
 		return err
 	}
+	if dsw.accountCache != nil {
+		dsw.accountCache.Add(address, account)
+	}
 	return nil
 }
 
@@ -81,6 +106,9 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if original.Incarnation > 0 {
 		dsw.incarnationMap[address] = original.Incarnation
 	}
+	if dsw.accountCache != nil {
+		dsw.accountCache.Add(address, nil)
+	}
 	return nil
 }
 
@@ -93,7 +121,16 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 		return err
 	}
 	//save contract to codeHash mapping
-	return dsw.stateDb.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:])
+	if err := dsw.stateDb.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
+		return err
+	}
+	if dsw.codeCache != nil {
+		dsw.codeCache.Add(addrHash, code)
+	}
+	if dsw.codeSizeCache != nil {
+		dsw.codeSizeCache.Add(addrHash, len(code))
+	}
+	return nil
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -123,6 +160,13 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	} else {
 		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
+	if dsw.storageCache != nil {
+		var storageKey [20+32]byte
+		copy(storageKey[:], address[:])
+		copy(storageKey[20:], key[:])
+		dsw.storageCache.Add(storageKey, vv)
+	}
+	return nil
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
