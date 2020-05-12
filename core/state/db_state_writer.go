@@ -34,10 +34,10 @@ type DbStateWriter struct {
 	blockNr        uint64
 	csw            *ChangeSetWriter
 	incarnationMap map[common.Address]uint64
-	accountCache *lru.Cache
-	storageCache *lru.Cache
-	codeCache *lru.Cache
-	codeSizeCache *lru.Cache
+	accountCache   *lru.Cache
+	storageCache   *lru.Cache
+	codeCache      *lru.Cache
+	codeSizeCache  *lru.Cache
 }
 
 func (dsw *DbStateWriter) SetAccountCache(accountCache *lru.Cache) {
@@ -154,7 +154,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 		return err
 	}
 	if dsw.storageCache != nil {
-		var storageKey [20+32]byte
+		var storageKey [20 + 32]byte
 		copy(storageKey[:], address[:])
 		copy(storageKey[20:], key[:])
 		dsw.storageCache.Add(storageKey, vv)

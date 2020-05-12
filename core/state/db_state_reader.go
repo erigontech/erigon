@@ -14,17 +14,17 @@ import (
 
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
-	db ethdb.Getter
+	db             ethdb.Getter
 	incarnationMap map[common.Address]uint64
-	accountCache *lru.Cache
-	storageCache *lru.Cache
-	codeCache *lru.Cache
-	codeSizeCache *lru.Cache
+	accountCache   *lru.Cache
+	storageCache   *lru.Cache
+	codeCache      *lru.Cache
+	codeSizeCache  *lru.Cache
 }
 
 func NewDbStateReader(db ethdb.Getter, incarnationMap map[common.Address]uint64) *DbStateReader {
 	return &DbStateReader{
-		db: db,
+		db:             db,
 		incarnationMap: incarnationMap,
 	}
 }
@@ -74,9 +74,9 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 }
 
 func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	var storageKeyP *[20+32]byte
+	var storageKeyP *[20 + 32]byte
 	if dbr.storageCache != nil {
-		var storageKey [20+32]byte
+		var storageKey [20 + 32]byte
 		copy(storageKey[:], address[:])
 		copy(storageKey[20:], key[:])
 		if cached, ok := dbr.storageCache.Get(storageKey); ok {
