@@ -153,20 +153,18 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
-	if len(v) == 0 {
-		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
-	} else {
-		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
-	}
 	if dsw.storageCache != nil {
 		var storageKey [20+32]byte
 		copy(storageKey[:], address[:])
 		copy(storageKey[20:], key[:])
 		dsw.storageCache.Add(storageKey, vv)
 	}
-	return nil
+	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
+	if len(v) == 0 {
+		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
+	} else {
+		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
+	}
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
