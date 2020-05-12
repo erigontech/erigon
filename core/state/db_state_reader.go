@@ -48,6 +48,9 @@ func (dbr *DbStateReader) SetCodeSizeCache(codeSizeCache *lru.Cache) {
 func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	if dbr.accountCache != nil {
 		if cached, ok := dbr.accountCache.Get(address); ok {
+			if cached == nil {
+				return nil, nil
+			}
 			return cached.(*accounts.Account), nil
 		}
 	}
