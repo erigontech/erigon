@@ -3,12 +3,10 @@ package trie
 import (
 	"fmt"
 	"math/big"
-	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -114,8 +112,7 @@ func TestResolve3Keep(t *testing.T) {
 func TestTrieResolver(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
+	require, _, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -200,7 +197,6 @@ func TestTwoStorageItems(t *testing.T) {
 
 func TestTwoAccounts(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 	key1 := common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b")
 	acc := accounts.NewAccount()
 	acc.Initialised = true
@@ -219,31 +215,24 @@ func TestTwoAccounts(t *testing.T) {
 
 	expect := common.HexToHash("925002c3260b44e44c3edebad1cc442142b03020209df1ab8bb86752edbd2cd7")
 
-	buf := pool.GetBuffer(64)
-	buf.Reset()
-	defer pool.PutBuffer(buf)
+	resolver := NewResolver(0)
+	rs := NewResolveSet(0)
+	rs.AddKey(key1)
+	subTries, err1 := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	require.NoError(err1, "resolve error")
+	assert.Equal(expect.String(), subTries.Hashes[0].String())
 
-	DecompressNibbles(common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), &buf.B)
+	tr := New(common.Hash{})
+	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
+	assert.NoError(err)
 
-	req := &ResolveRequest{
-		resolveHex:  buf.Bytes(),
-		resolvePos:  0,
-	}
-
-	resolver := NewResolver(tr, 0)
-	resolver.AddRequest(req)
-	err = resolver.ResolveWithDb(db, 0, false)
-	require.NoError(err, "resolve error")
-
-	assert.Equal(expect.String(), tr.Hash().String())
-
-	_, ok := tr.GetAccount(key1)
+	x, ok := tr.GetAccount(key1)
 	assert.True(ok)
+	assert.NotNil(x)
 }
 
 func TestReturnErrOnWrongRootHash(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
-	tr := New(common.Hash{})
 	putAccount := func(k string) {
 		a := accounts.Account{}
 		err := writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a)
@@ -252,13 +241,9 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 
 	putAccount("0000000000000000000000000000000000000000000000000000000000000000")
 
-	req := &ResolveRequest{
-		resolveHex:  []byte{},
-		resolvePos:  0,
-	}
-	resolver := NewResolver(tr, 0)
-	resolver.AddRequest(req)
-	err := resolver.ResolveWithDb(db, 0, false)
+	rs := NewResolveSet(0)
+	resolver := NewResolver(0)
+	_, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	require.NotNil(t, err)
 }
 
@@ -324,23 +309,25 @@ func TestApiDetails(t *testing.T) {
 	// this IntermediateHash key must not be used, because such key is in ResolveRequest
 	putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
 
-	tr := New(common.Hash{})
 	{
-		resolver := NewResolver(tr, 0)
+		resolver := NewResolver(0)
 		expectRootHash := common.HexToHash("9a87eff1bc257a70e62dd81ed4b5d210beb305ecdeec9ff497c717ea1c3794d4")
 
-		resolver.AddRequest(tr.NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0))
-		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0))
-		resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("0f"), 0))
-
-		err := resolver.ResolveStateful(db, 0, true)
+		rs := NewResolveSet(0)
+		rs.AddHex(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)))
+		rs.AddHex(common.Hex2Bytes("000202"))
+		rs.AddHex(common.Hex2Bytes("0f"))
+		subTries, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, true)
 
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
 		assert.NoError(err)
 
-		assert.Equal(expectRootHash.String(), tr.Hash().String())
+		assert.Equal(expectRootHash.String(), subTries.Hashes[0].String())
 
+		tr := New(common.Hash{})
+		err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
+		assert.NoError(err)
 		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("000%061x", 0)))
 		assert.False(found) // exists in DB but resolved, there is hashNode
 
@@ -493,99 +480,68 @@ func TestStorageResolver2(t *testing.T) {
 	require.NoError(db.Put(dbutils.CurrentStateBucket, ks4, common.FromHex("7a381122bada791a7ab1f6037dac80432753baad")))
 
 	{
-		tr := New(common.Hash{})
-		resolver := NewResolver(tr, 0)
-		resolver.AddRequest(tr.NewResolveRequest(nil, common.FromHex("00000001"), 0))
-		err := resolver.ResolveWithDb(db, 0, false)
+		resolver := NewResolver(0)
+		rs := NewResolveSet(0)
+		rs.AddHex(common.FromHex("00000001"))
+		_, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 	}
 	{
-		tr := New(common.Hash{})
-		resolver := NewResolver(tr, 0)
-		resolver.AddRequest(tr.NewResolveRequest(dbutils.GenerateStoragePrefix(kAcc2, a2.Incarnation), nil, 0))
-		err := resolver.ResolveWithDb(db, 0, false)
+		resolver := NewResolver(0)
+		rs := NewResolveSet(0)
+		rs.AddKey(dbutils.GenerateStoragePrefix(kAcc2, a2.Incarnation))
+		_, err := resolver.ResolveWithDb(db, 0, rs, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 	}
 }
 
-func TestPrepareResolveParams(t *testing.T) {
+func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
+	tr := New(common.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
-	kAcc1WithInc := dbutils.GenerateStoragePrefix(kAcc1, 1)
 	ks1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
+	acc1 := accounts.NewAccount()
+	acc1.Balance.SetInt64(12345)
+	acc1.Incarnation = 1
+	acc1.Initialised = true
+	tr.UpdateAccount(kAcc1, &acc1)
+	tr.Update(concat(kAcc1, ks1...), []byte{1,2,3})
 
 	kAcc2 := common.FromHex("0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
-	kAcc2WithInc := dbutils.GenerateStoragePrefix(kAcc2, 1)
 	ks2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	ks22 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000002")
+	acc2 := accounts.NewAccount()
+	acc2.Balance.SetInt64(6789)
+	acc2.Incarnation = 1
+	acc2.Initialised = true
+	tr.UpdateAccount(kAcc2, &acc2)
+	tr.Update(concat(kAcc2, ks2...), []byte{4,5,6})
+	tr.Update(concat(kAcc2, ks22...), []byte{7,8,9})
+	tr.Hash()
 
-	tr := NewResolver(nil, 0)
-
-	// if resolve only accounts
-	tr.AddRequest(&ResolveRequest{nil, keybytesToHex(kAcc1), 10, false, nil})
-	tr.AddRequest(&ResolveRequest{nil, keybytesToHex(kAcc2), 20, false, nil})
-	sort.Stable(tr)
-	resolver := NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks := resolver.PrepareResolveParams()
-	assert.Equal("[0001cf1ce0 0002cf1ce0664746d39a]", fmt.Sprintf("%x", startkeys))
-	assert.Equal("[40 80]", fmt.Sprintf("%d", fixedbits))
-	assert.Equal("[000000010c0f010c0e00 000000020c0f010c0e000606040704060d03090a]", fmt.Sprintf("%x", hooks))
-	tr.Reset(0)
-
-	// if some account doesn't need resolution
-	tr.AddRequest(&ResolveRequest{nil, keybytesToHex(kAcc1), 10, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc1WithInc, keybytesToHex(ks1), 0, false, nil})
-	tr.AddRequest(&ResolveRequest{nil, keybytesToHex(kAcc2), 20, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc2WithInc, keybytesToHex(ks2), 0, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc2WithInc, keybytesToHex(ks22), 0, false, nil})
-	sort.Stable(tr)
-	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
-	assert.Equal("[0001cf1ce0 0002cf1ce0664746d39a]", fmt.Sprintf("%x", startkeys))
-	assert.Equal("[40 80]", fmt.Sprintf("%d", fixedbits))
-	assert.Equal("[000000010c0f010c0e00 000000020c0f010c0e000606040704060d03090a]", fmt.Sprintf("%x", hooks))
-	tr.Reset(0)
-
-	// if some account doesn't need resolution
-	tr.AddRequest(&ResolveRequest{nil, keybytesToHex(kAcc1), 10, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc1WithInc, keybytesToHex(ks1), 0, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc2WithInc, keybytesToHex(ks2), 0, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc2WithInc, keybytesToHex(ks22), 0, false, nil})
-	sort.Stable(tr)
-	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
-	assert.Equal([][]byte{
-		common.FromHex("0001cf1ce0"),
-		kAcc2WithInc,
-	}, startkeys)
-	assert.Equal("[40 320]", fmt.Sprintf("%d", fixedbits))
-	assert.Equal("[000000010c0f010c0e00 000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
-	tr.Reset(0)
-
-	// if first account doesn't need resolution
-	tr.AddRequest(&ResolveRequest{kAcc2WithInc, keybytesToHex(ks2), 0, false, nil})
-	tr.AddRequest(&ResolveRequest{kAcc2WithInc, keybytesToHex(ks22), 0, false, nil})
-	sort.Stable(tr)
-	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
-	assert.Equal([][]byte{
-		kAcc2WithInc,
-	}, startkeys)
-	assert.Equal("[320]", fmt.Sprintf("%d", fixedbits))
-	assert.Equal("[000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
-	tr.Reset(0)
-
-	// case when some storage requests - coming before account request which has resolve pos -> must lead to full scan
-	tr.AddRequest(&ResolveRequest{kAcc1WithInc, keybytesToHex(ks1), 0, false, nil})
-	tr.AddRequest(&ResolveRequest{nil, keybytesToHex(kAcc2), 0, false, nil})
-	sort.Stable(tr)
-	resolver = NewResolverStateful(tr.requests, nil)
-	startkeys, fixedbits, hooks = resolver.PrepareResolveParams()
-	assert.Equal("[]", fmt.Sprintf("%x", startkeys))
+	// Evict accounts only
+	tr.EvictNode(keybytesToHex(kAcc1))
+	tr.EvictNode(keybytesToHex(kAcc2))
+	rs := NewResolveSet(0)
+	rs.AddKey(concat(kAcc1, ks1...))
+	rs.AddKey(concat(kAcc2, ks2...))
+	rs.AddKey(concat(kAcc2, ks22...))
+	dbPrefixes, fixedbits, hooks := tr.CreateLoadingPrefixes(rs)
+	assert.Equal("[]", fmt.Sprintf("%x", dbPrefixes))
 	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[]", fmt.Sprintf("%x", hooks))
-	tr.Reset(0)
+
+	// Evict everytning
+	tr.EvictNode([]byte{})
+	// if resolve only accounts
+	rs = NewResolveSet(0)
+	rs.AddKey(kAcc1)
+	rs.AddKey(kAcc2)
+	dbPrefixes, fixedbits, hooks = tr.CreateLoadingPrefixes(rs)
+	assert.Equal("[]", fmt.Sprintf("%x", dbPrefixes))
+	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
+	assert.Equal("[]", fmt.Sprintf("%x", hooks))
 }
 
 func TestIsBefore(t *testing.T) {

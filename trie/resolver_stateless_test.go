@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type testWitnessStorage []byte
@@ -80,38 +78,35 @@ func TestRebuildTrie(t *testing.T) {
 
 	resolvedTries := make([]*Trie, 3)
 
-	currentTrie := 0
-
-	req1 := trie1.NewResolveRequest(nil, []byte{0x01}, 1)
-	req2 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
-	req21 := trie2.NewResolveRequest(nil, []byte{0x02}, 1)
-	req3 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
-	req31 := trie3.NewResolveRequest(nil, []byte{0x03}, 1)
-
-	hookFunction := func(hookNibbles []byte, root node, rootHash common.Hash) error {
-		trie := New(rootHash)
-		trie.root = root
-		resolvedTries[currentTrie] = trie
-		currentTrie++
-		return nil
-	}
-
 	// it should ignore duplicate resolve requests
-	resolver := NewResolverStateless([]*ResolveRequest{req1, req2, req21}, hookFunction)
+	resolver := NewResolverStateless()
 
-	pos, err := resolver.RebuildTrie(&storage, 1, 1, 0)
+	subTries, pos, err := resolver.RebuildTrie(&storage, 1, 1, 0, 2)
 	if err != nil {
 		t.Error(err)
+	}
+	currentTrie := 0
+	for i, root := range subTries.roots {
+		tr := New(subTries.Hashes[i])
+		tr.root = root
+		resolvedTries[currentTrie] = tr
+		currentTrie++
 	}
 
 	// we also support partial resolution with continuation (for storage tries)
 	// so basically we first resolve accounts, then storages separately
 	// but we still want to keep one entry in a DB per block, so we store the last read position
 	// and then use it as a start
-	resolver = NewResolverStateless([]*ResolveRequest{req3, req31}, hookFunction)
-	_, err = resolver.RebuildTrie(&storage, 1, 1, pos)
+	resolver = NewResolverStateless()
+	subTries, _, err = resolver.RebuildTrie(&storage, 1, 1, pos, 1)
 	if err != nil {
 		t.Error(err)
+	}
+	for i, root := range subTries.roots {
+		tr := New(subTries.Hashes[i])
+		tr.root = root
+		resolvedTries[currentTrie] = tr
+		currentTrie++
 	}
 
 	if !bytes.Equal(resolvedTries[0].Hash().Bytes(), trie1.Hash().Bytes()) {
