@@ -408,13 +408,6 @@ func min(a, b int) int {
 	return b
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // CreateLoadingPrefixes walks over the trie and creates the list of DB prefixes and
 // corresponding list of valid bits in the prefix (for the cases when prefix contains an
 // odd number of nibbles) that would allow loading the missing information from the database
