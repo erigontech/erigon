@@ -90,7 +90,7 @@ func (tr *ResolverStateful) finaliseRoot(cutoff int) error {
 				tr.subTries.Hashes = append(tr.subTries.Hashes, tr.hb.rootHash())
 			} else {
 				tr.subTries.roots = append(tr.subTries.roots, nil)
-				tr.subTries.Hashes = append(tr.subTries.Hashes, common.Hash{})				
+				tr.subTries.Hashes = append(tr.subTries.Hashes, common.Hash{})
 			}
 		} else {
 			return err
@@ -215,10 +215,10 @@ func (tr *ResolverStateful) RebuildTrie(db ethdb.Database, rs *ResolveSet, dbPre
 
 	cutoffs := make([]int, len(fixedbits))
 	for i, bits := range fixedbits {
-		if bits >= 256 /* addrHash */ + 64 /* incarnation */ {
+		if bits >= 256 /* addrHash */ +64 /* incarnation */ {
 			cutoffs[i] = bits/4 - 16 // Remove incarnation
 		} else {
-			cutoffs[i] = bits/4
+			cutoffs[i] = bits / 4
 		}
 	}
 

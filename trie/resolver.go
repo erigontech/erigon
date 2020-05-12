@@ -13,7 +13,7 @@ var emptyHash [32]byte
 // sub-tree root hash would be queried
 type SubTries struct {
 	Hashes []common.Hash // Root hashes of the sub-tries
-	roots []node   // Sub-tries
+	roots  []node        // Sub-tries
 }
 
 type ResolveFunc func(*Resolver, *ResolveSet, [][]byte, []int) (SubTries, error)
@@ -22,8 +22,8 @@ type ResolveFunc func(*Resolver, *ResolveSet, [][]byte, []int) (SubTries, error)
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	blockNr          uint64
-	codeRequests     []*ResolveRequestForCode
+	blockNr      uint64
+	codeRequests []*ResolveRequestForCode
 }
 
 func NewResolver(blockNr uint64) *Resolver {
