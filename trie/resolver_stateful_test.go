@@ -528,9 +528,9 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	rs.AddKey(concat(kAcc2, ks2...))
 	rs.AddKey(concat(kAcc2, ks22...))
 	dbPrefixes, fixedbits, hooks := tr.CreateLoadingPrefixes(rs)
-	assert.Equal("[]", fmt.Sprintf("%x", dbPrefixes))
-	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
-	assert.Equal("[]", fmt.Sprintf("%x", hooks))
+	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe]", fmt.Sprintf("%x", dbPrefixes))
+	assert.Equal("[320 320]", fmt.Sprintf("%d", fixedbits))
+	assert.Equal("[000000010c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803 000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
 
 	// Evict everytning
 	tr.EvictNode([]byte{})
