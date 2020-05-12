@@ -28,17 +28,19 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
-	tr := trie.New(syncHeadBlock.Root())
-	// making resolve request for the trie root, so we only get a hash
-	rr := tr.NewResolveRequest(nil, []byte{}, 0)
-
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 
-	resolver := trie.NewResolver(tr, blockNr)
-	resolver.AddRequest(rr)
-	err = resolver.ResolveStateful(euphemeralMutation, blockNr, false)
-	if err != nil {
-		return errors.Wrap(err, "checking root hash failed")
+	resolver := trie.NewResolver(blockNr)
+	rs := trie.NewResolveSet(0)
+	subTries, err1 := resolver.ResolveStateful(euphemeralMutation, rs, [][]byte{nil}, []int{0}, false)
+	if err1 != nil {
+		return errors.Wrap(err1, "checking root hash failed")
+	}
+	if len(subTries.Hashes) != 1 {
+		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
+	}
+	if subTries.Hashes[0] != syncHeadBlock.Root() {
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
 	return SaveStageProgress(d.stateDB, HashCheck, blockNr)

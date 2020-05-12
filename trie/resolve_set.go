@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -47,8 +48,12 @@ func NewBinaryResolveSet(minLength int) *ResolveSet {
 
 // AddKey adds a new key (in KEY encoding) to the set
 func (rs *ResolveSet) AddKey(key []byte) {
-	hex := keybytesToHex(key)
-	rs.AddHex(hex)
+	var nibbles = make([]byte, 2*len(key))
+	for i, b := range key {
+		nibbles[i*2] = b / 16
+		nibbles[i*2+1] = b % 16
+	}
+	rs.AddHex(nibbles)
 }
 
 // AddHex adds a new key (in HEX encoding) to the set
@@ -129,4 +134,13 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 // and the storage keys of the same account
 func (rs *ResolveSet) Current() []byte {
 	return rs.hexes[rs.lteIndex]
+}
+
+// Rewind lets us reuse this list from the beginning
+func (rs *ResolveSet) Rewind() {
+	rs.lteIndex = 0
+}
+
+func (rs *ResolveSet) String() string {
+	return fmt.Sprintf("%x", rs.hexes)
 }

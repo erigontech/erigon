@@ -18,7 +18,7 @@ func TestBlockWitnessBinary(t *testing.T) {
 	rs := NewBinaryResolveSet(2)
 	rs.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(trBin.Trie().root, 1, false)
+	bwb := NewWitnessBuilder(trBin.Trie().root, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
@@ -57,7 +57,7 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 	rs := NewBinaryResolveSet(2)
 	rs.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(trBin.Trie().root, 1, false)
+	bwb := NewWitnessBuilder(trBin.Trie().root, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
