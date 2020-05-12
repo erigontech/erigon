@@ -33,17 +33,17 @@ func TestRebuildTrie(t *testing.T) {
 	trie2 := buildTestTrie(10)
 	trie3 := buildTestTrie(100)
 
-	w1, err := extractWitnessFromRootNode(trie1.root, 1, false, nil)
+	w1, err := extractWitnessFromRootNode(trie1.root, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w2, err := extractWitnessFromRootNode(trie2.root, 1, false, nil)
+	w2, err := extractWitnessFromRootNode(trie2.root, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w3, err := extractWitnessFromRootNode(trie3.root, 1, false, nil)
+	w3, err := extractWitnessFromRootNode(trie3.root, false, nil)
 	if err != nil {
 		t.Error(err)
 	}

@@ -1382,7 +1382,7 @@ func (tds *TrieDbState) makeBlockWitnessForPrefix(prefix []byte, trace bool, rl 
 		t = trie.HexToBin(tds.t).Trie()
 	}
 
-	return t.ExtractWitnessForPrefix(prefix, tds.blockNr, trace, rl)
+	return t.ExtractWitnessForPrefix(prefix, trace, rl)
 }
 
 func (tds *TrieDbState) makeBlockWitness(trace bool, rl trie.RetainDecider, isBinary bool) (*trie.Witness, error) {
@@ -1394,7 +1394,7 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rl trie.RetainDecider, isBi
 		t = trie.HexToBin(tds.t).Trie()
 	}
 
-	return t.ExtractWitness(tds.blockNr, trace, rl)
+	return t.ExtractWitness(trace, rl)
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
