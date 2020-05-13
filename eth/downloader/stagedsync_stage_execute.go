@@ -64,7 +64,7 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 100000
+const StateBatchSize = 4000000
 const ChangeBatchSize = 1000
 
 func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
