@@ -29,12 +29,8 @@ func NewChangeSetWriter() *ChangeSetWriter {
 
 func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
 	cs := changeset.NewAccountChangeSet()
-	for key, val := range w.accountChanges {
-		addrHash, err := common.HashData(key[:])
-		if err != nil {
-			return nil, err
-		}
-		if err := cs.Add(addrHash[:], val); err != nil {
+	for address, val := range w.accountChanges {
+		if err := cs.Add(common.CopyBytes(address[:]), val); err != nil {
 			return nil, err
 		}
 	}
@@ -97,16 +93,7 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 		return nil
 	}
 
-	secKey, err := common.HashData(key[:])
-	if err != nil {
-		return err
-	}
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return err
-	}
-
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 
 	o := bytes.TrimLeft(original[:], "\x00")
 	originalValue := make([]byte, len(o))

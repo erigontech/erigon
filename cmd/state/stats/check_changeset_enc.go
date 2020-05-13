@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"reflect"
+	"runtime"
+	"sync/atomic"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"golang.org/x/sync/errgroup"
-	"reflect"
-	"runtime"
-	"sync/atomic"
-	"time"
 )
 
 type Walker interface {
@@ -74,22 +75,22 @@ func CheckEnc(chaindata string) error {
 
 					walker := testWalker(data)
 					for _, val := range cs.Changes {
-						value, findErr := walker.Find(val.Key)
+						value, findErr := walker.Find(val.KeyHash())
 						if findErr != nil {
 							return findErr
 						}
 						if !bytes.Equal(value, val.Value) {
-							return fmt.Errorf("block: %d. incorrect value for %v. Returned:%v", blockNum, common.Bytes2Hex(val.Key), common.Bytes2Hex(value))
+							return fmt.Errorf("block: %d. incorrect value for %v. Returned:%v", blockNum, common.Bytes2Hex(val.KeyHash()), common.Bytes2Hex(value))
 						}
 					}
 					j := 0
 
 					err = walker.Walk(func(kk, vv []byte) error {
-						if !bytes.Equal(kk, cs2.Changes[j].Key) {
+						if !bytes.Equal(kk, cs2.Changes[j].KeyHash()) {
 							return fmt.Errorf("incorrect order. block: %d, element: %v", blockNum, j)
 						}
 						if !bytes.Equal(vv, cs2.Changes[j].Value) {
-							return fmt.Errorf("incorrect value. block: %d, key:%v", blockNum, common.Bytes2Hex(cs.Changes[j].Key))
+							return fmt.Errorf("incorrect value. block: %d, key:%v", blockNum, common.Bytes2Hex(cs.Changes[j].KeyHash()))
 						}
 						j++
 						return nil

@@ -3,12 +3,13 @@ package changeset
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"math/rand"
 	"reflect"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
@@ -23,16 +24,15 @@ func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
 		ch := NewStorageChangeSet()
 		var err error
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
+			address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 			inc := rand.Uint64()
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+				key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", j))
 				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, inc, key), val.Bytes())
+				err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, inc, key), val.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
-
 			}
 		}
 
@@ -115,11 +115,11 @@ func TestEncodingStorageNewWithDefaultIncarnation(t *testing.T) {
 		ch := NewStorageChangeSet()
 		var err error
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
+			address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+				key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", j))
 				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+				err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, defaultIncarnation, key), val.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -203,11 +203,11 @@ func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValue(t *testing.T) {
 		ch := NewStorageChangeSet()
 		var err error
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
+			address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+				key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", j))
 				val := []byte{}
-				err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val)
+				err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, defaultIncarnation, key), val)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -290,11 +290,11 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		ch := NewStorageChangeSet()
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
+			address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+				key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", j))
 				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err := ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+				err := ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, defaultIncarnation, key), val.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -363,11 +363,11 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 		ch := NewStorageChangeSet()
 
 		for i := 0; i < numOfElements; i++ {
-			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
+			address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 			for j := 0; j < numOfKeys; j++ {
-				key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+				key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", j))
 				val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
-				err := ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+				err := ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, defaultIncarnation, key), val.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -428,10 +428,10 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 	ch := NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
+		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", i))
 		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
+		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -459,10 +459,10 @@ func BenchmarkEncodeNewStorage(t *testing.B) {
 	ch := NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
+		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", i))
 		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
+		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -485,10 +485,10 @@ func BenchmarkFindStorage(t *testing.B) {
 	ch := NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
+		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", i))
 		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
+		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -518,10 +518,10 @@ func BenchmarkWalkStorage(t *testing.B) {
 	ch := NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
+		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", i))
 		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
+		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -562,10 +562,10 @@ func TestDefaultIncarnationCompress(t *testing.T) {
 	// First changeset has incarnation == defaultIncarnation, which should be compressed
 	// Second changeset has incarnation == defautIncarnation+1, which would not be compressed
 	ch1 := NewStorageChangeSet()
-	addrHash, _ := common.HashData([]byte("addrHash"))
-	key, _ := common.HashData([]byte("key"))
-	val, _ := common.HashData([]byte("val"))
-	err := ch1.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", 1))
+	key := common.HexToHash(fmt.Sprintf("0xba30a26e82cb5ce88ea897f1b55500dac335364d139ff6479927f7a59c5c275%d", 1))
+	val, _ := common.HashData([]byte("val" + strconv.Itoa(1)))
+	err := ch1.Add(dbutils.PlainGenerateCompositeStorageKey(address, defaultIncarnation, key), val.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +574,7 @@ func TestDefaultIncarnationCompress(t *testing.T) {
 		t.Fatal(err1)
 	}
 	ch2 := NewStorageChangeSet()
-	err = ch2.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation+1, key), val.Bytes())
+	err = ch2.Add(dbutils.PlainGenerateCompositeStorageKey(address, defaultIncarnation+1, key), val.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}

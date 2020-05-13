@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 func NewChangeSet() *ChangeSet {
@@ -16,6 +18,11 @@ func NewChangeSet() *ChangeSet {
 type Change struct {
 	Key   []byte
 	Value []byte
+}
+
+func (c Change) KeyHash() []byte {
+	h, _ := common.HashData(c.Key[:])
+	return h[:]
 }
 
 // ChangeSet is a map with keys of the same size.

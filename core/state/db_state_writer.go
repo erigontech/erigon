@@ -184,7 +184,8 @@ func (dsw *DbStateWriter) WriteHistory() error {
 
 func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
 	for _, change := range changes.Changes {
-		currentChunkKey := dbutils.IndexChunkKey(change.Key, ^uint64(0))
+
+		currentChunkKey := dbutils.IndexChunkKey(change.KeyHash(), ^uint64(0))
 		indexBytes, err := dsw.db.Get(bucket, currentChunkKey)
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
@@ -197,7 +198,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		} else if dbutils.CheckNewIndexChunk(indexBytes, v) {
 			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
 			index = dbutils.WrapHistoryIndex(indexBytes)
-			indexKey, err := index.Key(change.Key)
+			indexKey, err := index.Key(change.KeyHash())
 			if err != nil {
 				return err
 			}

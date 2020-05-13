@@ -8,10 +8,12 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
 	DefaultIncarnation = uint64(1)
+	storageKeyLen      = common.AddressLength + common.HashLength + common.IncarnationLength
 )
 
 var (
@@ -23,7 +25,7 @@ var (
 func NewStorageChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
-		keyLen:  2*common.HashLength + common.IncarnationLength,
+		keyLen:  storageKeyLen,
 	}
 }
 
@@ -70,13 +72,11 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 
 	currentKey := -1
 	for i, change := range s.Changes {
-		addrHash := change.Key[0:common.HashLength]
-		incarnation := ^binary.BigEndian.Uint64(change.Key[common.HashLength:])
-		keyHash := change.Key[common.HashLength+common.IncarnationLength : 2*common.HashLength+common.IncarnationLength]
+		address, incarnation, key := dbutils.PlainParseCompositeStorageKey(change.Key)
 		//found new contract address
-		if i == 0 || !bytes.Equal(currentContract.AddrHash, addrHash) || currentContract.Incarnation != incarnation {
+		if i == 0 || !bytes.Equal(currentContract.Address[:], address[:]) || currentContract.Incarnation != incarnation {
 			currentKey++
-			currentContract.AddrHash = addrHash
+			currentContract.Address = address
 			currentContract.Incarnation = incarnation
 			//add to incarnations part only if it's not default
 			if incarnation != DefaultIncarnation {
@@ -85,12 +85,12 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 				notDefaultIncarnationsBytes = append(notDefaultIncarnationsBytes, b...)
 				nonDefaultIncarnationCounter++
 			}
-			currentContract.Keys = [][]byte{keyHash}
+			currentContract.Keys = [][]byte{key[:]}
 			currentContract.Vals = [][]byte{change.Value}
 			keys = append(keys, currentContract)
 		} else {
 			//add key and value
-			currentContract.Keys = append(currentContract.Keys, keyHash)
+			currentContract.Keys = append(currentContract.Keys, key[:])
 			currentContract.Vals = append(currentContract.Vals, change.Value)
 		}
 
@@ -129,7 +129,7 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 	// save addrHashes + endOfKeys
 	var endNumOfKeys int
 	for i := 0; i < len(keys); i++ {
-		if _, err = buf.Write(keys[i].AddrHash); err != nil {
+		if _, err = buf.Write(keys[i].Address[:]); err != nil {
 			return nil, err
 		}
 		endNumOfKeys += len(keys[i].Keys)
@@ -203,13 +203,13 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 	keys := make([]contractKeys, numOfUniqueElements)
 	numOfSkipKeys := make([]int, numOfUniqueElements+1)
 	for i := 0; i < numOfUniqueElements; i++ {
-		start := 4 + i*(common.HashLength+4)
-		keys[i].AddrHash = b[start : start+common.HashLength]
-		numOfSkipKeys[i+1] = int(binary.BigEndian.Uint32(b[start+common.HashLength:]))
+		start := 4 + i*(common.AddressLength+4)
+		keys[i].Address = common.BytesToAddress(b[start : start+common.AddressLength])
+		numOfSkipKeys[i+1] = int(binary.BigEndian.Uint32(b[start+common.AddressLength:]))
 		keys[i].Incarnation = DefaultIncarnation
 	}
 	numOfElements := numOfSkipKeys[numOfUniqueElements]
-	incarnatonsInfo := 4 + numOfUniqueElements*(common.HashLength+4)
+	incarnatonsInfo := 4 + numOfUniqueElements*(common.AddressLength+4)
 	numOfNotDefaultIncarnations := int(binary.BigEndian.Uint32(b[incarnatonsInfo:]))
 
 	incarnationsStart := incarnatonsInfo + 4
@@ -235,10 +235,7 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 	id := 0
 	for _, v := range keys {
 		for i := range v.Keys {
-			k := make([]byte, common.HashLength*2+common.IncarnationLength)
-			copy(k[:common.HashLength], v.AddrHash)
-			binary.BigEndian.PutUint64(k[common.HashLength:], ^v.Incarnation)
-			copy(k[common.HashLength+common.IncarnationLength:common.HashLength*2+common.IncarnationLength], v.Keys[i])
+			k := dbutils.PlainGenerateCompositeStorageKey(v.Address, v.Incarnation, common.BytesToHash(v.Keys[i]))
 			val, innerErr := FindValue(b[valsInfoStart:], id)
 			if innerErr != nil {
 				return nil, innerErr
@@ -313,7 +310,7 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 	if numOfUniqueElements == 0 {
 		return nil
 	}
-	incarnatonsInfo := 4 + numOfUniqueElements*(common.HashLength+4)
+	incarnatonsInfo := 4 + numOfUniqueElements*(common.AddressLength+4)
 	numOfNotDefaultIncarnations := int(binary.BigEndian.Uint32(b[incarnatonsInfo:]))
 	incarnatonsStart := incarnatonsInfo + 4
 
@@ -330,7 +327,6 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 
 	var addressHashID uint32
 	var id int
-	k := make([]byte, common.HashLength*2+common.IncarnationLength)
 	for i := 0; i < numOfUniqueElements; i++ {
 		var (
 			startKeys int
@@ -338,19 +334,17 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 		)
 
 		if i > 0 {
-			startKeys = int(binary.BigEndian.Uint32(b[4+i*(common.HashLength)+(i-1)*4 : 4+i*(common.HashLength)+(i)*4]))
+			startKeys = int(binary.BigEndian.Uint32(b[4+i*(common.AddressLength)+(i-1)*4 : 4+i*(common.AddressLength)+(i)*4]))
 		}
-		endKeys = int(binary.BigEndian.Uint32(b[4+(i+1)*(common.HashLength)+i*4:]))
-		addrHash := b[4+i*(common.HashLength)+i*4:]
+		endKeys = int(binary.BigEndian.Uint32(b[4+(i+1)*(common.AddressLength)+i*4:]))
+		addrBytes := b[4+i*(common.AddressLength)+i*4:]
 		incarnation := DefaultIncarnation
 		if inc, ok := notDefaultIncarnations[addressHashID]; ok {
 			incarnation = inc
 		}
 
 		for j := startKeys; j < endKeys; j++ {
-			copy(k[:common.HashLength], addrHash[:common.HashLength])
-			copy(k[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength], b[keysStart+j*common.HashLength:])
-			binary.BigEndian.PutUint64(k[common.HashLength:], ^incarnation)
+			k := dbutils.PlainGenerateCompositeStorageKey(common.BytesToAddress(addrBytes[:common.AddressLength]), incarnation, common.BytesToHash(b[keysStart+j*common.HashLength:keysStart+j*common.HashLength+common.HashLength]))
 			val, innerErr := FindValue(b[valsInfoStart:], id)
 			if innerErr != nil {
 				return innerErr
@@ -380,33 +374,33 @@ func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 
-	incarnatonsInfo := 4 + numOfUniqueElements*(common.HashLength+4)
+	incarnatonsInfo := 4 + numOfUniqueElements*(common.AddressLength+4)
 	numOfElements := int(binary.BigEndian.Uint32(b[incarnatonsInfo-4:]))
 	numOfNotDefaultIncarnations := int(binary.BigEndian.Uint32(b[incarnatonsInfo:]))
 	incarnatonsStart := incarnatonsInfo + 4
 	keysStart := incarnatonsStart + numOfNotDefaultIncarnations*12
 	valsInfoStart := keysStart + numOfElements*common.HashLength
 
-	addHashID := sort.Search(numOfUniqueElements, func(i int) bool {
-		addrHash := b[4+i*(4+common.HashLength) : 4+i*(4+common.HashLength)+common.HashLength]
-		cmp := bytes.Compare(addrHash, k[0:common.HashLength])
+	addressID := sort.Search(numOfUniqueElements, func(i int) bool {
+		addrBytes := b[4+i*(4+common.AddressLength) : 4+i*(4+common.AddressLength)+common.AddressLength]
+		cmp := bytes.Compare(addrBytes, k[0:common.AddressLength])
 		return cmp >= 0
 	})
 
-	if addHashID == numOfUniqueElements {
+	if addressID == numOfUniqueElements {
 		return nil, ErrNotFound
 	}
 
 	from := 0
-	if addHashID > 0 {
-		from = int(binary.BigEndian.Uint32(b[4+addHashID*(common.HashLength+4)-4:]))
+	if addressID > 0 {
+		from = int(binary.BigEndian.Uint32(b[4+addressID*(common.AddressLength+4)-4:]))
 	}
-	to := int(binary.BigEndian.Uint32(b[4+addHashID*(common.HashLength+4)+common.HashLength:]))
+	to := int(binary.BigEndian.Uint32(b[4+addressID*(common.AddressLength+4)+common.AddressLength:]))
 
 	keyIndex := sort.Search(to-from, func(i int) bool {
 		index := from + i
 		key := b[keysStart+common.HashLength*index : keysStart+common.HashLength*index+common.HashLength]
-		cmp := bytes.Compare(key, k[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength])
+		cmp := bytes.Compare(key, k[common.AddressLength+common.IncarnationLength:common.AddressLength+common.HashLength+common.IncarnationLength])
 		return cmp >= 0
 	})
 	index := from + keyIndex
@@ -416,7 +410,7 @@ func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
 	return FindValue(b[valsInfoStart:], index)
 }
 
-func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, keyHashToFind []byte) ([]byte, error) {
+func (b StorageChangeSetBytes) FindWithoutIncarnation(addrBytesToFind []byte, keyBytesToFind []byte) ([]byte, error) {
 	if len(b) == 0 {
 		return nil, nil
 	}
@@ -436,8 +430,8 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 	valsInfoStart := keysStart + numOfElements*common.HashLength
 
 	addHashID := sort.Search(numOfUniqueElements, func(i int) bool {
-		addrHash := b[4+i*(common.HashLength+4) : 4+i*(common.HashLength+4)+common.HashLength]
-		cmp := bytes.Compare(addrHash, addrHashToFind)
+		addrBytes := b[4+i*(common.AddressLength+4) : 4+i*(common.AddressLength+4)+common.AddressLength]
+		cmp := bytes.Compare(addrBytes, addrBytesToFind)
 		return cmp >= 0
 	})
 
@@ -452,7 +446,7 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 	keyIndex := sort.Search(to-from, func(i int) bool {
 		index := from + i
 		key := b[keysStart+common.HashLength*index : keysStart+common.HashLength*index+common.HashLength]
-		cmp := bytes.Compare(key, keyHashToFind)
+		cmp := bytes.Compare(key, keyBytesToFind)
 		return cmp >= 0
 	})
 	index := from + keyIndex
@@ -464,7 +458,7 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 }
 
 type contractKeys struct {
-	AddrHash    []byte
+	Address     common.Address
 	Incarnation uint64
 	Keys        [][]byte
 	Vals        [][]byte

@@ -5,20 +5,21 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
+
+const accountKeySize = common.AddressLength
 
 func NewAccountChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
-		keyLen:  common.HashLength,
+		keyLen:  accountKeySize,
 	}
 }
 
 type AccountChangeSetBytes []byte
-
-const accountKeySize = common.HashLength
 
 /*
 AccountChangeSet is serialized in the following manner in order to facilitate binary search:

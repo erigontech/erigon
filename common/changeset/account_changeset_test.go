@@ -3,11 +3,11 @@ package changeset
 import (
 	"bytes"
 	"fmt"
+	"reflect"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/stretchr/testify/assert"
-	"reflect"
-	"strconv"
-	"testing"
 )
 
 func TestEncodingAccount(t *testing.T) {
@@ -23,8 +23,8 @@ func TestEncodingAccount(t *testing.T) {
 	}
 	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		err = ch.Add(addrHash.Bytes(), vals[i])
+		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		err = ch.Add(address[:], vals[i])
 		if err != nil {
 			t.Fatal(err)
 		}
