@@ -64,7 +64,7 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 4000000
+const StateBatchSize = 1000000
 const ChangeBatchSize = 1000
 
 func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
@@ -101,10 +101,10 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	chainConfig := d.blockchain.Config()
 	engine := d.blockchain.Engine()
 	vmConfig := d.blockchain.GetVMConfig()
-	accountCache, _ := lru.New(1000000)
-	storageCache, _ := lru.New(1000000)
+	accountCache, _ := lru.New(400000)
+	storageCache, _ := lru.New(400000)
 	codeCache, _ := lru.New(1000)
-	codeSizeCache, _ := lru.New(1000000)
+	codeSizeCache, _ := lru.New(400000)
 	for {
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
