@@ -43,6 +43,9 @@ const (
 	// SHashStreamItem used for marking a key-value pair in the stream as belonging to an intermediate hash
 	// within the storage items (storage tries)
 	SHashStreamItem
+	// CutoffStremItem used for marking the end of the subtrie of contract storage. There is no value
+	// attached to it
+	CutoffStreamItem
 )
 
 // Stream represents the collection of key-value pairs, sorted by keys, where values may belong
@@ -82,8 +85,12 @@ func (s *Stream) Reset() {
 	}
 }
 
+type StreamIterator interface {
+	Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte)
+}
+
 // Iterator helps iterate over a trie according to a given resolve set
-type Iterator struct {
+type TrieIterator struct {
 	rl           *RetainList
 	hex          []byte
 	nodeStack    []node
@@ -96,8 +103,8 @@ type Iterator struct {
 }
 
 // NewIterator creates a new iterator from scratch from a given trie and resolve set
-func NewIterator(t *Trie, rl *RetainList, trace bool) *Iterator {
-	return &Iterator{
+func NewTrieIterator(t *Trie, rl *RetainList, trace bool) *TrieIterator {
+	return &TrieIterator{
 		rl:           rl,
 		hex:          []byte{},
 		nodeStack:    []node{t.root},
@@ -111,7 +118,7 @@ func NewIterator(t *Trie, rl *RetainList, trace bool) *Iterator {
 }
 
 // Reset prepares iterator to be reused
-func (it *Iterator) Reset(t *Trie, rl *RetainList, trace bool) {
+func (it *TrieIterator) Reset(t *Trie, rl *RetainList, trace bool) {
 	it.rl = rl
 	it.hex = it.hex[:0]
 	if len(it.nodeStack) > 0 {
@@ -135,7 +142,7 @@ func (it *Iterator) Reset(t *Trie, rl *RetainList, trace bool) {
 }
 
 // Next delivers the next item from the iterator
-func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte) {
+func (it *TrieIterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte) {
 	for {
 		if it.top == 0 {
 			return NoItem, nil, nil, nil, nil
@@ -422,7 +429,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 
 // StreamMergeIterator merges an Iterator and a Stream
 type StreamMergeIterator struct {
-	it          *Iterator
+	it          *TrieIterator
 	s           *Stream
 	trace       bool
 	ki, ai, si  int
@@ -439,7 +446,7 @@ type StreamMergeIterator struct {
 }
 
 // NewStreamMergeIterator create a brand new StreamMergeIterator
-func NewStreamMergeIterator(it *Iterator, s *Stream, trace bool) *StreamMergeIterator {
+func NewStreamMergeIterator(it *TrieIterator, s *Stream, trace bool) *StreamMergeIterator {
 	smi := &StreamMergeIterator{
 		it:    it,
 		s:     s,
@@ -450,7 +457,7 @@ func NewStreamMergeIterator(it *Iterator, s *Stream, trace bool) *StreamMergeIte
 }
 
 // Reset prepares StreamMergeIterator for reuse
-func (smi *StreamMergeIterator) Reset(it *Iterator, s *Stream, trace bool) {
+func (smi *StreamMergeIterator) Reset(it *TrieIterator, s *Stream, trace bool) {
 	smi.it = it
 	smi.s = s
 	smi.trace = trace
@@ -841,7 +848,7 @@ func HashWithModifications(
 	// Now we merge old and new streams, preferring the new
 	newStream.Reset()
 
-	oldIt := NewIterator(t, rl, trace)
+	oldIt := NewTrieIterator(t, rl, trace)
 
 	it := NewStreamMergeIterator(oldIt, &stream, trace)
 	return StreamHash(it, storagePrefixLen, hb, trace)
