@@ -178,15 +178,6 @@ func doTestEncodingStorageNew(
 	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
 	})
-	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
-		f(t, 1000, 1000)
-	})
-	t.Run(formatTestName(5, 10000), func(t *testing.T) {
-		f(t, 5, 10000)
-	})
-	t.Run(formatTestName(20, 30000), func(t *testing.T) {
-		f(t, 20, 30000)
-	})
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkHashed(t *testing.T) {
@@ -260,18 +251,8 @@ func doTestWalk(
 	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run(formatTestName(5, 10000), func(t *testing.T) {
-		f(t, 5, 10000)
-	})
-
-	t.Run(formatTestName(100, 1000), func(t *testing.T) {
-		f(t, 100, 1000)
-	})
-	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
-		f(t, 1000, 1000)
-	})
-	t.Run(formatTestName(20, 30000), func(t *testing.T) {
-		f(t, 20, 30000)
+	t.Run(formatTestName(5, 1000), func(t *testing.T) {
+		f(t, 5, 1000)
 	})
 }
 
@@ -369,18 +350,9 @@ func doTestFind(
 	t.Run(formatTestName(50, 1000), func(t *testing.T) {
 		f(t, 50, 1000)
 	})
-	t.Run(formatTestName(5, 10000), func(t *testing.T) {
-		f(t, 5, 10000)
-	})
 
 	t.Run(formatTestName(100, 1000), func(t *testing.T) {
 		f(t, 100, 1000)
-	})
-	t.Run(formatTestName(1000, 1000), func(t *testing.T) {
-		f(t, 1000, 1000)
-	})
-	t.Run(formatTestName(20, 30000), func(t *testing.T) {
-		f(t, 20, 30000)
 	})
 }
 
