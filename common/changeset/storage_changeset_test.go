@@ -16,7 +16,7 @@ const (
 	defaultIncarnation = 1
 )
 
-var numOfChanges = []int{1, 3, 10, 100, 1000}
+var numOfChanges = []int{1, 3, 10, 100}
 
 func getDefaultIncarnation() uint64 { return defaultIncarnation }
 func getRandomIncarnation() uint64  { return rand.Uint64() }
