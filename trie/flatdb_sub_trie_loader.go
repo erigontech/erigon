@@ -57,17 +57,15 @@ type FlatDbSubTrieLoader struct {
 	ihK, ihV           []byte
 	minKeyAsNibbles    bytes.Buffer
 
+	itemPresent bool
+	itemType StreamItem
 	// Storage item buffer
-	storageItemPresent bool
-	storageIsHash      bool
 	storageKeyPart1    []byte
 	storageKeyPart2    []byte
 	storageHash        []byte
 	storageValue       []byte
 
 	// Acount item buffer
-	accountItemPresent bool
-	accountIsHash      bool
 	accountKey         []byte
 	accountHash        []byte
 	accountValue       accounts.Account
@@ -102,8 +100,7 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl *RetainList, dbPref
 	fstl.hb.trace = trace
 	fstl.rl = rl
 	fstl.dbPrefixes = dbPrefixes
-	fstl.storageItemPresent = false
-	fstl.accountItemPresent = false
+	fstl.itemPresent = false
 	if fstl.trace {
 		fmt.Printf("----------\n")
 		fmt.Printf("RebuildTrie\n")
@@ -252,9 +249,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 			}
 			return nil
 		}
+		fstl.itemPresent = true
 		if len(fstl.k) > common.HashLength {
-			fstl.storageItemPresent = true
-			fstl.storageIsHash = false
+			fstl.itemType = StorageStreamItem
 			if len(fstl.k) >= common.HashLength {
 				fstl.storageKeyPart1 = fstl.k[:common.HashLength]
 				if len(fstl.k) >= common.HashLength+common.IncarnationLength {
@@ -273,8 +270,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 				fmt.Printf("k after storageWalker and Next: %x\n", fstl.k)
 			}
 		} else {
-			fstl.accountItemPresent = true
-			fstl.accountIsHash = false
+			fstl.itemType = AccountStreamItem
 			fstl.accountKey = fstl.k
 			fstl.accountHash = nil
 			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
@@ -328,9 +324,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 		}
 		return nil
 	}
+	fstl.itemPresent = true
 	if len(fstl.ihK) > common.HashLength {
-		fstl.storageItemPresent = true
-		fstl.storageIsHash = true
+		fstl.itemType = SHashStreamItem
 		if len(fstl.ihK) >= common.HashLength {
 			fstl.storageKeyPart1 = fstl.ihK[:common.HashLength]
 			if len(fstl.ihK) >= common.HashLength+common.IncarnationLength {
@@ -345,8 +341,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 		fstl.storageHash = fstl.ihV
 		fstl.storageValue = nil
 	} else {
-		fstl.accountItemPresent = true
-		fstl.accountIsHash = true
+		fstl.itemType = AHashStreamItem
 		fstl.accountKey = fstl.ihK
 		fstl.accountHash = fstl.ihV
 	}
@@ -527,22 +522,31 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		return fstl.subTries, err
 	}
 	for fstl.k != nil || fstl.ihK != nil {
-		for (fstl.k != nil || fstl.ihK != nil) && !fstl.accountItemPresent && !fstl.storageItemPresent {
+		for (fstl.k != nil || fstl.ihK != nil) && !fstl.itemPresent {
 			if err := fstl.iteration(false /* first */); err != nil {
 				return fstl.subTries, err
 			}
 		}
-		if fstl.storageItemPresent {
-			if err := fstl.WalkerStorage(fstl.storageIsHash, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
-				return fstl.subTries, err
+		if fstl.itemPresent {
+			switch fstl.itemType {
+			case StorageStreamItem:
+				if err := fstl.WalkerStorage(false, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
+					return fstl.subTries, err
+				}
+			case SHashStreamItem:
+				if err := fstl.WalkerStorage(true, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
+					return fstl.subTries, err
+				}
+			case AccountStreamItem:
+				if err := fstl.WalkerAccount(false, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
+					return fstl.subTries, err
+				}
+			case AHashStreamItem:
+				if err := fstl.WalkerAccount(true, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
+					return fstl.subTries, err
+				}
 			}
-			fstl.storageItemPresent = false
-		}
-		if fstl.accountItemPresent {
-			if err := fstl.WalkerAccount(fstl.accountIsHash, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
-				return fstl.subTries, err
-			}
-			fstl.accountItemPresent = false
+			fstl.itemPresent = false
 		}
 	}
 	if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {

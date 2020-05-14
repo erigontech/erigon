@@ -43,6 +43,9 @@ const (
 	// SHashStreamItem used for marking a key-value pair in the stream as belonging to an intermediate hash
 	// within the storage items (storage tries)
 	SHashStreamItem
+	// CutoffStremItem used for marking the end of the subtrie of contract storage. There is no value
+	// attached to it
+	CutoffStreamItem
 )
 
 // Stream represents the collection of key-value pairs, sorted by keys, where values may belong
