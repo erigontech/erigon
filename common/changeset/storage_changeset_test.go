@@ -16,6 +16,8 @@ const (
 	defaultIncarnation = 1
 )
 
+var numOfChanges = []int{1, 3, 10, 100, 1000}
+
 func getDefaultIncarnation() uint64 { return defaultIncarnation }
 func getRandomIncarnation() uint64  { return rand.Uint64() }
 
@@ -41,8 +43,6 @@ func getHashedBytes(b []byte) csStorageBytes {
 func getPlainBytes(b []byte) csStorageBytes {
 	return StorageChangeSetPlainBytes(b)
 }
-
-var numOfChanges = []int{1, 3, 10, 100, 1000, 10000}
 
 func getTestDataAtIndex(i, j int, inc uint64, generator func(common.Address, uint64, common.Hash) []byte) []byte {
 	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
