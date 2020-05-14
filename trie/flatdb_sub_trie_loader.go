@@ -601,8 +601,6 @@ func (fstl *FlatDbSubTrieLoader) AttachRequestedCode(db ethdb.Getter, requests [
 	return nil
 }
 
-type walker func(isIH bool, rangeIdx int, k, v []byte) error
-
 func keyToNibbles(k []byte, w io.ByteWriter) {
 	for _, b := range k {
 		//nolint:errcheck
