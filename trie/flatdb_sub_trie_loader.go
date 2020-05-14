@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -48,7 +49,7 @@ type FlatDbSubTrieLoader struct {
 	fixedbytes         []int
 	masks              []byte
 	cutoffs            []int
-	tx                 *bolt.Tx // Manually managed read-only transaction (rolled back when iterator is exhausted)
+	boltDB             *bolt.DB
 	c                  *bolt.Cursor
 	ih                 *bolt.Cursor
 	nextAccountKey     [32]byte
@@ -82,7 +83,6 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 // Reset prepares the loader for reuse
 func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl *RetainList, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
 	fstl.rangeIdx = 0
-	fstl.rl = NewRetainList(0)
 	fstl.curr.Reset()
 	fstl.succ.Reset()
 	fstl.value.Reset()
@@ -116,20 +116,12 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl *RetainList, dbPref
 	if len(dbPrefixes) == 0 {
 		return nil
 	}
-	var boltDB *bolt.DB
 	if hasBolt, ok := db.(ethdb.HasKV); ok {
-		boltDB = hasBolt.KV()
+		fstl.boltDB = hasBolt.KV()
 	}
-	if boltDB == nil {
+	if fstl.boltDB == nil {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
-
-	// Create manually managed read transaction
-	tx, err := boltDB.Begin(false)
-	if err != nil {
-		return fmt.Errorf("opening bolt tx: %v", err)
-	}
-	fstl.tx = tx
 	fixedbytes := make([]int, len(fixedbits))
 	masks := make([]byte, len(fixedbits))
 	cutoffs := make([]int, len(fixedbits))
@@ -144,78 +136,44 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl *RetainList, dbPref
 	fstl.fixedbytes = fixedbytes
 	fstl.masks = masks
 	fstl.cutoffs = cutoffs
-	dbPrefix := dbPrefixes[0]
-	if len(dbPrefix) > common.HashLength {
-		// Looking for storage sub-tree
-		copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
-	}
-
-	ihBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-	if ihBucket != nil {
-		fstl.ih = ihBucket.Cursor()
-	} else {
-		fstl.ih = nil
-	}
-	fstl.c = tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-
-	fstl.k, fstl.v = fstl.c.Seek(dbPrefix)
-	if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
-		// Advance past the storage to the first account
-		if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-			fstl.k, fstl.v = fstl.c.SeekTo(fstl.nextAccountKey[:])
-		} else {
-			fstl.k = nil
-		}
-	}
-	if fstl.trace {
-		fmt.Printf("c.Seek(%x) = %x\n", dbPrefix, fstl.k)
-	}
-	if fstl.ih != nil {
-		fstl.ihK, fstl.ihV = fstl.ih.Seek(dbPrefix)
-		if len(dbPrefix) <= common.HashLength && len(fstl.ihK) > common.HashLength {
-			// Advance past the storage to the first account
-			if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-				fstl.ihK, fstl.ihV = fstl.ih.SeekTo(fstl.nextAccountKey[:])
-			} else {
-				fstl.ihK = nil
-			}
-		}
-	}
 	return nil
 }
 
-func (fstl *FlatDbSubTrieLoader) iteration() error {
-	isIH, minKey := keyIsBefore(fstl.ihK, fstl.k)
-	if fstl.trace {
-		fmt.Printf("keyIsBefore(%x,%x)=%t,%x\n", fstl.ihK, fstl.k, isIH, minKey)
+func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
+	var isIH bool
+	var minKey []byte
+	if !first {
+		isIH, minKey = keyIsBefore(fstl.ihK, fstl.k)
 	}
 	fixedbytes := fstl.fixedbytes[fstl.rangeIdx]
 	cutoff := fstl.cutoffs[fstl.rangeIdx]
-	if fixedbytes > 0 {
+	if first || fixedbytes > 0 {
 		dbPrefix := fstl.dbPrefixes[fstl.rangeIdx]
 		mask := fstl.masks[fstl.rangeIdx]
 		// Adjust rangeIdx if needed
-		cmp := int(-1)
+		var cmp int = -1
 		for cmp != 0 {
-			if len(minKey) < fixedbytes {
-				cmp = bytes.Compare(minKey, dbPrefix[:len(minKey)])
-				if cmp == 0 {
-					cmp = -1
-				}
-			} else {
-				cmp = bytes.Compare(minKey[:fixedbytes-1], dbPrefix[:fixedbytes-1])
-				if cmp == 0 {
-					k1 := minKey[fixedbytes-1] & mask
-					k2 := dbPrefix[fixedbytes-1] & mask
-					if k1 < k2 {
+			if minKey != nil { // In the first iteration, we do not have valid minKey, so we skip this part
+				if len(minKey) < fixedbytes {
+					cmp = bytes.Compare(minKey, dbPrefix[:len(minKey)])
+					if cmp == 0 {
 						cmp = -1
-					} else if k1 > k2 {
-						cmp = 1
+					}
+				} else {
+					cmp = bytes.Compare(minKey[:fixedbytes-1], dbPrefix[:fixedbytes-1])
+					if cmp == 0 {
+						k1 := minKey[fixedbytes-1] & mask
+						k2 := dbPrefix[fixedbytes-1] & mask
+						if k1 < k2 {
+							cmp = -1
+						} else if k1 > k2 {
+							cmp = 1
+						}
 					}
 				}
 			}
 			if cmp < 0 {
-				// This happens after we have just incremented rangeIdx
+				// This happens after we have just incremented rangeIdx or on the very first iteration
 				fstl.k, fstl.v = fstl.c.SeekTo(dbPrefix)
 				if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
 					// Advance past the storage to the first account
@@ -225,30 +183,35 @@ func (fstl *FlatDbSubTrieLoader) iteration() error {
 						fstl.k = nil
 					}
 				}
-				if fstl.ih != nil {
-					fstl.ihK, fstl.ihV = fstl.ih.SeekTo(dbPrefix)
-					if len(dbPrefix) <= common.HashLength && len(fstl.ihK) > common.HashLength {
-						// Advance to the first account
-						if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-							fstl.ihK, fstl.ihV = fstl.ih.SeekTo(fstl.nextAccountKey[:])
-						} else {
-							fstl.ihK = nil
-						}
+				fstl.ihK, fstl.ihV = fstl.ih.SeekTo(dbPrefix)
+				if len(dbPrefix) <= common.HashLength && len(fstl.ihK) > common.HashLength {
+					// Advance to the first account
+					if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
+						fstl.ihK, fstl.ihV = fstl.ih.SeekTo(fstl.nextAccountKey[:])
+					} else {
+						fstl.ihK = nil
 					}
+				}
+				if first { // This is enough for the first iteration
+					return nil
 				}
 				if fstl.k == nil && fstl.ihK == nil {
 					return nil
 				}
 				isIH, minKey = keyIsBefore(fstl.ihK, fstl.k)
 			} else if cmp > 0 {
-				fstl.rangeIdx++
+				if !first {
+					fstl.rangeIdx++
+				}
 				if fstl.rangeIdx == len(fstl.dbPrefixes) {
 					fstl.k = nil
 					fstl.ihK = nil
 					return nil
 				}
-				if err := fstl.finaliseRoot(cutoff); err != nil {
-					return err
+				if !first {
+					if err := fstl.finaliseRoot(cutoff); err != nil {
+						return err
+					}
 				}
 				fixedbytes = fstl.fixedbytes[fstl.rangeIdx]
 				mask = fstl.masks[fstl.rangeIdx]
@@ -322,10 +285,8 @@ func (fstl *FlatDbSubTrieLoader) iteration() error {
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and SeekTo: %x\n", fstl.k)
 			}
-			if fstl.ih != nil {
-				if !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
-					fstl.ihK, fstl.ihV = fstl.ih.SeekTo(fstl.accAddrHashWithInc[:])
-				}
+			if !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
+				fstl.ihK, fstl.ihV = fstl.ih.SeekTo(fstl.accAddrHashWithInc[:])
 			}
 		}
 		return nil
@@ -543,12 +504,27 @@ func (fstl *FlatDbSubTrieLoader) finaliseStorageRoot(cutoff int) (bool, error) {
 }
 
 func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
+	defer trieFlatDbSubTrieLoaderTimer.UpdateSince(time.Now())
 	if len(fstl.dbPrefixes) == 0 {
 		return SubTries{}, nil
 	}
+	// Create manually managed read transaction
+	if tx, err := fstl.boltDB.Begin(false); err == nil {
+		//nolint:errcheck
+		defer tx.Rollback()
+		fstl.ih = tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+		fstl.c = tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+	} else {
+		if err != nil {
+			return SubTries{}, fmt.Errorf("opening bolt tx: %v", err)
+		}
+	}
+	if err := fstl.iteration(true /* first */); err != nil {
+		return fstl.subTries, err
+	}
 	for fstl.k != nil || fstl.ihK != nil {
 		for (fstl.k != nil || fstl.ihK != nil) && !fstl.accountItemPresent && !fstl.storageItemPresent {
-			if err := fstl.iteration(); err != nil {
+			if err := fstl.iteration(false /* first */); err != nil {
 				return fstl.subTries, err
 			}
 		}
@@ -563,11 +539,6 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				return fstl.subTries, err
 			}
 			fstl.accountItemPresent = false
-		}
-	}
-	if fstl.tx != nil {
-		if err := fstl.tx.Rollback(); err != nil {
-			return fstl.subTries, err
 		}
 	}
 	if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {
