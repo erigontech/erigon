@@ -310,6 +310,13 @@ func initialState1() error {
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
+	// Create intermediate hash bucket since it is mandatory now
+	if err := dbBolt.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+		return err
+	}); err != nil {
+		return err
+	}
 	snapshotDb := db.MemCopy().(*ethdb.BoltDatabase).KV()
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()

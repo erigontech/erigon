@@ -82,6 +82,10 @@ func (s *Stream) Reset() {
 	}
 }
 
+type StreamIterator interface {
+	Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte)
+}
+
 // Iterator helps iterate over a trie according to a given resolve set
 type Iterator struct {
 	rl           *RetainList
