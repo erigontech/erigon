@@ -554,7 +554,13 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	if err != nil {
 		return err
 	}
-	return tds.t.HookSubTries(subTries, hooks)
+	if err := tds.t.HookSubTries(subTries, hooks); err != nil {
+		for i, hash := range subTries.Hashes {
+			log.Error("Info for error", "dbPrefix", dbPrefixes[i], "fixedbits", fixedbits[i], "hash", hash)
+		}
+		return err
+	}
+	return nil
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
