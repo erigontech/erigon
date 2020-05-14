@@ -174,6 +174,10 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 			}
 			if cmp < 0 {
 				// This happens after we have just incremented rangeIdx or on the very first iteration
+				if first && len(dbPrefix) > common.HashLength {
+					// Looking for storage sub-tree
+					copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
+				}
 				fstl.k, fstl.v = fstl.c.SeekTo(dbPrefix)
 				if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
 					// Advance past the storage to the first account
