@@ -566,7 +566,9 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		}
 	}
 	if fstl.tx != nil {
-		fstl.tx.Rollback()
+		if err := fstl.tx.Rollback(); err != nil {
+			return fstl.subTries, err
+		}
 	}
 	if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
