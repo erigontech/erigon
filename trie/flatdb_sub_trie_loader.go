@@ -58,17 +58,18 @@ type FlatDbSubTrieLoader struct {
 
 	// Storage item buffer
 	storageItemPresent bool
-	storageItemType StreamItem
-	storageKey []byte
+	storageIsHash bool
+	storageKeyPart1 []byte
+	storageKeyPart2 []byte
 	storageHash []byte
 	storageValue []byte
 
 	// Acount item buffer
 	accountItemPresent bool
-	accountItemType StreamItem
+	accountIsHash bool
 	accountKey []byte
 	accountHash []byte
-	accountValue *accounts.Account
+	accountValue []byte
 }
 
 func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
@@ -185,6 +186,9 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl *RetainList, dbPref
 
 func (fstl *FlatDbSubTrieLoader) iteration() error {
 	isIH, minKey := keyIsBefore(fstl.ihK, fstl.k)
+	if fstl.trace {
+		fmt.Printf("keyIsBefore(%x,%x)=%t,%x\n", fstl.ihK, fstl.k, isIH, minKey)
+	}
 	fixedbytes := fstl.fixedbytes[fstl.rangeIdx]
 	cutoff := fstl.cutoffs[fstl.rangeIdx]
 	if fixedbytes > 0 {
@@ -282,21 +286,48 @@ func (fstl *FlatDbSubTrieLoader) iteration() error {
 			return nil
 		}
 		if len(fstl.k) > common.HashLength {
-			if err := fstl.WalkerStorage(false, fstl.rangeIdx, fstl.k, fstl.v); err != nil {
-				return err
+			fstl.storageItemPresent = true
+			fstl.storageIsHash = false
+			if len(fstl.k) >= common.HashLength {
+				fstl.storageKeyPart1 = fstl.k[:common.HashLength]
+				if len(fstl.k) >= common.HashLength + common.IncarnationLength {
+					fstl.storageKeyPart2 = fstl.k[common.HashLength + common.IncarnationLength:]
+				} else {
+					fstl.storageKeyPart2 = nil
+				}
+			} else {
+				fstl.storageKeyPart1 = fstl.k
+				fstl.storageKeyPart2 = nil
 			}
+			fstl.storageHash = nil
+			fstl.storageValue = fstl.v
+			//if err := fstl.WalkerStorage(false, fstl.rangeIdx, fstl.k, fstl.v); err != nil {
+			//	return err
+			//}
 			fstl.k, fstl.v = fstl.c.Next()
 			if fstl.trace {
 				fmt.Printf("k after storageWalker and Next: %x\n", fstl.k)
 			}
 		} else {
-			if err := fstl.WalkerAccount(false, fstl.rangeIdx, fstl.k, fstl.v); err != nil {
-				return err
+			fstl.accountItemPresent = true
+			fstl.accountIsHash = false
+			fstl.accountKey = fstl.k
+			fstl.accountValue = fstl.v
+			if err := fstl.a.DecodeForStorage(fstl.v); err != nil {
+				return fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
+			copy(fstl.accAddrHashWithInc[:], fstl.k)
+			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], ^fstl.a.Incarnation)
+			//if err := fstl.WalkerAccount(false, fstl.rangeIdx, fstl.k, fstl.v); err != nil {
+			//	return err
+			//}
 			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
 			fstl.k, fstl.v = fstl.c.SeekTo(fstl.accAddrHashWithInc[:])
+			if fstl.trace {
+				fmt.Printf("k after accountWalker and SeekTo: %x\n", fstl.k)
+			}
 			if fstl.ih != nil {
 				if !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
 					fstl.ihK, fstl.ihV = fstl.ih.SeekTo(fstl.accAddrHashWithInc[:])
@@ -339,13 +370,32 @@ func (fstl *FlatDbSubTrieLoader) iteration() error {
 		return nil
 	}
 	if len(fstl.ihK) > common.HashLength {
-		if err := fstl.WalkerStorage(true, fstl.rangeIdx, fstl.ihK, fstl.ihV); err != nil {
-			return fmt.Errorf("storageWalker err: %w", err)
+		fstl.storageItemPresent = true
+		fstl.storageIsHash = true
+		if len(fstl.ihK) >= common.HashLength {
+			fstl.storageKeyPart1 = fstl.ihK[:common.HashLength]
+			if len(fstl.ihK) >= common.HashLength + common.IncarnationLength {
+				fstl.storageKeyPart2 = fstl.ihK[common.HashLength + common.IncarnationLength:]
+			} else {
+				fstl.storageKeyPart2 = nil
+			}
+		} else {
+			fstl.storageKeyPart1 = fstl.ihK
+			fstl.storageKeyPart2 = nil
 		}
+		fstl.storageHash = nil
+		fstl.storageValue = fstl.ihV
+		//if err := fstl.WalkerStorage(true, fstl.rangeIdx, fstl.ihK, fstl.ihV); err != nil {
+		//	return fmt.Errorf("storageWalker err: %w", err)
+		//}
 	} else {
-		if err := fstl.WalkerAccount(true, fstl.rangeIdx, fstl.ihK, fstl.ihV); err != nil {
-			return fmt.Errorf("accWalker err: %w", err)
-		}
+		fstl.accountItemPresent = true
+		fstl.accountIsHash = true
+		fstl.accountKey = fstl.ihK
+		fstl.accountValue = fstl.ihV
+		//if err := fstl.WalkerAccount(true, fstl.rangeIdx, fstl.ihK, fstl.ihV); err != nil {
+		//	return fmt.Errorf("accWalker err: %w", err)
+		//}
 	}
 
 	// skip subtree
@@ -393,12 +443,6 @@ func (fstl *FlatDbSubTrieLoader) iteration() error {
 	}
 	return nil
 }
-
-/*
-func (fstl *FlatDbSubTrieLoader) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte) {
-
-}
-*/
 
 // cutoff specifies how many nibbles have to be cut from the beginning of the storage keys
 // to fit the insertion point.
@@ -515,8 +559,22 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		return SubTries{}, nil
 	}
 	for fstl.k != nil || fstl.ihK != nil {
-		if err := fstl.iteration(); err != nil {
-			return SubTries{}, err
+		for (fstl.k != nil || fstl.ihK != nil) && !fstl.accountItemPresent && !fstl.storageItemPresent {
+			if err := fstl.iteration(); err != nil {
+				return fstl.subTries, err
+			}
+		}
+		if fstl.storageItemPresent {
+			if err := fstl.WalkerStorage(fstl.storageIsHash, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue); err != nil {
+				return fstl.subTries, err
+			}
+			fstl.storageItemPresent = false
+		}
+		if fstl.accountItemPresent {
+			if err := fstl.WalkerAccount(fstl.accountIsHash, fstl.rangeIdx, fstl.accountKey, fstl.accountValue); err != nil {
+				return fstl.subTries, err
+			}
+			fstl.accountItemPresent = false
 		}
 	}
 	if fstl.tx != nil {
@@ -555,6 +613,15 @@ func (fstl *FlatDbSubTrieLoader) AttachRequestedCode(db ethdb.Getter, requests [
 
 type walker func(isIH bool, rangeIdx int, k, v []byte) error
 
+func keyToNibbles(k []byte, w io.ByteWriter) {
+	for _, b := range k {
+		//nolint:errcheck
+		w.WriteByte(b / 16)
+		//nolint:errcheck
+		w.WriteByte(b % 16)
+	}
+}
+
 func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
 	// Transform k to nibbles, but skip the incarnation part in the middle
 	for i, b := range k {
@@ -576,16 +643,17 @@ func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
 	}
 }
 
-func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, k, v []byte) error {
+func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, kPart1, kPart2, v []byte) error {
 	if fstl.trace {
-		fmt.Printf("WalkerStorage: isIH=%v rangeIdx=%d key=%x value=%x\n", isIH, rangeIdx, k, v)
+		fmt.Printf("WalkerStorage: isIH=%v rangeIdx=%d keyPart1=%x keyPart2=%x value=%x\n", isIH, rangeIdx, kPart1, kPart2, v)
 	}
 
 	fstl.currStorage.Reset()
 	fstl.currStorage.Write(fstl.succStorage.Bytes())
 	fstl.succStorage.Reset()
 	// Transform k to nibbles, but skip the incarnation part in the middle
-	keyToNibblesWithoutInc(k, &fstl.succStorage)
+	keyToNibbles(kPart1, &fstl.succStorage)
+	keyToNibbles(kPart2, &fstl.succStorage)
 
 	if !isIH {
 		fstl.succStorage.WriteByte(16)
@@ -677,11 +745,6 @@ func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, rangeIdx int, k, v []b
 		return nil
 	}
 
-	if err := fstl.a.DecodeForStorage(v); err != nil {
-		return fmt.Errorf("fail DecodeForStorage: %w", err)
-	}
-	copy(fstl.accAddrHashWithInc[:], k)
-	binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], ^fstl.a.Incarnation)
 	// Place code on the stack first, the storage will follow
 	if !fstl.a.IsEmptyCodeHash() {
 		// the first item ends up deepest on the stack, the second item - on the top
