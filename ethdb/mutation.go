@@ -24,6 +24,13 @@ func (m *mutation) KV() *bolt.DB {
 	}
 }
 
+func (m *mutation) AbstractKV() KV {
+	if casted, ok := m.db.(HasAbstractKV); ok {
+		return casted.AbstractKV()
+	}
+	return nil
+}
+
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

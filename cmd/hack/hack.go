@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -619,6 +621,71 @@ func trieChart() {
 	check(err)
 }
 
+func mgrSchedule(chaindata string, block uint64) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+
+	//bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	//check(err)
+	//defer db.Close()
+	//tds, err := bc.GetTrieDbState()
+	//check(err)
+	//currentBlock := bc.CurrentBlock()
+	//currentBlockNr := currentBlock.NumberU64()
+
+	loader := trie.NewSubTrieLoader(0)
+	tr := trie.New(common.Hash{})
+	rs := trie.NewRetainList(0)
+	rs.AddHex([]byte{})
+	subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	check(err)
+
+	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
+	check(err)
+
+	stateSize := tr.EstimateWitnessSize([]byte{})
+	schedule := mgr.NewStateSchedule(stateSize, block, block+mgr.BlocksPerCycle+100)
+
+	var buf bytes.Buffer
+	var witnessSizeAccumulator uint64
+	var witnessCount int64
+	var witnessEstimatedSizeAccumulator uint64
+	//fmt.Printf("%s\n", schedule)
+	//fmt.Printf("stateSize: %d\n", stateSize)
+	for i := range schedule.Ticks {
+		tick := schedule.Ticks[i]
+		for j := range tick.StateSizeSlices {
+			ss := tick.StateSizeSlices[j]
+			stateSlice, err2 := mgr.StateSizeSlice2StateSlice(db, tr, ss)
+			if err2 != nil {
+				panic(err2)
+			}
+			retain := trie.NewRetainRange(common.CopyBytes(stateSlice.From), common.CopyBytes(stateSlice.To))
+			//if tick.IsLastInCycle() {
+			//	fmt.Printf("\nretain: %s\n", retain)
+			//}
+			witness, err2 := tr.ExtractWitness(false, retain)
+			if err2 != nil {
+				panic(err2)
+			}
+
+			buf.Reset()
+			_, err = witness.WriteTo(&buf)
+			if err != nil {
+				panic(err)
+			}
+
+			witnessCount++
+			witnessSizeAccumulator += uint64(buf.Len())
+		}
+		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
+	}
+
+	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
+	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
+	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
+}
+
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 32
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
@@ -655,7 +722,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 100 || i == block {
+		if len(blocks) >= 1000 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
 				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
@@ -2073,6 +2140,9 @@ func main() {
 	}
 	if *action == "slice" {
 		dbSlice(*chaindata, common.FromHex(*hash))
+	}
+	if *action == "mgrSchedule" {
+		mgrSchedule(*chaindata, uint64(*block))
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)

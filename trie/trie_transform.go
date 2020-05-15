@@ -1,6 +1,7 @@
 package trie
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
@@ -30,9 +31,7 @@ func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTrans
 		}
 		transformSubTrie(n.storage, aHex, newTrie, transformFunc)
 	case hashNode:
-		nCopy := make(hashNode, len(n))
-		copy(nCopy, n)
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), nCopy)
+		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), hashNode{hash: common.CopyBytes(n.hash), witnessLength: n.witnessLength})
 		return
 	case *shortNode:
 		var hexVal []byte

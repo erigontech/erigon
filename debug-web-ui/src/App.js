@@ -10,6 +10,7 @@ import IntermediateHashPage from './page/IntermediateHashPage';
 import { ReactComponent as Logo } from './logo.svg';
 import StoragePage from './page/Storage';
 import RemoteSidebar from './components/RemoteSidebar';
+import IntermediateDataLenPage from "./page/IntermediateDataLenPage";
 
 const sidebar = [
   {
@@ -23,6 +24,10 @@ const sidebar = [
   {
     url: '/intermediate-hash',
     label: 'Inter Hash',
+  },
+  {
+    url: '/intermediate-data-len',
+    label: 'Data Len',
   },
 ];
 
@@ -70,6 +75,9 @@ function App() {
                 </Route>
                 <Route path="/intermediate-hash">
                   <IntermediateHashPage api={api} />
+                </Route>
+                <Route path="/intermediate-data-len">
+                  <IntermediateDataLenPage api={api} />
                 </Route>
               </Switch>
             </Col>

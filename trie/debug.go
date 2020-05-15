@@ -112,10 +112,10 @@ func (n *shortNode) print(w io.Writer) {
 }
 
 func (n hashNode) fstring(ind string) string {
-	return fmt.Sprintf("<%x> ", []byte(n))
+	return fmt.Sprintf("<%x> ", n.hash)
 }
 func (n hashNode) print(w io.Writer) {
-	fmt.Fprintf(w, "h(%x)", []byte(n))
+	fmt.Fprintf(w, "h(%x)", n.hash)
 }
 
 func (n valueNode) fstring(ind string) string {
@@ -184,7 +184,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "\n")
 		fmt.Fprintf(w, "%s)\n", ind)
 	case hashNode:
-		fmt.Fprintf(w, "hash(%x)", []byte(n))
+		fmt.Fprintf(w, "hash(%x)", n.hash)
 	case valueNode:
 		fmt.Fprintf(w, "value(%s %x)", key, []byte(n))
 	case *accountNode:
@@ -287,9 +287,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 	case hashNode:
 		fmt.Fprintf(w, "hash(")
 		if n, ok := n2.(hashNode); ok {
-			fmt.Fprintf(w, "%x/%x", []byte(n1), []byte(n))
+			fmt.Fprintf(w, "%x/%x", n1.hash, n.hash)
 		} else {
-			fmt.Fprintf(w, "hash(%x)/%T(%x)\n", []byte(n1), n2, n2.reference())
+			fmt.Fprintf(w, "hash(%x)/%T(%x)\n", n1.hash, n2, n2.reference())
 			//printDiffSide(n2, w, ind, key)
 		}
 		fmt.Fprintf(w, ")")
@@ -347,7 +347,7 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
 	}
 	var hash common.Hash
 	if hn, ok := nd.(hashNode); ok {
-		copy(hash[:], hn[:])
+		copy(hash[:], hn.hash[:])
 	} else {
 		h := t.newHasherFunc()
 		defer returnHasherToPool(h)

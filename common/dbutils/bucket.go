@@ -74,6 +74,9 @@ var (
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket = []byte("iTh")
 
+	// some_prefix_of(hash_of_address_of_account) => estimated_number_of_witness_bytes
+	IntermediateTrieWitnessLenBucket = []byte("iTw")
+
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = []byte("DBINFO")
 
@@ -148,6 +151,7 @@ var Buckets = [][]byte{
 	AccountChangeSetBucket,
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
+	IntermediateTrieWitnessLenBucket,
 	DatabaseVerisionKey,
 	HeadHeaderKey,
 	HeadBlockKey,

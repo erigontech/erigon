@@ -55,6 +55,9 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string) error 
 	if err = apis.RegisterIntermediateHashAPI(root.Group("intermediate-hash"), e); err != nil {
 		return err
 	}
+	if err = apis.RegisterIntermediateDataLenAPI(root.Group("intermediate-data-len"), e); err != nil {
+		return err
+	}
 
 	log.Printf("serving on %v... press ctrl+C to abort\n", localAddress)
 
