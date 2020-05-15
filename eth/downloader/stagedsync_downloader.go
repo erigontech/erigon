@@ -6,7 +6,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-var UsePlainStateExecution = true // FIXME: when we can move the hashed state forward.
+var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
+//  ^--- will be overriden e when parsing flags anyway
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 	log.Info("Sync stage 1/5. Downloading headers...")
