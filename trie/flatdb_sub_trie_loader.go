@@ -43,7 +43,6 @@ type FlatDbSubTrieLoader struct {
 	currStorage   bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succStorage   bytes.Buffer
 	valueStorage  bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groupsStorage []uint16
 
 	witnessLenAccount uint64
 	witnessLenStorage uint64
@@ -102,7 +101,6 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, dbPr
 	fstl.succStorage.Reset()
 	fstl.valueStorage.Reset()
 	fstl.minKeyAsNibbles.Reset()
-	fstl.groupsStorage = fstl.groupsStorage[:0]
 	fstl.wasIHStorage = false
 	fstl.subTries = SubTries{}
 	fstl.trace = trace
@@ -228,8 +226,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 				cutoff = fstl.cutoffs[fstl.rangeIdx]
 				fstl.wasIH = false
 				fstl.wasIHStorage = false
-				fstl.groups = fstl.groups[:0]
-				fstl.groupsStorage = fstl.groupsStorage[:0]
 				fstl.curr.Reset()
 				fstl.succ.Reset()
 				fstl.currStorage.Reset()
@@ -458,9 +454,14 @@ func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
 		if fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.curr.Bytes(), fstl.succ.Bytes(), fstl.hb, data, fstl.groups, false); err != nil {
 			return err
 		}
+		if len(fstl.groups) > cutoff {
+			fstl.groups = fstl.groups[:cutoff]
+		}
+		for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+			fstl.groups = fstl.groups[:len(fstl.groups)-1]
+		}
 		fstl.accData.FieldSet = 0
 	}
-	fstl.groups = fstl.groups[:0]
 	fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
 	fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
 	fstl.hb.Reset()
@@ -494,11 +495,16 @@ func (fstl *FlatDbSubTrieLoader) finaliseStorageRoot(cutoff int) (bool, error) {
 			data = &fstl.leafData
 		}
 		var err error
-		fstl.groupsStorage, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groupsStorage, false)
+		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, false)
 		if err != nil {
 			return false, err
 		}
-		fstl.groupsStorage = fstl.groupsStorage[:0]
+		if len(fstl.groups) > cutoff {
+			fstl.groups = fstl.groups[:cutoff]
+		}
+		for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+			fstl.groups = fstl.groups[:len(fstl.groups)-1]
+		}
 		fstl.currStorage.Reset()
 		fstl.succStorage.Reset()
 		fstl.wasIHStorage = false
@@ -557,6 +563,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 						return err
 					}
 				case CutoffStreamItem:
+					fmt.Printf("Cutoff with %d\n", fstl.streamCutoff)
 					if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
 						return err
 					}
@@ -654,7 +661,7 @@ func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, kPart1, 
 			fstl.leafData.Value = rlphacks.RlpSerializableBytes(fstl.valueStorage.Bytes())
 			data = &fstl.leafData
 		}
-		fstl.groupsStorage, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groupsStorage, false)
+		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, false)
 		if err != nil {
 			return err
 		}
@@ -717,7 +724,6 @@ func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, rangeIdx int, k []byte
 		fstl.wasIHStorage = false
 		fstl.currStorage.Reset()
 		fstl.succStorage.Reset()
-		fstl.groupsStorage = fstl.groupsStorage[:0]
 		var err error
 		if fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.curr.Bytes(), fstl.succ.Bytes(), fstl.hb, data, fstl.groups, false); err != nil {
 			return err
