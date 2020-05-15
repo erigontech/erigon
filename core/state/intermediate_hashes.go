@@ -1,8 +1,11 @@
 package state
 
 import (
+	"encoding/binary"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -27,7 +30,7 @@ func NewIntermediateHashes(putter ethdb.Putter, deleter ethdb.Deleter) *Intermed
 	return &IntermediateHashes{putter: putter, deleter: deleter}
 }
 
-func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeHash common.Hash, incarnation uint64) {
+func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeHash common.Hash, incarnation uint64, witnessLen uint64) {
 	// only put to bucket prefixes with even number of nibbles
 	if len(prefixAsNibbles) == 0 || len(prefixAsNibbles)%2 == 1 {
 		return
@@ -46,8 +49,16 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 		key = common.CopyBytes(buf.B)
 	}
 
+	lenBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(lenBytes, witnessLen)
+
 	if err := ih.putter.Put(dbutils.IntermediateTrieHashBucket, key, common.CopyBytes(nodeHash[:])); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
+	}
+	if debug.IsTrackWitnessSizeEnabled() {
+		if err := ih.putter.Put(dbutils.IntermediateTrieWitnessLenBucket, key, lenBytes); err != nil {
+			log.Warn("could not put intermediate trie data len", "err", err)
+		}
 	}
 }
 
@@ -71,6 +82,11 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 
 	if err := ih.deleter.Delete(dbutils.IntermediateTrieHashBucket, key); err != nil {
 		log.Warn("could not delete intermediate trie hash", "err", err)
-		return
 	}
+	if debug.IsTrackWitnessSizeEnabled() {
+		if err := ih.deleter.Delete(dbutils.IntermediateTrieWitnessLenBucket, key); err != nil {
+			log.Warn("could not delete intermediate trie hash", "err", err)
+		}
+	}
+
 }

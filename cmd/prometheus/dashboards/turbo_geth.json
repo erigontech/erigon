@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1588588291032,
+  "iteration": 1589512709712,
   "links": [],
   "panels": [
     {
@@ -42,8 +42,8 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 6,
+        "w": 8,
         "x": 0,
         "y": 1
       },
@@ -81,15 +81,15 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "trie_resolve_stateful{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "trie_subtrieloader_flatdb{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "trie_resolve_stateful: {{quantile}}, {{instance}}",
+          "legendFormat": "trie_subtrieloader_flatdb: {{quantile}}, {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "trie_resolve_stateless{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "trie_subtrieloader_witnessdb{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "trie_resolve_stateless: {{quantile}}, {{instance}}",
+          "legendFormat": "trie_subtrieloader_witnessdb: {{quantile}}, {{instance}}",
           "refId": "C"
         }
       ],
@@ -143,9 +143,104 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "hiddenSeries": false,
+      "id": 130,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(trie_subtrieloader_flatdb_count{instance=~\"$instance\"}[15m])",
+          "interval": "",
+          "legendFormat": "trie_resolve_stateful_count: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(trie_subtrieloader_witnessdb_count{instance=~\"$instance\"}[15m])",
+          "interval": "",
+          "legendFormat": "trie_resolve_stateless_count: {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Trie Resolve Amounts",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
         "y": 1
       },
       "hiddenSeries": false,
@@ -175,13 +270,13 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(db_ih_insert{instance=~\"$instance\"}[1m])",
+          "expr": "rate(db_ih_insert{instance=~\"$instance\"}[15m])",
           "interval": "",
           "legendFormat": "db/ih/insert: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(db_ih_delete{instance=~\"$instance\"}[1m])",
+          "expr": "rate(db_ih_delete{instance=~\"$instance\"}[15m])",
           "interval": "",
           "legendFormat": "db/ih/delete: {{instance}}",
           "refId": "B"
@@ -235,7 +330,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 7
       },
       "id": 82,
       "panels": [],
@@ -254,7 +349,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 10
+        "y": 8
       },
       "hiddenSeries": false,
       "id": 106,
@@ -363,7 +458,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 10
+        "y": 8
       },
       "hiddenSeries": false,
       "id": 86,
@@ -472,7 +567,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 10
+        "y": 8
       },
       "hiddenSeries": false,
       "id": 85,
@@ -570,10 +665,10 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 7,
+        "w": 8,
         "x": 0,
-        "y": 16
+        "y": 14
       },
       "hiddenSeries": false,
       "id": 124,
@@ -659,10 +754,10 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 16
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 14
       },
       "hiddenSeries": false,
       "id": 128,
@@ -753,7 +848,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 21
       },
       "id": 75,
       "panels": [],
@@ -772,7 +867,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 22
       },
       "hiddenSeries": false,
       "id": 96,
@@ -873,7 +968,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 22
       },
       "hiddenSeries": false,
       "id": 77,
@@ -977,7 +1072,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 28
       },
       "id": 4,
       "panels": [],
@@ -1006,7 +1101,7 @@
         "h": 2,
         "w": 3,
         "x": 0,
-        "y": 32
+        "y": 29
       },
       "id": 108,
       "interval": null,
@@ -1081,7 +1176,7 @@
         "h": 6,
         "w": 9,
         "x": 3,
-        "y": 32
+        "y": 29
       },
       "hiddenSeries": false,
       "id": 110,
@@ -1198,7 +1293,7 @@
         "h": 2,
         "w": 3,
         "x": 12,
-        "y": 32
+        "y": 29
       },
       "id": 113,
       "interval": null,
@@ -1273,7 +1368,7 @@
         "h": 6,
         "w": 9,
         "x": 15,
-        "y": 32
+        "y": 29
       },
       "hiddenSeries": false,
       "id": 116,
@@ -1390,7 +1485,7 @@
         "h": 2,
         "w": 3,
         "x": 0,
-        "y": 34
+        "y": 31
       },
       "id": 111,
       "interval": null,
@@ -1474,7 +1569,7 @@
         "h": 2,
         "w": 3,
         "x": 12,
-        "y": 34
+        "y": 31
       },
       "id": 114,
       "interval": null,
@@ -1556,7 +1651,7 @@
         "h": 2,
         "w": 3,
         "x": 0,
-        "y": 36
+        "y": 33
       },
       "id": 109,
       "interval": null,
@@ -1638,7 +1733,7 @@
         "h": 2,
         "w": 3,
         "x": 12,
-        "y": 36
+        "y": 33
       },
       "id": 115,
       "interval": null,
@@ -1711,7 +1806,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 112,
@@ -1887,7 +1982,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 44
       },
       "hiddenSeries": false,
       "id": 117,
@@ -2061,7 +2156,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 53
       },
       "id": 17,
       "panels": [],
@@ -2080,7 +2175,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 54
       },
       "hiddenSeries": false,
       "id": 35,
@@ -2192,7 +2287,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 54
       },
       "hiddenSeries": false,
       "id": 118,
@@ -2304,7 +2399,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 54
       },
       "hiddenSeries": false,
       "id": 119,
@@ -2399,7 +2494,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 60
       },
       "id": 37,
       "panels": [],
@@ -2418,7 +2513,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 64
+        "y": 61
       },
       "hiddenSeries": false,
       "id": 120,
@@ -2519,7 +2614,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 64
+        "y": 61
       },
       "hiddenSeries": false,
       "id": 56,
@@ -2729,7 +2824,7 @@
           ]
         },
         "datasource": "Prometheus",
-        "definition": "trie_resolve_stateful",
+        "definition": "trie_subtrieloader_flatdb",
         "hide": 0,
         "includeAll": true,
         "index": -1,
@@ -2737,7 +2832,7 @@
         "multi": true,
         "name": "instance",
         "options": [],
-        "query": "trie_resolve_stateful",
+        "query": "trie_subtrieloader_flatdb",
         "refresh": 1,
         "regex": "/.*instance=\"([^\"]*).*/",
         "skipUrlSync": false,
@@ -2785,5 +2880,5 @@
   "variables": {
     "list": []
   },
-  "version": 40
+  "version": 23
 }
