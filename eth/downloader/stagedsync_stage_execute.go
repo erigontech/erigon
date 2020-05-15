@@ -104,14 +104,22 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		if block == nil {
 			break
 		}
-		stateReader := state.NewDbStateReader(mutation, uncommitedIncarnations)
-		plainStateReader := state.NewPlainStateReaderWithFallback(
-			mutation, uncommitedIncarnations, stateReader)
 
-		stateWriter := state.NewDbStateWriter(mutation, blockNum, uncommitedIncarnations)
+		hashStateReader := state.NewDbStateReader(mutation, uncommitedIncarnations)
+
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
+
+		if UsePlainStateExecution {
+			stateReader = state.NewPlainStateReaderWithFallback(mutation, uncommitedIncarnations, hashStateReader)
+			stateWriter = state.NewPlainStateWriter(mutation, blockNum, uncommitedIncarnations)
+		} else {
+			stateReader = hashStateReader
+			stateWriter = state.NewDbStateWriter(mutation, blockNum, uncommitedIncarnations)
+		}
 
 		// where the magic happens
-		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, plainStateReader, stateWriter)
+		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}

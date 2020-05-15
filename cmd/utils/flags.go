@@ -224,6 +224,10 @@ var (
 		Usage: `Blockchain sync mode ("fast", "full", "staged", or "light")`,
 		Value: &defaultSyncMode,
 	}
+	StagedSyncPlainExecFlag = cli.BoolFlag{
+		Name:  "plainstate",
+		Usage: "use plain state when doing staged sync (affects only syncmode=staged)",
+	}
 	GCModePruningFlag = cli.BoolFlag{
 		Name:  "pruning",
 		Usage: `Enable storage pruning`,
@@ -1502,6 +1506,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
+
+	downloader.UsePlainStateExecution = ctx.Bool(StagedSyncPlainExecFlag.Name)
+	log.Info("setting up plain text execution", "plain", downloader.UsePlainStateExecution)
 
 	if ctx.GlobalIsSet(SyncModeFlag.Name) {
 		cfg.SyncMode = *GlobalTextMarshaler(ctx, SyncModeFlag.Name).(*downloader.SyncMode)

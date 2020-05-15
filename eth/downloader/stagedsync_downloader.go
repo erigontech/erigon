@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-const enableHashChecks = false // FIXME: when we can move the hashed state forward.
+var UsePlainStateExecution = true // FIXME: when we can move the hashed state forward.
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 	log.Info("Sync stage 1/5. Downloading headers...")
@@ -39,7 +39,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		case Execution:
 			err = unwindExecutionStage(unwindPoint, d.stateDB)
 		case HashCheck:
-			if enableHashChecks {
+			if !UsePlainStateExecution {
 				err = d.unwindHashCheckStage(unwindPoint)
 			}
 		default:
@@ -92,7 +92,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/5. Validating final hash")
-	if enableHashChecks {
+	if !UsePlainStateExecution {
 		if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
 			return err
 		}
