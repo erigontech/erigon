@@ -103,7 +103,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		return err
 	}
 	var accountSerialised []byte
-	accountSerialised, err = changeset.EncodeAccounts(accountChanges)
+	accountSerialised, err = changeset.EncodeAccountsPlain(accountChanges)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	}
 	var storageSerialized []byte
 	if storageChanges.Len() > 0 {
-		storageSerialized, err = changeset.EncodeStorage(storageChanges)
+		storageSerialized, err = changeset.EncodeStoragePlain(storageChanges)
 		if err != nil {
 			return err
 		}
