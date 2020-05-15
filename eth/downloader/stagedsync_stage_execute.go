@@ -61,8 +61,8 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
-	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
+func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uint64, error) {
+	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return 0, err
 	}
@@ -84,30 +84,42 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 		}
 	*/
 
-	mutation := d.stateDB.NewBatch()
+	mutation := stateDB.NewBatch()
 
 	progressLogger := NewProgressLogger(logInterval)
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
-	// incarnationMap holds incarnations for accounts that were deleted, but their storage
-	// is not yet committed
-	var incarnationMap = make(map[common.Address]uint64)
 
-	chainConfig := d.blockchain.Config()
-	engine := d.blockchain.Engine()
-	vmConfig := d.blockchain.GetVMConfig()
+	// uncommitedIncarnations map holds incarnations for accounts that were deleted,
+	// but their storage is not yet committed
+	var uncommitedIncarnations = make(map[common.Address]uint64)
+
+	chainConfig := blockchain.Config()
+	engine := blockchain.Engine()
+	vmConfig := blockchain.GetVMConfig()
 	for {
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
-		block := d.blockchain.GetBlockByNumber(blockNum)
+		block := blockchain.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
-		stateReader := state.NewDbStateReader(mutation, incarnationMap)
-		stateWriter := state.NewDbStateWriter(mutation, blockNum, incarnationMap)
+
+		hashStateReader := state.NewDbStateReader(mutation, uncommitedIncarnations)
+
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
+
+		if UsePlainStateExecution {
+			stateReader = state.NewPlainStateReaderWithFallback(mutation, uncommitedIncarnations, hashStateReader)
+			stateWriter = state.NewPlainStateWriter(mutation, blockNum, uncommitedIncarnations)
+		} else {
+			stateReader = hashStateReader
+			stateWriter = state.NewDbStateWriter(mutation, blockNum, uncommitedIncarnations)
+		}
 
 		// where the magic happens
-		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, d.blockchain, engine, block, stateReader, stateWriter)
+		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}
@@ -122,8 +134,8 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			if _, err = mutation.Commit(); err != nil {
 				return 0, err
 			}
-			mutation = d.stateDB.NewBatch()
-			incarnationMap = make(map[common.Address]uint64)
+			mutation = stateDB.NewBatch()
+			uncommitedIncarnations = make(map[common.Address]uint64)
 		}
 
 		/*
@@ -140,25 +152,21 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
 
-func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
-	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
+func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
+	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
 	}
-	unwindPoint, err1 := GetStageUnwind(d.stateDB, Execution)
-	if err1 != nil {
-		return err1
-	}
 	if unwindPoint >= lastProcessedBlockNumber {
-		err = SaveStageUnwind(d.stateDB, Execution, 0)
+		err = SaveStageUnwind(stateDB, Execution, 0)
 		if err != nil {
 			return fmt.Errorf("unwind Execution: reset: %v", err)
 		}
 		return nil
 	}
-	log.Info("Unwdind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
-	mutation := d.stateDB.NewBatch()
-	accountMap, storageMap, err2 := d.stateDB.RewindData(lastProcessedBlockNumber, unwindPoint)
+	log.Info("Unwind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
+	mutation := stateDB.NewBatch()
+	accountMap, storageMap, err2 := stateDB.RewindData(lastProcessedBlockNumber, unwindPoint)
 	if err2 != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
@@ -172,7 +180,7 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 			}
 			// Fetch the code hash
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err2 := d.stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
+				if codeHash, err2 := stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				}
 			}
