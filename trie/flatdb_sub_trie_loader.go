@@ -562,11 +562,10 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 					}
 				}
 				fstl.itemPresent = false
-			} else {
-				if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {
-					return err
-				}
 			}
+		}
+		if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {
+			return err
 		}
 		return nil
 	}); err != nil {

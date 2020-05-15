@@ -370,6 +370,7 @@ func TestApiDetails(t *testing.T) {
 		rl.AddHex(append(hexf("000202%0122x", 0), hexf("%0128x", 0)...))
 		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
+		rl.Rewind()
 		subTries, err := loader.LoadSubTries(db, 0, rl, dbPrefixes, fixedbits, false)
 		require.NoError(err)
 
