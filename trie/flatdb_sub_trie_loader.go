@@ -69,6 +69,7 @@ type FlatDbSubTrieLoader struct {
 	accountKey         []byte
 	accountHash        []byte
 	accountValue       accounts.Account
+	streamCutoff       int
 }
 
 func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
@@ -193,13 +194,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 						fstl.ihK = nil
 					}
 				}
-				if first { // This is enough for the first iteration
-					return nil
-				}
-				if fstl.k == nil && fstl.ihK == nil {
-					return nil
-				}
-				isIH, minKey = keyIsBefore(fstl.ihK, fstl.k)
+				return nil
 			} else if cmp > 0 {
 				if !first {
 					fstl.rangeIdx++
@@ -210,9 +205,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 					return nil
 				}
 				if !first {
-					if err := fstl.finaliseRoot(cutoff); err != nil {
-						return err
-					}
+					fstl.itemPresent = true
+					fstl.itemType = CutoffStreamItem
+					fstl.streamCutoff = cutoff
 				}
 				fixedbytes = fstl.fixedbytes[fstl.rangeIdx]
 				mask = fstl.masks[fstl.rangeIdx]
@@ -222,7 +217,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 					copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 				}
 				cutoff = fstl.cutoffs[fstl.rangeIdx]
-				fstl.hb.Reset()
 				fstl.wasIH = false
 				fstl.wasIHStorage = false
 				fstl.groups = fstl.groups[:0]
@@ -457,6 +451,7 @@ func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
 	fstl.groups = fstl.groups[:0]
 	fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
 	fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
+	fstl.hb.Reset()
 	return nil
 }
 
@@ -507,55 +502,51 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	if len(fstl.dbPrefixes) == 0 {
 		return SubTries{}, nil
 	}
-	// Create manually managed read transaction
-	if tx, err := fstl.boltDB.Begin(false); err == nil {
-		//nolint:errcheck
-		defer tx.Rollback()
+	if err := fstl.boltDB.View(func(tx *bolt.Tx) error {
 		fstl.ih = tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 		fstl.c = tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-	} else {
-		if err != nil {
-			return SubTries{}, fmt.Errorf("opening bolt tx: %v", err)
+		if err := fstl.iteration(true /* first */); err != nil {
+			return err
 		}
-	}
-	if err := fstl.iteration(true /* first */); err != nil {
+		for fstl.k != nil || fstl.ihK != nil {
+			for (fstl.k != nil || fstl.ihK != nil) && !fstl.itemPresent {
+				if err := fstl.iteration(false /* first */); err != nil {
+					return err
+				}
+			}
+			if fstl.itemPresent {
+				switch fstl.itemType {
+				case StorageStreamItem:
+					if err := fstl.WalkerStorage(false, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
+						return err
+					}
+				case SHashStreamItem:
+					if err := fstl.WalkerStorage(true, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
+						return err
+					}
+				case AccountStreamItem:
+					if err := fstl.WalkerAccount(false, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
+						return err
+					}
+				case AHashStreamItem:
+					if err := fstl.WalkerAccount(true, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
+						return err
+					}
+				case CutoffStreamItem:
+					if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
+						return err
+					}
+				}
+				fstl.itemPresent = false
+			} else {
+				if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
 		return fstl.subTries, err
-	}
-	for fstl.k != nil || fstl.ihK != nil {
-		for (fstl.k != nil || fstl.ihK != nil) && !fstl.itemPresent {
-			if err := fstl.iteration(false /* first */); err != nil {
-				return fstl.subTries, err
-			}
-		}
-		if fstl.itemPresent {
-			switch fstl.itemType {
-			case StorageStreamItem:
-				if err := fstl.WalkerStorage(false, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
-					return fstl.subTries, err
-				}
-			case SHashStreamItem:
-				if err := fstl.WalkerStorage(true, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash); err != nil {
-					return fstl.subTries, err
-				}
-			case AccountStreamItem:
-				if err := fstl.WalkerAccount(false, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
-					return fstl.subTries, err
-				}
-			case AHashStreamItem:
-				if err := fstl.WalkerAccount(true, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash); err != nil {
-					return fstl.subTries, err
-				}
-			}
-			fstl.itemPresent = false
-		}
-	}
-	if err := fstl.finaliseRoot(fstl.cutoffs[len(fstl.cutoffs)-1]); err != nil {
-		fmt.Println("Err in finalize root, writing down resolve params")
-		fmt.Printf("fstl.rs: %x\n", fstl.rl.hexes)
-		fmt.Printf("fixedbytes: %d\n", fstl.fixedbytes)
-		fmt.Printf("masks: %b\n", fstl.masks)
-		fmt.Printf("dbPrefixes: %x\n", fstl.dbPrefixes)
-		return fstl.subTries, fmt.Errorf("error in finaliseRoot %w", err)
 	}
 	return fstl.subTries, nil
 }
