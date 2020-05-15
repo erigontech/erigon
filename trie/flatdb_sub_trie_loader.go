@@ -496,7 +496,7 @@ func (fstl *FlatDbSubTrieLoader) finaliseStorageRoot(cutoff int) (bool, error) {
 			data = &fstl.leafData
 		}
 		var err error
-		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, false)
+		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, true)
 		if err != nil {
 			return false, err
 		}
