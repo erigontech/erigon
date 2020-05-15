@@ -152,7 +152,8 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
 
-func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
+//nolint:unparam
+func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error { //nolint:unparam
 	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)

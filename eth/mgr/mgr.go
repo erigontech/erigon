@@ -2,7 +2,6 @@ package mgr
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -10,8 +9,8 @@ import (
 )
 
 const (
-	TicksPerCycle  uint64 = 4096
-	BlocksPerTick  uint64 = 50
+	TicksPerCycle  uint64 = 256
+	BlocksPerTick  uint64 = 20
 	BlocksPerCycle uint64 = BlocksPerTick * TicksPerCycle
 
 	BytesPerWitness uint64 = 1024 * 1024
@@ -63,14 +62,15 @@ func NewStateSchedule(stateSize, fromBlock, toBlock uint64) Schedule {
 }
 
 func NewTick(blockNr, stateSize uint64) Tick {
-	number := uint64(math.Floor(float64(blockNr)/float64(BlocksPerTick))) % TicksPerCycle
+	number := blockNr / BlocksPerTick % TicksPerCycle
+	fromSize := number * stateSize / TicksPerCycle
 
 	tick := Tick{
 		Number:    number,
 		FromBlock: blockNr,
 		ToBlock:   blockNr - blockNr%BlocksPerTick + BlocksPerTick - 1,
-		FromSize:  uint64(math.Ceil(float64(number*stateSize) / float64(TicksPerCycle))),
-		ToSize:    uint64(math.Ceil(float64((number+1)*stateSize)/float64(TicksPerCycle))) - 1,
+		FromSize:  fromSize,
+		ToSize:    fromSize + stateSize/TicksPerCycle - 1,
 	}
 
 	for i := uint64(0); ; i++ {
@@ -80,7 +80,7 @@ func NewTick(blockNr, stateSize uint64) Tick {
 		}
 
 		tick.StateSizeSlices = append(tick.StateSizeSlices, ss)
-		if ss.ToSize == tick.ToSize {
+		if ss.ToSize >= tick.ToSize {
 			break
 		}
 	}

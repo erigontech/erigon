@@ -82,6 +82,14 @@ type (
 // unset children need to serialize correctly.
 var nilValueNode = valueNode(nil)
 
+func NewShortNode(key []byte, value node) *shortNode {
+	return &shortNode{
+		Key:           key,
+		Val:           value,
+		witnessLength: 1 + uint64(1)/2 + value.witnessLen(), //opcode + len(key)/2 + childrenWitnessLen
+	}
+}
+
 func EncodeAsValue(data []byte) ([]byte, error) {
 	tmp := new(bytes.Buffer)
 	if err := rlp.Encode(tmp, valueNode(data)); err != nil {
@@ -253,6 +261,27 @@ func (an *accountNode) witnessLen() uint64 {
 		res += an.code.witnessLen()
 	}
 	return res
+}
+
+func (n *fullNode) recalculateWitnessLen() {
+	n.witnessLength = 1 + 1 // opcode + mask + childrenWitnessLen
+	for j := range n.Children {
+		if n.Children[j] != nil {
+			n.witnessLength += n.Children[j].witnessLen()
+		}
+	}
+}
+func (n *duoNode) recalculateWitnessLen() {
+	n.witnessLength = 1 + 1 // opcode + mask + childrenWitnessLen
+	if n.child1 != nil {
+		n.witnessLength += n.child1.witnessLen()
+	}
+	if n.child2 != nil {
+		n.witnessLength += n.child2.witnessLen()
+	}
+}
+func (n *shortNode) recalculateWitnessLen() {
+	n.witnessLength = 1 + 1 + uint64(len(n.Key))/2 + n.Val.witnessLen() // opcode + len(key)/2 + childrenWitnessLen
 }
 
 // Pretty printing.

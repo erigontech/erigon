@@ -150,16 +150,14 @@ func TestTwoStorageItems(t *testing.T) {
 
 	require.NoError(db.Put(dbutils.CurrentStateBucket, key1, val1))
 	require.NoError(db.Put(dbutils.CurrentStateBucket, key2, val2))
-	leaf1 := shortNode{Key: keybytesToHex(key1[1:]), Val: valueNode(val1)}
-	leaf2 := shortNode{Key: keybytesToHex(key2[1:]), Val: valueNode(val2)}
 	var branch fullNode
-	branch.Children[0x7] = &leaf1
-	branch.Children[0xf] = &leaf2
-	root := shortNode{Key: []byte{0xd}, Val: &branch}
+	branch.Children[0x7] = NewShortNode(keybytesToHex(key1[1:]), valueNode(val1))
+	branch.Children[0xf] = NewShortNode(keybytesToHex(key2[1:]), valueNode(val2))
+	root := NewShortNode([]byte{0xd}, &branch)
 
 	hasher := newHasher(false)
 	defer returnHasherToPool(hasher)
-	rootRlp, err := hasher.hashChildren(&root, 0)
+	rootRlp, err := hasher.hashChildren(root, 0)
 	require.NoError(err, "failed ot hash children")
 
 	// Resolve the root node

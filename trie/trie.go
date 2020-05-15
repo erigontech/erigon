@@ -284,7 +284,7 @@ func (t *Trie) Update(key, value []byte) {
 	newnode := valueNode(value)
 
 	if t.root == nil {
-		t.root = &shortNode{Key: hex, Val: newnode, witnessLength: uint64(len(value))}
+		t.root = NewShortNode(hex, newnode)
 	} else {
 		_, t.root = t.insert(t.root, hex, valueNode(value))
 	}
@@ -308,7 +308,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	}
 
 	if t.root == nil {
-		t.root = &shortNode{Key: hex, Val: newnode}
+		t.root = NewShortNode(hex, newnode)
 	} else {
 		_, t.root = t.insert(t.root, hex, newnode)
 	}
@@ -561,7 +561,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 	var nn node
 	switch n := origNode.(type) {
 	case nil:
-		return true, &shortNode{Key: common.CopyBytes(key[pos:]), Val: value, witnessLength: value.witnessLen()}
+		return true, NewShortNode(common.CopyBytes(key[pos:]), value)
 	case *accountNode:
 		updated, nn = t.insertRecursive(n.storage, key, pos, value)
 		if updated {
@@ -579,6 +579,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				t.evictNodeFromHashMap(n)
 				n.Val = nn
 				n.ref.len = 0
+				n.recalculateWitnessLen()
 			}
 			newNode = n
 		} else {
@@ -588,13 +589,13 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
 			} else {
-				c1 = &shortNode{Key: common.CopyBytes(n.Key[matchlen+1:]), Val: n.Val, witnessLength: n.Val.witnessLen()}
+				c1 = NewShortNode(common.CopyBytes(n.Key[matchlen+1:]), n.Val)
 			}
 			var c2 node
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				c2 = &shortNode{Key: common.CopyBytes(key[pos+matchlen+1:]), Val: value, witnessLength: value.witnessLen()}
+				c2 = NewShortNode(common.CopyBytes(key[pos+matchlen+1:]), value)
 			}
 			branch := &duoNode{}
 			if n.Key[matchlen] < key[pos+matchlen] {
@@ -605,7 +606,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				branch.child2 = c1
 			}
 			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
-			branch.witnessLength = branch.child1.witnessLen() + branch.child2.witnessLen()
+			branch.recalculateWitnessLen()
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -615,6 +616,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
 				n.ref.len = 0
+				n.recalculateWitnessLen()
 				newNode = n
 			}
 			t.observers.BranchNodeCreated(key[:pos+matchlen])
@@ -632,6 +634,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				t.evictNodeFromHashMap(n)
 				n.child1 = nn
 				n.ref.len = 0
+				n.recalculateWitnessLen()
 			}
 			newNode = n
 		case i2:
@@ -640,6 +643,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				t.evictNodeFromHashMap(n)
 				n.child2 = nn
 				n.ref.len = 0
+				n.recalculateWitnessLen()
 			}
 			newNode = n
 		default:
@@ -648,13 +652,13 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			if len(key) == pos+1 {
 				child = value
 			} else {
-				child = &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value, witnessLength: value.witnessLen()}
+				child = NewShortNode(common.CopyBytes(key[pos+1:]), value)
 			}
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
 			newnode.Children[key[pos]] = child
-			newnode.witnessLength = n.child1.witnessLen() + n.child2.witnessLen()
+			newnode.recalculateWitnessLen()
 			updated = true
 			// current node leaves the generation but newnode joins it
 			newNode = newnode
@@ -669,17 +673,18 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
-				n.Children[key[pos]] = &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value, witnessLength: value.witnessLen()}
+				n.Children[key[pos]] = NewShortNode(common.CopyBytes(key[pos+1:]), value)
 			}
 			updated = true
 			n.ref.len = 0
+			n.recalculateWitnessLen()
 		} else {
 			updated, nn = t.insertRecursive(child, key, pos+1, value)
 			if updated {
 				t.evictNodeFromHashMap(n)
-				n.witnessLength += nn.witnessLen() - n.Children[key[pos]].witnessLen()
 				n.Children[key[pos]] = nn
 				n.ref.len = 0
+				n.recalculateWitnessLen()
 			}
 		}
 		newNode = n
@@ -890,12 +895,12 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 			k := make([]byte, len(short.Key)+1)
 			k[0] = byte(pos)
 			copy(k[1:], short.Key)
-			return &shortNode{Key: k, Val: short.Val, witnessLength: short.witnessLength}
+			return NewShortNode(k, short.Val)
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
-	return &shortNode{Key: []byte{byte(pos)}, Val: child, witnessLength: child.witnessLen()}
+	return NewShortNode([]byte{byte(pos)}, child)
 }
 
 func (t *Trie) delete(origNode node, key []byte, preserveAccountNode bool) (updated bool, newNode node) {
@@ -949,7 +954,7 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 							// always creates a new slice) instead of append to
 							// avoid modifying n.Key since it might be shared with
 							// other nodes.
-							newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val, witnessLength: shortChild.witnessLength}
+							newNode = NewShortNode(concat(n.Key, shortChild.Key...), shortChild.Val)
 						} else {
 							n.Val = nn
 							newNode = n

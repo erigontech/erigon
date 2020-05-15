@@ -135,7 +135,7 @@ func (rl *RetainList) String() string {
 	return fmt.Sprintf("%x", rl.hexes)
 }
 
-// RetainList encapsulates the list of keys that are required to be fully available, or loaded
+// RetainRange encapsulates the range of keys that are required to be fully available, or loaded
 // (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
 // pairs
 // DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
@@ -145,7 +145,7 @@ type RetainRange struct {
 	codeTouches map[common.Hash]struct{}
 }
 
-// NewRetainList creates new RetainList
+// NewRetainRange creates new NewRetainRange
 // to=nil - means no upper bound
 func NewRetainRange(from, to []byte) *RetainRange {
 	return &RetainRange{from: from, to: to, codeTouches: make(map[common.Hash]struct{})}
@@ -153,9 +153,10 @@ func NewRetainRange(from, to []byte) *RetainRange {
 
 // Retain decides whether to emit `HASHER` or `BRANCH` for a given prefix, by
 // checking if this is prefix of any of the keys added to the set
-// Since keys in the set are sorted, and we expect that the prefixes will
-// come in monotonically ascending order, we optimise for this, though
-// the function would still work if the order is different
+// it returns True:
+//	- for keys between from and to
+//  - for keys which are prefixes of from and to
+//  - for keys which are contains from and to as a prefix
 func (rr *RetainRange) Retain(prefix []byte) (retain bool) {
 	if bytes.HasPrefix(rr.from, prefix) || bytes.HasPrefix(prefix, rr.from) {
 		return true

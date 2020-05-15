@@ -472,10 +472,8 @@ func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
 		fstl.accData.FieldSet = 0
 	}
 	fstl.groups = fstl.groups[:0]
-	if fstl.hb.hasRoot() {
-		fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
-		fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
-	}
+	fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+	fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
 	return nil
 }
 
