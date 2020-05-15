@@ -18,10 +18,10 @@ const search = (prefix, api, setState) => {
     });
   };
 
-  return api.lookupIntermediateHashes(prefix).then(lookupSuccess).catch(lookupFail);
+  return api.lookupIntermediateDataLen(prefix).then(lookupSuccess).catch(lookupFail);
 };
 
-const LookupIntermediateHashForm = ({ api }) => {
+const LookupIntermediateDataLenForm = ({ api }) => {
   const [state, setState] = useState({ hashes: undefined, loading: false });
 
   return (
@@ -72,4 +72,4 @@ const TableRow = ({ item }) => {
   );
 };
 
-export default LookupIntermediateHashForm;
+export default LookupIntermediateDataLenForm;

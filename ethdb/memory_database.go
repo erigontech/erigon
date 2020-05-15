@@ -60,6 +60,18 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 	if err != nil {
 		panic(err)
 	}
+
+	if err := db.Update(func(tx *bolt.Tx) error {
+		for _, bucket := range dbutils.Buckets {
+			if _, err := tx.CreateBucketIfNotExists(bucket, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 	return &BoltDatabase{
 		db:  db,
 		log: logger,

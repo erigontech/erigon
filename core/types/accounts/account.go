@@ -16,12 +16,12 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised    bool
-	Nonce          uint64
-	Balance        big.Int
-	Root           common.Hash // merkle root of the storage trie
-	CodeHash       common.Hash // hash of the bytecode
-	Incarnation    uint64
+	Initialised bool
+	Nonce       uint64
+	Balance     big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    common.Hash // hash of the bytecode
+	Incarnation uint64
 }
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -284,7 +284,6 @@ func (a *Account) Copy(image *Account) {
 	a.Balance.Set(&image.Balance)
 	copy(a.Root[:], image.Root[:])
 	copy(a.CodeHash[:], image.CodeHash[:])
-	a.Incarnation = image.Incarnation
 	a.Incarnation = image.Incarnation
 }
 

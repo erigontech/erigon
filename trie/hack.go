@@ -30,7 +30,7 @@ func FullNode3() {
 	f := &fullNode{}
 	f.Children[0] = valueNode(nil)
 	h := common.Hash{}
-	f.Children[1] = hashNode(h[:])
+	f.Children[1] = hashNode{hash: h[:]}
 	b, err := rlp.EncodeToBytes(f)
 	if err != nil {
 		panic(err)
@@ -42,7 +42,7 @@ func FullNode4() {
 	f := &fullNode{}
 	h := common.Hash{}
 	for i := 0; i < 17; i++ {
-		f.Children[i] = hashNode(h[:])
+		f.Children[i] = hashNode{hash: h[:]}
 	}
 	b, err := rlp.EncodeToBytes(f)
 	if err != nil {

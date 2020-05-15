@@ -1,12 +1,15 @@
 package trie
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -251,10 +254,15 @@ func TestApiDetails(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 
 	storageKey := func(incarnation uint64, k string) []byte {
-		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), incarnation, common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001"))
+		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), incarnation, common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"))
 	}
 	putIH := func(k string, v string) {
 		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+	}
+	putIDataLen := func(k string, v uint64) {
+		lenBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(lenBytes, v)
+		require.NoError(db.Put(dbutils.IntermediateTrieWitnessLenBucket, common.Hex2Bytes(k), lenBytes))
 	}
 
 	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached SubTrieLoaders
@@ -270,25 +278,20 @@ func TestApiDetails(t *testing.T) {
 		for _, i := range []int{0, 1, 2, 15} {
 			for _, j := range []int{0, 1, 2, 15} {
 				k := fmt.Sprintf(base+"%x%x%061x", i, j, 0)
-				//storageV := common.Hex2Bytes(fmt.Sprintf("%x%x", i, j))
-				storageV := []byte{2}
 				incarnation := uint64(2)
-				root := common.HexToHash("3ed409af5dae7a8b4670f1df4d90d675b115757858b3ea1ec83a323b5c2e060c")
-				if i == 1 {
-					storageV = []byte{1}
+				if j == 1 {
 					incarnation = 1
-					root = common.HexToHash("2abc098983e097b6de2b7fd9c5c322e37d12025bc3e0cfdaad4af26a3b51e208")
 				}
+				storageV := []byte{uint8(incarnation)}
 
 				a := accounts.Account{
 					// Using Nonce field as an ID of account.
 					// Will check later if value which we .Get() from Trie has expected ID.
 					Nonce:       uint64(i*10 + j),
 					Initialised: true,
-					Root:        root,
 					CodeHash:    EmptyCodeHash,
 					Balance:     *big.NewInt(0),
-					Incarnation: incarnation,
+					Incarnation: 2, // all acc have 2nd inc, but some storage are on 1st inc
 				}
 				require.NoError(writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a))
 				require.NoError(db.Put(dbutils.CurrentStateBucket, storageKey(incarnation, k), storageV))
@@ -303,115 +306,146 @@ func TestApiDetails(t *testing.T) {
 		require.NoError(err)
 		fmt.Printf("%x\n", root)
 	*/
-	putIH("00", "83ffec17e97f4d5240cf371a23580225dc086c53ff1b14aad92ededd155a047a")
-	putIH("ff", "36548655db5662652d6045bd5474d0d1453122dbc66c55493ed99bcdf9743e7d")
+	putIH("00", "7e099756ba801779e6ac78da0c8f0272a2033e92314f02fbf7ec5158ab57017b")
+	putIH("ff", "73e9eaef7cbb0b824f964669ee2ebff9ed7a4cd2c672b521e44f9b33cab8aa55")
+	putIDataLen("00", 254)
+	putIDataLen("ff", 256)
 
 	// this IntermediateHash key must not be used, because such key is in ResolveRequest
-	putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
+	// putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
+
+	loader := NewSubTrieLoader(0)
+	tr := New(common.Hash{})
 
 	{
-		resolver := NewSubTrieLoader(0)
-		expectRootHash := common.HexToHash("9a87eff1bc257a70e62dd81ed4b5d210beb305ecdeec9ff497c717ea1c3794d4")
+		expectRootHash := common.HexToHash("8c34d9b522547741fefe2363762026cf821e6b6a9358a56c9af26182403d20d9")
 
 		rs := NewRetainList(0)
-		rs.AddHex(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)))
+		rs.AddHex(hexf("000101%0122x", 0))
 		rs.AddHex(common.Hex2Bytes("000202"))
 		rs.AddHex(common.Hex2Bytes("0f"))
-		subTries, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, true)
+		subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+		assert.NoError(err)
+
+		err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
+		assert.NoError(err)
+
+		assert.Equal(expectRootHash.String(), tr.Hash().String())
 
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
-		assert.NoError(err)
+		//fmt.Printf("%d\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessLen())
+		//fmt.Printf("%d\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessLen())
 
-		assert.Equal(expectRootHash.String(), subTries.Hashes[0].String())
-
-		tr := New(common.Hash{})
-		err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
-		assert.NoError(err)
-		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("000%061x", 0)))
+		_, found := tr.GetAccount(hexf("000%061x", 0))
 		assert.False(found) // exists in DB but resolved, there is hashNode
 
-		acc, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("011%061x", 0)))
+		acc, found := tr.GetAccount(hexf("011%061x", 0))
 		assert.True(found)
 		require.NotNil(acc)              // cache bucket has empty value, but self-destructed Account still available
 		assert.Equal(int(acc.Nonce), 11) // i * 10 + j
 
-		acc, found = tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)))
+		acc, found = tr.GetAccount(hexf("021%061x", 0))
 		assert.True(found)
 		require.NotNil(acc)              // exists in db and resolved
 		assert.Equal(int(acc.Nonce), 21) // i * 10 + j
 
-		acc, found = tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("051%061x", 0)))
+		acc, found = tr.GetAccount(hexf("051%061x", 0))
 		assert.True(found)
 		assert.Nil(acc) // not exists in DB
 
-		assert.Panics(func() {
-			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("001%061x", 0)), &accounts.Account{})
-		})
-		assert.NotPanics(func() {
-			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("011%061x", 0)), &accounts.Account{})
-			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)), &accounts.Account{})
-			tr.UpdateAccount(common.Hex2Bytes(fmt.Sprintf("051%061x", 0)), &accounts.Account{})
-		})
+		//assert.Panics(func() {
+		//	tr.UpdateAccount(hexf("001%061x", 0), &accounts.Account{})
+		//})
+		//assert.NotPanics(func() {
+		//	tr.UpdateAccount(hexf("011%061x", 0), &accounts.Account{})
+		//	tr.UpdateAccount(hexf("021%061x", 0), &accounts.Account{})
+		//	tr.UpdateAccount(hexf("051%061x", 0), &accounts.Account{})
+		//})
 	}
 
-	/*
-		{ // storage resolver
-			putIH("00", "0aca8baf23c54bda626bc3c3d1590f9cdb9deb8defaef7455f5f0b55b3d1c76e")
-			putIH("ff", "71c0df1d41959526a6961cca7e5831982848074c4cc556fbef4f8a1fad6621ca")
+	{ // storage loader
+		loader.Reset(1)
+		rl := NewRetainList(0)
+		rl.AddHex(append(hexf("000101%0122x", 0), hexf("%0128x", 0)...))
+		rl.AddHex(append(hexf("000201%0122x", 0), hexf("%0128x", 0)...))
+		rl.AddHex(append(hexf("000202%0122x", 0), hexf("%0128x", 0)...))
+		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
+		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
+		subTries, err := loader.LoadSubTries(db, 0, rl, dbPrefixes, fixedbits, false)
+		require.NoError(err)
 
-			for i, resolverName := range []string{Stateful, StatefulCached} {
-				resolver := NewSubTrieLoader(32, false, 0)
-				expectRootHash := common.HexToHash("494e295f60cfde19548157facc0c425d8b254f791a006b74173dc71113f56df0")
+		err = tr.HookSubTries(subTries, hooks) // hook up to the root
+		assert.NoError(err)
 
-				resolver.AddRequest(tries[i].NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0))
-				resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("00020100"), 0))
-				resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("0f"), 0))
+		_, found := tr.Get(hexf("000%061x", 0))
+		assert.False(found) // exists in DB but not resolved, there is hashNode
 
-				if resolverName == Stateful {
-					err := resolver.ResolveStateful(db, 0)
-					require.NoError(err)
-					//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
-					//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[1].reference())
-					_, root := tries[i].DeepHash(common.Hex2Bytes(fmt.Sprintf("021%061x", 0)))
-					fmt.Printf("Alex: %x\n", root)
-					_, root = tries[i].DeepHash(common.Hex2Bytes(fmt.Spritntf("011%061x", 0)))
-					fmt.Printf("Alex: %x\n", root)
+		storage, found := tr.Get(hexf("011%061x", 0))
+		assert.True(found)
+		require.Nil(storage) // deleted by empty value in cache bucket
 
-					//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
-				} else {
-					err := resolver.ResolveStatefulCached(db, 0, true)
-					//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[1].reference())
-					require.NoError(err)
+		storage, found = tr.Get(hexf("021%0125x", 0))
+		assert.True(found)
+		require.Nil(storage) // this storage has inc=1
+
+		storage, found = tr.Get(hexf("022%0125x", 0))
+		assert.True(found)
+		require.Equal(storage, []byte{2})
+
+		storage, found = tr.Get(hexf("051%0125x", 0))
+		assert.True(found)
+		assert.Nil(storage) // not exists in DB
+
+		//assert.Panics(func() {
+		//	tr.Update(hexf("001%0125x", 0), nil)
+		//})
+		//assert.NotPanics(func() {
+		//	tr.Update(hexf("011%0125x", 0), nil)
+		//	tr.Update(hexf("021%0125x", 0), nil)
+		//	tr.Update(hexf("051%0125x", 0), nil)
+		//})
+	}
+
+	if debug.IsTrackWitnessSizeEnabled() {
+		loader.Reset(1)
+		rs := NewRetainList(0)
+		for _, base := range []string{"0", "f"} {
+			for _, i := range []int{0, 1, 2, 15} {
+				for _, j := range []int{0, 1, 2, 15} {
+					contract := hexf("0"+base+"0%x0%x%0122x", i, j, 0)
+					rs.AddHex(append(contract, hexf("%0128x", 0)...))
 				}
-				//assert.Equal(expectRootHash.String(), tr.Hash().String())
-
-				//_, found := tr.Get(storageKey(2, fmt.Sprintf("000%061x", 0)))
-				//assert.False(found) // exists in DB but not resolved, there is hashNode
-
-				storage, found := tries[i].Get(storageKey(2, fmt.Sprintf("011%061x", 0)))
-				assert.True(found)
-				require.Nil(storage) // deleted by empty value in cache bucket
-
-				//storage, found = tr.Get(storageKey(2, fmt.Sprintf("021%061x", 0)))
-				//assert.True(found)
-				//require.Equal(storage, common.Hex2Bytes("21"))
-
-				//storage, found = tr.Get(storageKey(2, fmt.Sprintf("051%061x", 0)))
-				//assert.True(found)
-				//assert.Nil(storage) // not exists in DB
-
-				//assert.Panics(func() {
-				//	tr.Update(storageKey(2, fmt.Sprintf("001%061x", 0)), nil)
-				//})
-				assert.NotPanics(func() {
-					tries[i].Update(storageKey(2, fmt.Sprintf("011%061x", 0)), nil)
-					tries[i].Update(storageKey(2, fmt.Sprintf("021%061x", 0)), nil)
-					tries[i].Update(storageKey(2, fmt.Sprintf("051%061x", 0)), nil)
-				})
 			}
 		}
-	*/
+		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
+		subTries, err := loader.LoadSubTries(db, 0, rs, dbPrefixes, fixedbits, false)
+		require.NoError(err)
+
+		err = tr.HookSubTries(subTries, hooks) // hook up to the root
+		assert.NoError(err)
+
+		assert.Equal(uint64(2050), tr.root.witnessLen())
+		assert.Equal(uint64(1024), tr.root.(*fullNode).Children[0].witnessLen())
+		assert.Equal(uint64(254), tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessLen())
+		assert.Equal(uint64(256), tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessLen())
+
+		witness, err := tr.ExtractWitness(false, rs)
+		if err != nil {
+			panic(err)
+		}
+
+		var buf bytes.Buffer
+		_, err = witness.WriteTo(&buf)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("WitnessLen. Real: %d, Estimate: %d\n", buf.Len(), tr.root.witnessLen())
+	}
+}
+
+func hexf(format string, a ...interface{}) []byte {
+	return common.FromHex(fmt.Sprintf(format, a...))
 }
 
 func TestStorageSubTrieLoader2(t *testing.T) {
@@ -585,9 +619,6 @@ func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) e
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
 	if err := db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
-		return err
-	}
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), acc.Root.Bytes()); err != nil {
 		return err
 	}
 	return nil

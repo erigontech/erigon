@@ -36,28 +36,35 @@ type node interface {
 
 	// if not empty, returns node's RLP or hash thereof
 	reference() []byte
+	witnessLen() uint64
 }
 
 type (
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	fullNode struct {
-		ref      nodeRef
-		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
+		ref           nodeRef
+		Children      [17]node // Actual trie node data to encode/decode (needs custom encoder)
+		witnessLength uint64   // amount of bytes holded in DB by all storage/code under this prefix. equal to sum of children's witnessLength
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	duoNode struct {
-		ref    nodeRef
-		mask   uint32 // Bitmask. The set bits indicate the child is not nil
-		child1 node
-		child2 node
+		ref           nodeRef
+		mask          uint32 // Bitmask. The set bits indicate the child is not nil
+		child1        node
+		child2        node
+		witnessLength uint64
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		ref nodeRef
-		Key []byte // HEX encoding
-		Val node
+		ref           nodeRef
+		Key           []byte // HEX encoding
+		Val           node
+		witnessLength uint64
 	}
-	hashNode  []byte
+	hashNode struct {
+		hash          []byte
+		witnessLength uint64
+	}
 	valueNode []byte
 
 	accountNode struct {
@@ -215,13 +222,38 @@ type nodeRef struct {
 	len  byte        // length of the data (0 indicates invalid data)
 }
 
-func (n hashNode) reference() []byte      { return n }
+func (n hashNode) reference() []byte      { return n.hash }
 func (n valueNode) reference() []byte     { return nil }
 func (n codeNode) reference() []byte      { return nil }
 func (n *fullNode) reference() []byte     { return n.ref.data[0:n.ref.len] }
 func (n *duoNode) reference() []byte      { return n.ref.data[0:n.ref.len] }
 func (n *shortNode) reference() []byte    { return n.ref.data[0:n.ref.len] }
 func (an *accountNode) reference() []byte { return nil }
+
+// WitnessLen calculation logic:
+// hashNode: represents full underlying witness
+// valueNode: opcode + len(storage)
+// codeNode: opcode + len(code)
+// fullNode: opcode + mask + childrenWitnessLen
+// duoNode: opcode + mask + childrenWitnessLen
+// shortNode: opcode + len(key)/2 + childrenWitnessLen
+// accountNode: opcode + account data len + codeWitnessLen + storageWitnessLen
+func (n hashNode) witnessLen() uint64   { return n.witnessLength }
+func (n valueNode) witnessLen() uint64  { return uint64(len(n)) + 1 }
+func (n codeNode) witnessLen() uint64   { return uint64(len(n)) + 1 }
+func (n *fullNode) witnessLen() uint64  { return n.witnessLength }
+func (n *duoNode) witnessLen() uint64   { return n.witnessLength }
+func (n *shortNode) witnessLen() uint64 { return n.witnessLength }
+func (an *accountNode) witnessLen() uint64 {
+	res := 1 + uint64(an.EncodingLengthForStorage())
+	if an.storage != nil {
+		res += an.storage.witnessLen()
+	}
+	if an.code != nil {
+		res += an.code.witnessLen()
+	}
+	return res
+}
 
 // Pretty printing.
 func (n fullNode) String() string     { return n.fstring("") }
