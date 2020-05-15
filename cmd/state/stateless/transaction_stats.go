@@ -105,12 +105,12 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			tt.gasForSSTORE += cost
 		}
 		if stack.Len() > 0 {
-			tt.queryStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
-			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+			tt.queryStorageAccess(contract.Address(), common.Hash(stack.Back(0).Bytes32()))
+			tt.markStorageAccess(contract.Address(), common.Hash(stack.Back(0).Bytes32()))
 		}
 	case vm.SLOAD:
 		if stack.Len() > 0 {
-			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+			tt.markStorageAccess(contract.Address(), common.Hash(stack.Back(0).Bytes32()))
 		}
 	case vm.CREATE, vm.CREATE2:
 		tt.measureCurrentGas = gas
@@ -126,11 +126,11 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			tt.gasForEthSendingCALL += (cost - callGas)
 		}
 		if stack.Len() > 1 {
-			tt.queryAccountAccess(common.BigToAddress(stack.Back(1)))
+			tt.queryAccountAccess(common.Address(stack.Back(1).Bytes20()))
 		}
 	case vm.SELFDESTRUCT:
 		if stack.Len() > 0 {
-			tt.queryAccountAccess(common.BigToAddress(stack.Back(0)))
+			tt.queryAccountAccess(common.Address(stack.Back(0).Bytes20()))
 		}
 	}
 	return nil

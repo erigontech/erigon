@@ -48,7 +48,7 @@ func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 		if stack.Len() == 0 {
 			return nil
 		}
-		loc := common.BigToHash(stack.Back(0))
+		loc := common.Hash(stack.Back(0).Bytes32())
 		if smap, ok := dt.storageWriteSetFrame[addr]; ok {
 			smap[loc] = struct{}{}
 		} else {
@@ -61,7 +61,7 @@ func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 		if stack.Len() == 0 {
 			return nil
 		}
-		loc := common.BigToHash(stack.Back(0))
+		loc := common.Hash(stack.Back(0).Bytes32())
 		if smap, ok := dt.storageReadSet[addr]; ok {
 			smap[loc] = struct{}{}
 		} else {

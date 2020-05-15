@@ -48,7 +48,7 @@ func (st *StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas,
 		if stack.Len() == 0 {
 			return nil
 		}
-		loc := common.BigToHash(stack.Back(0))
+		loc := common.Hash(stack.Back(0).Bytes32())
 		if l1, ok1 := st.loaded[addr]; ok1 {
 			if _, ok2 := l1[loc]; !ok2 {
 				st.nakedSstores++
@@ -66,7 +66,7 @@ func (st *StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas,
 		if stack.Len() == 0 {
 			return nil
 		}
-		loc := common.BigToHash(stack.Back(0))
+		loc := common.Hash(stack.Back(0).Bytes32())
 		if l1, ok1 := st.loaded[addr]; ok1 {
 			if _, ok2 := l1[loc]; !ok2 {
 				st.nakedSloads++

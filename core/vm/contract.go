@@ -19,6 +19,8 @@ package vm
 import (
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
@@ -81,11 +83,11 @@ func NewContract(caller ContractRef, object ContractRef, value *big.Int, gas uin
 	return c
 }
 
-func (c *Contract) validJumpdest(dest *big.Int) bool {
-	udest := dest.Uint64()
-	// PC cannot go beyond len(code) and certainly can't be bigger than 63bits.
+func (c *Contract) validJumpdest(dest *uint256.Int) bool {
+	udest, overflow := dest.Uint64WithOverflow()
+	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
-	if dest.BitLen() >= 63 || udest >= uint64(len(c.Code)) {
+	if overflow || udest >= uint64(len(c.Code)) {
 		return false
 	}
 	// Only JUMPDESTs allowed for destinations
