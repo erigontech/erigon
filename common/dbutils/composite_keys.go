@@ -106,6 +106,31 @@ func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, se
 	return compositeKey
 }
 
+func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.Hash) {
+	prefixLen := common.HashLength + common.IncarnationLength
+	addrHash, inc := ParseStoragePrefix(compositeKey[:prefixLen])
+	var key common.Hash
+	copy(key[:], compositeKey[prefixLen:prefixLen+common.HashLength])
+	return addrHash, inc, key
+}
+
+// AddrHash + incarnation + KeyHash
+// For contract storage (for plain state)
+func PlainGenerateCompositeStorageKey(address common.Address, incarnation uint64, key common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.AddressLength+8+common.HashLength)
+	compositeKey = append(compositeKey, PlainGenerateStoragePrefix(address, incarnation)...)
+	compositeKey = append(compositeKey, key[:]...)
+	return compositeKey
+}
+
+func PlainParseCompositeStorageKey(compositeKey []byte) (common.Address, uint64, common.Hash) {
+	prefixLen := common.AddressLength + common.IncarnationLength
+	addr, inc := PlainParseStoragePrefix(compositeKey[:prefixLen])
+	var key common.Hash
+	copy(key[:], compositeKey[prefixLen:prefixLen+common.HashLength])
+	return addr, inc, key
+}
+
 // AddrHash + incarnation + StorageHashPrefix
 func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, storageHashPrefix []byte) []byte {
 	key := make([]byte, common.HashLength+8+len(storageHashPrefix))
@@ -121,6 +146,28 @@ func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 	copy(prefix, addressHash)
 	binary.BigEndian.PutUint64(prefix[common.HashLength:], ^incarnation)
 	return prefix
+}
+
+// address hash + incarnation prefix (for plain state)
+func PlainGenerateStoragePrefix(address common.Address, incarnation uint64) []byte {
+	prefix := make([]byte, common.AddressLength+8)
+	copy(prefix, address[:])
+	binary.BigEndian.PutUint64(prefix[common.AddressLength:], ^incarnation)
+	return prefix
+}
+
+func PlainParseStoragePrefix(prefix []byte) (common.Address, uint64) {
+	var addr common.Address
+	copy(addr[:], prefix[:common.AddressLength])
+	inc := ^binary.BigEndian.Uint64(prefix[common.AddressLength : common.AddressLength+common.IncarnationLength])
+	return addr, inc
+}
+
+func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {
+	var addrHash common.Hash
+	copy(addrHash[:], prefix[:common.HashLength])
+	inc := ^binary.BigEndian.Uint64(prefix[common.HashLength : common.HashLength+common.IncarnationLength])
+	return addrHash, inc
 }
 
 func DecodeIncarnation(buf []byte) uint64 {

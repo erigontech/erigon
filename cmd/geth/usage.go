@@ -76,6 +76,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.RinkebyFlag,
 			utils.RopstenFlag,
 			utils.SyncModeFlag,
+			utils.StagedSyncPlainExecFlag,
 			utils.ExitWhenSyncedFlag,
 			//utils.GCModePruningFlag,
 			utils.GCModeLimitFlag,

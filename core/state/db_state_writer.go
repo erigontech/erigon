@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
@@ -13,6 +12,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
+
+var _ WriterWithChangeSets = (*DbStateWriter)(nil)
 
 func NewDbStateWriter(db ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
 	return &DbStateWriter{
@@ -82,12 +83,16 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := dsw.csw.UpdateAccountCode(addrHash, incarnation, codeHash, code); err != nil {
+func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if err := dsw.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
 	//save contract code mapping
 	if err := dsw.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+		return err
+	}
+	addrHash, err := common.HashData(address.Bytes())
+	if err != nil {
 		return err
 	}
 	//save contract to codeHash mapping
@@ -106,19 +111,19 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-	v := bytes.TrimLeft(value[:], "\x00")
-	vv := make([]byte, len(v))
-	copy(vv, v)
-
 	addrHash, err := dsw.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
+
+	v := cleanUpTrailingZeroes(value[:])
 	if len(v) == 0 {
 		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
+		vv := make([]byte, len(v))
+		copy(vv, v)
 		return dsw.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }

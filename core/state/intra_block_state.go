@@ -590,7 +590,6 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
-
 var nullLocation = common.Hash{}
 var nullValue = common.Big0
 
@@ -788,12 +787,7 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 	} else if isDirty {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			addrHash, err := common.HashData(addr.Bytes())
-			if err != nil {
-				log.Error("Hashing address error", "err", err)
-				return err
-			}
-			if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 				return err
 			}
 		}

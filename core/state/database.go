@@ -37,6 +37,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
+var _ StateWriter = (*TrieStateWriter)(nil)
+
 // MaxTrieCacheSize is the trie cache size limit after which to evict trie nodes from memory.
 var MaxTrieCacheSize = uint64(1024 * 1024)
 
@@ -57,10 +59,15 @@ type StateReader interface {
 
 type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
-	UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error
+	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
 	CreateContract(address common.Address) error
+}
+
+type WriterWithChangeSets interface {
+	StateWriter
+	WriteChangeSets() error
 }
 
 type NoopWriter struct {
@@ -78,7 +85,7 @@ func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, o
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
@@ -1326,9 +1333,13 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	return nil
 }
 
-func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (tsw *TrieStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
 		tsw.tds.retainListBuilder.CreateCode(codeHash)
+	}
+	addrHash, err := common.HashData(address.Bytes())
+	if err != nil {
+		return err
 	}
 	tsw.tds.currentBuffer.codeUpdates[addrHash] = code
 	return nil

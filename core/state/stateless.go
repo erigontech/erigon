@@ -29,6 +29,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
+var (
+	_ StateReader = (*Stateless)(nil)
+	_ StateWriter = (*Stateless)(nil)
+)
+
 // Stateless is the inter-block cache for stateless client prototype, iteration 2
 // It creates the initial state trie during the construction, and then updates it
 // during the execution of block(s)
@@ -196,12 +201,11 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 
 // UpdateAccountCode is a part of the StateWriter interface
 // This implementation adds the code to the codeMap to make it available for further accesses
-func (s *Stateless) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
-
+func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	s.codeUpdates[codeHash] = code
 
 	if s.trace {
-		fmt.Printf("Stateless: UpdateAccountCode %x codeHash %x\n", addrHash, codeHash)
+		fmt.Printf("Stateless: UpdateAccountCode %x codeHash %x\n", address, codeHash)
 	}
 	return nil
 }
