@@ -292,6 +292,10 @@ func (c *badgerCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
+func (c *badgerCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
+	return c.Seek(seek)
+}
+
 func (c *badgerCursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
@@ -379,6 +383,10 @@ func (c *badgerNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	c.k = item.Key()[c.bucket.nameLen:]
 
 	return c.k, uint32(item.ValueSize()), c.err
+}
+
+func (c *badgerNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
+	return c.Seek(seek)
 }
 
 func (c *badgerNoValuesCursor) Next() ([]byte, uint32, error) {

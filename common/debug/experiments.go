@@ -53,3 +53,15 @@ func IsBlockCompressionEnabled() bool {
 	})
 	return compressBlocks
 }
+
+var (
+	trackWitnessSize       bool
+	getTrackWitnessSizeLen sync.Once
+)
+
+func IsTrackWitnessSizeEnabled() bool {
+	getTrackWitnessSizeLen.Do(func() {
+		_, trackWitnessSize = os.LookupEnv("TRACK_WITNESS_SIZE")
+	})
+	return trackWitnessSize
+}

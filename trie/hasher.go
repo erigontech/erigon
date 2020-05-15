@@ -88,7 +88,7 @@ func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 // It also updates node's ref with that value.
 func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
 	if hn, ok := n.(hashNode); ok {
-		copy(storeTo, hn)
+		copy(storeTo, hn.hash)
 		return common.HashLength, nil
 	}
 	if len(n.reference()) > 0 {

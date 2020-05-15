@@ -4,6 +4,6 @@ import App from './App';
 
 test('renders learn react link', () => {
   const { getByText } = render(<App />);
-  const linkElement = getByText(/Turbo-Geth Debug Utility/i);
+  const linkElement = getByText(/Scope/i);
   expect(linkElement).toBeInTheDocument();
 });
