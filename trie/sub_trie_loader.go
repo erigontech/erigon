@@ -61,7 +61,10 @@ func (stl *SubTrieLoader) LoadSubTries(db ethdb.Database, blockNr uint64, rl *Re
 
 func (stl *SubTrieLoader) LoadFromFlatDb(db ethdb.Database, rl *RetainList, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
 	loader := NewFlatDbSubTrieLoader()
-	subTries, err := loader.LoadSubTries(db, rl, dbPrefixes, fixedbits, trace)
+	if err1 := loader.Reset(db, rl, dbPrefixes, fixedbits, trace); err1 != nil {
+		return SubTries{}, err1
+	}
+	subTries, err := loader.LoadSubTries()
 	if err != nil {
 		return subTries, err
 	}

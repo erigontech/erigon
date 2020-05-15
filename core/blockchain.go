@@ -2463,7 +2463,7 @@ func ExecuteBlockEuphemerally(
 	engine consensus.Engine,
 	block *types.Block,
 	stateReader state.StateReader,
-	stateWriter *state.DbStateWriter,
+	stateWriter state.WriterWithChangeSets,
 ) error {
 	ibs := state.New(stateReader)
 	header := block.Header()
