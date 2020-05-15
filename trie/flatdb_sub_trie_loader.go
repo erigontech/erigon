@@ -567,7 +567,6 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 						return err
 					}
 				case CutoffStreamItem:
-					fmt.Printf("Cutoff with %d\n", fstl.streamCutoff)
 					if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
 						return err
 					}
