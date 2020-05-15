@@ -322,7 +322,7 @@ func TestApiDetails(t *testing.T) {
 		rs.AddHex(hexf("000101%0122x", 0))
 		rs.AddHex(common.Hex2Bytes("000202"))
 		rs.AddHex(common.Hex2Bytes("0f"))
-		subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, true)
+		subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 
 		err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
@@ -370,7 +370,6 @@ func TestApiDetails(t *testing.T) {
 		rl.AddHex(append(hexf("000202%0122x", 0), hexf("%0128x", 0)...))
 		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
-		fmt.Printf("dbPrefixes = %x\n", dbPrefixes)
 		rl.Rewind()
 		subTries, err := loader.LoadSubTries(db, 0, rl, dbPrefixes, fixedbits, false)
 		require.NoError(err)

@@ -40,9 +40,9 @@ type FlatDbSubTrieLoader struct {
 	hashData     GenStructStepHashData
 	trace        bool
 
-	currStorage   bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succStorage   bytes.Buffer
-	valueStorage  bytes.Buffer // Current value to be used as the value tape for the hash builder
+	currStorage  bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succStorage  bytes.Buffer
+	valueStorage bytes.Buffer // Current value to be used as the value tape for the hash builder
 
 	witnessLenAccount uint64
 	witnessLenStorage uint64
@@ -60,23 +60,23 @@ type FlatDbSubTrieLoader struct {
 	ihK, ihV           []byte
 	minKeyAsNibbles    bytes.Buffer
 
-	itemPresent bool
-	itemType StreamItem
+	itemPresent   bool
+	itemType      StreamItem
 	getWitnessLen func(prefix []byte) uint64
 
 	// Storage item buffer
-	storageKeyPart1    []byte
-	storageKeyPart2    []byte
-	storageHash        []byte
-	storageValue       []byte
-	storageWitnessLen  uint64
+	storageKeyPart1   []byte
+	storageKeyPart2   []byte
+	storageHash       []byte
+	storageValue      []byte
+	storageWitnessLen uint64
 
 	// Acount item buffer
-	accountKey         []byte
-	accountHash        []byte
-	accountValue       accounts.Account
-	streamCutoff       int
-	accountWitnessLen  uint64
+	accountKey        []byte
+	accountHash       []byte
+	accountValue      accounts.Account
+	streamCutoff      int
+	accountWitnessLen uint64
 }
 
 func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
@@ -177,6 +177,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 					}
 				}
 			}
+			if cmp == 0 && fstl.itemPresent {
+				return nil
+			}
 			if cmp < 0 {
 				// This happens after we have just incremented rangeIdx or on the very first iteration
 				if first && len(dbPrefix) > common.HashLength {
@@ -224,12 +227,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(first bool) error {
 					copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 				}
 				cutoff = fstl.cutoffs[fstl.rangeIdx]
-				fstl.wasIH = false
-				fstl.wasIHStorage = false
-				fstl.curr.Reset()
-				fstl.succ.Reset()
-				fstl.currStorage.Reset()
-				fstl.succStorage.Reset()
 			}
 		}
 	}
@@ -466,6 +463,12 @@ func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
 	fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
 	fstl.groups = fstl.groups[:0]
 	fstl.hb.Reset()
+	fstl.wasIH = false
+	fstl.wasIHStorage = false
+	fstl.curr.Reset()
+	fstl.succ.Reset()
+	fstl.currStorage.Reset()
+	fstl.succStorage.Reset()
 	return nil
 }
 
@@ -496,12 +499,12 @@ func (fstl *FlatDbSubTrieLoader) finaliseStorageRoot(cutoff int) (bool, error) {
 			data = &fstl.leafData
 		}
 		var err error
-		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, true)
+		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, false)
 		if err != nil {
 			return false, err
 		}
-		if len(fstl.groups) > cutoff {
-			fstl.groups = fstl.groups[:cutoff]
+		if len(fstl.groups) >= cutoff {
+			fstl.groups = fstl.groups[:cutoff-1]
 		}
 		for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
 			fstl.groups = fstl.groups[:len(fstl.groups)-1]
