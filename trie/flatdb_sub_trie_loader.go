@@ -395,121 +395,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 	return nil
 }
 
-// cutoff specifies how many nibbles have to be cut from the beginning of the storage keys
-// to fit the insertion point.
-// We create a fake branch node at the cutoff point by modifying the last
-// nibble of the `succ` key
-func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
-	if fstl.trace {
-		fmt.Printf("finaliseRoot(%d)\n", cutoff)
-	}
-	fstl.curr.Reset()
-	fstl.curr.Write(fstl.succ.Bytes())
-	fstl.succ.Reset()
-	if fstl.curr.Len() > 0 {
-		if cutoff > 0 {
-			fstl.succ.Write(fstl.curr.Bytes()[:cutoff-1])
-			fstl.succ.WriteByte(fstl.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
-		}
-		var data GenStructStepData
-		if fstl.wasIH {
-			fstl.hashData.Hash = common.BytesToHash(fstl.value.Bytes())
-			fstl.hashData.DataLen = fstl.accountWitnessLen
-			data = &fstl.hashData
-		} else {
-			if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
-				if ok {
-					// There are some storage items
-					fstl.accData.FieldSet |= AccountFieldStorageOnly
-				}
-			} else {
-				return err
-			}
-			fstl.wasIHStorage = false
-			fstl.accData.Balance.Set(&fstl.a.Balance)
-			if fstl.a.Balance.Sign() != 0 {
-				fstl.accData.FieldSet |= AccountFieldBalanceOnly
-			}
-			fstl.accData.Nonce = fstl.a.Nonce
-			if fstl.a.Nonce != 0 {
-				fstl.accData.FieldSet |= AccountFieldNonceOnly
-			}
-			fstl.accData.Incarnation = fstl.a.Incarnation
-			data = &fstl.accData
-		}
-		var err error
-		if fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.curr.Bytes(), fstl.succ.Bytes(), fstl.hb, data, fstl.groups, false); err != nil {
-			return err
-		}
-		if len(fstl.groups) > cutoff {
-			fstl.groups = fstl.groups[:cutoff]
-		}
-		for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-			fstl.groups = fstl.groups[:len(fstl.groups)-1]
-		}
-		fstl.accData.FieldSet = 0
-	}
-	fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
-	fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
-	fstl.groups = fstl.groups[:0]
-	fstl.hb.Reset()
-	fstl.wasIH = false
-	fstl.wasIHStorage = false
-	fstl.curr.Reset()
-	fstl.succ.Reset()
-	fstl.currStorage.Reset()
-	fstl.succStorage.Reset()
-	return nil
-}
-
-// cutoff specifies how many nibbles have to be cut from the beginning of the storage keys
-// to fit the insertion point. For entire storage subtrie of an account, the cutoff
-// would be the the length (in nibbles) of adress Hash.
-// For resolver requests that asks for a part of some
-// contract's storage, cutoff point will be deeper than that.
-// We create a fake branch node at the cutoff point by modifying the last
-// nibble of the `succ` key
-func (fstl *FlatDbSubTrieLoader) finaliseStorageRoot(cutoff int) (bool, error) {
-	if fstl.trace {
-		fmt.Printf("finaliseStorageRoot(%d), succStorage.Len() = %d\n", cutoff, fstl.succStorage.Len())
-	}
-	fstl.currStorage.Reset()
-	fstl.currStorage.Write(fstl.succStorage.Bytes())
-	fstl.succStorage.Reset()
-	if fstl.currStorage.Len() > 0 {
-		fstl.succStorage.Write(fstl.currStorage.Bytes()[:cutoff-1])
-		fstl.succStorage.WriteByte(fstl.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
-		var data GenStructStepData
-		if fstl.wasIHStorage {
-			fstl.hashData.Hash = common.BytesToHash(fstl.valueStorage.Bytes())
-			fstl.hashData.DataLen = fstl.storageWitnessLen
-			data = &fstl.hashData
-		} else {
-			fstl.leafData.Value = rlphacks.RlpSerializableBytes(fstl.valueStorage.Bytes())
-			data = &fstl.leafData
-		}
-		var err error
-		fstl.groups, err = GenStructStep(fstl.rl.Retain, fstl.currStorage.Bytes(), fstl.succStorage.Bytes(), fstl.hb, data, fstl.groups, false)
-		if err != nil {
-			return false, err
-		}
-		if len(fstl.groups) >= cutoff {
-			fstl.groups = fstl.groups[:cutoff-1]
-		}
-		for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-			fstl.groups = fstl.groups[:len(fstl.groups)-1]
-		}
-		fstl.currStorage.Reset()
-		fstl.succStorage.Reset()
-		fstl.wasIHStorage = false
-		if fstl.trace {
-			fmt.Printf("storage root: %x\n", fstl.hb.rootHash())
-		}
-		return true, nil
-	}
-	return false, nil
-}
-
 func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	defer trieFlatDbSubTrieLoaderTimer.UpdateSince(time.Now())
 	if len(fstl.dbPrefixes) == 0 {
@@ -555,13 +440,31 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				case AccountStreamItem:
 					fstl.advanceKeysAccount(false, fstl.accountKey)
 					if fstl.curr.Len() > 0 && !fstl.wasIH {
-						if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
-							if ok {
-								// There are some storage items
-								fstl.accData.FieldSet |= AccountFieldStorageOnly
-							}
-						} else {
+						fstl.currStorage.Reset()
+						fstl.currStorage.Write(fstl.succStorage.Bytes())
+						fstl.succStorage.Reset()
+						if fstl.currStorage.Len() > 0 {
+							fstl.succStorage.Write(fstl.currStorage.Bytes()[:2*common.HashLength-1])
+							fstl.succStorage.WriteByte(fstl.currStorage.Bytes()[2*common.HashLength-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+						}
+						if err := fstl.genStructStorage(); err != nil {
 							return err
+						}
+						if fstl.currStorage.Len() > 0 {
+							if len(fstl.groups) >= 2*common.HashLength {
+								fstl.groups = fstl.groups[:2*common.HashLength-1]
+							}
+							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+								fstl.groups = fstl.groups[:len(fstl.groups)-1]
+							}
+							fstl.currStorage.Reset()
+							fstl.succStorage.Reset()
+							fstl.wasIHStorage = false
+							if fstl.trace {
+								fmt.Printf("storage root: %x\n", fstl.hb.rootHash())
+							}
+							// There are some storage items
+							fstl.accData.FieldSet |= AccountFieldStorageOnly
 						}
 					}
 					if err := fstl.genStructAccount(); err != nil {
@@ -573,13 +476,31 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				case AHashStreamItem:
 					fstl.advanceKeysAccount(true, fstl.accountKey)
 					if fstl.curr.Len() > 0 && !fstl.wasIH {
-						if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
-							if ok {
-								// There are some storage items
-								fstl.accData.FieldSet |= AccountFieldStorageOnly
-							}
-						} else {
+						fstl.currStorage.Reset()
+						fstl.currStorage.Write(fstl.succStorage.Bytes())
+						fstl.succStorage.Reset()
+						if fstl.currStorage.Len() > 0 {
+							fstl.succStorage.Write(fstl.currStorage.Bytes()[:2*common.HashLength-1])
+							fstl.succStorage.WriteByte(fstl.currStorage.Bytes()[2*common.HashLength-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+						}
+						if err := fstl.genStructStorage(); err != nil {
 							return err
+						}
+						if fstl.currStorage.Len() > 0 {
+							if len(fstl.groups) >= 2*common.HashLength {
+								fstl.groups = fstl.groups[:2*common.HashLength-1]
+							}
+							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+								fstl.groups = fstl.groups[:len(fstl.groups)-1]
+							}
+							fstl.currStorage.Reset()
+							fstl.succStorage.Reset()
+							fstl.wasIHStorage = false
+							if fstl.trace {
+								fmt.Printf("storage root: %x\n", fstl.hb.rootHash())
+							}
+							// There are some storage items
+							fstl.accData.FieldSet |= AccountFieldStorageOnly
 						}
 					}
 					if err := fstl.genStructAccount(); err != nil {
@@ -590,22 +511,86 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 					}
 				case CutoffStreamItem:
 					if fstl.streamCutoff >= 2*common.HashLength {
-						// if only storage resolution required, then no account records
-						if ok, err := fstl.finaliseStorageRoot(fstl.streamCutoff); err == nil {
-							if ok {
-								fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
-								fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
-							} else {
-								fstl.subTries.roots = append(fstl.subTries.roots, nil)
-								fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
-							}
-						} else {
+						fstl.currStorage.Reset()
+						fstl.currStorage.Write(fstl.succStorage.Bytes())
+						fstl.succStorage.Reset()
+						if fstl.currStorage.Len() > 0 {
+							fstl.succStorage.Write(fstl.currStorage.Bytes()[:fstl.streamCutoff-1])
+							fstl.succStorage.WriteByte(fstl.currStorage.Bytes()[fstl.streamCutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+						}
+						if err := fstl.genStructStorage(); err != nil {
 							return err
+						}
+						if fstl.currStorage.Len() > 0 {
+							if len(fstl.groups) >= fstl.streamCutoff {
+								fstl.groups = fstl.groups[:fstl.streamCutoff-1]
+							}
+							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+								fstl.groups = fstl.groups[:len(fstl.groups)-1]
+							}
+							fstl.currStorage.Reset()
+							fstl.succStorage.Reset()
+							fstl.wasIHStorage = false
+							fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+							fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
+						} else {
+							fstl.subTries.roots = append(fstl.subTries.roots, nil)
+							fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
 						}
 					} else {
-						if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
+						fstl.curr.Reset()
+						fstl.curr.Write(fstl.succ.Bytes())
+						fstl.succ.Reset()
+						if fstl.curr.Len() > 0 && fstl.streamCutoff > 0 {
+							fstl.succ.Write(fstl.curr.Bytes()[:fstl.streamCutoff-1])
+							fstl.succ.WriteByte(fstl.curr.Bytes()[fstl.streamCutoff-1] + 1) // Modify last nibble before the cutoff point
+						}
+						if fstl.curr.Len() > 0 && !fstl.wasIH {
+							fstl.currStorage.Reset()
+							fstl.currStorage.Write(fstl.succStorage.Bytes())
+							fstl.succStorage.Reset()
+							if fstl.currStorage.Len() > 0 {
+								fstl.succStorage.Write(fstl.currStorage.Bytes()[:2*common.HashLength-1])
+								fstl.succStorage.WriteByte(fstl.currStorage.Bytes()[2*common.HashLength-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+							}
+							if err := fstl.genStructStorage(); err != nil {
+								return err
+							}
+							if fstl.currStorage.Len() > 0 {
+								if len(fstl.groups) >= 2*common.HashLength {
+									fstl.groups = fstl.groups[:2*common.HashLength-1]
+								}
+								for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+									fstl.groups = fstl.groups[:len(fstl.groups)-1]
+								}
+								fstl.currStorage.Reset()
+								fstl.succStorage.Reset()
+								fstl.wasIHStorage = false
+								// There are some storage items
+								fstl.accData.FieldSet |= AccountFieldStorageOnly
+							}
+						}
+						if err := fstl.genStructAccount(); err != nil {
 							return err
 						}
+						if fstl.curr.Len() > 0 {
+							if len(fstl.groups) > fstl.streamCutoff {
+								fstl.groups = fstl.groups[:fstl.streamCutoff]
+							}
+							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+								fstl.groups = fstl.groups[:len(fstl.groups)-1]
+							}
+						}
+						fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+						fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
+						fstl.groups = fstl.groups[:0]
+						fstl.hb.Reset()
+						fstl.wasIH = false
+						fstl.wasIHStorage = false
+						fstl.curr.Reset()
+						fstl.succ.Reset()
+						fstl.currStorage.Reset()
+						fstl.succStorage.Reset()
 					}
 				}
 				fstl.itemPresent = false
