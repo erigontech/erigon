@@ -24,6 +24,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
+type RetainDecider interface {
+	Retain([]byte) bool
+	IsCodeTouched(common.Hash) bool
+}
+
 // RetainList encapsulates the list of keys that are required to be fully available, or loaded
 // (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
 // pairs
@@ -119,13 +124,6 @@ func (rl *RetainList) Retain(prefix []byte) bool {
 	return false
 }
 
-// Current returns the hex value that has been used for the latest comparison in `Retain` function
-// It is only used in one edge case at the moment - to distinguish between the accounts' key
-// and the storage keys of the same account
-func (rl *RetainList) Current() []byte {
-	return rl.hexes[rl.lteIndex]
-}
-
 // Rewind lets us reuse this list from the beginning
 func (rl *RetainList) Rewind() {
 	rl.lteIndex = 0
@@ -187,6 +185,3 @@ func (rr *RetainRange) String() string {
 	return fmt.Sprintf("%x-%x", rr.from, rr.to)
 }
 
-func (rr *RetainRange) Current() []byte {
-	panic("don't call me")
-}

@@ -8,11 +8,6 @@ import (
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)
-type RetainDecider interface {
-	Retain([]byte) bool
-	IsCodeTouched(common.Hash) bool
-	Current() []byte
-}
 
 type MerklePathLimiter struct {
 	RetainDecider RetainDecider
