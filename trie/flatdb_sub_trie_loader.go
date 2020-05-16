@@ -554,7 +554,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 					fstl.saveValueStorage(true, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen)
 				case AccountStreamItem:
 					fstl.advanceKeysAccount(false, fstl.accountKey)
-					if fstl.curr.Len() > 0 {
+					if fstl.curr.Len() > 0 && !fstl.wasIH {
 						if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
 							if ok {
 								// There are some storage items
@@ -592,9 +592,10 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 						} else {
 							return err
 						}
-					}
-					if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
-						return err
+					} else {
+						if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
+							return err
+						}
 					}
 				}
 				fstl.itemPresent = false
