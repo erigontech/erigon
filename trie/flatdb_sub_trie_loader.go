@@ -403,21 +403,6 @@ func (fstl *FlatDbSubTrieLoader) finaliseRoot(cutoff int) error {
 	if fstl.trace {
 		fmt.Printf("finaliseRoot(%d)\n", cutoff)
 	}
-	if cutoff >= 2*common.HashLength {
-		// if only storage resolution required, then no account records
-		if ok, err := fstl.finaliseStorageRoot(cutoff); err == nil {
-			if ok {
-				fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
-				fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
-			} else {
-				fstl.subTries.roots = append(fstl.subTries.roots, nil)
-				fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
-			}
-		} else {
-			return err
-		}
-		return nil
-	}
 	fstl.curr.Reset()
 	fstl.curr.Write(fstl.succ.Bytes())
 	fstl.succ.Reset()
@@ -556,22 +541,58 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 			if fstl.itemPresent {
 				switch fstl.itemType {
 				case StorageStreamItem:
-					if err := fstl.WalkerStorage(false, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen); err != nil {
+					fstl.advanceKeysStorage(false, fstl.storageKeyPart1, fstl.storageKeyPart2)
+					if err := fstl.genStructStorage(); err != nil {
 						return err
 					}
+					fstl.saveValueStorage(false, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen)
 				case SHashStreamItem:
-					if err := fstl.WalkerStorage(true, fstl.rangeIdx, fstl.storageKeyPart1, fstl.storageKeyPart2, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen); err != nil {
+					fstl.advanceKeysStorage(true, fstl.storageKeyPart1, fstl.storageKeyPart2)
+					if err := fstl.genStructStorage(); err != nil {
 						return err
 					}
+					fstl.saveValueStorage(true, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen)
 				case AccountStreamItem:
-					if err := fstl.WalkerAccount(false, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash, fstl.accountWitnessLen); err != nil {
+					fstl.advanceKeysAccount(false, fstl.accountKey)
+					if fstl.curr.Len() > 0 {
+						if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
+							if ok {
+								// There are some storage items
+								fstl.accData.FieldSet |= AccountFieldStorageOnly
+							}
+						} else {
+							return err
+						}
+					}
+					if err := fstl.genStructAccount(); err != nil {
+						return err
+					}
+					if err := fstl.saveValueAccount(false, &fstl.accountValue, fstl.accountHash, fstl.accountWitnessLen); err != nil {
 						return err
 					}
 				case AHashStreamItem:
-					if err := fstl.WalkerAccount(true, fstl.rangeIdx, fstl.accountKey, &fstl.accountValue, fstl.accountHash, fstl.accountWitnessLen); err != nil {
+					fstl.advanceKeysAccount(true, fstl.accountKey)
+					if err := fstl.genStructAccount(); err != nil {
+						return err
+					}
+					if err := fstl.saveValueAccount(true, &fstl.accountValue, fstl.accountHash, fstl.accountWitnessLen); err != nil {
 						return err
 					}
 				case CutoffStreamItem:
+					if fstl.streamCutoff >= 2*common.HashLength {
+						// if only storage resolution required, then no account records
+						if ok, err := fstl.finaliseStorageRoot(fstl.streamCutoff); err == nil {
+							if ok {
+								fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+								fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
+							} else {
+								fstl.subTries.roots = append(fstl.subTries.roots, nil)
+								fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
+							}
+						} else {
+							return err
+						}
+					}
 					if err := fstl.finaliseRoot(fstl.streamCutoff); err != nil {
 						return err
 					}
@@ -636,11 +657,7 @@ func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
 	}
 }
 
-func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, kPart1, kPart2, v, h []byte, witnessLen uint64) error {
-	if fstl.trace {
-		fmt.Printf("WalkerStorage: isIH=%v rangeIdx=%d keyPart1=%x keyPart2=%x value=%x hash=%x\n", isIH, rangeIdx, kPart1, kPart2, v, h)
-	}
-
+func (fstl *FlatDbSubTrieLoader) advanceKeysStorage(isIH bool, kPart1, kPart2 []byte) {
 	fstl.currStorage.Reset()
 	fstl.currStorage.Write(fstl.succStorage.Bytes())
 	fstl.succStorage.Reset()
@@ -651,7 +668,9 @@ func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, kPart1, 
 	if !isIH {
 		fstl.succStorage.WriteByte(16)
 	}
+}
 
+func (fstl *FlatDbSubTrieLoader) genStructStorage() error {
 	if fstl.currStorage.Len() > 0 {
 		var err error
 		var data GenStructStepData
@@ -671,7 +690,11 @@ func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, kPart1, 
 			return err
 		}
 	}
-	// Remember the current key and value
+	return nil
+}
+
+func (fstl *FlatDbSubTrieLoader) saveValueStorage(isIH bool, v, h []byte, witnessLen uint64) {
+	// Remember the current value
 	fstl.wasIHStorage = isIH
 	fstl.valueStorage.Reset()
 	if isIH {
@@ -680,15 +703,9 @@ func (fstl *FlatDbSubTrieLoader) WalkerStorage(isIH bool, rangeIdx int, kPart1, 
 	} else {
 		fstl.valueStorage.Write(v)
 	}
-
-	return nil
 }
 
-// Walker - k, v - shouldn't be reused in the caller's code
-func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, rangeIdx int, k []byte, v *accounts.Account, h []byte, witnessLen uint64) error {
-	if fstl.trace {
-		fmt.Printf("WalkerAccount: isIH=%v rangeIdx=%d key=%x hash=%x\n", isIH, rangeIdx, k, h)
-	}
+func (fstl *FlatDbSubTrieLoader) advanceKeysAccount(isIH bool, k []byte) {
 	fstl.curr.Reset()
 	fstl.curr.Write(fstl.succ.Bytes())
 	fstl.succ.Reset()
@@ -699,7 +716,9 @@ func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, rangeIdx int, k []byte
 	if !isIH {
 		fstl.succ.WriteByte(16)
 	}
+}
 
+func (fstl *FlatDbSubTrieLoader) genStructAccount() error {
 	if fstl.curr.Len() > 0 {
 		var data GenStructStepData
 		if fstl.wasIH {
@@ -707,14 +726,6 @@ func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, rangeIdx int, k []byte
 			fstl.hashData.DataLen = fstl.witnessLenAccount
 			data = &fstl.hashData
 		} else {
-			if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
-				if ok {
-					// There are some storage items
-					fstl.accData.FieldSet |= AccountFieldStorageOnly
-				}
-			} else {
-				return err
-			}
 			fstl.accData.Balance.Set(&fstl.a.Balance)
 			if fstl.a.Balance.Sign() != 0 {
 				fstl.accData.FieldSet |= AccountFieldBalanceOnly
@@ -735,16 +746,17 @@ func (fstl *FlatDbSubTrieLoader) WalkerAccount(isIH bool, rangeIdx int, k []byte
 		}
 		fstl.accData.FieldSet = 0
 	}
-	// Remember the current key and value
-	fstl.wasIH = isIH
+	return nil
+}
 
+func (fstl *FlatDbSubTrieLoader) saveValueAccount(isIH bool, v *accounts.Account, h []byte, witnessLen uint64) error {
+	fstl.wasIH = isIH
 	if isIH {
 		fstl.value.Reset()
 		fstl.value.Write(h)
 		fstl.witnessLenAccount = witnessLen
 		return nil
 	}
-
 	fstl.a.Copy(v)
 	// Place code on the stack first, the storage will follow
 	if !fstl.a.IsEmptyCodeHash() {
