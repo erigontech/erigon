@@ -572,6 +572,16 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 					}
 				case AHashStreamItem:
 					fstl.advanceKeysAccount(true, fstl.accountKey)
+					if fstl.curr.Len() > 0 && !fstl.wasIH {
+						if ok, err := fstl.finaliseStorageRoot(2 * common.HashLength); err == nil {
+							if ok {
+								// There are some storage items
+								fstl.accData.FieldSet |= AccountFieldStorageOnly
+							}
+						} else {
+							return err
+						}
+					}
 					if err := fstl.genStructAccount(); err != nil {
 						return err
 					}
