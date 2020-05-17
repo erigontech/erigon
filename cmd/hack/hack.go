@@ -2012,6 +2012,28 @@ func resetState(chaindata string) {
 	fmt.Printf("Reset state done\n")
 }
 
+type Receiver struct {
+	defaultReceiver *trie.DefaultReceiver
+}
+
+func (r *Receiver) Receive(
+	itemType trie.StreamItem,
+	accountKey []byte,
+	storageKeyPart1 []byte,
+	storageKeyPart2 []byte,
+	accountValue *accounts.Account,
+	storageValue []byte,
+	hash []byte,
+	cutoff int,
+	witnessLen uint64,
+) error {
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+}
+
+func (r *Receiver) Result() trie.SubTries {
+	return r.defaultReceiver.Result()
+}
+
 func testGetProof(chaindata string, block uint64, account common.Address) {
 	fmt.Printf("testGetProof %s, %d, %x\n", chaindata, block, account)
 	// Find all changesets larger than given blocks
@@ -2061,8 +2083,14 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	}
 	fmt.Printf("Account changesets: %d, storage changesets: %d\n", accountCs, storageCs)
 	loader := trie.NewFlatDbSubTrieLoader()
+	unfurl := trie.NewRetainList(0)
+	if err = loader.Reset(db, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
+		panic(err)
+	}
+	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver()}
 	rl := trie.NewRetainList(0)
-	loader.Reset(db, rl, [][]byte{nil}, []int{0}, false)
+	r.defaultReceiver.Reset(rl, false)
+	loader.SetStreamReceiver(r)
 	subTries, err := loader.LoadSubTries()
 	if err != nil {
 		panic(err)

@@ -93,9 +93,13 @@ type DefaultReceiver struct {
 	witnessLen   uint64
 }
 
+func NewDefaultReceiver() *DefaultReceiver {
+	return &DefaultReceiver{hb: NewHashBuilder(false)}
+}
+
 func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 	fstl := &FlatDbSubTrieLoader{
-		defaultReceiver: &DefaultReceiver{hb: NewHashBuilder(false)},
+		defaultReceiver: NewDefaultReceiver(),
 	}
 	return fstl
 }
