@@ -444,7 +444,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				case AccountStreamItem:
 					fstl.advanceKeysAccount(fstl.accountKey, true /* terminator */)
 					if fstl.curr.Len() > 0 && !fstl.wasIH {
-						fstl.cutoffKeysStorage(2*common.HashLength)
+						fstl.cutoffKeysStorage(2 * common.HashLength)
 						if fstl.currStorage.Len() > 0 {
 							if err := fstl.genStructStorage(); err != nil {
 								return err
@@ -475,7 +475,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				case AHashStreamItem:
 					fstl.advanceKeysAccount(fstl.accountKey, false /* terminator */)
 					if fstl.curr.Len() > 0 && !fstl.wasIH {
-						fstl.cutoffKeysStorage(2*common.HashLength)
+						fstl.cutoffKeysStorage(2 * common.HashLength)
 						if fstl.currStorage.Len() > 0 {
 							if err := fstl.genStructStorage(); err != nil {
 								return err
@@ -530,7 +530,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 					} else {
 						fstl.cutoffKeysAccount(fstl.streamCutoff)
 						if fstl.curr.Len() > 0 && !fstl.wasIH {
-							fstl.cutoffKeysStorage(2*common.HashLength)
+							fstl.cutoffKeysStorage(2 * common.HashLength)
 							if fstl.currStorage.Len() > 0 {
 								if err := fstl.genStructStorage(); err != nil {
 									return err
