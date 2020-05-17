@@ -215,7 +215,11 @@ func opAddmod(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 
 func opMulmod(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	x, y, z := callContext.stack.pop(), callContext.stack.pop(), callContext.stack.peek()
-	z.MulMod(&x, &y, z)
+	if z.IsZero() {
+		z.Clear()
+	} else {
+		z.MulMod(&x, &y, z)
+	}
 	return nil, nil
 }
 
@@ -599,18 +603,18 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 	callContext.contract.UseGas(gas)
 	res, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, value.ToBig())
 
-	stackvalue := size
+	stackValue := size
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
 	// rule) and treat as an error, if the ruleset is frontier we must
 	// ignore this error and pretend the operation was successful.
 	if interpreter.evm.chainRules.IsHomestead && suberr == ErrCodeStoreOutOfGas {
-		stackvalue.Clear()
+		stackValue.Clear()
 	} else if suberr != nil && suberr != ErrCodeStoreOutOfGas {
-		stackvalue.Clear()
+		stackValue.Clear()
 	} else {
-		stackvalue.SetBytes(addr.Bytes())
+		stackValue.SetBytes(addr.Bytes())
 	}
 	callContext.contract.Gas += returnGas
 
@@ -634,13 +638,13 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	callContext.contract.UseGas(gas)
 	res, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, endowment.ToBig(), salt.ToBig())
 
-	stackvalue := salt
+	stackValue := salt
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
-		stackvalue.Clear()
+		stackValue.Clear()
 	} else {
-		stackvalue.SetBytes(addr.Bytes())
+		stackValue.SetBytes(addr.Bytes())
 	}
 	callContext.contract.Gas += returnGas
 
