@@ -2102,7 +2102,7 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 				if _, ok := accountMap[string(kk)]; !ok {
 					if len(vv) > 0 {
 						var a accounts.Account
-						a.DecodeForStorage(vv)
+						check(a.DecodeForStorage(vv))
 						accountMap[string(kk)] = &a
 					} else {
 						accountMap[string(kk)] = nil
