@@ -312,12 +312,12 @@ func TestApiDetails(t *testing.T) {
 	// this IntermediateHash key must not be used, because such key is in ResolveRequest
 	// putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
 
-	loader := NewSubTrieLoader(0)
 	tr := New(common.Hash{})
 
 	{
 		expectRootHash := common.HexToHash("8c34d9b522547741fefe2363762026cf821e6b6a9358a56c9af26182403d20d9")
 
+		loader := NewSubTrieLoader(0)
 		rs := NewRetainList(0)
 		rs.AddHex(hexf("000101%0122x", 0))
 		rs.AddHex(common.Hex2Bytes("000202"))
@@ -363,13 +363,14 @@ func TestApiDetails(t *testing.T) {
 	}
 
 	{ // storage loader
-		loader.Reset(1)
+		loader := NewSubTrieLoader(0)
 		rl := NewRetainList(0)
 		rl.AddHex(append(hexf("000101%0122x", 0), hexf("%0128x", 0)...))
 		rl.AddHex(append(hexf("000201%0122x", 0), hexf("%0128x", 0)...))
 		rl.AddHex(append(hexf("000202%0122x", 0), hexf("%0128x", 0)...))
 		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
+		rl.Rewind()
 		subTries, err := loader.LoadSubTries(db, 0, rl, dbPrefixes, fixedbits, false)
 		require.NoError(err)
 
@@ -406,7 +407,7 @@ func TestApiDetails(t *testing.T) {
 	}
 
 	if debug.IsTrackWitnessSizeEnabled() {
-		loader.Reset(1)
+		loader := NewSubTrieLoader(0)
 		rs := NewRetainList(0)
 		for _, base := range []string{"0", "f"} {
 			for _, i := range []int{0, 1, 2, 15} {
