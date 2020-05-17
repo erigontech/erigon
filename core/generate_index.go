@@ -2,12 +2,13 @@ package core
 
 import (
 	"bytes"
+	"sort"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"sort"
-	"time"
 )
 
 func NewIndexGenerator(db ethdb.Database, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker) *IndexGenerator {
@@ -97,7 +98,7 @@ func (ig *IndexGenerator) GenerateIndex() error {
 	}
 
 	commit := func() error {
-		tuples := common.NewTuples(len(ig.cache), 3, 1)
+		tuples := make(ethdb.MultiPutTuples, 0, len(ig.cache)*3)
 		for key, vals := range ig.cache {
 			for _, val := range vals {
 				var (
@@ -108,15 +109,11 @@ func (ig *IndexGenerator) GenerateIndex() error {
 				if err != nil {
 					return err
 				}
-
-				if err := tuples.Append(ig.bucketToWrite, chunkKey, val.Val); err != nil {
-					return err
-				}
-
+				tuples = append(tuples, ig.bucketToWrite, chunkKey, val.Val)
 			}
 		}
 		sort.Sort(tuples)
-		_, err := ig.db.MultiPut(tuples.Values...)
+		_, err := ig.db.MultiPut(tuples...)
 		if err != nil {
 			return err
 		}
