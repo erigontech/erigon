@@ -1421,3 +1421,90 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	defer tds.tMu.Unlock()
 	return tds.t.Hash()
 }
+
+func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	prefixNibbles, ok := tds.t.PrefixByCumulativeWitnessSize(size)
+	if len(prefixNibbles)%2 == 1 {
+		prefixNibbles = prefixNibbles[:len(prefixNibbles)-1]
+	}
+	prefix := make([]byte, len(prefixNibbles)/2)
+	trie.CompressNibbles(prefixNibbles, &prefix)
+	if ok {
+		fmt.Printf("Return from trie\n")
+		return prefix, nil
+	}
+
+	var kv ethdb.KV
+	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
+		kv = hasBolt.AbstractKV()
+	}
+
+	var accumulator uint64 // increase when go to sibling, don't touch it when go to child
+
+	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
+		c := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
+		k, v, err := c.Seek(prefix)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("To Sibling: %x, %d\n", prefix, accumulator)
+		for k != nil {
+			prefixSize := binary.BigEndian.Uint64(v)
+			fmt.Printf("Cmp: %d, %d\n", accumulator+prefixSize, size)
+			if accumulator+prefixSize >= size {
+				k, v, err = c.Next() // go to child
+				if err != nil {
+					return err
+				}
+				if !bytes.HasPrefix(k, prefix) {
+					fmt.Printf("Not Match: %x, %x\n", k, prefix)
+					return nil
+				}
+				prefix = common.CopyBytes(k)
+				fmt.Printf("To Child: %x, %d\n", prefix, accumulator)
+				continue
+			}
+			accumulator += prefixSize
+
+			next, ok := nextSubtree(k)
+			if !ok {
+				prefix = nil
+				return nil
+			}
+
+			k, v, err = c.SeekTo(next) // go to sibling
+			if err != nil {
+				return err
+			}
+			if !bytes.HasPrefix(k, prefix) {
+				fmt.Printf("Not Match: %x, %x\n", k, prefix)
+				return nil
+			}
+			prefix = common.CopyBytes(k)
+			fmt.Printf("To Sibling: %x, %d, %x\n", prefix, accumulator, next)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return prefix, nil
+}
+
+// nextSubtree does []byte++. Returns false if overflow.
+func nextSubtree(in []byte) ([]byte, bool) {
+	r := make([]byte, len(in))
+	copy(r, in)
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] != 255 {
+			r[i]++
+			return r, true
+		}
+
+		r[i] = 0
+	}
+	return nil, false
+}
