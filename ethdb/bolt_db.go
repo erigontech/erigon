@@ -134,6 +134,29 @@ func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	return uint64(savedTx.Stats().Write), nil
 }
 
+// Type which expecting sequence of triplets: bucket, key, value, ....
+// It sorts entries by bucket name, then inside bucket clusters sort by keys
+type MultiPutTuples [][]byte
+
+func (t MultiPutTuples) Len() int { return len(t) / 3 }
+
+func (t MultiPutTuples) Less(i, j int) bool {
+	cmp := bytes.Compare(t[i*3], t[j*3])
+	if cmp == -1 {
+		return true
+	}
+	if cmp == 0 {
+		return bytes.Compare(t[i*3+1], t[j*3+1]) == -1
+	}
+	return false
+}
+
+func (t MultiPutTuples) Swap(i, j int) {
+	t[i*3], t[j*3] = t[j*3], t[i*3]
+	t[i*3+1], t[j*3+1] = t[j*3+1], t[i*3+1]
+	t[i*3+2], t[j*3+2] = t[j*3+2], t[i*3+2]
+}
+
 func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
 	err := db.db.View(func(tx *bolt.Tx) error {
