@@ -2060,6 +2060,14 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 		panic(err)
 	}
 	fmt.Printf("Account changesets: %d, storage changesets: %d\n", accountCs, storageCs)
+	loader := trie.NewFlatDbSubTrieLoader()
+	rl := trie.NewRetainList(0)
+	loader.Reset(db, rl, [][]byte{nil}, []int{0}, false)
+	subTries, err := loader.LoadSubTries()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
 }
 
 func main() {
