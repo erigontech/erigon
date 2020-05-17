@@ -2012,6 +2012,56 @@ func resetState(chaindata string) {
 	fmt.Printf("Reset state done\n")
 }
 
+func testGetProof(chaindata string, block uint64, account common.Address) {
+	fmt.Printf("testGetProof %s, %d, %x\n", chaindata, block, account)
+	// Find all changesets larger than given blocks
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	ts := dbutils.EncodeTimestamp(block)
+	accountCs := 0
+	accountMap := make(map[string][]byte)
+	if err = db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+		if changeset.Len(v) > 0 {
+			walker := func(kk, vv []byte) error {
+				if _, ok := accountMap[string(kk)]; !ok {
+					accountMap[string(kk)] = vv
+				}
+				return nil
+			}
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
+				return false, innerErr
+			}
+		}
+		accountCs++
+		return true, nil
+	}); err != nil {
+		panic(err)
+	}
+	storageCs := 0
+	storageMap := make(map[string][]byte)
+	if err = db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+		if changeset.Len(v) > 0 {
+			walker := func(kk, vv []byte) error {
+				if _, ok := storageMap[string(kk)]; !ok {
+					storageMap[string(kk)] = vv
+				}
+				return nil
+			}
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
+				return false, innerErr
+			}
+		}
+		storageCs++
+		return true, nil
+	}); err != nil {
+		panic(err)
+	}
+	fmt.Printf("Account changesets: %d, storage changesets: %d\n", accountCs, storageCs)
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2146,5 +2196,8 @@ func main() {
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)
+	}
+	if *action == "getProof" {
+		testGetProof(*chaindata, uint64(*block), common.HexToAddress(*account))
 	}
 }

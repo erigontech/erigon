@@ -21,6 +21,18 @@ var (
 	trieFlatDbSubTrieLoaderTimer = metrics.NewRegisteredTimer("trie/subtrieloader/flatdb", nil)
 )
 
+type StreamReceiver func(
+	itemType StreamItem,
+	accountKey []byte,
+	storageKeyPart1 []byte,
+	storageKeyPart2 []byte,
+	accountValue *accounts.Account,
+	storageValue []byte,
+	hash []byte,
+	cutoff int,
+	witnessLen uint64,
+) error
+
 type FlatDbSubTrieLoader struct {
 	rl       RetainDecider
 	curr     bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
@@ -63,18 +75,18 @@ type FlatDbSubTrieLoader struct {
 	getWitnessLen func(prefix []byte) uint64
 
 	// Storage item buffer
-	storageKeyPart1   []byte
-	storageKeyPart2   []byte
-	storageHash       []byte
-	storageValue      []byte
-	storageWitnessLen uint64
+	storageKeyPart1 []byte
+	storageKeyPart2 []byte
+	storageValue    []byte
 
 	// Acount item buffer
-	accountKey        []byte
-	accountHash       []byte
-	accountValue      accounts.Account
-	streamCutoff      int
-	accountWitnessLen uint64
+	accountKey   []byte
+	accountValue accounts.Account
+	hashValue    []byte
+	streamCutoff int
+	witnessLen   uint64
+
+	receiver StreamReceiver
 }
 
 func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
@@ -86,6 +98,7 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 
 // Reset prepares the loader for reuse
 func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
+	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 	fstl.curr.Reset()
 	fstl.succ.Reset()
@@ -140,6 +153,10 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, dbPr
 	fstl.cutoffs = cutoffs
 
 	return nil
+}
+
+func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
+	fstl.receiver = receiver
 }
 
 // iteration moves through the database buckets and creates at most
@@ -264,7 +281,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 				fstl.storageKeyPart1 = fstl.k
 				fstl.storageKeyPart2 = nil
 			}
-			fstl.storageHash = nil
+			fstl.hashValue = nil
 			fstl.storageValue = fstl.v
 			fstl.k, fstl.v = c.Next()
 			if fstl.trace {
@@ -273,7 +290,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 		} else {
 			fstl.itemType = AccountStreamItem
 			fstl.accountKey = fstl.k
-			fstl.accountHash = nil
+			fstl.hashValue = nil
 			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
 				return fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
@@ -339,14 +356,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 			fstl.storageKeyPart1 = fstl.ihK
 			fstl.storageKeyPart2 = nil
 		}
-		fstl.storageHash = fstl.ihV
+		fstl.hashValue = fstl.ihV
 		fstl.storageValue = nil
-		fstl.storageWitnessLen = fstl.getWitnessLen(fstl.ihK)
+		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
 	} else {
 		fstl.itemType = AHashStreamItem
 		fstl.accountKey = fstl.ihK
-		fstl.accountHash = fstl.ihV
-		fstl.accountWitnessLen = fstl.getWitnessLen(fstl.ihK)
+		fstl.hashValue = fstl.ihV
+		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
 	}
 
 	// skip subtree
@@ -395,6 +412,170 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 	return nil
 }
 
+func (fstl *FlatDbSubTrieLoader) defaultReceiver(itemType StreamItem,
+	accountKey []byte,
+	storageKeyPart1 []byte,
+	storageKeyPart2 []byte,
+	accountValue *accounts.Account,
+	storageValue []byte,
+	hash []byte,
+	cutoff int,
+	witnessLen uint64,
+) error {
+	switch itemType {
+	case StorageStreamItem:
+		fstl.advanceKeysStorage(storageKeyPart1, storageKeyPart2, true /* terminator */)
+		if fstl.currStorage.Len() > 0 {
+			if err := fstl.genStructStorage(); err != nil {
+				return err
+			}
+		}
+		fstl.saveValueStorage(false, storageValue, hash, witnessLen)
+	case SHashStreamItem:
+		fstl.advanceKeysStorage(storageKeyPart1, storageKeyPart2, false /* terminator */)
+		if fstl.currStorage.Len() > 0 {
+			if err := fstl.genStructStorage(); err != nil {
+				return err
+			}
+		}
+		fstl.saveValueStorage(true, storageValue, hash, witnessLen)
+	case AccountStreamItem:
+		fstl.advanceKeysAccount(accountKey, true /* terminator */)
+		if fstl.curr.Len() > 0 && !fstl.wasIH {
+			fstl.cutoffKeysStorage(2 * common.HashLength)
+			if fstl.currStorage.Len() > 0 {
+				if err := fstl.genStructStorage(); err != nil {
+					return err
+				}
+			}
+			if fstl.currStorage.Len() > 0 {
+				if len(fstl.groups) >= 2*common.HashLength {
+					fstl.groups = fstl.groups[:2*common.HashLength-1]
+				}
+				for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+					fstl.groups = fstl.groups[:len(fstl.groups)-1]
+				}
+				fstl.currStorage.Reset()
+				fstl.succStorage.Reset()
+				fstl.wasIHStorage = false
+				// There are some storage items
+				fstl.accData.FieldSet |= AccountFieldStorageOnly
+			}
+		}
+		if fstl.curr.Len() > 0 {
+			if err := fstl.genStructAccount(); err != nil {
+				return err
+			}
+		}
+		if err := fstl.saveValueAccount(false, accountValue, hash, witnessLen); err != nil {
+			return err
+		}
+	case AHashStreamItem:
+		fstl.advanceKeysAccount(accountKey, false /* terminator */)
+		if fstl.curr.Len() > 0 && !fstl.wasIH {
+			fstl.cutoffKeysStorage(2 * common.HashLength)
+			if fstl.currStorage.Len() > 0 {
+				if err := fstl.genStructStorage(); err != nil {
+					return err
+				}
+			}
+			if fstl.currStorage.Len() > 0 {
+				if len(fstl.groups) >= 2*common.HashLength {
+					fstl.groups = fstl.groups[:2*common.HashLength-1]
+				}
+				for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+					fstl.groups = fstl.groups[:len(fstl.groups)-1]
+				}
+				fstl.currStorage.Reset()
+				fstl.succStorage.Reset()
+				fstl.wasIHStorage = false
+				// There are some storage items
+				fstl.accData.FieldSet |= AccountFieldStorageOnly
+			}
+		}
+		if fstl.curr.Len() > 0 {
+			if err := fstl.genStructAccount(); err != nil {
+				return err
+			}
+		}
+		if err := fstl.saveValueAccount(true, accountValue, hash, witnessLen); err != nil {
+			return err
+		}
+	case CutoffStreamItem:
+		if cutoff >= 2*common.HashLength {
+			fstl.cutoffKeysStorage(cutoff)
+			if fstl.currStorage.Len() > 0 {
+				if err := fstl.genStructStorage(); err != nil {
+					return err
+				}
+			}
+			if fstl.currStorage.Len() > 0 {
+				if len(fstl.groups) >= cutoff {
+					fstl.groups = fstl.groups[:cutoff-1]
+				}
+				for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+					fstl.groups = fstl.groups[:len(fstl.groups)-1]
+				}
+				fstl.currStorage.Reset()
+				fstl.succStorage.Reset()
+				fstl.wasIHStorage = false
+				fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+				fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
+			} else {
+				fstl.subTries.roots = append(fstl.subTries.roots, nil)
+				fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
+			}
+		} else {
+			fstl.cutoffKeysAccount(cutoff)
+			if fstl.curr.Len() > 0 && !fstl.wasIH {
+				fstl.cutoffKeysStorage(2 * common.HashLength)
+				if fstl.currStorage.Len() > 0 {
+					if err := fstl.genStructStorage(); err != nil {
+						return err
+					}
+				}
+				if fstl.currStorage.Len() > 0 {
+					if len(fstl.groups) >= 2*common.HashLength {
+						fstl.groups = fstl.groups[:2*common.HashLength-1]
+					}
+					for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+						fstl.groups = fstl.groups[:len(fstl.groups)-1]
+					}
+					fstl.currStorage.Reset()
+					fstl.succStorage.Reset()
+					fstl.wasIHStorage = false
+					// There are some storage items
+					fstl.accData.FieldSet |= AccountFieldStorageOnly
+				}
+			}
+			if fstl.curr.Len() > 0 {
+				if err := fstl.genStructAccount(); err != nil {
+					return err
+				}
+			}
+			if fstl.curr.Len() > 0 {
+				if len(fstl.groups) > cutoff {
+					fstl.groups = fstl.groups[:cutoff]
+				}
+				for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
+					fstl.groups = fstl.groups[:len(fstl.groups)-1]
+				}
+			}
+			fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
+			fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
+			fstl.groups = fstl.groups[:0]
+			fstl.hb.Reset()
+			fstl.wasIH = false
+			fstl.wasIHStorage = false
+			fstl.curr.Reset()
+			fstl.succ.Reset()
+			fstl.currStorage.Reset()
+			fstl.succStorage.Reset()
+		}
+	}
+	return nil
+}
+
 func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	defer trieFlatDbSubTrieLoaderTimer.UpdateSince(time.Now())
 	if len(fstl.dbPrefixes) == 0 {
@@ -424,156 +605,8 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				}
 			}
 			if fstl.itemPresent {
-				switch fstl.itemType {
-				case StorageStreamItem:
-					fstl.advanceKeysStorage(fstl.storageKeyPart1, fstl.storageKeyPart2, true /* terminator */)
-					if fstl.currStorage.Len() > 0 {
-						if err := fstl.genStructStorage(); err != nil {
-							return err
-						}
-					}
-					fstl.saveValueStorage(false, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen)
-				case SHashStreamItem:
-					fstl.advanceKeysStorage(fstl.storageKeyPart1, fstl.storageKeyPart2, false /* terminator */)
-					if fstl.currStorage.Len() > 0 {
-						if err := fstl.genStructStorage(); err != nil {
-							return err
-						}
-					}
-					fstl.saveValueStorage(true, fstl.storageValue, fstl.storageHash, fstl.storageWitnessLen)
-				case AccountStreamItem:
-					fstl.advanceKeysAccount(fstl.accountKey, true /* terminator */)
-					if fstl.curr.Len() > 0 && !fstl.wasIH {
-						fstl.cutoffKeysStorage(2 * common.HashLength)
-						if fstl.currStorage.Len() > 0 {
-							if err := fstl.genStructStorage(); err != nil {
-								return err
-							}
-						}
-						if fstl.currStorage.Len() > 0 {
-							if len(fstl.groups) >= 2*common.HashLength {
-								fstl.groups = fstl.groups[:2*common.HashLength-1]
-							}
-							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-								fstl.groups = fstl.groups[:len(fstl.groups)-1]
-							}
-							fstl.currStorage.Reset()
-							fstl.succStorage.Reset()
-							fstl.wasIHStorage = false
-							// There are some storage items
-							fstl.accData.FieldSet |= AccountFieldStorageOnly
-						}
-					}
-					if fstl.curr.Len() > 0 {
-						if err := fstl.genStructAccount(); err != nil {
-							return err
-						}
-					}
-					if err := fstl.saveValueAccount(false, &fstl.accountValue, fstl.accountHash, fstl.accountWitnessLen); err != nil {
-						return err
-					}
-				case AHashStreamItem:
-					fstl.advanceKeysAccount(fstl.accountKey, false /* terminator */)
-					if fstl.curr.Len() > 0 && !fstl.wasIH {
-						fstl.cutoffKeysStorage(2 * common.HashLength)
-						if fstl.currStorage.Len() > 0 {
-							if err := fstl.genStructStorage(); err != nil {
-								return err
-							}
-						}
-						if fstl.currStorage.Len() > 0 {
-							if len(fstl.groups) >= 2*common.HashLength {
-								fstl.groups = fstl.groups[:2*common.HashLength-1]
-							}
-							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-								fstl.groups = fstl.groups[:len(fstl.groups)-1]
-							}
-							fstl.currStorage.Reset()
-							fstl.succStorage.Reset()
-							fstl.wasIHStorage = false
-							// There are some storage items
-							fstl.accData.FieldSet |= AccountFieldStorageOnly
-						}
-					}
-					if fstl.curr.Len() > 0 {
-						if err := fstl.genStructAccount(); err != nil {
-							return err
-						}
-					}
-					if err := fstl.saveValueAccount(true, &fstl.accountValue, fstl.accountHash, fstl.accountWitnessLen); err != nil {
-						return err
-					}
-				case CutoffStreamItem:
-					if fstl.streamCutoff >= 2*common.HashLength {
-						fstl.cutoffKeysStorage(fstl.streamCutoff)
-						if fstl.currStorage.Len() > 0 {
-							if err := fstl.genStructStorage(); err != nil {
-								return err
-							}
-						}
-						if fstl.currStorage.Len() > 0 {
-							if len(fstl.groups) >= fstl.streamCutoff {
-								fstl.groups = fstl.groups[:fstl.streamCutoff-1]
-							}
-							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-								fstl.groups = fstl.groups[:len(fstl.groups)-1]
-							}
-							fstl.currStorage.Reset()
-							fstl.succStorage.Reset()
-							fstl.wasIHStorage = false
-							fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
-							fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
-						} else {
-							fstl.subTries.roots = append(fstl.subTries.roots, nil)
-							fstl.subTries.Hashes = append(fstl.subTries.Hashes, common.Hash{})
-						}
-					} else {
-						fstl.cutoffKeysAccount(fstl.streamCutoff)
-						if fstl.curr.Len() > 0 && !fstl.wasIH {
-							fstl.cutoffKeysStorage(2 * common.HashLength)
-							if fstl.currStorage.Len() > 0 {
-								if err := fstl.genStructStorage(); err != nil {
-									return err
-								}
-							}
-							if fstl.currStorage.Len() > 0 {
-								if len(fstl.groups) >= 2*common.HashLength {
-									fstl.groups = fstl.groups[:2*common.HashLength-1]
-								}
-								for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-									fstl.groups = fstl.groups[:len(fstl.groups)-1]
-								}
-								fstl.currStorage.Reset()
-								fstl.succStorage.Reset()
-								fstl.wasIHStorage = false
-								// There are some storage items
-								fstl.accData.FieldSet |= AccountFieldStorageOnly
-							}
-						}
-						if fstl.curr.Len() > 0 {
-							if err := fstl.genStructAccount(); err != nil {
-								return err
-							}
-						}
-						if fstl.curr.Len() > 0 {
-							if len(fstl.groups) > fstl.streamCutoff {
-								fstl.groups = fstl.groups[:fstl.streamCutoff]
-							}
-							for len(fstl.groups) > 0 && fstl.groups[len(fstl.groups)-1] == 0 {
-								fstl.groups = fstl.groups[:len(fstl.groups)-1]
-							}
-						}
-						fstl.subTries.roots = append(fstl.subTries.roots, fstl.hb.root())
-						fstl.subTries.Hashes = append(fstl.subTries.Hashes, fstl.hb.rootHash())
-						fstl.groups = fstl.groups[:0]
-						fstl.hb.Reset()
-						fstl.wasIH = false
-						fstl.wasIHStorage = false
-						fstl.curr.Reset()
-						fstl.succ.Reset()
-						fstl.currStorage.Reset()
-						fstl.succStorage.Reset()
-					}
+				if err := fstl.receiver(fstl.itemType, fstl.accountKey, fstl.storageKeyPart1, fstl.storageKeyPart2, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessLen); err != nil {
+					return err
 				}
 				fstl.itemPresent = false
 			}
