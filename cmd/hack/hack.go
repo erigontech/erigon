@@ -2140,14 +2140,17 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	}); err != nil {
 		panic(err)
 	}
-	var unfurlList []string
+	var unfurlList = make([]string, len(accountMap) + len(storageMap))
 	unfurl := trie.NewRetainList(0)
+	i := 0
 	for ks := range accountMap {
-		unfurlList = append(unfurlList, ks)
+		unfurlList[i] = ks
+		i++
 		unfurl.AddKey([]byte(ks))
 	}
 	for ks := range storageMap {
-		unfurlList = append(unfurlList, ks)
+		unfurlList[i] = ks
+		i++
 		var sk [64]byte
 		copy(sk[:], []byte(ks)[:common.HashLength])
 		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
