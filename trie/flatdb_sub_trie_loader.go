@@ -286,6 +286,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 		} else {
 			fstl.itemType = AccountStreamItem
 			fstl.accountKey = fstl.k
+			fstl.storageKeyPart1 = nil
+			fstl.storageKeyPart2 = nil
 			fstl.hashValue = nil
 			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
 				return fmt.Errorf("fail DecodeForStorage: %w", err)
@@ -358,6 +360,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 	} else {
 		fstl.itemType = AHashStreamItem
 		fstl.accountKey = fstl.ihK
+		fstl.storageKeyPart1 = nil
+		fstl.storageKeyPart2 = nil
 		fstl.hashValue = fstl.ihV
 		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
 	}

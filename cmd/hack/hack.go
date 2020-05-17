@@ -2014,6 +2014,10 @@ func resetState(chaindata string) {
 
 type Receiver struct {
 	defaultReceiver *trie.DefaultReceiver
+	accountMap      map[string]*accounts.Account
+	storageMap      map[string][]byte
+	unfurlList      []string
+	currentIdx      int
 }
 
 func (r *Receiver) Receive(
@@ -2027,6 +2031,55 @@ func (r *Receiver) Receive(
 	cutoff int,
 	witnessLen uint64,
 ) error {
+	for r.currentIdx < len(r.unfurlList) {
+		ks := r.unfurlList[r.currentIdx]
+		k := []byte(ks)
+		var c int
+		switch itemType {
+		case trie.StorageStreamItem, trie.SHashStreamItem:
+			if len(k) > common.HashLength {
+				c = bytes.Compare(k[:common.HashLength], storageKeyPart1)
+				if c == 0 {
+					c = bytes.Compare(k[common.HashLength+common.IncarnationLength:], storageKeyPart2)
+				}
+			} else {
+				c = bytes.Compare(k, storageKeyPart1)
+			}
+		case trie.AccountStreamItem, trie.AHashStreamItem:
+			c = bytes.Compare(k, accountKey)
+		case trie.CutoffStreamItem:
+			c = -1
+		}
+		if c > 0 {
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+		}
+		if len(k) > common.HashLength {
+			v := r.storageMap[ks]
+			if c < 0 || (c == 0 && len(v) > 0) {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k[:32], k[40:], nil, v, nil, 0, 0); err != nil {
+					return err
+				}
+			}
+			if c < 0 && len(v) == 0 {
+				panic("")
+			}
+		} else {
+			v := r.accountMap[ks]
+			if c < 0 || (c == 0 && v != nil) {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, nil, v, nil, nil, 0, 0); err != nil {
+					return err
+				}
+			}
+			if c < 0 && v == nil {
+				panic("")
+			}
+		}
+		r.currentIdx++
+		if c == 0 {
+			return nil
+		}
+	}
+	// We ran out of modifications, simply pass through
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
 }
 
@@ -2042,12 +2095,18 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	defer db.Close()
 	ts := dbutils.EncodeTimestamp(block)
 	accountCs := 0
-	accountMap := make(map[string][]byte)
+	accountMap := make(map[string]*accounts.Account)
 	if err = db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := accountMap[string(kk)]; !ok {
-					accountMap[string(kk)] = vv
+					if len(vv) > 0 {
+						var a accounts.Account
+						a.DecodeForStorage(vv)
+						accountMap[string(kk)] = &a
+					} else {
+						accountMap[string(kk)] = nil
+					}
 				}
 				return nil
 			}
@@ -2081,13 +2140,26 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	}); err != nil {
 		panic(err)
 	}
-	fmt.Printf("Account changesets: %d, storage changesets: %d\n", accountCs, storageCs)
-	loader := trie.NewFlatDbSubTrieLoader()
+	var unfurlList []string
 	unfurl := trie.NewRetainList(0)
+	for ks := range accountMap {
+		unfurlList = append(unfurlList, ks)
+		unfurl.AddKey([]byte(ks))
+	}
+	for ks := range storageMap {
+		unfurlList = append(unfurlList, ks)
+		var sk [64]byte
+		copy(sk[:], []byte(ks)[:common.HashLength])
+		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
+		unfurl.AddKey(sk[:])
+	}
+	sort.Strings(unfurlList)
+	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
+	loader := trie.NewFlatDbSubTrieLoader()
 	if err = loader.Reset(db, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
 		panic(err)
 	}
-	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver()}
+	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	rl := trie.NewRetainList(0)
 	r.defaultReceiver.Reset(rl, false)
 	loader.SetStreamReceiver(r)
@@ -2096,6 +2168,9 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 		panic(err)
 	}
 	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
+	hash := rawdb.ReadCanonicalHash(db, block-1)
+	header := rawdb.ReadHeader(db, hash, block-1)
+	fmt.Printf("Block state root: %x\n", header.Root)
 }
 
 func main() {
