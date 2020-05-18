@@ -75,7 +75,7 @@ func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 		if stack.Len() == 0 {
 			return nil
 		}
-		loc := common.BigToHash(stack.Back(0))
+		loc := common.Hash(stack.Back(0).Bytes32())
 		if l1, ok1 := ct.loadedS[addr]; ok1 {
 			if _, ok2 := l1[loc]; !ok2 {
 				ct.nakedSstores++
@@ -103,7 +103,7 @@ func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 		if stack.Len() == 0 {
 			return nil
 		}
-		loc := common.BigToHash(stack.Back(0))
+		loc := common.Hash(stack.Back(0).Bytes32())
 		if l1, ok1 := ct.loadedS[addr]; ok1 {
 			if _, ok2 := l1[loc]; !ok2 {
 				ct.nakedSloads++

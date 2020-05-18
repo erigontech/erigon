@@ -108,7 +108,7 @@ func (mw *memoryWrapper) slice(begin, end int64) []byte {
 		log.Warn("Tracer accessed out of bound memory", "available", mw.memory.Len(), "offset", begin, "size", end-begin)
 		return nil
 	}
-	return mw.memory.GetCopy(begin, end-begin)
+	return mw.memory.GetCopy(uint64(begin), uint64(end-begin))
 }
 
 // getUint returns the 32 bytes at the specified address interpreted as a uint.
@@ -119,7 +119,7 @@ func (mw *memoryWrapper) getUint(addr int64) *big.Int {
 		log.Warn("Tracer accessed out of bound memory", "available", mw.memory.Len(), "offset", addr, "size", 32)
 		return new(big.Int)
 	}
-	return new(big.Int).SetBytes(mw.memory.GetPtr(addr, 32))
+	return new(big.Int).SetBytes(mw.memory.GetPtr(uint64(addr), 32))
 }
 
 // pushObject assembles a JSVM object wrapping a swappable memory and pushes it
@@ -162,7 +162,7 @@ func (sw *stackWrapper) peek(idx int) *big.Int {
 		log.Warn("Tracer accessed out of bound stack", "size", len(sw.stack.Data()), "index", idx)
 		return new(big.Int)
 	}
-	return sw.stack.Data()[len(sw.stack.Data())-idx-1]
+	return sw.stack.Back(idx).ToBig()
 }
 
 // pushObject assembles a JSVM object wrapping a swappable stack and pushes it
