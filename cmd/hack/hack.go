@@ -2055,23 +2055,17 @@ func (r *Receiver) Receive(
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
-			if c < 0 || (c == 0 && len(v) > 0) {
+			if c <= 0 && len(v) > 0 {
 				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k[:32], k[40:], nil, v, nil, 0, 0); err != nil {
 					return err
 				}
 			}
-			if c < 0 && len(v) == 0 {
-				panic("")
-			}
 		} else {
 			v := r.accountMap[ks]
-			if c < 0 || (c == 0 && v != nil) {
+			if c <= 0 && v != nil {
 				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
-			}
-			if c < 0 && v == nil {
-				panic("")
 			}
 		}
 		r.currentIdx++
@@ -2143,10 +2137,18 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
-	for ks := range accountMap {
+	for ks, acc := range accountMap {
 		unfurlList[i] = ks
 		i++
 		unfurl.AddKey([]byte(ks))
+		if acc != nil {
+			// Fill the code hashes
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
+					copy(acc.CodeHash[:], codeHash)
+				}
+			}
+		}
 	}
 	for ks := range storageMap {
 		unfurlList[i] = ks
@@ -2170,6 +2172,10 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	if err != nil {
 		panic(err)
 	}
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
+	fmt.Printf("Head block number: %d, root hash: %x\n", *headNumber, headHeader.Root)
 	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
 	hash := rawdb.ReadCanonicalHash(db, block-1)
 	header := rawdb.ReadHeader(db, hash, block-1)
