@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -132,21 +134,40 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		return nil, err
 	}
-	_, err2 := tr.Prove(addrHash[:], 0, false /* storage */)
+	accountProof, err2 := tr.Prove(addrHash[:], 0, false /* storage */)
 	if err2 != nil {
 		return nil, err2
 	}
-	for _, key := range storageKeys {
+	storageProof := make([]StorageResult, len(storageKeys))
+	for i, key := range storageKeys {
 		keyAsHash := common.HexToHash(key)
 		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
-			if _, err3 := tr.Prove(append(addrHash[:], keyHash[:]...), 64 /* nibbles to get to the storage sub-trie */, true /* storage */); err3 != nil {
+			trieKey := append(addrHash[:], keyHash[:]...)
+			if proof, err3 := tr.Prove(trieKey, 64 /* nibbles to get to the storage sub-trie */, true /* storage */); err3 == nil {
+				v, _ := tr.Get(trieKey)
+				bv := new(big.Int)
+				bv.SetBytes(v)
+				storageProof[i] = StorageResult{key, (*hexutil.Big)(bv), common.ToHexArray(proof)}
+			} else {
 				return nil, err3
 			}
 		} else {
 			return nil, err1
 		}
 	}
-	return nil, nil
+	acc, found := tr.GetAccount(addrHash[:])
+	if !found {
+		return nil, nil
+	}
+	return &AccountResult{
+		Address:      address,
+		AccountProof: common.ToHexArray(accountProof),
+		Balance:      (*hexutil.Big)(&acc.Balance),
+		CodeHash:     acc.CodeHash,
+		Nonce:        hexutil.Uint64(acc.Nonce),
+		StorageHash:  acc.Root,
+		StorageProof: storageProof,
+	}, nil
 }
 
 type Receiver struct {

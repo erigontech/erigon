@@ -31,17 +31,19 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 					return nil, err
 				}
 			}
-			if len(key) < len(n.Key) || !bytes.Equal(n.Key, key[:len(n.Key)]) {
+			nKey := n.Key
+			if nKey[len(nKey)-1] == 16 {
+				nKey = nKey[:len(nKey)-1]
+			}
+			if len(key) < len(nKey) || !bytes.Equal(nKey, key[:len(nKey)]) {
 				// The trie doesn't contain the key.
 				tn = nil
 			} else {
 				tn = n.Val
-				key = key[len(n.Key):]
+				key = key[len(nKey):]
 			}
-			if n.Key[len(n.Key)-1] == 16 {
-				fromLevel -= (len(n.Key) - 1)
-			} else {
-				fromLevel -= len(n.Key)
+			if fromLevel > 0 {
+				fromLevel -= len(nKey)
 			}
 		case *duoNode:
 			if fromLevel == 0 {
@@ -62,6 +64,9 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			default:
 				tn = nil
 			}
+			if fromLevel > 0 {
+				fromLevel--
+			}
 		case *fullNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
@@ -72,6 +77,9 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			}
 			tn = n.Children[key[0]]
 			key = key[1:]
+			if fromLevel > 0 {
+				fromLevel--
+			}
 		case *accountNode:
 			if storage {
 				tn = n.storage
