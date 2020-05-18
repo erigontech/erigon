@@ -613,7 +613,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 			}
 			k, v := iwl.SeekTo(prefix)
 			if !bytes.Equal(k, prefix) {
-				panic(fmt.Sprintf("IH and DataLen buckets must have same keys set: %x, %x", k, prefix))
+				panic(fmt.Sprintf("IH and WitnessLen buckets must have same keys set: %x, %x", k, prefix))
 			}
 			return binary.BigEndian.Uint64(v)
 		}
@@ -718,7 +718,7 @@ func (dr *DefaultReceiver) genStructStorage() error {
 	var data GenStructStepData
 	if dr.wasIHStorage {
 		dr.hashData.Hash = common.BytesToHash(dr.valueStorage.Bytes())
-		dr.hashData.DataLen = dr.witnessLen
+		dr.hashData.WitnessLen = dr.witnessLen
 		data = &dr.hashData
 	} else {
 		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
@@ -770,7 +770,7 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	var data GenStructStepData
 	if dr.wasIH {
 		copy(dr.hashData.Hash[:], dr.value.Bytes())
-		dr.hashData.DataLen = dr.witnessLen
+		dr.hashData.WitnessLen = dr.witnessLen
 		data = &dr.hashData
 	} else {
 		dr.accData.Balance.Set(&dr.a.Balance)

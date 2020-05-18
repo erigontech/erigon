@@ -160,7 +160,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("valueNode %x\n", hex)
 			}
 			it.top--
-			return StorageStreamItem, hex, nil, nil, []byte(n), n.witnessLen()
+			return StorageStreamItem, hex, nil, nil, n, n.witnessLen()
 		case *shortNode:
 			if it.trace {
 				fmt.Printf("shortNode %x\n", hex)
@@ -428,21 +428,21 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 
 // StreamMergeIterator merges an Iterator and a Stream
 type StreamMergeIterator struct {
-	it          *Iterator
-	s           *Stream
-	trace       bool
-	ki, ai, si  int
-	offset      int
-	hex         []byte
-	itemType    StreamItem
-	oldItemType StreamItem
-	oldHex      []byte
-	oldHexCopy  []byte
-	oldAVal     *accounts.Account
-	oldHash     []byte
-	oldHashCopy []byte
-	oldVal      []byte
-	oldDataLen  uint64
+	it            *Iterator
+	s             *Stream
+	trace         bool
+	ki, ai, si    int
+	offset        int
+	hex           []byte
+	itemType      StreamItem
+	oldItemType   StreamItem
+	oldHex        []byte
+	oldHexCopy    []byte
+	oldAVal       *accounts.Account
+	oldHash       []byte
+	oldHashCopy   []byte
+	oldVal        []byte
+	oldWitnessLen uint64
 }
 
 // NewStreamMergeIterator create a brand new StreamMergeIterator
@@ -452,7 +452,7 @@ func NewStreamMergeIterator(it *Iterator, s *Stream, trace bool) *StreamMergeIte
 		s:     s,
 		trace: trace,
 	}
-	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldDataLen = it.Next()
+	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldWitnessLen = it.Next()
 	return smi
 }
 
@@ -465,11 +465,11 @@ func (smi *StreamMergeIterator) Reset(it *Iterator, s *Stream, trace bool) {
 	smi.ai = 0
 	smi.si = 0
 	smi.offset = 0
-	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldDataLen = it.Next()
+	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldWitnessLen = it.Next()
 }
 
 // Next returns the next item in the merged iterator
-func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValue *accounts.Account, aCode []byte, hash []byte, value []byte, dataLen uint64) {
+func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValue *accounts.Account, aCode []byte, hash []byte, value []byte, witnessLen uint64) {
 	for {
 		if smi.trace {
 			fmt.Printf("smi.hex %x, smi.ki %d, len(smi.s.keySizes) %d, smi.oldItemType %d smi.oldHex %x\n", smi.hex, smi.ki, len(smi.s.keySizes), smi.oldItemType, smi.oldHex)
@@ -498,7 +498,7 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 				si := smi.si
 				smi.si++
 				if len(smi.s.sValues[si]) > 0 {
-					return StorageStreamItem, hex, nil, nil, nil, smi.s.sValues[si], uint64(len(smi.s.sValues[si]))
+					return StorageStreamItem, hex, nil, nil, nil, smi.s.sValues[si], 0
 				}
 			default:
 				panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
@@ -515,12 +515,13 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 			}
 			smi.oldHashCopy = append(smi.oldHashCopy, smi.oldHash...)
 			oldVal := smi.oldVal
-			smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldDataLen = smi.it.Next()
-			return oldItemType, smi.oldHexCopy, oldAVal, nil, smi.oldHashCopy, oldVal, uint64(len(oldVal))
+			oldWitnessLen := smi.oldWitnessLen
+			smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldWitnessLen = smi.it.Next()
+			return oldItemType, smi.oldHexCopy, oldAVal, nil, smi.oldHashCopy, oldVal, oldWitnessLen
 		} else {
 			// Special case - account gets deleted
 			if smi.itemType == AccountStreamItem && smi.s.aValues[smi.ai] == nil && bytes.HasPrefix(smi.oldHex, hex) {
-				smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldDataLen = smi.it.Next()
+				smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldWitnessLen = smi.it.Next()
 			} else {
 				switch bytes.Compare(smi.oldHex, hex) {
 				case -1:
@@ -535,8 +536,9 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 					}
 					smi.oldHashCopy = append(smi.oldHashCopy, smi.oldHash...)
 					oldVal := smi.oldVal
-					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldDataLen = smi.it.Next()
-					return oldItemType, smi.oldHexCopy, oldAVal, nil, smi.oldHashCopy, oldVal, uint64(len(oldVal))
+					oldWitnessLen := smi.oldWitnessLen
+					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldWitnessLen = smi.it.Next()
+					return oldItemType, smi.oldHexCopy, oldAVal, nil, smi.oldHashCopy, oldVal, oldWitnessLen
 				case 1:
 					smi.hex = nil // To be consumed
 					switch smi.itemType {
@@ -550,14 +552,14 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 						si := smi.si
 						smi.si++
 						if len(smi.s.sValues[si]) > 0 {
-							return StorageStreamItem, hex, nil, nil, nil, smi.s.sValues[si], uint64(len(smi.s.sValues[si]))
+							return StorageStreamItem, hex, nil, nil, nil, smi.s.sValues[si], 0
 						}
 					default:
 						panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
 					}
 				case 0:
 					smi.hex = nil // To be consumed
-					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldDataLen = smi.it.Next()
+					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal, smi.oldWitnessLen = smi.it.Next()
 					switch smi.itemType {
 					case AccountStreamItem:
 						ai := smi.ai
@@ -569,7 +571,7 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 						si := smi.si
 						smi.si++
 						if len(smi.s.sValues[si]) > 0 {
-							return StorageStreamItem, hex, nil, nil, nil, smi.s.sValues[si], uint64(len(smi.s.sValues[si]))
+							return StorageStreamItem, hex, nil, nil, nil, smi.s.sValues[si], 0
 						}
 					default:
 						panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
@@ -592,7 +594,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	var hashRef []byte
 	var hashRefStorage []byte
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
-	var dataLenAcc, dataLenStorage uint64
+	var witnessLenAcc, witnessLenStorage uint64
 	var aRoot common.Hash
 	var aEmptyRoot = true
 	var isAccount bool
@@ -606,10 +608,10 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	curr.Reset()
 	currStorage.Reset()
 
-	makeData := func(fieldSet uint32, hashRef []byte, dataLen uint64) GenStructStepData {
+	makeData := func(fieldSet uint32, hashRef []byte, witnessLen uint64) GenStructStepData {
 		if hashRef != nil {
 			copy(hashData.Hash[:], hashRef)
-			hashData.DataLen = dataLen
+			hashData.WitnessLen = witnessLen
 			return &hashData
 		} else if !isAccount {
 			leafData.Value = rlphacks.RlpSerializableBytes(value.Bytes())
@@ -621,7 +623,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	}
 
 	retain := func(_ []byte) bool { return trace }
-	for newItemType, hex, aVal, aCode, hash, val, dataLen := it.Next(); newItemType != NoItem; newItemType, hex, aVal, aCode, hash, val, dataLen = it.Next() {
+	for newItemType, hex, aVal, aCode, hash, val, witnessLen := it.Next(); newItemType != NoItem; newItemType, hex, aVal, aCode, hash, val, witnessLen = it.Next() {
 		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
 			// If there was an open storage "sub-stream", close it and set the storage flag on
 			if succStorage.Len() > 0 {
@@ -631,7 +633,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				if currStorage.Len() > 0 {
 					isAccount = false
 					var err error
-					sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, dataLenStorage), sGroups, trace)
+					sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, witnessLenStorage), sGroups, trace)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -639,7 +641,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 					fieldSet += AccountFieldStorageOnly
 				}
 			} else if itemType == AccountStreamItem && !aEmptyRoot {
-				if err := hb.hash(aRoot[:], dataLen); err != nil {
+				if err := hb.hash(aRoot[:], witnessLen); err != nil {
 					return common.Hash{}, err
 				}
 				fieldSet += AccountFieldStorageOnly
@@ -651,13 +653,13 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			if curr.Len() > 0 {
 				isAccount = true
 				var err error
-				groups, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef, dataLenAcc), groups, trace)
+				groups, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef, witnessLenAcc), groups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
 			}
 			itemType = newItemType
-			dataLenAcc = dataLen
+			witnessLenAcc = witnessLen
 			switch itemType {
 			case AccountStreamItem:
 				var a *accounts.Account = aVal
@@ -697,13 +699,13 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			if currStorage.Len() > 0 {
 				isAccount = false
 				var err error
-				sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, dataLenStorage), sGroups, trace)
+				sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, witnessLenStorage), sGroups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
 			}
 			sItemType = newItemType
-			dataLenStorage = dataLen
+			witnessLenStorage = witnessLen
 			switch sItemType {
 			case StorageStreamItem:
 				value.Reset()
@@ -723,7 +725,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		if currStorage.Len() > 0 {
 			isAccount = false
 			var err error
-			_, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, dataLenStorage), sGroups, trace)
+			_, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, witnessLenStorage), sGroups, trace)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -731,7 +733,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			fieldSet |= AccountFieldStorageOnly
 		}
 	} else if itemType == AccountStreamItem && !aEmptyRoot {
-		if err := hb.hash(aRoot[:], dataLenAcc); err != nil {
+		if err := hb.hash(aRoot[:], witnessLenAcc); err != nil {
 			return common.Hash{}, err
 		}
 		fieldSet |= AccountFieldStorageOnly
@@ -742,7 +744,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	if curr.Len() > 0 {
 		isAccount = true
 		var err error
-		_, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef, dataLenAcc), groups, trace)
+		_, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef, witnessLenAcc), groups, trace)
 		if err != nil {
 			return common.Hash{}, err
 		}
