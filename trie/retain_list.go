@@ -185,3 +185,31 @@ func (rr *RetainRange) String() string {
 	return fmt.Sprintf("%x-%x", rr.from, rr.to)
 }
 
+// RetainAll - returns true to any prefix
+type RetainAll struct {
+	codeTouches map[common.Hash]struct{}
+}
+
+// NewRetainRange creates new NewRetainRange
+// to=nil - means no upper bound
+func NewRetainAll() *RetainAll {
+	return &RetainAll{codeTouches: make(map[common.Hash]struct{})}
+}
+
+func (rr *RetainAll) Retain(prefix []byte) (retain bool) {
+	return true
+}
+
+// AddCodeTouch adds a new code touch into the resolve set
+func (rr *RetainAll) AddCodeTouch(codeHash common.Hash) {
+	rr.codeTouches[codeHash] = struct{}{}
+}
+
+func (rr *RetainAll) IsCodeTouched(codeHash common.Hash) bool {
+	_, ok := rr.codeTouches[codeHash]
+	return ok
+}
+
+func (rr *RetainAll) String() string {
+	return ""
+}

@@ -106,7 +106,7 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 
 // Reset prepares the loader for reuse
 func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Getter, rl RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
-	fstl.defaultReceiver.Reset(rl, trace)
+	fstl.defaultReceiver.Reset(NewRetainAll(), trace)
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
@@ -813,20 +813,6 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 		}
 	}
 	return nil
-}
-
-func (fstl *FlatDbSubTrieLoader) retainAcc(prefix []byte) bool {
-	if !fstl.wasIH {
-		return true
-	}
-	return fstl.rl.Retain(prefix)
-}
-
-func (fstl *FlatDbSubTrieLoader) retainStorage(prefix []byte) bool {
-	if !fstl.wasIHStorage {
-		return true
-	}
-	return fstl.rl.Retain(prefix)
 }
 
 // nextSubtree does []byte++. Returns false if overflow.
