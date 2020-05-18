@@ -101,11 +101,24 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	rl := trie.NewRetainList(0)
-	r.defaultReceiver.Reset(rl, false)
-	loader.SetStreamReceiver(r)
-	subTries, err := loader.LoadSubTries()
+	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return nil, err
+	}
+	rl.AddKey(addrHash[:])
+	for _, key := range storageKeys {
+		keyAsHash := common.HexToHash(key)
+		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
+			rl.AddKey(append(addrHash[:], keyHash[:]...))
+		} else {
+			return nil, err1
+		}
+	}
+	r.defaultReceiver.Reset(rl, false)
+	loader.SetStreamReceiver(r)
+	subTries, err1 := loader.LoadSubTries()
+	if err1 != nil {
+		return nil, err1
 	}
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -115,6 +128,24 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	hash := rawdb.ReadCanonicalHash(db, block-1)
 	header := rawdb.ReadHeader(db, hash, block-1)
 	fmt.Printf("Block state root: %x\n", header.Root)
+	tr := trie.New(header.Root)
+	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
+		return nil, err
+	}
+	_, err2 := tr.Prove(addrHash[:], 0, false /* storage */)
+	if err2 != nil {
+		return nil, err2
+	}
+	for _, key := range storageKeys {
+		keyAsHash := common.HexToHash(key)
+		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
+			if _, err3 := tr.Prove(append(addrHash[:], keyHash[:]...), 64 /* nibbles to get to the storage sub-trie */, true /* storage */); err3 != nil {
+				return nil, err3
+			}
+		} else {
+			return nil, err1
+		}
+	}
 	return nil, nil
 }
 
