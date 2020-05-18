@@ -27,6 +27,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -1422,7 +1423,7 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
+func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size uint64) ([]byte, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	prefixNibbles, ok := tds.t.PrefixByCumulativeWitnessSize(size)
@@ -1432,10 +1433,11 @@ func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
 	prefix := make([]byte, len(prefixNibbles)/2)
 	trie.CompressNibbles(prefixNibbles, &prefix)
 	if ok {
-		fmt.Printf("Return from trie\n")
+		fmt.Printf("Return from trie: %x\n", prefixNibbles)
 		return prefix, nil
 	}
 
+	fmt.Printf("From Trie: %x\n", prefixNibbles)
 	var kv ethdb.KV
 	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
 		kv = hasBolt.AbstractKV()
@@ -1445,6 +1447,10 @@ func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
 
 	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
+		//c.Walk(func(k, v []byte) (bool, error) {
+		//	fmt.Printf("k: %x, v: %x\n", k, v)
+		//	return true, nil
+		//})
 		k, v, err := c.Seek(prefix)
 		if err != nil {
 			return err
@@ -1453,14 +1459,15 @@ func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
 		fmt.Printf("To Sibling: %x, %d\n", prefix, accumulator)
 		for k != nil {
 			prefixSize := binary.BigEndian.Uint64(v)
-			fmt.Printf("Cmp: %d, %d\n", accumulator+prefixSize, size)
+			fmt.Printf("Check: %d, %d\n", accumulator+prefixSize, size)
 			if accumulator+prefixSize >= size {
 				k, v, err = c.Next() // go to child
 				if err != nil {
 					return err
 				}
+				fmt.Printf("Try To Child: %x, %x\n", k, v)
 				if !bytes.HasPrefix(k, prefix) {
-					fmt.Printf("Not Match: %x, %x\n", k, prefix)
+					fmt.Printf("Not More children: %x, %x\n", k, prefix)
 					return nil
 				}
 				prefix = common.CopyBytes(k)
@@ -1479,6 +1486,7 @@ func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
 			if err != nil {
 				return err
 			}
+			fmt.Printf("Try To Sibling: %x, %x\n", k, v)
 			if !bytes.HasPrefix(k, prefix) {
 				fmt.Printf("Not Match: %x, %x\n", k, prefix)
 				return nil
@@ -1490,8 +1498,150 @@ func (tds *TrieDbState) PrefixByWitnessSize(size uint64) ([]byte, error) {
 	}); err != nil {
 		return nil, err
 	}
+	fmt.Printf("Found: %x\n", prefix)
 
 	return prefix, nil
+}
+
+func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size1, size2 uint64) (from []byte, to []byte, err error) {
+	fmt.Println()
+	fmt.Println()
+	defer func(t time.Time) { fmt.Println("database.go:1536", time.Since(t)) }(time.Now())
+	fmt.Printf("sizes: %d %d\n", size1, size2)
+
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	prefixNibbles, ok1 := tds.t.PrefixByCumulativeWitnessSize(size1)
+	if len(prefixNibbles)%2 == 1 {
+		prefixNibbles = prefixNibbles[:len(prefixNibbles)-1]
+	}
+
+	prefix1 := make([]byte, len(prefixNibbles)/2)
+	trie.CompressNibbles(prefixNibbles, &prefix1)
+
+	prefixNibbles, ok2 := tds.t.PrefixByCumulativeWitnessSize(size2)
+	fmt.Printf("AAA %x\n", prefixNibbles)
+	if len(prefixNibbles)%2 == 1 {
+		prefixNibbles = prefixNibbles[:len(prefixNibbles)-1]
+	}
+	prefix2 := make([]byte, len(prefixNibbles)/2)
+	trie.CompressNibbles(prefixNibbles, &prefix2)
+
+	fmt.Printf("From Trie: %t, %x\n", ok1, prefix1)
+	fmt.Printf("From Trie: %t, %x\n", ok2, prefix2)
+
+	var kv ethdb.KV
+	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
+		kv = hasBolt.AbstractKV()
+	}
+
+	f := func(c ethdb.Cursor, prefix []byte, size uint64) ([]byte, error) {
+		parent := common.CopyBytes(prefix)
+		var accumulator uint64
+		x := 0
+		defer func() {
+			fmt.Printf("x: %d\n", x)
+		}()
+		next := parent
+		//next := append(parent, 0)
+		var k, v []byte
+		var ok bool
+		for {
+			for {
+				prevSibling := common.CopyBytes(k)
+				x++
+				k, v, err = c.SeekTo(next)
+				if err != nil {
+					return nil, err
+				}
+				fmt.Printf("SeekTo: %x->%x\n", next, k)
+				if len(k) < len(next) {
+					fmt.Printf("No More Siblings1: %x, %x, %x\n", next, k, prevSibling)
+					prefix = prevSibling
+					return prefix, nil
+				}
+				if !bytes.HasPrefix(k, parent) {
+					fmt.Printf("No More Siblings2: %x, %x,%x \n", next, k, prevSibling)
+					fmt.Printf("parent: %x\n", parent)
+					prefix = prevSibling
+					return prefix, nil
+				}
+
+				// go to sibling
+				fmt.Printf("Sibling: %x, %x\n", k, parent)
+
+				// found sibling
+				prefixSize := binary.BigEndian.Uint64(v)
+				fmt.Printf("Check: %t acc+childSize=%d, size=%d\n", accumulator+prefixSize >= size, accumulator+prefixSize, size)
+				if accumulator+prefixSize >= size {
+					break
+				}
+
+				accumulator += prefixSize
+
+				//if len(next) < len(k) {
+				//	k = k[:len(next)]
+				//	next, ok = nextSubtree(k)
+				//	if !ok {
+				//		prefix = nil
+				//		return prefix, nil
+				//	}
+				//	fmt.Printf("nextSubtree: %x, %x\n", k, next)
+				//	continue
+				//}
+				next, ok = nextSubtree(k)
+				if !ok {
+					prefix = nil
+					return prefix, nil
+				}
+			}
+
+			parent = common.CopyBytes(k)
+			x++
+			k, v, err = c.Next() // go to child
+			if err != nil {
+				return nil, err
+			}
+			fmt.Printf("Child: %x, %x\n", k, parent)
+			if !bytes.HasPrefix(k, parent) {
+				fmt.Printf("Not More children: %x, %x\n", k, prefix)
+				prefix = parent
+				return prefix, nil
+			}
+			next = k
+		}
+		return prefix, nil
+	}
+
+	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
+		c := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
+		//fmt.Printf("DUMP!\n")
+		//tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
+		//	if bytes.HasPrefix(k, prefix1) || bytes.HasPrefix(k, prefix2) {
+		//		fmt.Printf("%x, %x\n", k, v)
+		//	}
+		//	return true, nil
+		//})
+		var err2 error
+		if !ok1 {
+			from, err2 = f(c, prefix1, size1)
+			if err2 != nil {
+				return err2
+			}
+		}
+		if !ok2 {
+			to, err2 = f(c, prefix2, size2)
+			if err2 != nil {
+				return err2
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	fmt.Printf("Found: %x-%x\n", from, to)
+
+	return from, to, nil
 }
 
 // nextSubtree does []byte++. Returns false if overflow.

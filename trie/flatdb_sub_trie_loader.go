@@ -815,6 +815,20 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 	return nil
 }
 
+func (fstl *FlatDbSubTrieLoader) retainAcc(prefix []byte) bool {
+	if !fstl.wasIH {
+		return true
+	}
+	return fstl.rl.Retain(prefix)
+}
+
+func (fstl *FlatDbSubTrieLoader) retainStorage(prefix []byte) bool {
+	if !fstl.wasIHStorage {
+		return true
+	}
+	return fstl.rl.Retain(prefix)
+}
+
 // nextSubtree does []byte++. Returns false if overflow.
 func nextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))

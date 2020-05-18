@@ -52,10 +52,14 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 	lenBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(lenBytes, witnessLen)
 
-	if err := ih.putter.Put(dbutils.IntermediateTrieHashBucket, key, common.CopyBytes(nodeHash[:])); err != nil {
-		log.Warn("could not put intermediate trie hash", "err", err)
-	}
-	if debug.IsTrackWitnessSizeEnabled() {
+	if !debug.IsTrackWitnessSizeEnabled() {
+		if err := ih.putter.Put(dbutils.IntermediateTrieHashBucket, key, common.CopyBytes(nodeHash[:])); err != nil {
+			log.Warn("could not put intermediate trie hash", "err", err)
+		}
+	} else {
+		if err := ih.putter.Put(dbutils.IntermediateTrieHashBucket, key, common.CopyBytes(nodeHash[:])); err != nil {
+			log.Warn("could not put intermediate trie hash", "err", err)
+		}
 		if err := ih.putter.Put(dbutils.IntermediateTrieWitnessLenBucket, key, lenBytes); err != nil {
 			log.Warn("could not put intermediate trie data len", "err", err)
 		}
@@ -88,5 +92,4 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 			log.Warn("could not delete intermediate trie hash", "err", err)
 		}
 	}
-
 }

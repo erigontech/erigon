@@ -625,25 +625,27 @@ func mgrSchedule(chaindata string, block uint64) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 
-	//bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-	//check(err)
-	//defer db.Close()
-	//tds, err := bc.GetTrieDbState()
-	//check(err)
+	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	check(err)
+	defer db.Close()
+	tds, err := bc.GetTrieDbState()
+	check(err)
 	//currentBlock := bc.CurrentBlock()
 	//currentBlockNr := currentBlock.NumberU64()
 
+	t := time.Now()
 	loader := trie.NewSubTrieLoader(0)
-	tr := trie.New(common.Hash{})
+	tr := tds.Trie()
 	rs := trie.NewRetainList(0)
 	rs.AddHex([]byte{})
 	subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	check(err)
-
 	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
 	check(err)
+	fmt.Println("hack.go:636", time.Since(t))
 
-	stateSize := tr.EstimateWitnessSize([]byte{})
+	stateSize := tds.Trie().EstimateWitnessSize([]byte{})
+	fmt.Printf("%d\n", stateSize)
 	schedule := mgr.NewStateSchedule(stateSize, block, block+mgr.BlocksPerCycle+100)
 
 	var buf bytes.Buffer
@@ -656,7 +658,7 @@ func mgrSchedule(chaindata string, block uint64) {
 		tick := schedule.Ticks[i]
 		for j := range tick.StateSizeSlices {
 			ss := tick.StateSizeSlices[j]
-			stateSlice, err2 := mgr.StateSizeSlice2StateSlice(db, tr, ss)
+			stateSlice, err2 := mgr.StateSizeSlice2StateSlice(tds, ss)
 			if err2 != nil {
 				panic(err2)
 			}
@@ -664,7 +666,7 @@ func mgrSchedule(chaindata string, block uint64) {
 			//if tick.IsLastInCycle() {
 			//	fmt.Printf("\nretain: %s\n", retain)
 			//}
-			witness, err2 := tr.ExtractWitness(false, retain)
+			witness, err2 := tds.Trie().ExtractWitness(false, retain)
 			if err2 != nil {
 				panic(err2)
 			}
