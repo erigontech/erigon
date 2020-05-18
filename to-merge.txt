@@ -1,0 +1,1015 @@
+commit 6d74d1e5f762e06a6a739a42261886510f842778
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed May 13 12:31:35 2020 +0300
+
+    params: release go-ethereum v1.9.14
+
+commit a188a1e150ecc917d85631f9e1308712ff55bd5d
+Author: Hao Duan <duanhao0814@gmail.com>
+Date:   Wed May 13 17:06:19 2020 +0800
+
+    ethstats: stop report ticker in each loop cycle #21070 (#21071)
+    
+    Co-authored-by: Hao Duan <duan.hao@hyperchain.cn>
+
+commit d02301f758df1d16875c959b58cf91c76edecbdd
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed May 13 16:33:48 2020 +0800
+
+    core: fix missing receipt on Clique crashes (#21045)
+    
+    * core: fix missing receipt
+    
+    * core: address comment
+
+commit 0b63915430e5921722004345228c5239a8784d6b
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue May 12 13:02:23 2020 +0200
+
+    accounts/abi: allow overloaded argument names (#21060)
+    
+    * accounts/abi: allow overloaded argument names
+    
+    In solidity it is possible to create the following contract:
+    ```
+    contract Overloader {
+        struct F { uint _f; uint __f; uint f; }
+        function f(F memory f) public {}
+    }
+    ```
+    This however resulted in a panic in the abi package.
+    
+    * accounts/abi fixed error handling
+
+commit b8ea9042e52f7bb59c0c0c9e7df37d4f2f579dd2
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue May 12 12:21:40 2020 +0200
+
+    accounts/abi: accounts/abi/bind: Move topics to abi package (#21057)
+    
+    * accounts/abi/bind: added test cases for waitDeployed
+    
+    * accounts/abi/bind: added test case for boundContract
+    
+    * accounts/abi/bind: removed unnecessary resolve methods
+    
+    * accounts/abi: moved topics from /bind to /abi
+    
+    * accounts/abi/bind: cleaned up format... functions
+    
+    * accounts/abi: improved log message
+    
+    * accounts/abi: added type tests
+    
+    * accounts/abi/bind: remove superfluous template methods
+
+commit 7b7e5921a4012810707aaf825080c70ef6823768
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Tue May 12 18:11:34 2020 +0800
+
+    miner: support disabling empty blockprecommits form the Go API (#20736)
+    
+    * cmd, miner: add noempty-precommit flag
+    
+    * cmd, miner: get rid of external flag
+    
+    * miner: change bool to atomic int
+    
+    * miner: fix tiny typo
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 7540c53e72f2974a0c5509274412c2bf65dd1ab9
+Author: ucwong <ucwong@126.com>
+Date:   Tue May 12 17:19:15 2020 +0800
+
+    core/rawdb: remove unused math (#21065)
+
+commit aaede53738fac7767459dc2a854136ac6680e5b2
+Author: ucwong <ucwong@126.com>
+Date:   Tue May 12 16:46:35 2020 +0800
+
+    core/rawdb : log format fix for Unindexing transaction (#21064)
+    
+    * core/rawdb : log format fix for Unindexing transaction
+    
+    * core/rawdb: tiny fixup
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 53cac027d0795a66097c753495a8609e545822ba
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Tue May 12 16:02:15 2020 +0800
+
+    les: drop the message if the entire p2p connection is stuck (#21033)
+    
+    * les: drop the message if the entire p2p connection is stuck
+    
+    * les: fix lint
+
+commit 7ace5a3a8b2a4591063096232a3a1264e3faf8fe
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue May 12 07:46:10 2020 +0200
+
+    core: fixup blockchain tests (#21062)
+    
+    core: fixup blockchain tests
+
+commit 40859a2441a91b120ce33b5f5ede95c8f7e7fd97
+Merge: 453523005 126ac94f3
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 11 19:05:47 2020 +0300
+
+    Merge pull request #21061 from karalabe/cht-1.9.14
+    
+    params: bump CHTs for the v1.9.14 release
+
+commit 45352300592cf68feb64d67aefa607eec2c9a1de
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon May 11 17:58:43 2020 +0200
+
+    cmd, core, eth: background transaction indexing (#20302)
+    
+    * cmd, core, eth: init tx lookup in background
+    
+    * core/rawdb: tiny log fixes to make it clearer what's happening
+    
+    * core, eth: fix rebase errors
+    
+    * core/rawdb: make reindexing less generic, but more optimal
+    
+    * rlp: implement rlp list iterator
+    
+    * core/rawdb: new implementation of tx indexing/unindex using generic tx iterator and hashing rlp-data
+    
+    * core/rawdb, cmd/utils: fix review concerns
+    
+    * cmd/utils: fix merge issue
+    
+    * core/rawdb: add some log formatting polishes
+    
+    Co-authored-by: rjl493456442 <garyrong0905@gmail.com>
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 126ac94f369e56a4da879aaa8914afef6a8a64b2
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 11 18:56:09 2020 +0300
+
+    params: bump CHTs for the v1.9.14 release
+
+commit 6f54ae24cdeacd14519eac8b127e0e1fea03d66a
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon May 11 17:11:17 2020 +0200
+
+    p2p: add 0 port check in dialer  (#21008)
+    
+    * p2p: add low port check in dialer
+    
+    We already have a check like this for UDP ports, add a similar one in
+    the dialer. This prevents dials to port zero and it's also an extra
+    layer of protection against spamming HTTP servers.
+    
+    * p2p/discover: use errLowPort in v4 code
+    
+    * p2p: change port check
+    
+    * p2p: add comment
+    
+    * p2p/simulations/adapters: ensure assigned port is in all node records
+
+commit 069a7e1f8abe4e06f7aba7bb1dbd5a49ce242a5a
+Author: AusIV <git@ausiv.com>
+Date:   Mon May 11 07:11:17 2020 -0500
+
+    core/rawdb: stop freezer process as part of freezer.Close() (#21010)
+    
+    * core/rawdb: Stop freezer process as part of freezer.Close()
+    
+    When you call db.Close(), it was closing the leveldb database first,
+    then closing the freezer, but never stopping the freezer process.
+    This could cause the freezer to attempt to write to leveldb after
+    leveldb had been closed, leading to a crash with a non-zero exit code.
+    
+    This change adds a quit channel to the freezer, and freezer.Close()
+    will not return until the freezer process has stopped.
+    
+    Additionally, when you call freezerdb.Close(), it will close the
+    AncientStore before closing leveldb, to ensure that the freezer goroutine
+    will be stopped before leveldb is closed.
+    
+    * core/rawdb: Fix formatting for golint
+    
+    * core/rawdb: Use backoff flag to avoid repeating select
+    
+    * core/rawdb: Include accidentally omitted backoff
+
+commit bd60295de56b04a435fc2a0b31d3d18a34cd3843
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon May 11 11:59:21 2020 +0200
+
+    console: fix some crashes/errors in the bridge (#21050)
+    
+    Fixes #21046
+
+commit 930e82d7f4e6e0e7e90d36569f294745e1547a1e
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon May 11 10:16:32 2020 +0200
+
+    params, cmd/utils: remove outdated discv5 bootnodes, deprecate flags (#20949)
+    
+    * params: remove outdated discv5 bootnodes
+    
+    * cmd/utils: deprecated bootnodesv4/v5 flags
+
+commit 37877e86ed44d4bada1df47dca4ee41428943749
+Merge: 263622f44 0b2edf05b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 11 11:09:25 2020 +0300
+
+    Merge pull request #21056 from karalabe/statedb-simpler-code
+    
+    core/state: make GetCodeSize mirror GetCode implementation wise
+
+commit 263622f44f45eb3e8be6dde4ed030f7f5717066b
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Mon May 11 16:08:20 2020 +0800
+
+    accounts/abi/bind/backend, internal/ethapi: recap gas limit with balance (#21043)
+    
+    * accounts/abi/bind/backend, internal/ethapi: recap gas limit with balance
+    
+    * accounts, internal: address comment and fix lint
+    
+    * accounts, internal: extend log message
+    
+    * tiny nits to format hexutil.Big and nil properly
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 0b2edf05bbbab272794f2ea5c92acb5857984102
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 11 10:14:49 2020 +0300
+
+    core/state: make GetCodeSize mirror GetCode implementation wise
+
+commit e29e4c2376ae9718208178b226bd9ee86d2ffa4f
+Author: ligi <ligi@ligi.de>
+Date:   Mon May 11 09:05:37 2020 +0200
+
+    build: fix CLI params for windows LNK files (#21055)
+    
+    * build: Fix CLI params for windows LNK files
+    
+    closes #21054
+    
+    * Remove parameters
+
+commit 82f9ed49fa6a6831c997582821dd1c5ba4f14116
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri May 8 20:52:20 2020 +0200
+
+    core/state: avoid statedb.dbErr due to emptyCode (#21051)
+    
+    * core/state: more verbose stateb errors
+    
+    * core/state: fix flaw
+    
+    * core/state: fixed lint
+    
+    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
+
+commit b0b65d017f7bfd454d6f3bcbbc4eb419e940bf5c
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu May 7 15:13:34 2020 +0200
+
+    core/state: abort commit if read errors have occurred (#21039)
+    
+    This finally adds the error check that the documentation of StateDB.dbErr
+    promises to do. dbErr was added in 9e5f03b6c (June 2017), and the check was
+    already missing in that commit. We somehow survived without it for three years.
+
+commit 1152f458499b4d91b95a873d9d33c923397a2184
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu May 7 15:06:31 2020 +0200
+
+    core/state: include zero-address in state dump if present (#21038)
+    
+    * Include 0x0000 address into the dump if it is present
+    
+    * core/state: go fmt
+    
+    Co-authored-by: Alexey Akhunov <akhounov@gmail.com>
+
+commit dd88bd82c9453b01e5d8b659bf59e44396a1f572
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Thu May 7 09:24:10 2020 +0200
+
+    accounts/abi/bind: add void if no return args specified (#21002)
+    
+    * accounts/abi/bind: add void if no return args specified
+    
+    Currently the java generator generates invalid input on pure/view functions
+    that have no return type. e.g. `function f(uint u) view public {}`
+    This is not a problem in practice as people rarely ever write functions like this.
+    
+    * accounts/abi/bind: use elseif instead of nested if
+
+commit 85944c25619da8cfb69dd78ec191b219ca720f3f
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Thu May 7 15:07:59 2020 +0800
+
+    core/state/snapshot: fix typo (#21037)
+
+commit 87c463c47aa6d10a55a4b860bab3d53199814d01
+Merge: 39c64d85a 90af6dae6
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed May 6 18:11:15 2020 +0300
+
+    Merge pull request #21036 from karalabe/snapshot-storage-leak
+    
+    core/state/snapshot: don't create storage list for non-existing accounts
+
+commit 90af6dae6efc934e698bac11b09f773724e296bd
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed May 6 17:22:38 2020 +0300
+
+    core/state/snapshot: don't create storage list for non-existing accounts
+
+commit 39c64d85a2af2c48c9b79447d2848c4f5f22446c
+Author: Boqin Qin <Bobbqqin@gmail.com>
+Date:   Wed May 6 21:47:59 2020 +0800
+
+    core: avoid double-lock in tx_pool_test (#20984)
+
+commit 234cc8e77f912ec33c1774e007e3f3a5065da426
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Wed May 6 15:35:04 2020 +0200
+
+    eth/downloader: minor typo fixes in comments (#21035)
+
+commit 5cdc2dffda5af375bd5e26216c525159354022aa
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed May 6 21:33:57 2020 +0800
+
+    trie: fix TestBadRangeProof unit test (#21034)
+
+commit c2147ee154b4d638c3b241fce0b1e185b72c0c2b
+Author: ploui <64719999+ploui@users.noreply.github.com>
+Date:   Wed May 6 06:01:01 2020 -0400
+
+    eth: don't inadvertently enable snapshots in archive nodes (#21025)
+    
+    * eth: don't reassign more cache than is being made available
+    
+    * eth: don't inadvertently enable snapshot in a case where --snapshot wasn't given
+
+commit b98259868b8362bb027636d8209fa7e583d9dff4
+Merge: 292570ad6 34ed2d834
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed May 6 12:59:33 2020 +0300
+
+    Merge pull request #21032 from karalabe/skip-announce-goroutine-eth64
+    
+    eth: skip transaction announcer goroutine on eth<65
+
+commit 292570ad6cea36ae89fd024cfd7d5319fc68170e
+Merge: 933acf338 8f8ff8d60
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed May 6 12:58:51 2020 +0300
+
+    Merge pull request #21028 from karalabe/memfix-32bit-arch
+    
+    cmd/geth: handle memfixes on 32bit arch with large RAM
+
+commit 34ed2d834a7786e4ae3c24fbcea6cc236bc644f7
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed May 6 12:47:27 2020 +0300
+
+    eth: skip transaction announcer goroutine on eth<65
+
+commit 933acf3389d420a655b35a8dbf40536ebe058113
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue May 5 16:30:43 2020 +0200
+
+    account/abi: remove superfluous type checking (#21022)
+    
+    * accounts/abi: added getType func to Type struct
+    
+    * accounts/abi: fixed tuple unpack
+    
+    * accounts/abi: removed type.Type
+    
+    * accounts/abi: added comment
+    
+    * accounts/abi: removed unused types
+    
+    * accounts/abi: removed superfluous declarations
+    
+    * accounts/abi: typo
+
+commit 44a3b8c04cf18dc0a796f96d5972beb0e3cbe79b
+Merge: a52511e69 451577299
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue May 5 15:11:40 2020 +0300
+
+    Merge pull request #21026 from karalabe/disable-highmem-test
+    
+    tests: skip consensus test using 1GB RAM
+
+commit a52511e69295e3b81b0a6f5a391549764a234b55
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue May 5 15:11:00 2020 +0300
+
+    build: raise test timeout back to 10 mins (#21027)
+
+commit 8f8ff8d6010954fe5dbd2ce36330fbf1b8451e4f
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue May 5 13:25:56 2020 +0300
+
+    cmd/geth: handle memfixes on 32bit arch with large RAM
+
+commit 4515772993db46e8e5e9480be579c75238c4f227
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue May 5 12:27:09 2020 +0300
+
+    tests: skip consensus test using 1GB RAM
+
+commit c989bca173681f4462985cec2d30616aa0774edd
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Tue May 5 10:19:17 2020 +0200
+
+    cmd/utils: renames flags related to http-rpc server (#20935)
+    
+    * rpc flags related to starting http server renamed to http
+    
+    * old rpc flags aliased and still functional
+    
+    * pprof flags fixed
+    
+    * renames gpo related flags
+    
+    * linted
+    
+    * renamed rpc flags for consistency and clarity
+    
+    * added warn logs
+    
+    * added more warn logs for all deprecated flags for consistency
+    
+    * moves legacy flags to separate file, hides older flags under show-deprecated-flags command
+    
+    * legacy prefix and moved some more legacy flags to legacy file
+    
+    * fixed circular import
+    
+    * added docs
+    
+    * fixed imports lint error
+    
+    * added notes about when flags were deprecated
+    
+    * cmd/utils: group flags by deprecation date + reorder by date,
+    
+    * modified deprecated comments for consistency, added warn log for --rpc
+    
+    * making sure deprecated flags are still functional
+    
+    * show-deprecated-flags command cleaned up
+    
+    * fixed lint errors
+    
+    * corrected merge conflict
+    
+    * IsSet --> GlobalIsSet
+    
+    * uncategorized flags, if not deprecated, displayed under misc
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 587656619d281fe76824a392008ff87d1a0bbe3f
+Merge: 5e45db761 da5914701
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 4 17:10:17 2020 +0300
+
+    Merge pull request #21023 from karalabe/snapshot-verify-iterator-release
+    
+    core/state/snapshot: release iterator after verification
+
+commit da591470147689bb5978eaaff28468d19af61614
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 4 15:14:08 2020 +0300
+
+    core/state/snapshot: release iterator after verification
+
+commit 5e45db76100b938756217f7d27d83cdae99d352d
+Merge: ab72803e6 65cd28aa0
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 4 15:12:35 2020 +0300
+
+    Merge pull request #21021 from karalabe/tests-snapshot-gen-cleanup
+    
+    tests: cleanup snapshot generator goroutine leak
+
+commit ab72803e6f171d6fc2c40419c833853b7c122f6f
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon May 4 14:09:14 2020 +0200
+
+    accounts/abi: move U256Bytes to common/math (#21020)
+
+commit e872083d444eb571ea4ce55553a7d4dcb439474c
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon May 4 13:20:20 2020 +0200
+
+    accounts/abi: removed Kind from Type struct (#21009)
+    
+    * accounts/abi: removed Kind from Type struct
+    
+    * accounts/abi: removed unused code
+
+commit 65cd28aa0eca876b6a3e3b702889d3bde4386e9d
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon May 4 11:54:24 2020 +0300
+
+    tests: cleanup snapshot generator goroutine leak
+
+commit 510b6f90db406b697610fe0ff2eee66d173673b2
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri May 1 13:52:41 2020 +0200
+
+    accounts/external: convert signature v value to 0/1 (#20997)
+    
+    This fixes an issue with clef, which already transforms the signature
+    to use the legacy 27/28 encoding.
+    
+    Fixes #20994
+
+commit c43be6cf875a6557cb4c42cfd9f65b612e8b4cd7
+Author: Boqin Qin <Bobbqqin@gmail.com>
+Date:   Fri May 1 19:48:52 2020 +0800
+
+    les: remove invalid use of t.Fatal in TestHandshake (#21012)
+
+commit 7e4d1925f06beca77dfda23c0c6a19a3ab7be8b4
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri May 1 12:51:04 2020 +0200
+
+    go.sum: run go mod tidy (#21014)
+
+commit d2d3166f35b7cdaa63c54503bfccd4c808564f18
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Apr 30 18:57:06 2020 +0200
+
+    accounts/external: fill account-cache if that hasn't already been done, fixes #20995 (#20998)
+
+commit 2337aa64eb6f8c60641724ccb5919d1a5d7d9f82
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Thu Apr 30 15:43:50 2020 +0800
+
+    core/state/snapshot: fix trie generator reporter (#21004)
+
+commit 3cebfb6664408b04f87dd0fe3d6fccdf7b7badd5
+Merge: 26d271dfb 4b6f6ffe2
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Apr 30 10:26:25 2020 +0300
+
+    Merge pull request #21003 from karalabe/snapshot-journal-nilfix
+    
+    core/state/snapshot: fix journal nil deserialziation
+
+commit 4b6f6ffe2389cc2a62a10e9e8014101e3b0a595b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Apr 29 18:00:29 2020 +0300
+
+    core/state/snapshot: fix journal nil deserialziation
+
+commit 26d271dfbba1367326dec38068f9df828d462c61
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Apr 29 17:53:08 2020 +0800
+
+    core/state/snapshot: implement storage iterator (#20971)
+    
+    * core/state/snapshot: implement storage iterator
+    
+    * core/state/snapshot, tests: implement helper function
+    
+    * core/state/snapshot: fix storage issue
+    
+    If an account is deleted in the tx_1 but recreated in the tx_2,
+    the it can happen that in this diff layer, both destructedSet
+    and storageData records this account. In this case, the storage
+    iterator should be able to iterate the slots belong to new account
+    but disable further iteration in deeper layers(belong to old account)
+    
+    * core/state/snapshot: address peter and martin's comment
+    
+    * core/state: address comments
+    
+    * core/state/snapshot: fix test
+
+commit 1264c19f1153d6379b4df37ae7a9d996b90dd732
+Author: ucwong <ucwong@126.com>
+Date:   Tue Apr 28 19:57:07 2020 +0800
+
+    go.mod : goupnp v1.0.0 upgrade (#20996)
+
+commit 7f95a85fd474b93e9f6441fa7f582f9bd089aeb7
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Apr 28 13:28:38 2020 +0200
+
+    signer, log: properly escape character sequences (#20987)
+    
+    * signer: properly handle terminal escape characters
+    
+    * log: use strconv conversion instead of custom escape function
+    
+    * log: remove relection tests for nil
+
+commit 0708b573bc38c1d393d2452cb97807dccda70b5f
+Author: ucwong <ucwong@126.com>
+Date:   Tue Apr 28 16:53:08 2020 +0800
+
+    event, whisper/whisperv6: use defer where possible (#20940)
+
+commit 9887edd580d161d22d284e8778b090016bd24f80
+Author: Steven E. Harris <seh@panix.com>
+Date:   Tue Apr 28 04:43:21 2020 -0400
+
+    rpc: add explicit 200 response for empty HTTP GET (#20952)
+
+commit 1893266c59c04eb55709b911578767f1ab8a9210
+Author: ucwong <ucwong@126.com>
+Date:   Tue Apr 28 16:22:23 2020 +0800
+
+    go.mod: upgrade to golang-lru v0.5.4 (#20992)
+    
+    golang-lru is now a go module, and the upgrade corrects a couple
+    of minor issues. In particular, the library could crash if you inserted
+    nil into an LRU cache.
+
+commit 92a7538ed3ffb23b372219ec2e7a36457217730e
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Apr 28 10:06:49 2020 +0200
+
+    core: improve TestLogRebirth (#20961)
+    
+    This is a resubmit of #20668 which rewrites the problematic test
+    without any additional goroutines. It also documents the test better.
+    
+    The purpose of this test is checking whether log events are sent
+    correctly when importing blocks. The test was written at a time when
+    blockchain events were delivered asynchronously, making the check hard
+    to pull off. Now that core.BlockChain delivers events synchronously
+    during the call to InsertChain, the test can be simplified.
+    
+    Co-authored-by: BurtonQin <bobbqqin@gmail.com>
+
+commit 5c3993444d725aba00c7c8c976c5cc9f4bf6a317
+Author: Julian Y <jyap808@users.noreply.github.com>
+Date:   Mon Apr 27 08:25:24 2020 -0700
+
+    rpc: make ExampleClientSubscription work with the geth API (#19483)
+    
+    This corrects the call to eth_getBlockByNumber, which previously
+    returned this error:
+    
+      can't get latest block: missing value for required argument 1
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit ba068d40dd9a198ccc7ad9382c768f363aeb54cc
+Author: Boqin Qin <Bobbqqin@gmail.com>
+Date:   Mon Apr 27 21:16:30 2020 +0800
+
+    core: add check in AddChildIndexer to avoid double lock (#20982)
+    
+    This fixes a theoretical double lock condition which could occur in
+    
+        indexer.AddChildIndexer(indexer)
+    
+    Nobody would ever do that though.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit e32ee6ac05af434d6af330682a00cafa1ba32a66
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Apr 27 15:07:33 2020 +0200
+
+    accounts/abi: added abi test cases, minor bug fixes  (#20903)
+    
+    * accounts/abi: added documentation
+    
+    * accounts/abi: reduced usage of arguments.LengthNonIndexed
+    
+    * accounts/abi: simplified reflection logic
+    
+    * accounts/abi: moved testjson data into global declaration
+    
+    * accounts/abi: removed duplicate test cases
+    
+    * accounts/abi: reworked abi tests
+    
+    * accounts/abi: added more tests for abi packing
+    
+    * accounts/abi/bind: refactored base tests
+    
+    * accounts/abi: run pack tests as subtests
+    
+    * accounts/abi: removed duplicate tests
+    
+    * accounts/abi: removed unnused arguments.LengthNonIndexed
+    
+    Due to refactors to the code, we do not need the arguments.LengthNonIndexed function anymore.
+    You can still get the length by calling len(arguments.NonIndexed())
+    
+    * accounts/abi: added type test
+    
+    * accounts/abi: modified unpack test to pack test
+    
+    * accounts/abi: length check on arrayTy
+    
+    * accounts/abi: test invalid abi
+    
+    * accounts/abi: fixed rebase error
+    
+    * accounts/abi: fixed rebase errors
+    
+    * accounts/abi: removed unused definition
+    
+    * accounts/abi: merged packing/unpacking tests
+    
+    * accounts/abi: fixed [][][32]bytes encoding
+    
+    * accounts/abi: added tuple test cases
+    
+    * accounts/abi: renamed getMockLog -> newMockLog
+    
+    * accounts/abi: removed duplicate test
+    
+    * accounts/abi: bools -> booleans
+
+commit 40283d0522e5bf2567e080b5eac9700597095704
+Author: Steven E. Harris <seh@panix.com>
+Date:   Mon Apr 27 05:16:00 2020 -0400
+
+    node: shut down all node-related HTTP servers gracefully (#20956)
+    
+    Rather than just closing the underlying network listener to stop our
+    HTTP servers, use the graceful shutdown procedure, waiting for any
+    in-process requests to finish.
+
+commit a070e23178e8ad2213893a758fe87a3213ec1bff
+Merge: 1aa83290f b0bbd4718
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Apr 27 12:02:13 2020 +0300
+
+    Merge pull request #20988 from karalabe/catchup-shutdown
+    
+    eth: fix shutdown regression to abort downloads, not just cancel
+
+commit b0bbd4718511a8b2575e5feb8cbd54beb9675973
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Apr 27 11:22:15 2020 +0300
+
+    eth: fix shutdown regression to abort downloads, not just cancel
+
+commit 1aa83290f5052ce275fc4f36b909a721afe6037a
+Author: tgyKomgo <52910426+tgyKomgo@users.noreply.github.com>
+Date:   Fri Apr 24 16:50:03 2020 +0200
+
+    p2p/enode: update code comment (#20972)
+    
+    It is possible to specify enode URLs using domain name since
+    commit b90cdbaa79cf, but the code comment still said that only
+    IP addresses are allowed.
+    
+    Co-authored-by: admin@komgo.io <KomgoRocks2018!>
+
+commit 8a2e8faadd55a81090996afdd6b9e082bb32f72b
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Fri Apr 24 19:43:49 2020 +0800
+
+    core/state/snapshot: fix binary iterator (#20970)
+
+commit 44ff3f3dc98a5bd72e06ff6b05739c2dce8c9b62
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Fri Apr 24 19:37:56 2020 +0800
+
+    trie: initial implementation for range proof (#20908)
+    
+    * trie: initial implementation for range proof
+    
+    * trie: add benchmark
+    
+    * trie: fix lint
+    
+    * trie: fix minor issue
+    
+    * trie: unset the edge valuenode as well
+    
+    * trie: unset the edge valuenode as nilValuenode
+
+commit 38aab0aa831594f31d02c9f02bfacc0bef48405d
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Apr 22 11:52:29 2020 +0200
+
+    accounts/keystore: fix double import race (#20915)
+    
+    * accounts/keystore: fix race in Import/ImportECDSA
+    
+    * accounts/keystore: added import/export tests
+    
+    * cmd/geth: improved TestAccountImport test
+    
+    * accounts/keystore: added import/export tests
+    
+    * accounts/keystore: fixed naming
+    
+    * accounts/keystore: fixed typo
+    
+    * accounts/keystore: use mutex instead of rwmutex
+    
+    * accounts: use errors instead of fmt
+
+commit 2ec72321910204048d3a05174d3cad6d877e647f
+Author: icodezjb <icodezjb@163.com>
+Date:   Wed Apr 22 16:27:47 2020 +0800
+
+    core: mirror full node reorg logic in light client too (#20931)
+    
+    * core: fix the condition of reorg
+    
+    * core: fix nitpick to only retrieve head once
+    
+    * core: don't reorg if received chain is longer at same diff
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit b9df7ecdc3d3685180ceb29665bab59e9f614da5
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Apr 22 16:25:36 2020 +0800
+
+    all: seperate consensus error and evm internal error (#20830)
+    
+    * all: seperate consensus error and evm internal error
+    
+    There are actually two types of error will be returned when
+    a tranaction/message call is executed: (a) consensus error
+    (b) evm internal error. The former should be converted to
+    a consensus issue, e.g. The sender doesn't enough asset to
+    purchase the gas it specifies. The latter is allowed since
+    evm itself is a blackbox and internal error is allowed to happen.
+    
+    This PR emphasizes the difference by introducing a executionResult
+    structure. The evm error is embedded inside. So if any error
+    returned, it indicates consensus issue happens.
+    
+    And also this PR improve the `EstimateGas` API to return the concrete
+    revert reason if the transaction always fails
+    
+    * all: polish
+    
+    * accounts/abi/bind/backends: add tests
+    
+    * accounts/abi/bind/backends, internal: cleanup error message
+    
+    * all: address comments
+    
+    * core: fix lint
+    
+    * accounts, core, eth, internal: address comments
+    
+    * accounts, internal: resolve revert reason if possible
+    
+    * accounts, internal: address comments
+
+commit c60c0c97e77ef28086c851fd2d8499e9e1574ac3
+Author: ucwong <ucwong@126.com>
+Date:   Wed Apr 22 15:31:32 2020 +0800
+
+    go.mod : update fastcache to 1.5.7 (#20936)
+
+commit 870d4c4970d6b5b613a5860d405b5ad0d1f569a1
+Merge: 6c458f32f c036fe35a
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Apr 22 09:50:01 2020 +0300
+
+    Merge pull request #20953 from holiman/fixdlseek
+    
+    core/state/snapshot: make difflayer account iterator seek operation inclusive
+
+commit 6c458f32f80db882df02a1766f5d4cdbd930bcb7
+Author: ucwong <ucwong@126.com>
+Date:   Tue Apr 21 22:42:18 2020 +0800
+
+    p2p: defer wait group done in protocol start (#20951)
+
+commit c036fe35a8513d8f8ea74c6cbe0190c60f088862
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Apr 21 16:26:02 2020 +0200
+
+    core/state/snapshot: make difflayer account iterator seek operation inclusive
+
+commit 7599999dcd966843a08a79529470d15e77139ce0
+Author: Boqin Qin <Bobbqqin@gmail.com>
+Date:   Tue Apr 21 16:11:38 2020 +0800
+
+    snapshot: add Unlock before return (#20948)
+    
+    * Forget Unlock in snapshot
+    
+    * Remove Unlock before panic
+
+commit 79b68dd78d70ed8e6629849c3d9d71992f8e9aaa
+Merge: 648b0cb71 af4080b4b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Apr 20 16:52:04 2020 +0300
+
+    Merge pull request #20923 from holiman/fix_seckeybuf
+    
+    trie: fix concurrent usage of secKeyBuf, ref #20920
+
+commit 648b0cb7144feec13391f8e587866e9d47a75548
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Mon Apr 20 11:46:38 2020 +0200
+
+    cmd, core: remove override muir glacier and override istanbul (#20942)
+
+commit ac9c03f910a91db95db1ed7b20c50b49faefbaae
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Apr 20 09:01:04 2020 +0200
+
+    accounts/abi: Prevent recalculation of internal fields (#20895)
+    
+    * accounts/abi: prevent recalculation of ID, Sig and String
+    
+    * accounts/abi: fixed unpacking of no values
+    
+    * accounts/abi: multiple fixes to arguments
+    
+    * accounts/abi: refactored methodName and eventName
+    
+    This commit moves the complicated logic of how we assign method names
+    and event names if they already exist into their own functions for
+    better readability.
+    
+    * accounts/abi: prevent recalculation of internal
+    
+    In this commit, I changed the way we calculate the string
+    representations, sig representations and the id's of methods. Before
+    that these fields would be recalculated everytime someone called .Sig()
+    .String() or .ID() on a method or an event.
+    
+    Additionally this commit fixes issue #20856 as we assign names to inputs
+    with no name (input with name "" becomes "arg0")
+    
+    * accounts/abi: added unnamed event params test
+    
+    * accounts/abi: fixed rebasing errors in method sig
+    
+    * accounts/abi: fixed rebasing errors in method sig
+    
+    * accounts/abi: addressed comments
+    
+    * accounts/abi: added FunctionType enumeration
+    
+    * accounts/abi/bind: added test for unnamed arguments
+    
+    * accounts/abi: improved readability in NewMethod, nitpicks
+    
+    * accounts/abi: method/eventName -> overloadedMethodName
+
+commit ca22d0761bd772d38d229d59b3c72a2e7ca9592c
+Author: Boqin Qin <Bobbqqin@gmail.com>
+Date:   Fri Apr 17 20:51:38 2020 +0800
+
+    event: fix inconsistency in Lock and Unlock (#20933)
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 7a63faf734d7150e764c0c08de7f83ceaf64e272
+Author: Nishant Das <nish1993@hotmail.com>
+Date:   Thu Apr 16 21:58:37 2020 +0800
+
+    p2p/discover: add helper methods to UDPv5 (#20918)
+    
+    This adds two new methods to UDPv5, AllNodes and LocalNode.
+    
+    AllNodes returns all the nodes stored in the local table; this is
+    useful for the purposes of metrics collection and also debugging any
+    potential issues with other discovery v5 implementations.
+    
+    LocalNode returns the local node object. The reason for exposing this
+    is so that users can modify and set/delete new key-value entries in
+    the local record.
+
+commit 3bf1054a13f2ed2ba8c0c7c44279bbca6e4e7cbb
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Apr 16 10:41:32 2020 +0300
+
+    params: begin v1.9.14 release cycle
+
+commit af4080b4b7fe653568714b0012fc702ecec917f4
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Apr 15 11:07:29 2020 +0200
+
+    trie: fix concurrent usage of secKeyBuf, ref #20920
