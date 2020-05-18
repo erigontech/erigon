@@ -95,6 +95,6 @@ func min(a, b uint64) uint64 {
 
 // Temporary unoptimal implementation. Get existing short prefixes from trie, then resolve range, and give long prefixes from trie.
 func StateSizeSlice2StateSlice(tds *state.TrieDbState, in StateSizeSlice) (out StateSlice, err error) {
-	out.From, out.To, err = tds.PrefixByCumulativeWitnessSize2(in.FromSize, in.ToSize)
+	out.From, out.To, err = tds.PrefixByCumulativeWitnessSize(in.FromSize, in.ToSize)
 	return out, err
 }

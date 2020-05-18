@@ -19,6 +19,7 @@ var (
 )
 
 const keyBufferSize = 64
+const dbPageSize = 4096 // common OS page size is 4KB
 
 type IntermediateHashes struct {
 	trie.NoopObserver // make sure that we don't need to subscribe to unnecessary methods
@@ -54,6 +55,10 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 			log.Warn("could not put intermediate trie hash", "err", err)
 		}
 	} else {
+		if witnessLen < 4*dbPageSize {
+			return // store in DB only IH which allowing do big jumps over state
+		}
+
 		lenBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(lenBytes, witnessLen)
 
@@ -90,7 +95,7 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 	}
 	if debug.IsTrackWitnessSizeEnabled() {
 		//fmt.Printf("Del:%x\n", key)
-		if err := ih.deleter.Delete(dbutils.IntermediateWitnessLenBucket, common.CopyBytes(key)); err != nil {
+		if err := ih.deleter.Delete(dbutils.IntermediateWitnessLenBucket, key); err != nil {
 			log.Warn("could not delete intermediate trie hash", "err", err)
 		}
 	}

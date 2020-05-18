@@ -37,7 +37,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/trie"
+)
+
+var (
+	dbWitnessLenPrefixTimer      = metrics.NewRegisteredTimer("db/witnesslen/prefix", nil)
+	dbWitnessLenPrefixSeeksMeter = metrics.NewRegisteredMeter("db/witnesslen/prefix/seeks", nil)
 )
 
 var _ StateWriter = (*TrieStateWriter)(nil)
@@ -1423,87 +1429,10 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size uint64) ([]byte, error) {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-	prefixNibbles, ok := tds.t.PrefixByCumulativeWitnessSize(size)
-	if len(prefixNibbles)%2 == 1 {
-		prefixNibbles = prefixNibbles[:len(prefixNibbles)-1]
-	}
-	prefix := make([]byte, len(prefixNibbles)/2)
-	trie.CompressNibbles(prefixNibbles, &prefix)
-	if ok {
-		fmt.Printf("Return from trie: %x\n", prefixNibbles)
-		return prefix, nil
-	}
-
-	fmt.Printf("From Trie: %x\n", prefixNibbles)
-	var kv ethdb.KV
-	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
-		kv = hasBolt.AbstractKV()
-	}
-
-	var accumulator uint64 // increase when go to sibling, don't touch it when go to child
-
-	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateWitnessLenBucket).Cursor()
-		k, v, err := c.Seek(prefix)
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("To Sibling: %x, %d\n", prefix, accumulator)
-		for k != nil {
-			prefixSize := binary.BigEndian.Uint64(v)
-			fmt.Printf("Check: %d, %d\n", accumulator+prefixSize, size)
-			if accumulator+prefixSize >= size {
-				k, v, err = c.Next() // go to child
-				if err != nil {
-					return err
-				}
-				fmt.Printf("Try To Child: %x, %x\n", k, v)
-				if !bytes.HasPrefix(k, prefix) {
-					fmt.Printf("Not More children: %x, %x\n", k, prefix)
-					return nil
-				}
-				prefix = common.CopyBytes(k)
-				fmt.Printf("To Child: %x, %d\n", prefix, accumulator)
-				continue
-			}
-			accumulator += prefixSize
-
-			next, ok := nextSubtree(k)
-			if !ok {
-				prefix = nil
-				return nil
-			}
-
-			k, v, err = c.SeekTo(next) // go to sibling
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Try To Sibling: %x, %x\n", k, v)
-			if !bytes.HasPrefix(k, prefix) {
-				fmt.Printf("Not Match: %x, %x\n", k, prefix)
-				return nil
-			}
-			prefix = common.CopyBytes(k)
-			fmt.Printf("To Sibling: %x, %d, %x\n", prefix, accumulator, next)
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	fmt.Printf("Found: %x\n", prefix)
-
-	return prefix, nil
-}
-
-func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size1, size2 uint64) (from []byte, to []byte, err error) {
-	fmt.Println()
-	fmt.Println()
-	defer func(t time.Time) { fmt.Println("database.go:1536", time.Since(t)) }(time.Now())
-	fmt.Printf("sizes: %d %d\n", size1, size2)
+func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size1, size2 uint64) (from []byte, to []byte, err error) {
+	steps := int64(0)
+	defer dbWitnessLenPrefixTimer.UpdateSince(time.Now())
+	defer dbWitnessLenPrefixSeeksMeter.Mark(steps)
 
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
@@ -1516,7 +1445,6 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size1, size2 uint64) (fro
 	trie.CompressNibbles(prefixNibbles, &prefix1)
 
 	prefixNibbles, ok2 := tds.t.PrefixByCumulativeWitnessSize(size2)
-	fmt.Printf("AAA %x\n", prefixNibbles)
 	if len(prefixNibbles)%2 == 1 {
 		prefixNibbles = prefixNibbles[:len(prefixNibbles)-1]
 	}
@@ -1532,94 +1460,64 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size1, size2 uint64) (fro
 	}
 
 	f := func(c ethdb.Cursor, prefix []byte, size uint64) ([]byte, error) {
-		parent := common.CopyBytes(prefix)
+		parent := prefix
+		prevSibling := prefix
 		var accumulator uint64
-		x := 0
-		defer func() {
-			fmt.Printf("x: %d\n", x)
-		}()
-		next := parent
-		//next := append(parent, 0)
+		next := append(parent, 0)
 		var k, v []byte
 		var ok bool
 		for {
-			for {
-				prevSibling := common.CopyBytes(k)
-				x++
-				k, v, err = c.SeekTo(next)
-				if err != nil {
-					return nil, err
-				}
-				fmt.Printf("SeekTo: %x->%x\n", next, k)
-				if len(k) < len(next) {
-					fmt.Printf("No More Siblings1: %x, %x, %x\n", next, k, prevSibling)
-					prefix = prevSibling
-					return prefix, nil
-				}
-				if !bytes.HasPrefix(k, parent) {
-					fmt.Printf("No More Siblings2: %x, %x,%x \n", next, k, prevSibling)
-					fmt.Printf("parent: %x\n", parent)
-					prefix = prevSibling
-					return prefix, nil
-				}
-
-				// go to sibling
-				fmt.Printf("Sibling: %x, %x\n", k, parent)
-
-				// found sibling
-				prefixSize := binary.BigEndian.Uint64(v)
-				fmt.Printf("Check: %t acc+childSize=%d, size=%d\n", accumulator+prefixSize >= size, accumulator+prefixSize, size)
-				if accumulator+prefixSize >= size {
-					break
-				}
-
-				accumulator += prefixSize
-
-				//if len(next) < len(k) {
-				//	k = k[:len(next)]
-				//	next, ok = nextSubtree(k)
-				//	if !ok {
-				//		prefix = nil
-				//		return prefix, nil
-				//	}
-				//	fmt.Printf("nextSubtree: %x, %x\n", k, next)
-				//	continue
-				//}
-				next, ok = nextSubtree(k)
-				if !ok {
-					prefix = nil
-					return prefix, nil
-				}
-			}
-
-			parent = common.CopyBytes(k)
-			x++
-			k, v, err = c.Next() // go to child
+			steps++
+			k, v, err = c.SeekTo(next)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("Child: %x, %x\n", k, parent)
+			//fmt.Printf("c.SeekTo(%x)=%x, parent=%x\n", next, k, prevSibling)
+
 			if !bytes.HasPrefix(k, parent) {
-				fmt.Printf("Not More children: %x, %x\n", k, prefix)
-				prefix = parent
+				fmt.Printf("No More Siblings: %x, %x,%x,%x \n", next, k, parent, prevSibling)
+				return prevSibling, nil
+			}
+
+			// found sibling
+			prefixSize := binary.BigEndian.Uint64(v)
+			parent = common.CopyBytes(k)
+			for accumulator+prefixSize >= size {
+				fmt.Printf("Child loop: %t acc+childSize=%d, size=%d\n", accumulator+prefixSize >= size, accumulator+prefixSize, size)
+				steps++
+				k, v, err = c.Next() // go to child
+				if err != nil {
+					return nil, err
+				}
+				//fmt.Printf("c.Next(): %x, %x\n", k, parent)
+				if !bytes.HasPrefix(k, parent) {
+					fmt.Printf("No More children: %x, %x\n", k, parent)
+					return parent, nil
+				}
+				prefixSize = binary.BigEndian.Uint64(v)
+			}
+			accumulator += prefixSize
+			fmt.Printf("Acc++: %d %d %x\n", accumulator, size, k)
+			prevSibling = common.CopyBytes(k)
+			next, ok = nextSubtree(k)
+			if !ok {
+				prefix = nil
 				return prefix, nil
 			}
-			next = k
 		}
-		return prefix, nil
 	}
 
 	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateWitnessLenBucket).Cursor()
 		var err2 error
 		if !ok1 {
-			from, err2 = f(c, prefix1, size1)
+			prefix1, err2 = f(c, prefix1, size1)
 			if err2 != nil {
 				return err2
 			}
 		}
 		if !ok2 {
-			to, err2 = f(c, prefix2, size2)
+			prefix2, err2 = f(c, prefix2, size2)
 			if err2 != nil {
 				return err2
 			}
@@ -1628,9 +1526,12 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size1, size2 uint64) (fro
 	}); err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("Found: %x-%x\n", from, to)
 
-	return from, to, nil
+	if size1 == 0 {
+		prefix1 = []byte{}
+	}
+	fmt.Printf("Found: %x-%x\n", prefix1, prefix2)
+	return prefix1, prefix2, nil
 }
 
 // nextSubtree does []byte++. Returns false if overflow.

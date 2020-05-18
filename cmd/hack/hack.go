@@ -654,6 +654,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	var witnessEstimatedSizeAccumulator uint64
 	//fmt.Printf("%s\n", schedule)
 	//fmt.Printf("stateSize: %d\n", stateSize)
+	defer func(t time.Time) { fmt.Println("hack.go:657", time.Since(t)) }(time.Now())
 	for i := range schedule.Ticks {
 		tick := schedule.Ticks[i]
 		for j := range tick.StateSizeSlices {
@@ -663,9 +664,9 @@ func mgrSchedule(chaindata string, block uint64) {
 				panic(err2)
 			}
 			retain := trie.NewRetainRange(common.CopyBytes(stateSlice.From), common.CopyBytes(stateSlice.To))
-			//if tick.IsLastInCycle() {
-			//	fmt.Printf("\nretain: %s\n", retain)
-			//}
+			if tick.IsLastInCycle() {
+				fmt.Printf("\nretain: %s\n", retain)
+			}
 			witness, err2 := tds.Trie().ExtractWitness(false, retain)
 			if err2 != nil {
 				panic(err2)
@@ -676,7 +677,7 @@ func mgrSchedule(chaindata string, block uint64) {
 			if err != nil {
 				panic(err)
 			}
-
+			_ = stateSlice
 			witnessCount++
 			witnessSizeAccumulator += uint64(buf.Len())
 		}
