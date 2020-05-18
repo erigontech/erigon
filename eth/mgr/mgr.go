@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 const (
@@ -96,29 +94,7 @@ func min(a, b uint64) uint64 {
 }
 
 // Temporary unoptimal implementation. Get existing short prefixes from trie, then resolve range, and give long prefixes from trie.
-func StateSizeSlice2StateSlice(tds *state.TrieDbState, in StateSizeSlice) (StateSlice, error) {
-	out := StateSlice{}
-
-	var err error
+func StateSizeSlice2StateSlice(tds *state.TrieDbState, in StateSizeSlice) (out StateSlice, err error) {
 	out.From, out.To, err = tds.PrefixByCumulativeWitnessSize2(in.FromSize, in.ToSize)
-	if err != nil {
-		return StateSlice{}, err
-	}
-
-	return out, nil
-}
-
-func _resolve(db ethdb.Database, tr *trie.Trie, decider trie.RetainDecider) error {
-	loader := trie.NewSubTrieLoader(0)
-	dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(decider)
-	subTries, err := loader.LoadSubTries(db, 0, decider, dbPrefixes, fixedbits, false)
-	if err != nil {
-		return err
-	}
-	//fmt.Printf("retain: %s\n", decider)
-	//fmt.Printf("dbPrefixes: %x, %d\n", dbPrefixes, len(subTries.Hashes))
-	if err := tr.HookSubTries(subTries, hooks); err != nil {
-		return err
-	}
-	return nil
+	return out, err
 }

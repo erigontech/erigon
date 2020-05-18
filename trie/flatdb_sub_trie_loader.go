@@ -606,7 +606,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	if err := fstl.boltDB.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		ih := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		iwl := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
+		iwl := tx.Bucket(dbutils.IntermediateWitnessLenBucket).Cursor()
 		fstl.getWitnessLen = func(prefix []byte) uint64 {
 			if !debug.IsTrackWitnessSizeEnabled() {
 				return 0

@@ -261,7 +261,7 @@ func TestApiDetails(t *testing.T) {
 	putIDataLen := func(k string, v uint64) {
 		lenBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(lenBytes, v)
-		require.NoError(db.Put(dbutils.IntermediateTrieWitnessLenBucket, common.Hex2Bytes(k), lenBytes))
+		require.NoError(db.Put(dbutils.IntermediateWitnessLenBucket, common.Hex2Bytes(k), lenBytes))
 	}
 
 	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached SubTrieLoaders

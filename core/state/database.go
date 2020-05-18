@@ -1446,11 +1446,7 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size uint64) ([]byte, erro
 	var accumulator uint64 // increase when go to sibling, don't touch it when go to child
 
 	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
-		//c.Walk(func(k, v []byte) (bool, error) {
-		//	fmt.Printf("k: %x, v: %x\n", k, v)
-		//	return true, nil
-		//})
+		c := tx.Bucket(dbutils.IntermediateWitnessLenBucket).Cursor()
 		k, v, err := c.Seek(prefix)
 		if err != nil {
 			return err
@@ -1614,14 +1610,7 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size1, size2 uint64) (fro
 	}
 
 	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
-		//fmt.Printf("DUMP!\n")
-		//tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
-		//	if bytes.HasPrefix(k, prefix1) || bytes.HasPrefix(k, prefix2) {
-		//		fmt.Printf("%x, %x\n", k, v)
-		//	}
-		//	return true, nil
-		//})
+		c := tx.Bucket(dbutils.IntermediateWitnessLenBucket).Cursor()
 		var err2 error
 		if !ok1 {
 			from, err2 = f(c, prefix1, size1)
