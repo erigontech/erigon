@@ -54,12 +54,6 @@ var (
 	memcacheCommitSizeMeter  = metrics.NewRegisteredMeter("trie/memcache/commit/size", nil)
 )
 
-// secureKeyPrefix is the database key prefix used to store trie node preimages.
-var secureKeyPrefix = []byte("secure-key-")
-
-// secureKeyLength is the length of the above prefix + 32byte hash.
-const secureKeyLength = secureKeyPrefixLength + 32
-
 // DatabaseReader wraps the Get method of a backing store for the trie.
 type DatabaseReader interface {
 	// Get retrieves the value associated with key from the database.

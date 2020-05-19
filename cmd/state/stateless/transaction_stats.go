@@ -194,7 +194,7 @@ func transactionStats(blockNum uint64) {
 	tt := NewTxTracer()
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
 	check(err)
 	interrupt := false
 	for !interrupt {
@@ -217,9 +217,10 @@ func transactionStats(blockNum uint64) {
 			tt.measureDepth = 0
 			tt.measureCurrentGas = tx.Gas()
 			tt.trace = (blockNum == 1279578) && (txIdx == 3)
-			if _, usedGas, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {
+				usedGas := result.UsedGas
 				var neededGas uint64
 				usedGas += statedb.GetRefund()
 				if usedGas > tt.gasForSSTORE+tt.gasForCREATE+tt.gasForEthSendingCALL {

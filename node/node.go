@@ -405,7 +405,7 @@ func (n *Node) startHTTP(endpoint string, apis []rpc.API, modules []string, cors
 func (n *Node) stopHTTP() {
 	if n.httpServer != nil {
 		// Don't bother imposing a timeout here.
-		n.httpServer.Shutdown(context.Background())
+		n.httpServer.Shutdown(context.Background()) //nolint:errcheck
 		n.log.Info("HTTP endpoint closed", "url", fmt.Sprintf("http://%v/", n.httpListenerAddr))
 	}
 	if n.httpHandler != nil {
@@ -445,7 +445,7 @@ func (n *Node) startWS(endpoint string, apis []rpc.API, modules []string, wsOrig
 func (n *Node) stopWS() {
 	if n.wsHTTPServer != nil {
 		// Don't bother imposing a timeout here.
-		n.wsHTTPServer.Shutdown(context.Background())
+		n.wsHTTPServer.Shutdown(context.Background()) //nolint:errcheck
 		n.log.Info("WebSocket endpoint closed", "url", fmt.Sprintf("ws://%v", n.wsListenerAddr))
 	}
 	if n.wsHandler != nil {

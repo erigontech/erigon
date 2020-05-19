@@ -13,7 +13,7 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
+//nolint:scopelint
 package abi
 
 import (
@@ -50,8 +50,8 @@ func TestPack(t *testing.T) {
 				// if want is a struct we need to use the components.
 				elem := reflect.ValueOf(test.unpacked)
 				var values []interface{}
-				for i := 0; i < elem.NumField(); i++ {
-					field := elem.Field(i)
+				for j := 0; j < elem.NumField(); j++ {
+					field := elem.Field(j)
 					values = append(values, field.Interface())
 				}
 				packed, err = inAbi.Pack("method", values...)

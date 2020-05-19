@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -286,24 +285,28 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 
 // doSync synchronizes the local blockchain with a remote peer.
 func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
-	if op.mode == downloader.FastSync {
-		// Before launch the fast sync, we have to ensure user uses the same
-		// txlookup limit.
-		// The main concern here is: during the fast sync Geth won't index the
-		// block(generate tx indices) before the HEAD-limit. But if user changes
-		// the limit in the next fast sync(e.g. user kill Geth manually and
-		// restart) then it will be hard for Geth to figure out the oldest block
-		// has been indexed. So here for the user-experience wise, it's non-optimal
-		// that user can't change limit during the fast sync. If changed, Geth
-		// will just blindly use the original one.
-		limit := pm.blockchain.TxLookupLimit()
-		if stored := rawdb.ReadFastTxLookupLimit(pm.chaindb); stored == nil {
-			rawdb.WriteFastTxLookupLimit(pm.chaindb, limit)
-		} else if *stored != limit {
-			pm.blockchain.SetTxLookupLimit(*stored)
-			log.Warn("Update txLookup limit", "provided", limit, "updated", *stored)
+	/*
+		if op.mode == downloader.FastSync {
+				Turbo-Geth doesn't support fast sync mode.
+
+				// Before launch the fast sync, we have to ensure user uses the same
+				// txlookup limit.
+				// The main concern here is: during the fast sync Geth won't index the
+				// block(generate tx indices) before the HEAD-limit. But if user changes
+				// the limit in the next fast sync(e.g. user kill Geth manually and
+				// restart) then it will be hard for Geth to figure out the oldest block
+				// has been indexed. So here for the user-experience wise, it's non-optimal
+				// that user can't change limit during the fast sync. If changed, Geth
+				// will just blindly use the original one.
+				limit := pm.blockchain.TxLookupLimit()
+				if stored := rawdb.ReadFastTxLookupLimit(pm.chaindb); stored == nil {
+					rawdb.WriteFastTxLookupLimit(pm.chaindb, limit)
+				} else if *stored != limit {
+					pm.blockchain.SetTxLookupLimit(*stored)
+					log.Warn("Update txLookup limit", "provided", limit, "updated", *stored)
+				}
 		}
-	}
+	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
 	err := pm.downloader.Synchronise(op.peer.id, op.head, op.td, op.mode)
 	if err != nil {

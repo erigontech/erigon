@@ -13,7 +13,7 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
+//nolint:scopelint
 package abi
 
 import (
@@ -27,9 +27,8 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 const jsondata = `
@@ -949,9 +948,9 @@ func TestABI_MethodById(t *testing.T) {
 	}
 	for name, m := range abi.Methods {
 		a := fmt.Sprintf("%v", m)
-		m2, err := abi.MethodById(m.ID)
-		if err != nil {
-			t.Fatalf("Failed to look up ABI method: %v", err)
+		m2, err2 := abi.MethodById(m.ID)
+		if err2 != nil {
+			t.Fatalf("Failed to look up ABI method: %v", err2)
 		}
 		b := fmt.Sprintf("%v", m2)
 		if a != b {

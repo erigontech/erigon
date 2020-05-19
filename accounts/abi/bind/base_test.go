@@ -95,7 +95,8 @@ func TestPassingBlockNumber(t *testing.T) {
 		t.Fatalf("CodeAt() was passed a block number when it should not have been")
 	}
 
-	bc.Call(&bind.CallOpts{BlockNumber: blockNumber, Pending: true}, &ret, "something")
+	// error is intentionally ignored
+	bc.Call(&bind.CallOpts{BlockNumber: blockNumber, Pending: true}, &ret, "something") //nolint:errcheck
 
 	if !mc.pendingCallContractCalled {
 		t.Fatalf("CallContract() was not passed the block number")

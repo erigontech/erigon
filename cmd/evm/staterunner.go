@@ -97,16 +97,16 @@ func stateTestCmd(ctx *cli.Context) error {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
-			statedb, db, blockNumber, root, err := test.Run(context.Background(), st, cfg)
+			statedb, tds, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
 			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root)
+				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
 			}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					dump := state.NewDumper(db, blockNumber).DefaultRawDump()
+					dump := state.NewDumper(tds.Database(), tds.GetBlockNr()).DefaultRawDump()
 					result.State = &dump
 				}
 			}

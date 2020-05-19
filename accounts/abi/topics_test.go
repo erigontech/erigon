@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )

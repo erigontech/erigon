@@ -26,7 +26,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/accounts"
-	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/accounts/scwallet"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -553,66 +553,66 @@ type StorageResult struct {
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
 	/*
-		state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
-		if state == nil || err != nil {
-			return nil, err
-	}
-
-	storageTrie := state.StorageTrie(address)
-	storageHash := types.EmptyRootHash
+			state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
+			if state == nil || err != nil {
+				return nil, err
 		}
-	storageProof := make([]StorageResult, len(storageKeys))
 
-	// if we have a storageTrie, (which means the account exists), we can update the storagehash
 		storageTrie := state.StorageTrie(address)
 		storageHash := types.EmptyRootHash
-	} else {
-		codeHash := state.GetCodeHash(address)
+			}
 		storageProof := make([]StorageResult, len(storageKeys))
-	}
 
 		// if we have a storageTrie, (which means the account exists), we can update the storagehash
-	for i, key := range storageKeys {
-		if storageTrie != nil {
-			storageHash = storageTrie.Hash()
-			if storageError != nil {
-				return nil, storageError
-			}
-			storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
+			storageTrie := state.StorageTrie(address)
+			storageHash := types.EmptyRootHash
 		} else {
-			// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
-			codeHash = crypto.Keccak256Hash(nil)
+			codeHash := state.GetCodeHash(address)
+			storageProof := make([]StorageResult, len(storageKeys))
 		}
-	}
 
-		// create the proof for the storageKeys
+			// if we have a storageTrie, (which means the account exists), we can update the storagehash
 		for i, key := range storageKeys {
 			if storageTrie != nil {
-				proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
+				storageHash = storageTrie.Hash()
 				if storageError != nil {
 					return nil, storageError
 				}
 				storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
 			} else {
-				storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+				// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
+				codeHash = crypto.Keccak256Hash(nil)
 			}
 		}
 
-		// create the accountProof
-		accountProof, proofErr := state.GetProof(address)
-		if proofErr != nil {
-			return nil, proofErr
-		}
+			// create the proof for the storageKeys
+			for i, key := range storageKeys {
+				if storageTrie != nil {
+					proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
+					if storageError != nil {
+						return nil, storageError
+					}
+					storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
+				} else {
+					storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+				}
+			}
 
-		return &AccountResult{
-			Address:      address,
-			AccountProof: common.ToHexArray(accountProof),
-			Balance:      (*hexutil.Big)(state.GetBalance(address)),
-			CodeHash:     codeHash,
-			Nonce:        hexutil.Uint64(state.GetNonce(address)),
-			StorageHash:  storageHash,
-			StorageProof: storageProof,
-		}, state.Error()
+			// create the accountProof
+			accountProof, proofErr := state.GetProof(address)
+			if proofErr != nil {
+				return nil, proofErr
+			}
+
+			return &AccountResult{
+				Address:      address,
+				AccountProof: common.ToHexArray(accountProof),
+				Balance:      (*hexutil.Big)(state.GetBalance(address)),
+				CodeHash:     codeHash,
+				Nonce:        hexutil.Uint64(state.GetNonce(address)),
+				StorageHash:  storageHash,
+				StorageProof: storageProof,
+			}, state.Error()
 	*/
 	return nil, nil
 }
