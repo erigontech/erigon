@@ -95,6 +95,23 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
 		unfurl.AddKey(sk[:])
 	}
+	rl := trie.NewRetainList(0)
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+	rl.AddKey(addrHash[:])
+	unfurl.AddKey(addrHash[:])
+	for _, key := range storageKeys {
+		keyAsHash := common.HexToHash(key)
+		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
+			trieKey := append(addrHash[:], keyHash[:]...)
+			rl.AddKey(trieKey)
+			unfurl.AddKey(trieKey)
+		} else {
+			return nil, err1
+		}
+	}
 	sort.Strings(unfurlList)
 	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
 	loader := trie.NewFlatDbSubTrieLoader()
@@ -102,20 +119,6 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		return nil, err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	rl := trie.NewRetainList(0)
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
-	rl.AddKey(addrHash[:])
-	for _, key := range storageKeys {
-		keyAsHash := common.HexToHash(key)
-		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
-			rl.AddKey(append(addrHash[:], keyHash[:]...))
-		} else {
-			return nil, err1
-		}
-	}
 	r.defaultReceiver.Reset(rl, false)
 	loader.SetStreamReceiver(r)
 	subTries, err1 := loader.LoadSubTries()

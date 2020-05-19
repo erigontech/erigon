@@ -20,6 +20,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	defer returnHasherToPool(hasher)
 	// Collect all nodes on the path to key.
 	key = keybytesToHex(key)
+	key = key[:len(key)-1] // Remove terminator
 	tn := t.root
 	for len(key) > 0 && tn != nil {
 		switch n := tn.(type) {
@@ -87,7 +88,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 				tn = nil
 			}
 		case hashNode:
-			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x", key)
+			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
 			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
 		}
