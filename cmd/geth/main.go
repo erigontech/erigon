@@ -91,8 +91,6 @@ var (
 		utils.SyncModeFlag,
 		utils.StagedSyncPlainExecFlag,
 		utils.ExitWhenSyncedFlag,
-		//utils.GCModePruningFlag,
-		utils.SnapshotFlag,
 		utils.TxLookupLimitFlag,
 		utils.LightServeFlag,
 		utils.GCModeLimitFlag,

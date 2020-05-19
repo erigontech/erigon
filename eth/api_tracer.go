@@ -713,11 +713,11 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 
+	statedb, dbstate := ComputeIntraBlockState(chainDb, parent)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
-		return nil, vm.Context{}, statedb, nil
+		return nil, vm.Context{}, statedb, dbstate, nil
 	}
-	statedb, dbstate := ComputeIntraBlockState(chainDb, parent)
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.Number())
 
@@ -736,7 +736,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
-		if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state

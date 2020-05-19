@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/tests/contracts"
 )
 
-
 func TestSelfDestructReceive(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -61,7 +60,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +115,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

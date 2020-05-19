@@ -287,11 +287,12 @@ func Setup(ctx *cli.Context) error {
 		if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
 			port = ctx.GlobalInt(legacyPprofPortFlag.Name)
 			log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
-		Exit()
+			Exit()
 		}
 
 		address := fmt.Sprintf("%s:%d", listenHost, port)
-		StartPProf(address)
+		StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
+	}
 	return nil
 }
 

@@ -75,7 +75,7 @@ func TestState(t *testing.T) {
 							return UnsupportedForkError{subtest.Fork}
 						}
 						ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
-						_, _, _, _, err := test.Run(ctx, subtest, vmconfig)
+						_, _, err := test.Run(ctx, subtest, vmconfig)
 						return st.checkFailure(t, err)
 					})
 				})

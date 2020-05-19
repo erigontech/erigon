@@ -111,11 +111,13 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	backend.SendTransaction(ctx, tx)
+	if err := backend.SendTransaction(ctx, tx); err != nil {
+		t.Errorf("error when sending tx: %v", err)
+	}
 	backend.Commit()
 	notContentCreation := errors.New("tx is not contract creation")
 	if _, err := bind.WaitDeployed(ctx, backend, tx); err.Error() != notContentCreation.Error() {
-		t.Errorf("error missmatch: want %q, got %q, ", notContentCreation, err)
+		t.Errorf("error mismatch: want %q, got %q, ", notContentCreation, err)
 	}
 
 	// Create a transaction that is not mined.
@@ -129,6 +131,8 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 		}
 	}()
 
-	backend.SendTransaction(ctx, tx)
+	if err := backend.SendTransaction(ctx, tx); err != nil {
+		t.Errorf("error when sending tx: %v", err)
+	}
 	cancel()
 }

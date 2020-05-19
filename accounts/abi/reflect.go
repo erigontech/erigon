@@ -117,7 +117,7 @@ func requireAssignable(dst, src reflect.Value) error {
 }
 
 // requireUnpackKind verifies preconditions for unpacking `args` into `kind`
-func requireUnpackKind(v reflect.Value, minLength int, args Arguments) error {
+func requireUnpackKind(v reflect.Value, minLength int, _ Arguments) error {
 	switch v.Kind() {
 	case reflect.Struct:
 	case reflect.Slice, reflect.Array:

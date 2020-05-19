@@ -13,16 +13,17 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
-
+// nolint:golint
 package utils
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/eth"
-	"github.com/ethereum/go-ethereum/node"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/node"
+
+	"github.com/urfave/cli"
 )
 
 var ShowDeprecated = cli.Command{

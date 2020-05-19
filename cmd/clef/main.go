@@ -605,7 +605,7 @@ func signer(c *cli.Context) error {
 
 		defer func() {
 			// Don't bother imposing a timeout here.
-			httpServer.Shutdown(context.Background())
+			httpServer.Shutdown(context.Background()) //nolint:errcheck
 			log.Info("HTTP endpoint closed", "url", extapiURL)
 		}()
 	}

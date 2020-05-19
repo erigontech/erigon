@@ -1000,9 +1000,8 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
-		// execution finished.
-		now := time.Now()
 	if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
+		now := time.Now()
 		if err = w.commit(ctx, uncles, nil, false, tstart); err != nil {
 			log.Error("Failed to commit empty block", "err", err)
 			ctx.CancelFunc()
@@ -1123,6 +1122,14 @@ func (w *worker) clearCanonicalChainContext() {
 		ctx.CancelFunc()
 	}
 	w.canonicalMining = nil
+}
+
+// postSideBlock fires a side chain event, only use it for testing.
+func (w *worker) postSideBlock(event core.ChainSideEvent) {
+	select {
+	case w.chainSideCh <- event:
+	case <-w.exitCh:
+	}
 }
 
 func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {

@@ -248,7 +248,6 @@ var AppHelpFlagGroups = []flagGroup{
 		Flags: metricsFlags,
 	},
 	{
-	{
 		Name: "ALIASED (deprecated)",
 		Flags: append([]cli.Flag{
 			utils.LegacyRPCEnabledFlag,

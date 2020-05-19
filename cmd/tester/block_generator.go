@@ -389,7 +389,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		return nil, err
 	}
 
-	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +471,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		return nil, err
 	}
 
-	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -275,7 +275,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 		if !isHomestead && err == ErrCodeStoreOutOfGas {
 			err = nil
 		}
-		if err == errExecutionReverted {
+		if err == ErrExecutionReverted {
 			// Assign return buffer from REVERT.
 			// TODO: Bad API design: return data buffer and the code is returned in the same place. In worst case
 			//       the code is returned also when there is not enough funds to deploy the code.
@@ -285,7 +285,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 		var createOutput []byte
 		createOutput, createAddr, gasLeftU, err = host.env.Create2(host.contract, input, gasU, value, salt)
 		createAddrEvmc = evmc.Address(createAddr)
-		if err == errExecutionReverted {
+		if err == ErrExecutionReverted {
 			// Assign return buffer from REVERT.
 			// TODO: Bad API design: return data buffer and the code is returned in the same place. In worst case
 			//       the code is returned also when there is not enough funds to deploy the code.
@@ -296,7 +296,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 	}
 
 	// Map errors.
-	if err == errExecutionReverted {
+	if err == ErrExecutionReverted {
 		err = evmc.Revert
 	} else if err != nil {
 		err = evmc.Failure
@@ -368,7 +368,7 @@ func (evm *EVMC) Run(contract *Contract, input []byte, readOnly bool) (ret []byt
 	contract.Gas = uint64(gasLeft)
 
 	if err == evmc.Revert {
-		err = errExecutionReverted
+		err = ErrExecutionReverted
 	} else if evmcError, ok := err.(evmc.Error); ok && evmcError.IsInternalError() {
 		panic(fmt.Sprintf("EVMC VM internal error: %s", evmcError.Error()))
 	}

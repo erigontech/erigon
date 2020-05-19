@@ -13,21 +13,22 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
+//nolint:errcheck,prealloc
 package core
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -36,7 +37,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
-		db     = rawdb.NewMemoryDatabase()
+		db     = ethdb.NewMemDatabase()
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -49,7 +50,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 	)
 
 	// We need to generate as many blocks +1 as uncles
-	blocks, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1,
+	blocks, _ := GenerateChain(context.Background(), params.TestChainConfig, genesis, engine, db, uncles+1,
 		func(n int, b *BlockGen) {
 			if n == uncles {
 				// Add transactions and stuff on the last block
@@ -97,13 +98,17 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 		t.Fatal("expected two elems, got zero")
 	}
 	txdata := it.Value()
+	// Check that senders exist (turbo-geth specific)
+	if !it.Next() {
+		t.Fatal("expected three elems, got one")
+	}
 	// Check that uncles exist
 	if !it.Next() {
-		t.Fatal("expected two elems, got one")
+		t.Fatal("expected three elems, got two")
 	}
 	// No more after that
 	if it.Next() {
-		t.Fatal("expected only two elems, got more")
+		t.Fatal("expected only three elems, got more")
 	}
 	txIt, err := rlp.NewListIterator(txdata)
 	if err != nil {

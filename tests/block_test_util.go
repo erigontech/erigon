@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -120,12 +119,7 @@ func (t *BlockTest) Run(_ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
-	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil)
-	if snapshotter {
-		cache.SnapshotLimit = 1
-		cache.SnapshotWait = true
-	}
-	chain, err := core.NewBlockChain(db, cache, config, engine, vm.Config{}, nil, nil)
+	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -145,12 +139,6 @@ func (t *BlockTest) Run(_ bool) error {
 	}
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
-	}
-	// Cross-check the snapshot-to-hash against the trie hash
-	if snapshotter {
-		if err := snapshot.VerifyState(chain.Snapshot(), chain.CurrentBlock().Root()); err != nil {
-			return err
-		}
 	}
 	return t.validateImportedHeaders(chain, validBlocks)
 }

@@ -132,7 +132,7 @@ func dataDependencies(blockNum uint64) {
 	defer w.Flush()
 	dt := NewDepTracer()
 	vmConfig := vm.Config{Tracer: dt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
 	check(err)
 	interrupt := false
 	for !interrupt {
@@ -160,10 +160,10 @@ func dataDependencies(blockNum uint64) {
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, _, failed, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {
-				if failed {
+				if result.Failed() {
 					// Only consider reads
 					accountsReadSets = append(accountsReadSets, dt.accountsReadSet)
 					accountsWriteSets = append(accountsWriteSets, make(map[common.Address]struct{}))

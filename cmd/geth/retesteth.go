@@ -691,7 +691,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			context := core.NewEVMContext(msg, block.Header(), api.blockchain, nil)
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{})
-			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				return AccountRangeResult{}, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
 			}
 			// Ensure any modifications are committed to the state
@@ -717,11 +717,6 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			return AccountRangeResult{}, err
 		}
 		result.AddressMap[addrHash] = addr
-	}
-	// Add the 'next key' so clients can continue downloading.
-	if it.Next() {
-		next := common.BytesToHash(it.Key)
-		result.NextKey = next
 	}
 
 	result.NextKey = common.BytesToHash(iterator.Next)
@@ -972,7 +967,7 @@ func retesteth(ctx *cli.Context) error {
 
 	defer func() {
 		// Don't bother imposing a timeout here.
-		httpServer.Shutdown(context.Background())
+		httpServer.Shutdown(context.Background()) //nolint:errcheck
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
 

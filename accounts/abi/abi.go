@@ -25,7 +25,7 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 // The ABI holds information about a contract's context and available
