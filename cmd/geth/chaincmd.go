@@ -28,7 +28,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -479,7 +479,7 @@ func removeDB(ctx *cli.Context) error {
 // confirmAndRemoveDB prompts the user for a last confirmation and removes the
 // folder if accepted.
 func confirmAndRemoveDB(database string, kind string) {
-	confirm, err := console.Stdin.PromptConfirm(fmt.Sprintf("Remove %s (%s)?", kind, database))
+	confirm, err := prompt.Stdin.PromptConfirm(fmt.Sprintf("Remove %s (%s)?", kind, database))
 	switch {
 	case err != nil:
 		utils.Fatalf("%v", err)
