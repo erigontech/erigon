@@ -522,9 +522,3 @@ Date:   Wed May 20 20:45:38 2020 +0800
     * trie: tiny typos and formulations
     
     Co-authored-by: Péter Szilágyi <peterke@gmail.com>
-
-commit 0a99efa61fd7fc29d4b82b66fc93ea5e4a1cb6e6
-Author: ucwong <ucwong@126.com>
-Date:   Wed May 20 15:32:54 2020 +0800
-
-    whisper: use canonical import name of package go-ethereum (#21099)
