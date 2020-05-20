@@ -69,20 +69,20 @@ func opSmod(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 
 func opExp(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	base, exponent := callContext.stack.pop(), callContext.stack.peek()
-	// some shortcuts
-	if exponent.IsZero() {
+	switch {
+	case exponent.IsZero():
 		// x ^ 0 == 1
 		exponent.SetOne()
-	} else if base.IsZero() {
+	case base.IsZero():
 		// 0 ^ y, if y != 0, == 0
 		exponent.Clear()
-	} else if exponent.LtUint64(2) { // exponent == 1
+	case exponent.LtUint64(2): // exponent == 1
 		// x ^ 1 == x
 		exponent.Set(&base)
-	} else if base.LtUint64(2) { // base == 1
+	case base.LtUint64(2): // base == 1
 		// 1 ^ y == 1
 		exponent.SetOne()
-	} else if base.LtUint64(3) { // base == 2
+	case base.LtUint64(3): // base == 2
 		if exponent.LtUint64(256) {
 			n := uint(exponent.Uint64())
 			exponent.SetOne()
@@ -90,7 +90,7 @@ func opExp(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byt
 		} else {
 			exponent.Clear()
 		}
-	} else {
+	default:
 		exponent.Exp(&base, exponent)
 	}
 	return nil, nil
