@@ -101,8 +101,8 @@ github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c h1:JHHhtb9XWJrGNMcr
 github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c/go.mod h1:YO35OhQPt3KJa3ryjFM5Bs14WD66h8eGKpfaBNrHW5M=
 github.com/elastic/gosigar v0.8.1-0.20180330100440-37f05ff46ffa h1:XKAhUk/dtp+CV0VO6mhG2V7jA9vbcGcnYF/Ay9NjZrY=
 github.com/elastic/gosigar v0.8.1-0.20180330100440-37f05ff46ffa/go.mod h1:cdorVVzy1fhmEqmtgqkoE3bYtCfSCkVyjTyCIo22xvs=
-github.com/ethereum/go-ethereum v1.9.13 h1:rOPqjSngvs1VSYH2H+PMPiWt4VEulvNRbFgqiGqJM3E=
-github.com/ethereum/go-ethereum v1.9.13/go.mod h1:qwN9d1GLyDh0N7Ab8bMGd0H9knaji2jOBm2RrMGjXls=
+github.com/ethereum/evmc/v7 v7.3.0 h1:4CsjJ+vSRrkzxOHeG1lFRGk4sG4/PgzXnWuRNgLGMJ0=
+github.com/ethereum/evmc/v7 v7.3.0/go.mod h1:q2Q0rCSUlIkngd+mZwfCzEUbvB0IIopH1+7hcs9QuDg=
 github.com/fatih/color v1.3.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/fatih/color v1.7.0 h1:DkWD4oS2D8LGGgTQ6IvwJJXSL5Vp2ffcQg58nFV38Ys=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
@@ -214,10 +214,6 @@ github.com/ledgerwatch/bolt v1.4.4 h1:Pg5gDqcZPXeLjZSjKrVX5PeCrbWwCyr1il9BNi/+D/
 github.com/ledgerwatch/bolt v1.4.4/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
 github.com/ledgerwatch/bolt v1.4.5-0.20200504044242-1f3c42ebc79a h1:MJk6Kk51ajOk1EtJb7YLMpj5xzJxgN3WD4rVC7t2pbc=
 github.com/ledgerwatch/bolt v1.4.5-0.20200504044242-1f3c42ebc79a/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
-github.com/ledgerwatch/evmc v0.0.0-20200504091739-ff42f8728484 h1:BjoLyGk3U8aTwE8kFhguCmY8FB9/B2wJpZvAYukzTg8=
-github.com/ledgerwatch/evmc v0.0.0-20200504091739-ff42f8728484/go.mod h1:zksoLdxVOLOs9I13pxQccQfJmo6uoyExp4Jv7pELgjM=
-github.com/ledgerwatch/evmc v1.7.1999 h1:nszxT9Tu7U3Ie4LE7aOQQRXfPk7S4x+BF1Vl0AqKTt0=
-github.com/ledgerwatch/evmc v1.7.1999/go.mod h1:noqvZeqUNrOMNRly7cXppTQ7MYq+rdZlkC+Q1qdijCM=
 github.com/leodido/go-urn v1.2.0 h1:hpXL4XnriNwQ/ABnpepYM/1vCLWNDfUNts8dX3xTG6Y=
 github.com/leodido/go-urn v1.2.0/go.mod h1:+8+nEpDfqqsY+g338gtMEUOtuK+4dEMhiQEgxpxOKII=
 github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0 h1:2vp6ESimuT8pCuZHThVyV0hlfa9oPL06HnGCL9pbUgc=

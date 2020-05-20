@@ -26,7 +26,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/evmc/bindings/go/evmc"
+	"github.com/ethereum/evmc/v7/bindings/go/evmc"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -246,8 +246,8 @@ func (host *hostContext) EmitLog(addr evmc.Address, evmcTopics []evmc.Hash, data
 }
 
 func (host *hostContext) Call(kind evmc.CallKind,
-	evmcDestination evmc.Address, evmcSender evmc.Address, value *big.Int, input []byte, gas int64, depth int,
-	static bool, salt *big.Int) (output []byte, gasLeft int64, createAddrEvmc evmc.Address, err error) {
+	evmcDestination evmc.Address, evmcSender evmc.Address, valueBytes evmc.Hash, input []byte, gas int64, depth int,
+	static bool, saltBytes evmc.Hash) (output []byte, gasLeft int64, createAddrEvmc evmc.Address, err error) {
 
 	destination := common.Address(evmcDestination)
 
@@ -255,6 +255,12 @@ func (host *hostContext) Call(kind evmc.CallKind,
 
 	gasU := uint64(gas)
 	var gasLeftU uint64
+
+	value := big.NewInt(0)
+	value.SetBytes(valueBytes[:])
+
+	salt := big.NewInt(0)
+	salt.SetBytes(saltBytes[:])
 
 	switch kind {
 	case evmc.Call:
