@@ -286,7 +286,7 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 	}
 	if r.ReturnValue != rg.ReturnValue {
 		fmt.Printf("Trace different ReturnValue: %s / %s\n", r.ReturnValue, rg.ReturnValue)
-		//return false
+		return false
 	}
 	if len(r.StructLogs) != len(rg.StructLogs) {
 		fmt.Printf("Trace different length: %d / %d\n", len(r.StructLogs), len(rg.StructLogs))
