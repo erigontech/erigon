@@ -3,7 +3,6 @@ package ethapi
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/big"
 	"sort"
 
@@ -18,7 +17,7 @@ import (
 )
 
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
-	block := uint64(blockNr.Int64())
+	block := uint64(blockNr.Int64()) + 1
 	db := s.b.ChainDb()
 	ts := dbutils.EncodeTimestamp(block)
 	accountCs := 0
@@ -113,7 +112,6 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		}
 	}
 	sort.Strings(unfurlList)
-	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
 	loader := trie.NewFlatDbSubTrieLoader()
 	if err = loader.Reset(db, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
 		return nil, err
@@ -125,14 +123,8 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	if err1 != nil {
 		return nil, err1
 	}
-	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
-	fmt.Printf("Head block number: %d, root hash: %x\n", *headNumber, headHeader.Root)
-	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
 	hash := rawdb.ReadCanonicalHash(db, block-1)
 	header := rawdb.ReadHeader(db, hash, block-1)
-	fmt.Printf("Block state root: %x\n", header.Root)
 	tr := trie.New(header.Root)
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		return nil, err

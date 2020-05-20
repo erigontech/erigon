@@ -277,19 +277,19 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 	r := trace.Result
 	rg := traceg.Result
 	if r.Gas != rg.Gas {
-		fmt.Printf("Trace different Gas: %d %d\n", r.Gas, rg.Gas)
+		fmt.Printf("Trace different Gas: %d / %d\n", r.Gas, rg.Gas)
 		return false
 	}
 	if r.Failed != rg.Failed {
-		fmt.Printf("Trace different Failed: %t %t\n", r.Failed, rg.Failed)
+		fmt.Printf("Trace different Failed: %t / %t\n", r.Failed, rg.Failed)
 		return false
 	}
 	if r.ReturnValue != rg.ReturnValue {
-		fmt.Printf("Trace different ReturnValue: %s %s\n", r.ReturnValue, rg.ReturnValue)
-		return false
+		fmt.Printf("Trace different ReturnValue: %s / %s\n", r.ReturnValue, rg.ReturnValue)
+		//return false
 	}
 	if len(r.StructLogs) != len(rg.StructLogs) {
-		fmt.Printf("Trace different length: %d %d\n", len(r.StructLogs), len(rg.StructLogs))
+		fmt.Printf("Trace different length: %d / %d\n", len(r.StructLogs), len(rg.StructLogs))
 		return false
 	}
 	for i, l := range r.StructLogs {
@@ -492,8 +492,8 @@ const Geth = "geth"
 const TurboGeth = "turbo_geth"
 
 var routes = map[string]string{
-	Geth:      "http://192.168.1.238:8545",
-	TurboGeth: "http://192.168.1.126:8545",
+	Geth:      "http://192.168.1.252:8545",
+	TurboGeth: "http://localhost:8545",
 }
 
 type CallResult struct {
@@ -549,7 +549,7 @@ func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) s
 }
 
 func (g *RequestGenerator) accountRange(bn int, page []byte) string {
-	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, true, true, true], "id":%d}`
+	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false, false], "id":%d}`
 	encodedKey := base64.StdEncoding.EncodeToString(page)
 	return fmt.Sprintf(template, bn, encodedKey, 256, g.reqID)
 }
@@ -1568,6 +1568,181 @@ func bench8() {
 	}
 }
 
+// bench9 tests eth_getProof
+func bench9(needCompare bool) {
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+
+	var res CallResult
+	reqGen := &RequestGenerator{
+		client: client,
+	}
+
+	reqGen.reqID++
+	var blockNumber EthBlockNumber
+	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		fmt.Printf("Could not get block number: %v\n", res.Err)
+		return
+	}
+	if blockNumber.Error != nil {
+		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		return
+	}
+	lastBlock := blockNumber.Number
+	fmt.Printf("Last block: %d\n", lastBlock)
+	// Go back 256 blocks
+	bn := int(lastBlock - 256)
+	page := common.Hash{}.Bytes()
+
+	var accRangeTG map[common.Address]state.DumpAccount
+
+	for len(page) > 0 {
+		accRangeTG = make(map[common.Address]state.DumpAccount)
+		var sr DebugAccountRange
+		reqGen.reqID++
+		res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+
+		if res.Err != nil {
+			fmt.Printf("Could not get accountRange (turbo-geth): %v\n", res.Err)
+			return
+		}
+
+		if sr.Error != nil {
+			fmt.Printf("Error getting accountRange (turbo-geth): %d %s\n", sr.Error.Code, sr.Error.Message)
+			break
+		} else {
+			page = sr.Result.Next
+			for k, v := range sr.Result.Accounts {
+				accRangeTG[k] = v
+			}
+		}
+	}
+	for address, dumpAcc := range accRangeTG {
+		var proof EthGetProof
+		reqGen.reqID++
+		var storageList []common.Hash
+		// And now with the storage, if present
+		if len(dumpAcc.Storage) > 0 {
+			for key := range dumpAcc.Storage {
+				storageList = append(storageList, common.HexToHash(key))
+				if len(storageList) > 100 {
+					break
+				}
+			}
+		}
+		res = reqGen.TurboGeth("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
+		if res.Err != nil {
+			fmt.Printf("Could not get getProof (turbo-geth): %v\n", res.Err)
+			return
+		}
+		if proof.Error != nil {
+			fmt.Printf("Error getting getProof (turbo-geth): %d %s\n", proof.Error.Code, proof.Error.Message)
+			break
+		}
+		if needCompare {
+			var gethProof EthGetProof
+			reqGen.reqID++
+			res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
+			if res.Err != nil {
+				fmt.Printf("Could not get getProof (geth): %v\n", res.Err)
+				return
+			}
+			if gethProof.Error != nil {
+				fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)
+				break
+			}
+			if !compareProofs(&proof, &gethProof) {
+				fmt.Printf("Proofs are different\n")
+				break
+			}
+		}
+	}
+
+}
+
+func compareProofs(proof, gethProof *EthGetProof) bool {
+	r := proof.Result
+	rg := gethProof.Result
+
+	/*
+	   	Address      common.Address  `json:"address"`
+	   	AccountProof []string        `json:"accountProof"`
+	   	Balance      *hexutil.Big    `json:"balance"`
+	   	CodeHash     common.Hash     `json:"codeHash"`
+	   	Nonce        hexutil.Uint64  `json:"nonce"`
+	   	StorageHash  common.Hash     `json:"storageHash"`
+	   	StorageProof []StorageResult `json:"storageProof"`
+	   }
+	   type StorageResult struct {
+	   	Key   string       `json:"key"`
+	   	Value *hexutil.Big `json:"value"`
+	   	Proof []string     `json:"proof"`
+	*/
+	equal := true
+	if r.Address != rg.Address {
+		fmt.Printf("Different addresses %x / %x\n", r.Address, rg.Address)
+		equal = false
+	}
+	if len(r.AccountProof) == len(rg.AccountProof) {
+		for i, ap := range r.AccountProof {
+			if ap != rg.AccountProof[i] {
+				fmt.Printf("Different item %d in account proof: %s %s\n", i, ap, rg.AccountProof[i])
+				equal = false
+			}
+		}
+	} else {
+		fmt.Printf("Different length of AccountProof: %d / %d\n", len(r.AccountProof), len(rg.AccountProof))
+		equal = false
+	}
+	if r.Balance.ToInt().Cmp(rg.Balance.ToInt()) != 0 {
+		fmt.Printf("Different balance: %d / %d\n", r.Balance, rg.Balance)
+		equal = false
+	}
+	if r.CodeHash != rg.CodeHash {
+		fmt.Printf("Different CodeHash: %x / %x\n", r.CodeHash, rg.CodeHash)
+		equal = false
+	}
+	if r.Nonce != rg.Nonce {
+		fmt.Printf("Different nonce: %d / %d\n", r.Nonce, rg.Nonce)
+		equal = false
+	}
+	if r.StorageHash != rg.StorageHash {
+		fmt.Printf("Different StorageHash: %x / %x\n", r.StorageHash, rg.StorageHash)
+		equal = false
+	}
+	if len(r.StorageProof) == len(rg.StorageProof) {
+		for i, sp := range r.StorageProof {
+			spg := rg.StorageProof[i]
+			if sp.Key != spg.Key {
+				fmt.Printf("Different storage proof key in item %d: %s / %s\n", i, sp.Key, spg.Key)
+				equal = false
+			}
+			if sp.Value.ToInt().Cmp(spg.Value.ToInt()) != 0 {
+				fmt.Printf("Different storage proof values in item %d: %d / %d\n", i, sp.Value, spg.Value)
+				equal = false
+			}
+			if len(sp.Proof) == len(spg.Proof) {
+				for j, p := range sp.Proof {
+					pg := spg.Proof[j]
+					if p != pg {
+						fmt.Printf("Different storage proof item %d in item %d: %s / %s\n", j, i, p, pg)
+						equal = false
+					}
+				}
+			} else {
+				fmt.Printf("Different length of storage proof in the item %d: %d / %d\n", i, len(sp.Proof), len(spg.Proof))
+				equal = false
+			}
+		}
+	} else {
+		fmt.Printf("Different length of StorageProof: %d / %d\n", len(r.StorageProof), len(rg.StorageProof))
+		equal = false
+	}
+	return equal
+}
+
 func main() {
 
 	var (
@@ -1599,5 +1774,7 @@ func main() {
 		bench7()
 	case "bench8":
 		bench8()
+	case "bench9":
+		bench9(true)
 	}
 }
