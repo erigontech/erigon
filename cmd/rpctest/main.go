@@ -1697,7 +1697,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 		equal = false
 	}
 	if r.Balance.ToInt().Cmp(rg.Balance.ToInt()) != 0 {
-		fmt.Printf("Different balance: %d / %d\n", r.Balance, rg.Balance)
+		fmt.Printf("Different balance: %s / %s\n", r.Balance.ToInt(), rg.Balance.ToInt())
 		equal = false
 	}
 	if r.CodeHash != rg.CodeHash {
@@ -1720,7 +1720,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 				equal = false
 			}
 			if sp.Value.ToInt().Cmp(spg.Value.ToInt()) != 0 {
-				fmt.Printf("Different storage proof values in item %d: %d / %d\n", i, sp.Value, spg.Value)
+				fmt.Printf("Different storage proof values in item %d: %x / %x\n", i, sp.Value.ToInt().Bytes(), spg.Value.ToInt().Bytes())
 				equal = false
 			}
 			if len(sp.Proof) == len(spg.Proof) {
