@@ -493,7 +493,7 @@ const TurboGeth = "turbo_geth"
 
 var routes = map[string]string{
 	Geth:      "http://192.168.1.252:8545",
-	TurboGeth: "http://localhost:8545",
+	TurboGeth: "http://192.168.1.238:8545",
 }
 
 type CallResult struct {
@@ -1593,13 +1593,11 @@ func bench9(needCompare bool) {
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	// Go back 256 blocks
-	bn := int(lastBlock - 256)
+	bn := int(lastBlock) - 256
 	page := common.Hash{}.Bytes()
 
-	var accRangeTG map[common.Address]state.DumpAccount
-
 	for len(page) > 0 {
-		accRangeTG = make(map[common.Address]state.DumpAccount)
+		accRangeTG := make(map[common.Address]state.DumpAccount)
 		var sr DebugAccountRange
 		reqGen.reqID++
 		res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
@@ -1618,48 +1616,47 @@ func bench9(needCompare bool) {
 				accRangeTG[k] = v
 			}
 		}
-	}
-	for address, dumpAcc := range accRangeTG {
-		var proof EthGetProof
-		reqGen.reqID++
-		var storageList []common.Hash
-		// And now with the storage, if present
-		if len(dumpAcc.Storage) > 0 {
-			for key := range dumpAcc.Storage {
-				storageList = append(storageList, common.HexToHash(key))
-				if len(storageList) > 100 {
+		for address, dumpAcc := range accRangeTG {
+			var proof EthGetProof
+			reqGen.reqID++
+			var storageList []common.Hash
+			// And now with the storage, if present
+			if len(dumpAcc.Storage) > 0 {
+				for key := range dumpAcc.Storage {
+					storageList = append(storageList, common.HexToHash(key))
+					if len(storageList) > 100 {
+						break
+					}
+				}
+			}
+			res = reqGen.TurboGeth("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
+			if res.Err != nil {
+				fmt.Printf("Could not get getProof (turbo-geth): %v\n", res.Err)
+				return
+			}
+			if proof.Error != nil {
+				fmt.Printf("Error getting getProof (turbo-geth): %d %s\n", proof.Error.Code, proof.Error.Message)
+				break
+			}
+			if needCompare {
+				var gethProof EthGetProof
+				reqGen.reqID++
+				res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
+				if res.Err != nil {
+					fmt.Printf("Could not get getProof (geth): %v\n", res.Err)
+					return
+				}
+				if gethProof.Error != nil {
+					fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)
+					break
+				}
+				if !compareProofs(&proof, &gethProof) {
+					fmt.Printf("Proofs are different\n")
 					break
 				}
 			}
 		}
-		res = reqGen.TurboGeth("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
-		if res.Err != nil {
-			fmt.Printf("Could not get getProof (turbo-geth): %v\n", res.Err)
-			return
-		}
-		if proof.Error != nil {
-			fmt.Printf("Error getting getProof (turbo-geth): %d %s\n", proof.Error.Code, proof.Error.Message)
-			break
-		}
-		if needCompare {
-			var gethProof EthGetProof
-			reqGen.reqID++
-			res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
-			if res.Err != nil {
-				fmt.Printf("Could not get getProof (geth): %v\n", res.Err)
-				return
-			}
-			if gethProof.Error != nil {
-				fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)
-				break
-			}
-			if !compareProofs(&proof, &gethProof) {
-				fmt.Printf("Proofs are different\n")
-				break
-			}
-		}
 	}
-
 }
 
 func compareProofs(proof, gethProof *EthGetProof) bool {
@@ -1775,6 +1772,6 @@ func main() {
 	case "bench8":
 		bench8()
 	case "bench9":
-		bench9(true)
+		bench9(false)
 	}
 }
