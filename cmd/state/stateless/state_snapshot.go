@@ -405,7 +405,7 @@ func StateSnapshot(blockNum uint64) error {
 	}
 	fmt.Printf("Snapshot took %v\n", time.Since(startTime))
 	startTime = time.Now()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	block := bc.GetBlockByNumber(blockNum)
 	fmt.Printf("Block number: %d\n", blockNum)

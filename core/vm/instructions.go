@@ -17,22 +17,12 @@
 package vm
 
 import (
-	"errors"
-
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
-)
-
-var (
-	errWriteProtection       = errors.New("evm: write protection")
-	errReturnDataOutOfBounds = errors.New("evm: return data out of bounds")
-	errExecutionReverted     = errors.New("evm: execution reverted")
-	errMaxCodeSizeExceeded   = errors.New("evm: max code size exceeded")
-	errInvalidJump           = errors.New("evm: invalid jump destination")
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -355,19 +345,19 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, callContext *call
 
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
-		return nil, errReturnDataOutOfBounds
+		return nil, ErrReturnDataOutOfBounds
 	}
 
 	// we can reuse dataOffset now (aliasing it for clarity)
 	end := dataOffset
 	overflow = end.AddOverflow(&dataOffset, &length)
 	if overflow {
-		return nil, errReturnDataOutOfBounds
+		return nil, ErrReturnDataOutOfBounds
 	}
 
 	end64, overflow := end.Uint64WithOverflow()
 	if overflow || uint64(len(interpreter.returnData)) < end64 {
-		return nil, errReturnDataOutOfBounds
+		return nil, ErrReturnDataOutOfBounds
 	}
 	callContext.memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
 
@@ -548,7 +538,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	pos := callContext.stack.pop()
 	if !callContext.contract.validJumpdest(&pos) {
-		return nil, errInvalidJump
+		return nil, ErrInvalidJump
 	}
 	*pc = pos.Uint64()
 
@@ -559,7 +549,7 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 	pos, cond := callContext.stack.pop(), callContext.stack.pop()
 	if !cond.IsZero() {
 		if !callContext.contract.validJumpdest(&pos) {
-			return nil, errInvalidJump
+			return nil, ErrInvalidJump
 		}
 		*pc = pos.Uint64()
 	} else {
@@ -618,7 +608,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 	}
 	callContext.contract.Gas += returnGas
 
-	if suberr == errExecutionReverted {
+	if suberr == ErrExecutionReverted {
 		return res, nil
 	}
 	return nil, nil
@@ -648,7 +638,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	}
 	callContext.contract.Gas += returnGas
 
-	if suberr == errExecutionReverted {
+	if suberr == ErrExecutionReverted {
 		return res, nil
 	}
 	return nil, nil
@@ -669,7 +659,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 		gas += params.CallStipend
 	}
 	ret, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, value.ToBig())
-	if err == nil || err == errExecutionReverted {
+	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
@@ -697,7 +687,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 		gas += params.CallStipend
 	}
 	ret, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, value.ToBig())
-	if err == nil || err == errExecutionReverted {
+	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
@@ -722,7 +712,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	ret, returnGas, err := interpreter.evm.DelegateCall(callContext.contract, toAddr, args, gas)
-	if err == nil || err == errExecutionReverted {
+	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
@@ -747,7 +737,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	ret, returnGas, err := interpreter.evm.StaticCall(callContext.contract, toAddr, args, gas)
-	if err == nil || err == errExecutionReverted {
+	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {

@@ -26,6 +26,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/accounts"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/accounts/scwallet"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -552,52 +553,66 @@ type StorageResult struct {
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 //func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
 	/*
-		state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
-		if state == nil || err != nil {
-			return nil, err
+			state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
+			if state == nil || err != nil {
+				return nil, err
 		}
 
 		storageTrie := state.StorageTrie(address)
 		storageHash := types.EmptyRootHash
-		codeHash := state.GetCodeHash(address)
+			}
 		storageProof := make([]StorageResult, len(storageKeys))
 
 		// if we have a storageTrie, (which means the account exists), we can update the storagehash
-		if storageTrie != nil {
-			storageHash = storageTrie.Hash()
+			storageTrie := state.StorageTrie(address)
+			storageHash := types.EmptyRootHash
 		} else {
-			// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
-			codeHash = crypto.Keccak256Hash(nil)
+			codeHash := state.GetCodeHash(address)
+			storageProof := make([]StorageResult, len(storageKeys))
 		}
 
-		// create the proof for the storageKeys
+			// if we have a storageTrie, (which means the account exists), we can update the storagehash
 		for i, key := range storageKeys {
 			if storageTrie != nil {
-				proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
+				storageHash = storageTrie.Hash()
 				if storageError != nil {
 					return nil, storageError
 				}
 				storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
 			} else {
-				storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+				// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
+				codeHash = crypto.Keccak256Hash(nil)
 			}
 		}
 
-		// create the accountProof
-		accountProof, proofErr := state.GetProof(address)
-		if proofErr != nil {
-			return nil, proofErr
-		}
+			// create the proof for the storageKeys
+			for i, key := range storageKeys {
+				if storageTrie != nil {
+					proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
+					if storageError != nil {
+						return nil, storageError
+					}
+					storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
+				} else {
+					storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+				}
+			}
 
-		return &AccountResult{
-			Address:      address,
-			AccountProof: common.ToHexArray(accountProof),
-			Balance:      (*hexutil.Big)(state.GetBalance(address)),
-			CodeHash:     codeHash,
-			Nonce:        hexutil.Uint64(state.GetNonce(address)),
-			StorageHash:  storageHash,
-			StorageProof: storageProof,
-		}, state.Error()
+			// create the accountProof
+			accountProof, proofErr := state.GetProof(address)
+			if proofErr != nil {
+				return nil, proofErr
+			}
+
+			return &AccountResult{
+				Address:      address,
+				AccountProof: common.ToHexArray(accountProof),
+				Balance:      (*hexutil.Big)(state.GetBalance(address)),
+				CodeHash:     codeHash,
+				Nonce:        hexutil.Uint64(state.GetNonce(address)),
+				StorageHash:  storageHash,
+				StorageProof: storageProof,
+			}, state.Error()
 	*/
 //	return nil, nil
 //}
@@ -791,14 +806,13 @@ type account struct {
 	StateDiff *map[common.Hash]common.Hash `json:"stateDiff"`
 }
 
-func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]account, vmCfg vm.Config, timeout time.Duration, globalGasCap *big.Int) ([]byte, uint64, bool, error) {
+func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]account, vmCfg vm.Config, timeout time.Duration, globalGasCap *big.Int) (*core.ExecutionResult, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
-		return nil, 0, false, err
+		return nil, err
 	}
-
 	// Override the fields of specified contracts before execution.
 	for addr, account := range overrides {
 		// Override account nonce.
@@ -814,7 +828,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 			state.SetBalance(addr, (*big.Int)(*account.Balance))
 		}
 		if account.State != nil && account.StateDiff != nil {
-			return nil, 0, false, fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
+			return nil, fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
 		}
 		// Replace entire state if caller requires.
 		if account.State != nil {
@@ -827,7 +841,6 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 			}
 		}
 	}
-
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
@@ -844,7 +857,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 	msg := args.ToMessage(globalGasCap)
 	evm, vmError, err := b.GetEVM(ctx, msg, state, header)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, err
 	}
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -856,15 +869,15 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
-	res, gas, failed, err := core.ApplyMessage(evm, msg, gp)
+	result, err := core.ApplyMessage(evm, msg, gp)
 	if err := vmError(); err != nil {
-		return nil, 0, false, err
+		return nil, err
 	}
 	// If the timer caused an abort, return an appropriate error message
 	if evm.Cancelled() {
-		return nil, 0, false, fmt.Errorf("execution aborted (timeout = %v)", timeout)
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 	}
-	return res, gas, failed, err
+	return result, err
 }
 
 // Call executes the given transaction on the state for the given block number.
@@ -878,8 +891,28 @@ func (s *PublicBlockChainAPI) Call(ctx context.Context, args CallArgs, blockNrOr
 	if overrides != nil {
 		accounts = *overrides
 	}
-	result, _, _, err := DoCall(ctx, s.b, args, blockNrOrHash, accounts, vm.Config{}, 5*time.Second, s.b.RPCGasCap())
-	return (hexutil.Bytes)(result), err
+	result, err := DoCall(ctx, s.b, args, blockNrOrHash, accounts, vm.Config{}, 5*time.Second, s.b.RPCGasCap())
+	if err != nil {
+		return nil, err
+	}
+	return result.Return(), nil
+}
+
+type estimateGasError struct {
+	error  string // Concrete error type if it's failed to estimate gas usage
+	vmerr  error  // Additional field, it's non-nil if the given transaction is invalid
+	revert string // Additional field, it's non-empty if the transaction is reverted and reason is provided
+}
+
+func (e estimateGasError) Error() string {
+	errMsg := e.error
+	if e.vmerr != nil {
+		errMsg += fmt.Sprintf(" (%v)", e.vmerr)
+	}
+	if e.revert != "" {
+		errMsg += fmt.Sprintf(" (%s)", e.revert)
+	}
+	return errMsg
 }
 
 func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
@@ -889,6 +922,11 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, blockNrOrHash 
 		hi  uint64
 		cap uint64
 	)
+	// Use zero address if sender unspecified.
+	if args.From == nil {
+		args.From = new(common.Address)
+	}
+	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
 	} else {
@@ -899,30 +937,63 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, blockNrOrHash 
 		}
 		hi = block.GasLimit()
 	}
+	// Recap the highest gas limit with account's available balance.
+	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
+		state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+		if err != nil {
+			return 0, err
+		}
+		balance := state.GetBalance(*args.From) // from can't be nil
+		available := new(big.Int).Set(balance)
+		if args.Value != nil {
+			if args.Value.ToInt().Cmp(available) >= 0 {
+				return 0, errors.New("insufficient funds for transfer")
+			}
+			available.Sub(available, args.Value.ToInt())
+		}
+		allowance := new(big.Int).Div(available, args.GasPrice.ToInt())
+		if hi > allowance.Uint64() {
+			transfer := args.Value
+			if transfer == nil {
+				transfer = new(hexutil.Big)
+			}
+			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
+				"sent", transfer.ToInt(), "gasprice", args.GasPrice.ToInt(), "fundable", allowance)
+			hi = allowance.Uint64()
+		}
+	}
+	// Recap the highest gas allowance with specified gascap.
 	if gasCap != nil && hi > gasCap.Uint64() {
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
 		hi = gasCap.Uint64()
 	}
 	cap = hi
 
-	// Use zero address if sender unspecified.
-	if args.From == nil {
-		args.From = new(common.Address)
-	}
 	// Create a helper to check if a gas allowance results in an executable transaction
-	executable := func(gas uint64) bool {
+	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		_, _, failed, err := DoCall(ctx, b, args, blockNrOrHash, nil, vm.Config{}, 0, gasCap)
-		if err != nil || failed {
-			return false
+		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, vm.Config{}, 0, gasCap)
+		if err != nil {
+			if err == core.ErrIntrinsicGas {
+				return true, nil, nil // Special case, raise gas limit
+			}
+			return true, nil, err // Bail out
 		}
-		return true
+		return result.Failed(), result, nil
 	}
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
-		if !executable(mid) {
+		failed, _, err := executable(mid)
+
+		// If the error is not nil(consensus error), it means the provided message
+		// call or transaction will never be accepted no matter how much gas it is
+		// assigened. Return the error directly, don't struggle any more.
+		if err != nil {
+			return 0, err
+		}
+		if failed {
 			lo = mid
 		} else {
 			hi = mid
@@ -930,8 +1001,29 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, blockNrOrHash 
 	}
 	// Reject the transaction as invalid if it still fails at the highest allowance
 	if hi == cap {
-		if !executable(hi) {
-			return 0, fmt.Errorf("gas required exceeds allowance (%d) or always failing transaction", cap)
+		failed, result, err := executable(hi)
+		if err != nil {
+			return 0, err
+		}
+		if failed {
+			if result != nil && result.Err != vm.ErrOutOfGas {
+				var revert string
+				if len(result.Revert()) > 0 {
+					ret, err := abi.UnpackRevert(result.Revert())
+					if err != nil {
+						revert = hexutil.Encode(result.Revert())
+					} else {
+						revert = ret
+					}
+				}
+				return 0, estimateGasError{
+					error:  "always failing transaction",
+					vmerr:  result.Err,
+					revert: revert,
+				}
+			}
+			// Otherwise, the specified gas cap is too low
+			return 0, estimateGasError{error: fmt.Sprintf("gas required exceeds allowance (%d)", cap)}
 		}
 	}
 	return hexutil.Uint64(hi), nil

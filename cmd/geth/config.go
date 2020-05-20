@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"reflect"
 	"unicode"
@@ -134,12 +133,6 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 
 func makeFullNode(ctx *cli.Context) *node.Node {
 	stack, cfg := makeConfigNode(ctx)
-	if ctx.GlobalIsSet(utils.OverrideIstanbulFlag.Name) {
-		cfg.Eth.OverrideIstanbul = new(big.Int).SetUint64(ctx.GlobalUint64(utils.OverrideIstanbulFlag.Name))
-	}
-	if ctx.GlobalIsSet(utils.OverrideMuirGlacierFlag.Name) {
-		cfg.Eth.OverrideMuirGlacier = new(big.Int).SetUint64(ctx.GlobalUint64(utils.OverrideMuirGlacierFlag.Name))
-	}
 	utils.RegisterEthService(stack, &cfg.Eth)
 
 	// Configure GraphQL if required

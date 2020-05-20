@@ -24,6 +24,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		DiscoveryURLs           []string
 		Pruning               bool
 		NoPrefetch              bool
+		TxLookupLimit           uint64                 `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		LightIngress            int                    `toml:",omitempty"`
 		LightEgress             int                    `toml:",omitempty"`
@@ -60,6 +61,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.DiscoveryURLs = c.DiscoveryURLs
 	enc.Pruning = c.Pruning
 	enc.NoPrefetch = c.NoPrefetch
+	enc.TxLookupLimit = c.TxLookupLimit
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
 	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
@@ -85,8 +87,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCGasCap = c.RPCGasCap
 	enc.Checkpoint = c.Checkpoint
 	enc.CheckpointOracle = c.CheckpointOracle
-	enc.OverrideIstanbul = c.OverrideIstanbul
-	enc.OverrideMuirGlacier = c.OverrideMuirGlacier
 	return &enc, nil
 }
 
@@ -99,6 +99,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		DiscoveryURLs           []string
 		Pruning               *bool
 		NoPrefetch              *bool
+		TxLookupLimit           *uint64                `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		LightIngress            *int                   `toml:",omitempty"`
 		LightEgress             *int                   `toml:",omitempty"`
@@ -149,6 +150,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.NoPrefetch != nil {
 		c.NoPrefetch = *dec.NoPrefetch
+	}
+	if dec.TxLookupLimit != nil {
+		c.TxLookupLimit = *dec.TxLookupLimit
 	}
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist
@@ -228,12 +232,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.CheckpointOracle != nil {
 		c.CheckpointOracle = dec.CheckpointOracle
-	}
-	if dec.OverrideIstanbul != nil {
-		c.OverrideIstanbul = dec.OverrideIstanbul
-	}
-	if dec.OverrideMuirGlacier != nil {
-		c.OverrideMuirGlacier = dec.OverrideMuirGlacier
 	}
 	return nil
 }

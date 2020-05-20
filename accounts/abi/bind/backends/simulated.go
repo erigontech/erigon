@@ -25,6 +25,7 @@ import (
 	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -39,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -50,7 +52,6 @@ var (
 	errBlockNumberUnsupported  = errors.New("simulatedBackend cannot access blocks other than the latest block")
 	errBlockDoesNotExist       = errors.New("block does not exist in blockchain")
 	errTransactionDoesNotExist = errors.New("transaction does not exist")
-	errGasEstimationFailed     = errors.New("gas required exceeds allowance or always failing transaction")
 )
 
 // SimulatedBackend implements bind.ContractBackend, simulating a blockchain in
@@ -83,7 +84,7 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err))
 	}
@@ -109,7 +110,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err))
 	}
@@ -391,9 +392,15 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	statedb := b.prependingState()
-	rval, _, _, err := b.callContract(call, b.blockchain.CurrentBlock(), statedb)
-	return rval, err
+	state, _, err := b.blockchain.State()
+	if err != nil {
+		return nil, err
+	}
+	res, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), state)
+	if err != nil {
+		return nil, err
+	}
+	return res.Return(), nil
 }
 
 // PendingCallContract executes a contract call on the pending state.
@@ -402,8 +409,11 @@ func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereu
 	defer b.mu.Unlock()
 	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot())
 
-	rval, _, _, err := b.callContract(call, b.pendingBlock, b.pendingState)
-	return rval, err
+	res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
+	if err != nil {
+		return nil, err
+	}
+	return res.Return(), nil
 }
 
 // PendingNonceAt implements PendingStateReader.PendingNonceAt, retrieving
@@ -438,25 +448,57 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	} else {
 		hi = b.pendingBlock.GasLimit()
 	}
+	// Recap the highest gas allowance with account's balance.
+	if call.GasPrice != nil && call.GasPrice.Uint64() != 0 {
+		balance := b.pendingState.GetBalance(call.From) // from can't be nil
+		available := new(big.Int).Set(balance)
+		if call.Value != nil {
+			if call.Value.Cmp(available) >= 0 {
+				return 0, errors.New("insufficient funds for transfer")
+			}
+			available.Sub(available, call.Value)
+		}
+		allowance := new(big.Int).Div(available, call.GasPrice)
+		if hi > allowance.Uint64() {
+			transfer := call.Value
+			if transfer == nil {
+				transfer = new(big.Int)
+			}
+			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
+				"sent", transfer, "gasprice", call.GasPrice, "fundable", allowance)
+			hi = allowance.Uint64()
+		}
+	}
 	cap = hi
 
 	// Create a helper to check if a gas allowance results in an executable transaction
-	executable := func(gas uint64) bool {
+	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		call.Gas = gas
 
 		snapshot := b.pendingState.Snapshot()
-		_, _, failed, err := b.callContract(call, b.pendingBlock, b.pendingState)
+		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
 		b.pendingState.RevertToSnapshot(snapshot)
 
-		if err != nil || failed {
-			return false
+		if err != nil {
+			if err == core.ErrIntrinsicGas {
+				return true, nil, nil // Special case, raise gas limit
+			}
+			return true, nil, err // Bail out
 		}
-		return true
+		return res.Failed(), res, nil
 	}
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
-		if !executable(mid) {
+		failed, _, err := executable(mid)
+
+		// If the error is not nil(consensus error), it means the provided message
+		// call or transaction will never be accepted no matter how much gas it is
+		// assigned. Return the error directly, don't struggle any more
+		if err != nil {
+			return 0, err
+		}
+		if failed {
 			lo = mid
 		} else {
 			hi = mid
@@ -464,8 +506,25 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	}
 	// Reject the transaction as invalid if it still fails at the highest allowance
 	if hi == cap {
-		if !executable(hi) {
-			return 0, errGasEstimationFailed
+		failed, result, err := executable(hi)
+		if err != nil {
+			return 0, err
+		}
+		if failed {
+			if result != nil && result.Err != vm.ErrOutOfGas {
+				errMsg := fmt.Sprintf("always failing transaction (%v)", result.Err)
+				if len(result.Revert()) > 0 {
+					ret, err := abi.UnpackRevert(result.Revert())
+					if err != nil {
+						errMsg += fmt.Sprintf(" (%#x)", result.Revert())
+					} else {
+						errMsg += fmt.Sprintf(" (%s)", ret)
+					}
+				}
+				return 0, errors.New(errMsg)
+			}
+			// Otherwise, the specified gas cap is too low
+			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
 	return hi, nil
@@ -473,7 +532,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
-func (b *SimulatedBackend) callContract(call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) ([]byte, uint64, bool, error) {
+func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = big.NewInt(1)

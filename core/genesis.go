@@ -153,16 +153,7 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil, nil, history)
-}
-func SetupGenesisBlockWithOverride(db ethdb.Database,
-	genesis *Genesis,
-	overrideIstanbul *big.Int,
-	overrideMuirGlacier *big.Int,
-	history bool,
-) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
-
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
 	}
@@ -177,9 +168,9 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 		}
 		block, stateDB1, err := genesis.Commit(db, history)
 		if err != nil {
-			return nil, common.Hash{}, nil, err
+			return genesis.Config, common.Hash{}, nil, err
 		}
-		return genesis.Config, block.Hash(), stateDB1, err
+		return genesis.Config, block.Hash(), stateDB1, nil
 	}
 
 	// Check whether the genesis block is already written.
@@ -196,12 +187,6 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
-	if overrideIstanbul != nil {
-		newcfg.IstanbulBlock = overrideIstanbul
-	}
-	if overrideMuirGlacier != nil {
-		newcfg.MuirGlacierBlock = overrideMuirGlacier
-	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}

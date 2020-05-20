@@ -144,46 +144,68 @@ func (t *StateTest) Subtests() []StateSubtest {
 	return sub
 }
 
-// Run executes a specific subtest.
-func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, ethdb.Getter, uint64, common.Hash, error) {
-	config, ok := Forks[subtest.Fork]
-	if !ok {
-		return nil, nil, 0, common.Hash{}, UnsupportedForkError{subtest.Fork}
+// Run executes a specific subtest and verifies the post-state and logs
+func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, error) {
+	state, statedb, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
+	if err != nil {
+		return state, statedb, err
 	}
-	block, _, _, _ := t.genesis(config).ToBlock(nil, false /* history */)
+	post := t.json.Post[subtest.Fork][subtest.Index]
+	// N.B: We need to do this in a two-step process, because the first Commit takes care
+	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
+	if root != common.Hash(post.Root) {
+		return state, statedb, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+	}
+	if logs := rlpHash(state.Logs()); logs != common.Hash(post.Logs) {
+		return state, statedb, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+	}
+	return state, statedb, nil
+}
+
+// RunNoVerify runs a specific subtest and returns the statedb and post-state root
+func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, common.Hash, error) {
+	config, eips, err := getVMConfig(subtest.Fork)
+	if err != nil {
+		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+	}
+	vmconfig.ExtraEips = eips
+	block, _, _, err := t.genesis(config).ToBlock(nil, false)
+	if err != nil {
+		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+	}
+
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
 
-	db := ethdb.NewMemDatabase()
-	statedb, tds, err := MakePreState(context.Background(), db, t.json.Pre, readBlockNr)
+	statedb, tds, err := MakePreState(context.Background(), ethdb.NewMemDatabase(), t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, nil, 0, common.Hash{}, fmt.Errorf("error in MakePreState: %v", err)
+		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	tds.StartNewBuffer()
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
 	if err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, common.Hash{}, err
 	}
-	evmCtx := core.NewEVMContext(msg, block.Header(), nil, &t.json.Env.Coinbase)
-	evmCtx.GetHash = vmTestBlockHash
-	evm := vm.NewEVM(evmCtx, statedb, config, vmconfig)
+	context := core.NewEVMContext(msg, block.Header(), nil, &t.json.Env.Coinbase)
+	context.GetHash = vmTestBlockHash
+	evm := vm.NewEVM(context, statedb, config, vmconfig)
 
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
 	snapshot := statedb.Snapshot()
-	if _, _, _, err = core.ApplyMessage(evm, msg, gaspool); err != nil {
+	if _, err = core.ApplyMessage(evm, msg, gaspool); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, common.Hash{}, err
 	}
 	// And _now_ get the state root
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, common.Hash{}, err
 	}
 	//fmt.Printf("\n before\n%s\n", tds.Dump())
 
@@ -194,28 +216,20 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, common.Hash{}, err
 	}
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, common.Hash{}, err
 	}
 	//fmt.Printf("\nbefore%s\n", tds.Dump())
 
 	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
-		return nil, nil, 0, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
+		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
 
 	root := roots[len(roots)-1]
-	// N.B: We need to do this in a two-step process, because the first Commit takes care
-	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
-	if root != common.Hash(post.Root) {
-		return statedb, db, readBlockNr + 1, common.Hash{}, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
-	}
-	if logs := rlpHash(statedb.Logs()); logs != common.Hash(post.Logs) {
-		return statedb, db, readBlockNr + 1, common.Hash{}, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
-	}
-	return statedb, db, readBlockNr + 1, root, nil
+	return statedb, tds, root, nil
 }
 
 func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {

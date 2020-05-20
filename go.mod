@@ -6,7 +6,7 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/JekaMas/notify v0.9.4
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
-	github.com/VictoriaMetrics/fastcache v1.5.4
+	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
 	github.com/aws/aws-sdk-go v1.28.9
 	github.com/blend/go-sdk v2.0.0+incompatible // indirect
@@ -33,9 +33,9 @@ require (
 	github.com/golang/snappy v0.0.1
 	github.com/gorilla/websocket v1.4.1
 	github.com/graph-gophers/graphql-go v0.0.0-20191115155744-f33e81362277
-	github.com/hashicorp/golang-lru v0.0.0-20160813221303-0a025b7e63ad
+	github.com/hashicorp/golang-lru v0.5.4
 	github.com/holiman/uint256 v1.0.0
-	github.com/huin/goupnp v0.0.0-20161224104101-679507af18f3
+	github.com/huin/goupnp v1.0.0
 	github.com/influxdata/influxdb v1.2.3-0.20180221223340-01288bdb0883
 	github.com/jackpal/go-nat-pmp v1.0.2-0.20160603034137-1fa385a6f458
 	github.com/julienschmidt/httprouter v1.2.0
@@ -67,7 +67,7 @@ require (
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
-	golang.org/x/net v0.0.0-20200301022130-244492dfa37a
+	golang.org/x/net v0.0.0-20200425230154-ff2c4b7c35a0
 	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4
 	golang.org/x/sys v0.0.0-20200501145240-bc7a7d42d5c3
 	golang.org/x/text v0.3.2
@@ -75,4 +75,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200316214253-d7b0ff38cac9
+	gopkg.in/urfave/cli.v1 v1.20.0
 )

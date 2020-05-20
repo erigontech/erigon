@@ -66,7 +66,7 @@ func TestBasisAccountPruning(t *testing.T) {
 
 	numBlocks := 10
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		NoHistory:           true,
 		ArchiveSyncInterval: 1,
 	}
-	blockchain, err := core.NewBlockChain(db, &cacheConfig, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, &cacheConfig, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestStoragePruning(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 
 	numBlocks := 25
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
