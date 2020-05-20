@@ -232,8 +232,6 @@ func (so *stateObject) setState(key, value common.Hash) {
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
-		value := value
-
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
 

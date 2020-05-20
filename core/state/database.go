@@ -1368,7 +1368,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 	}
 	m1[seckey] = struct{}{}
 	if len(v) > 0 {
-		m[seckey] = v
+		m[seckey] = common.CopyBytes(v)
 	} else {
 		m[seckey] = nil
 	}
