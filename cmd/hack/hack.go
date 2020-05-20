@@ -625,64 +625,71 @@ func mgrSchedule(chaindata string, block uint64) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 
+	t1 := time.Now()
 	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
+	fmt.Println("1", time.Since(t1))
 	defer db.Close()
+	t2 := time.Now()
 	tds, err := bc.GetTrieDbState()
 	check(err)
+	fmt.Println("2", time.Since(t2))
 	//currentBlock := bc.CurrentBlock()
 	//currentBlockNr := currentBlock.NumberU64()
 
-	t := time.Now()
+	t3 := time.Now()
 	loader := trie.NewSubTrieLoader(0)
 	tr := tds.Trie()
 	rs := trie.NewRetainList(0)
 	rs.AddHex([]byte{})
 	subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	check(err)
+	fmt.Println("3", time.Since(t3))
+	t4 := time.Now()
 	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
 	check(err)
-	fmt.Println("hack.go:636", time.Since(t))
+	fmt.Println("4", time.Since(t4))
 
-	stateSize := tds.Trie().EstimateWitnessSize([]byte{})
-	fmt.Printf("%d\n", stateSize)
-	schedule := mgr.NewStateSchedule(stateSize, block, block+mgr.BlocksPerCycle+100)
-
-	var buf bytes.Buffer
+	schedule := mgr.NewSchedule(tds)
+	var toBlock = block + mgr.BlocksPerCycle + 100
+	//var buf bytes.Buffer
 	var witnessSizeAccumulator uint64
 	var witnessCount int64
 	var witnessEstimatedSizeAccumulator uint64
 	//fmt.Printf("%s\n", schedule)
 	//fmt.Printf("stateSize: %d\n", stateSize)
-	defer func(t time.Time) { fmt.Println("hack.go:657", time.Since(t)) }(time.Now())
-	for i := range schedule.Ticks {
-		tick := schedule.Ticks[i]
-		for j := range tick.StateSizeSlices {
-			ss := tick.StateSizeSlices[j]
-			stateSlice, err2 := mgr.StateSizeSlice2StateSlice(tds, ss)
-			if err2 != nil {
-				panic(err2)
-			}
-			retain := trie.NewRetainRange(common.CopyBytes(stateSlice.From), common.CopyBytes(stateSlice.To))
-			if tick.IsLastInCycle() {
-				fmt.Printf("\nretain: %s\n", retain)
-			}
-			witness, err2 := tds.Trie().ExtractWitness(false, retain)
-			if err2 != nil {
-				panic(err2)
-			}
+	t5 := time.Now()
 
-			buf.Reset()
-			_, err = witness.WriteTo(&buf)
-			if err != nil {
-				panic(err)
-			}
-			_ = stateSlice
-			witnessCount++
-			witnessSizeAccumulator += uint64(buf.Len())
+	for tick, err := schedule.Tick(block); block <= toBlock; tick, err = schedule.Tick(block) {
+		if err != nil {
+			panic(err)
 		}
+		//fmt.Printf("BlocK: %d\n", block)
+		//fmt.Printf("Tick: %s\n", tick)
+
+		//for _, slice := range tick.StateSlices {
+		//	retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
+		//	if tick.IsLastInCycle() {
+		//		fmt.Printf("\nretain: %s\n", retain)
+		//	}
+		//	witness, err2 := tds.Trie().ExtractWitness(false, retain)
+		//	if err2 != nil {
+		//		panic(err2)
+		//	}
+		//
+		//	buf.Reset()
+		//	_, err = witness.WriteTo(&buf)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	witnessCount++
+		//	witnessSizeAccumulator += uint64(buf.Len())
+		//}
 		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
+		block = tick.ToBlock + 1
 	}
+
+	fmt.Println("5", time.Since(t5))
 
 	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
 	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))

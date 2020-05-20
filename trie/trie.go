@@ -1334,7 +1334,7 @@ func (t *Trie) HashMapSize() int {
 	return len(t.hashMap)
 }
 
-func (t *Trie) EstimateWitnessSize(key []byte) uint64 {
+func (t *Trie) CumulativeWitnessLen(key []byte) uint64 {
 	hex := keybytesToHex(key)
 	if t.binary {
 		hex = keyHexToBin(hex)
@@ -1349,18 +1349,18 @@ func (t *Trie) EstimateWitnessSize(key []byte) uint64 {
 	return n.witnessLen()
 }
 
-// PrefixByCumulativeWitnessSize returns minimal prefix with accumulated size >= than given one.
+// PrefixByCumulativeWitnessLen returns minimal prefix with accumulated size >= than given one.
 // Returns (nil, true) if size > root.witnessLen()
 // Returns (nil, false) if faced nil node in trie
-func (t *Trie) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, found bool) {
+func (t *Trie) PrefixByCumulativeWitnessLen(size uint64) (prefix []byte, incarnation uint64, found bool) {
 	return prefixGreaterThanWitnessSize(t.root, size)
 }
 
-func prefixGreaterThanWitnessSize(nd node, size uint64) (prefix []byte, found bool) {
+func prefixGreaterThanWitnessSize(nd node, size uint64) (prefix []byte, incarnation uint64, found bool) {
 	var accumulator uint64 // increase it when go to siblings, don't touch it when go to child
 
 	if nd.witnessLen() < size {
-		return prefix, true
+		return prefix, incarnation, true
 	}
 
 Loop:
@@ -1419,6 +1419,7 @@ Loop:
 				break Loop
 			}
 			nd = n.storage
+			incarnation = n.Incarnation
 		case valueNode:
 			//fmt.Printf("valueNode: %d %d %x\n", accumulator, accumulator+n.witnessLen(), prefix)
 			//accumulator += nd.witnessLen()
@@ -1437,7 +1438,8 @@ Loop:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	//fmt.Printf("Accumulator: %d %d\n", size, accumulator)
 
-	return prefix, found
+	// return only prefixes of Even length
+	CompressNibbles(prefix[:len(prefix)-len(prefix)%2], &prefix)
+	return prefix, incarnation, found
 }
