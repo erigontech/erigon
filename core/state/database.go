@@ -1311,7 +1311,6 @@ func (tds *TrieDbState) PlainStateWriter() *PlainStateWriter {
 	return NewPlainStateWriter(tds.db, tds.blockNr, tds.incarnationMap)
 }
 
-
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
