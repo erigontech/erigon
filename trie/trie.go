@@ -1236,12 +1236,7 @@ func (t *Trie) EvictNode(hex []byte) {
 	hnode := hashNode{hash: hn[:], iws: nd.witnessSize()}
 	t.observers.WillUnloadNode(hex, hn)
 
-	switch nd.(type) {
-	case *fullNode, *duoNode:
-		t.observers.WillUnloadBranchNode(hex, hn, incarnation, nd.witnessSize())
-	default:
-		// nothing to do
-	}
+	t.notifyUnloadRecursive(hex, incarnation, nd)
 
 	switch p := parent.(type) {
 	case nil:
@@ -1261,6 +1256,44 @@ func (t *Trie) EvictNode(hex []byte) {
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode
+	}
+}
+
+func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, n node) {
+	const (
+		dbPageSize          = 4096           // common OS page size is 4KB
+		minNodeSizeToNotify = 4 * dbPageSize // store in DB only IH which allowing do big jumps over state
+	)
+
+	if n.witnessSize() < minNodeSizeToNotify {
+		return
+	}
+
+	switch nn := n.(type) {
+	case *shortNode:
+		t.notifyUnloadRecursive(append(hex, nn.Key...), incarnation, nn.Val)
+	case *accountNode:
+		if nn.storage != nil {
+			t.notifyUnloadRecursive(hex, nn.Incarnation, nn.storage)
+		}
+	case *fullNode:
+		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
+		for i := range nn.Children {
+			if nn.Children[i] != nil {
+				t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, nn.Children[i])
+			}
+		}
+	case *duoNode:
+		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
+		i1, i2 := nn.childrenIdx()
+		if nn.child1 != nil {
+			t.notifyUnloadRecursive(append(hex, i1), incarnation, nn.child1)
+		}
+		if nn.child2 != nil {
+			t.notifyUnloadRecursive(append(hex, i2), incarnation, nn.child2)
+		}
+	default:
+		// nothing to do
 	}
 }
 
@@ -1352,15 +1385,15 @@ func (t *Trie) CumulativeWitnessSize(key []byte) uint64 {
 // PrefixByCumulativeWitnessSize returns minimal prefix with accumulated size >= than given one.
 // Returns (nil, true) if size > root.witnessSize()
 // Returns (nil, false) if faced nil node in trie
-func (t *Trie) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, incarnation uint64, found bool) {
+func (t *Trie) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, incarnation uint64, accumulator uint64, found bool) {
 	return prefixGreaterThanWitnessSize(t.root, size)
 }
 
-func prefixGreaterThanWitnessSize(nd node, size uint64) (prefix []byte, incarnation uint64, found bool) {
-	var accumulator uint64 // increase it when go to siblings, don't touch it when go to child
-
+// prefixGreaterThanWitnessSize - returns lexicographically minimal prefix of maximal length with accumulated witness size >= than given threshold.
+// accumulator - increase it when go to siblings, don't touch it when go to child. Doesn't includes last node - means accumulator <= size.
+func prefixGreaterThanWitnessSize(nd node, size uint64) (prefix []byte, incarnation uint64, accumulator uint64, found bool) {
 	if nd.witnessSize() < size {
-		return prefix, incarnation, true
+		return prefix, incarnation, accumulator, true
 	}
 
 Loop:
@@ -1441,5 +1474,5 @@ Loop:
 
 	// return only prefixes of Even length
 	CompressNibbles(prefix[:len(prefix)-len(prefix)%2], &prefix)
-	return prefix, incarnation, found
+	return prefix, incarnation, accumulator, found
 }
