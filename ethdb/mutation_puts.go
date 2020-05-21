@@ -5,6 +5,7 @@ import (
 
 type puts struct {
 	mp       map[string]putsBucket //map[bucket]putsBucket
+	size 	int
 }
 
 func newPuts() puts {
@@ -20,7 +21,14 @@ func (p puts) set(bucket, key, value []byte) {
 		bucketPuts = make(putsBucket)
 		p.mp[string(bucket)] = bucketPuts
 	}
+	skey := string(key)
+	if oldVal, ok := bucketPuts[skey]; ok {
+		p.size -= len(oldVal)
+	} else {
+		p.size += len(skey)
+	}
 	bucketPuts[string(key)] = value
+	p.size += len(value)
 }
 
 func (p puts) get(bucket, key []byte) ([]byte, bool) {
@@ -37,11 +45,7 @@ func (p puts) Delete(bucket, key []byte) {
 }
 
 func (p puts) Size() int {
-	var size int
-	for _, put := range p.mp {
-		size += len(put)
-	}
-	return size
+	return p.size
 }
 
 type putsBucket map[string][]byte //map[key]value
@@ -71,4 +75,3 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 
 	return value, true
 }
-

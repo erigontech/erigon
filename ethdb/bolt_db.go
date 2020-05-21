@@ -725,7 +725,7 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BoltDatabase) IdealBatchSize() int {
-	return 100 * 1024
+	return 16 * 1024 * 1024 // 16 Mb
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
