@@ -1521,8 +1521,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
 
-	downloader.UsePlainStateExecution = ctx.Bool(StagedSyncPlainExecFlag.Name)
-	log.Info("setting up plain text execution", "plain", downloader.UsePlainStateExecution)
+	core.UsePlainStateExecution = ctx.Bool(StagedSyncPlainExecFlag.Name)
+	log.Info("setting up plain text execution", "plain", core.UsePlainStateExecution)
 
 	if ctx.GlobalIsSet(SyncModeFlag.Name) {
 		cfg.SyncMode = *GlobalTextMarshaler(ctx, SyncModeFlag.Name).(*downloader.SyncMode)
