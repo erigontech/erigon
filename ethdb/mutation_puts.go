@@ -25,7 +25,7 @@ func (p puts) set(bucket, key, value []byte) {
 	if oldVal, ok := bucketPuts[skey]; ok {
 		p.size -= len(oldVal)
 	} else {
-		p.size += len(skey)
+		p.size += len(skey) + 32 // Add fixed overhead per key
 	}
 	bucketPuts[string(key)] = value
 	p.size += len(value)
