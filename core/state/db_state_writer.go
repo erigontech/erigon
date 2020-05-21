@@ -129,7 +129,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 	if err := dsw.stateDb.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
 		return err
 	}
-	if dsw.codeCache != nil {
+	if dsw.codeCache != nil && len(code) <= 1024 {
 		dsw.codeCache.Add(address, code)
 	}
 	if dsw.codeSizeCache != nil {

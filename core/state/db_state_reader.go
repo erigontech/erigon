@@ -118,7 +118,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 		}
 	}
 	code, err = dbr.db.Get(dbutils.CodeBucket, codeHash[:])
-	if dbr.codeCache != nil {
+	if dbr.codeCache != nil && len(code) <= 1024 {
 		dbr.codeCache.Add(address, code)
 	}
 	if dbr.codeSizeCache != nil {

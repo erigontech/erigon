@@ -100,7 +100,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 
 	accountCache, _ := lru.New(400000)
 	storageCache, _ := lru.New(400000)
-	//codeCache, _ := lru.New(1000)
+	codeCache, _ := lru.New(1000)
 	codeSizeCache, _ := lru.New(400000)
 	// uncommitedIncarnations map holds incarnations for accounts that were deleted,
 	// but their storage is not yet committed
@@ -124,26 +124,26 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			plainReader := state.NewPlainStateReaderWithFallback(stateBatch, uncommitedIncarnations)
 			plainReader.SetAccountCache(accountCache)
 			plainReader.SetStorageCache(storageCache)
-			//plainReader.SetCodeCache(codeCache)
+			plainReader.SetCodeCache(codeCache)
 			plainReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = plainReader
 			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
 			plainWriter.SetAccountCache(accountCache)
 			plainWriter.SetStorageCache(storageCache)
-			//plainWriter.SetCodeCache(codeCache)
+			plainWriter.SetCodeCache(codeCache)
 			plainWriter.SetCodeSizeCache(codeSizeCache)
 			stateWriter = plainWriter
 		} else {
 			hashStateReader := state.NewDbStateReader(stateBatch, uncommitedIncarnations)
 			hashStateReader.SetAccountCache(accountCache)
 			hashStateReader.SetStorageCache(storageCache)
-			//hashStateReader.SetCodeCache(codeCache)
+			hashStateReader.SetCodeCache(codeCache)
 			hashStateReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = hashStateReader
 			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
 			hashedStateWriter.SetAccountCache(accountCache)
 			hashedStateWriter.SetStorageCache(storageCache)
-			//hashedStateWriter.SetCodeCache(codeCache)
+			hashedStateWriter.SetCodeCache(codeCache)
 			hashedStateWriter.SetCodeSizeCache(codeSizeCache)
 			stateWriter = hashedStateWriter
 		}
