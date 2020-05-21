@@ -80,6 +80,9 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 		copy(storageKey[:], address[:])
 		copy(storageKey[20:], key[:])
 		if cached, ok := dbr.storageCache.Get(storageKey); ok {
+			if cached == nil {
+				return nil, nil
+			}
 			return cached.([]byte), nil
 		}
 		storageKeyP = &storageKey
@@ -108,6 +111,9 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 	}
 	if dbr.codeCache != nil {
 		if cached, ok := dbr.codeCache.Get(address); ok {
+			if cached == nil {
+				return nil, nil
+			}
 			return cached.([]byte), nil
 		}
 	}

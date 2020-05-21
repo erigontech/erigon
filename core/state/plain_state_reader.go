@@ -82,6 +82,9 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 		copy(storageKey[:], address[:])
 		copy(storageKey[20:], key[:])
 		if cached, ok := r.storageCache.Get(storageKey); ok {
+			if cached == nil {
+				return nil, nil
+			}
 			return cached.([]byte), nil
 		}
 		storageKeyP = &storageKey
@@ -96,7 +99,7 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 		return nil, err
 	}
 	if r.storageCache != nil {
-		r.storageCache.Add(*storageKeyP, []byte{})
+		r.storageCache.Add(*storageKeyP, nil)
 	}
 	return nil, nil
 }

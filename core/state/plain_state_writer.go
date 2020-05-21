@@ -56,7 +56,6 @@ func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common
 	if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
-
 	if w.accountCache != nil {
 		w.accountCache.Add(address, account)
 	}
@@ -78,7 +77,6 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 	if err := w.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
-
 	return w.stateDb.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address, incarnation), codeHash[:])
 }
 
@@ -86,11 +84,9 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 	if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
 		return err
 	}
-
 	if original.Incarnation > 0 {
 		w.uncommitedIncarnations[address] = original.Incarnation
 	}
-
 	if w.accountCache != nil {
 		w.accountCache.Add(address, nil)
 	}
@@ -99,7 +95,6 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 			return err
 		}
 	}
-
 	return nil
 }
 
