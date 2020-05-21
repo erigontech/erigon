@@ -1,20 +1,18 @@
 package ethdb
 
-import (
-)
-
 type puts struct {
-	mp       map[string]putsBucket //map[bucket]putsBucket
-	size 	int
+	mp   map[string]putsBucket //map[bucket]putsBucket
+	size int
 }
 
-func newPuts() puts {
-	return puts{
-		mp:       make(map[string]putsBucket),
+func newPuts() *puts {
+	return &puts{
+		mp:   make(map[string]putsBucket),
+		size: 0,
 	}
 }
 
-func (p puts) set(bucket, key, value []byte) {
+func (p *puts) set(bucket, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
 	if bucketPuts, ok = p.mp[string(bucket)]; !ok {
@@ -31,7 +29,7 @@ func (p puts) set(bucket, key, value []byte) {
 	p.size += len(value)
 }
 
-func (p puts) get(bucket, key []byte) ([]byte, bool) {
+func (p *puts) get(bucket, key []byte) ([]byte, bool) {
 	var bucketPuts putsBucket
 	var ok bool
 	if bucketPuts, ok = p.mp[string(bucket)]; !ok {
@@ -40,11 +38,11 @@ func (p puts) get(bucket, key []byte) ([]byte, bool) {
 	return bucketPuts.Get(key)
 }
 
-func (p puts) Delete(bucket, key []byte) {
+func (p *puts) Delete(bucket, key []byte) {
 	p.set(bucket, key, nil)
 }
 
-func (p puts) Size() int {
+func (p *puts) Size() int {
 	return p.size
 }
 

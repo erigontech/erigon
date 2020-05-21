@@ -11,7 +11,7 @@ import (
 )
 
 type mutation struct {
-	puts puts // Map buckets to map[key]value
+	puts *puts // Map buckets to map[key]value
 	mu   sync.RWMutex
 	db   Database
 }
