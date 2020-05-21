@@ -98,7 +98,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
-	//accountCache, _ := lru.New(400000)
+	accountCache, _ := lru.New(400000)
 	storageCache, _ := lru.New(400000)
 	//codeCache, _ := lru.New(1000)
 	codeSizeCache, _ := lru.New(400000)
@@ -122,26 +122,26 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 
 		if core.UsePlainStateExecution {
 			plainReader := state.NewPlainStateReaderWithFallback(stateBatch, uncommitedIncarnations)
-			//plainReader.SetAccountCache(accountCache)
+			plainReader.SetAccountCache(accountCache)
 			plainReader.SetStorageCache(storageCache)
 			//plainReader.SetCodeCache(codeCache)
 			plainReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = plainReader
 			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
-			//plainWriter.SetAccountCache(accountCache)
+			plainWriter.SetAccountCache(accountCache)
 			plainWriter.SetStorageCache(storageCache)
 			//plainWriter.SetCodeCache(codeCache)
 			plainWriter.SetCodeSizeCache(codeSizeCache)
 			stateWriter = plainWriter
 		} else {
 			hashStateReader := state.NewDbStateReader(stateBatch, uncommitedIncarnations)
-			//hashStateReader.SetAccountCache(accountCache)
+			hashStateReader.SetAccountCache(accountCache)
 			hashStateReader.SetStorageCache(storageCache)
 			//hashStateReader.SetCodeCache(codeCache)
 			hashStateReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = hashStateReader
 			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
-			//hashedStateWriter.SetAccountCache(accountCache)
+			hashedStateWriter.SetAccountCache(accountCache)
 			hashedStateWriter.SetStorageCache(storageCache)
 			//hashedStateWriter.SetCodeCache(codeCache)
 			hashedStateWriter.SetCodeSizeCache(codeSizeCache)

@@ -68,7 +68,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 		return nil, nil
 	}
 	if dbr.accountCache != nil {
-		dbr.accountCache.Add(address, &a)
+		dbr.accountCache.Add(address, a.SelfCopy())
 	}
 	return &a, nil
 }

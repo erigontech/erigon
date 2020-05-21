@@ -88,7 +88,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		return err
 	}
 	if dsw.accountCache != nil {
-		dsw.accountCache.Add(address, account)
+		dsw.accountCache.Add(address, account.SelfCopy())
 	}
 	return nil
 }
