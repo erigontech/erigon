@@ -157,24 +157,19 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 
 	v := cleanUpTrailingZeroes(value[:])
+	if len(v) == common.HashLength {
+		v = common.CopyBytes(v)
+	}
+	if dsw.storageCache != nil {
+		var storageKey [20 + 32]byte
+		copy(storageKey[:], address[:])
+		copy(storageKey[20:], key[:])
+		dsw.storageCache.Add(storageKey, nil)
+	}
 	if len(v) == 0 {
-		if dsw.storageCache != nil {
-			var storageKey [20 + 32]byte
-			copy(storageKey[:], address[:])
-			copy(storageKey[20:], key[:])
-			dsw.storageCache.Add(storageKey, nil)
-		}
 		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		vv := make([]byte, len(v))
-		copy(vv, v)
-		if dsw.storageCache != nil {
-			var storageKey [20 + 32]byte
-			copy(storageKey[:], address[:])
-			copy(storageKey[20:], key[:])
-			dsw.storageCache.Add(storageKey, vv)
-		}
-		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
+		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, v)
 	}
 }
 

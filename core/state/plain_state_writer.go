@@ -114,14 +114,16 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 
 	v := cleanUpTrailingZeroes(value[:])
-
+	if len(v) == common.HashLength {
+		v = common.CopyBytes(v)
+	}
+	if w.storageCache != nil {
+		var storageKey [20 + 32]byte
+		copy(storageKey[:], address[:])
+		copy(storageKey[20:], key[:])
+		w.storageCache.Add(storageKey, v)
+	}
 	if len(v) == 0 {
-		if w.storageCache != nil {
-			var storageKey [20 + 32]byte
-			copy(storageKey[:], address[:])
-			copy(storageKey[20:], key[:])
-			w.storageCache.Add(storageKey, nil)
-		}
 		if err := w.stateDb.Delete(dbutils.PlainStateBucket, compositeKey); err != nil {
 			if err != ethdb.ErrKeyNotFound {
 				return err
@@ -129,16 +131,7 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 		}
 		return nil
 	}
-
-	vv := make([]byte, len(v))
-	copy(vv, v)
-	if w.storageCache != nil {
-		var storageKey [20 + 32]byte
-		copy(storageKey[:], address[:])
-		copy(storageKey[20:], key[:])
-		w.storageCache.Add(storageKey, vv)
-	}
-	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, vv)
+	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, v)
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {
