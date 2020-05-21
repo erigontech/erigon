@@ -28,13 +28,15 @@ type progressLogger struct {
 	timer    *time.Ticker
 	quit     chan struct{}
 	interval int
+	batch    ethdb.DbWithPendingMutations
 }
 
-func NewProgressLogger(intervalInSeconds int) *progressLogger {
+func NewProgressLogger(intervalInSeconds int, batch ethdb.DbWithPendingMutations) *progressLogger {
 	return &progressLogger{
 		timer:    time.NewTicker(time.Duration(intervalInSeconds) * time.Second),
 		quit:     make(chan struct{}),
 		interval: intervalInSeconds,
+		batch:    batch,
 	}
 }
 
@@ -46,7 +48,7 @@ func (l *progressLogger) Start(numberRef *uint64) {
 			speed := float64(now-prev) / float64(l.interval)
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Executed blocks:", "currentBlock", now, "speed (blk/second)", speed,
+			log.Info("Executed blocks:", "currentBlock", now, "speed (blk/second)", speed, "state batch", common.StorageSize(l.batch.BatchSize()),
 				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			prev = now
 		}
@@ -67,8 +69,8 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 1000000
-const ChangeBatchSize = 1000
+const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
+const ChangeBatchSize = 1024 * 2014     // 1 Mb
 
 func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uint64, error) {
 	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
@@ -94,7 +96,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	stateBatch := stateDB.NewBatch()
 	changeBatch := stateDB.NewBatch()
 
-	progressLogger := NewProgressLogger(logInterval)
+	progressLogger := NewProgressLogger(logInterval, stateBatch)
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
