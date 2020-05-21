@@ -110,7 +110,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
-		if UsePlainStateExecution {
+		if core.UsePlainStateExecution {
 			stateReader = state.NewPlainStateReaderWithFallback(mutation, uncommitedIncarnations, hashStateReader)
 			stateWriter = state.NewPlainStateWriter(mutation, blockNum, uncommitedIncarnations)
 		} else {

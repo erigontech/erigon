@@ -1999,12 +1999,21 @@ func resetState(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer db.Close()
-	err = db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.AccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.StorageChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
+	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = db.DeleteBucket(dbutils.AccountChangeSetBucket)
-	check(err)
-	err = db.DeleteBucket(dbutils.StorageChangeSetBucket)
-	check(err)
+	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.Execution, 0)

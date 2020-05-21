@@ -40,6 +40,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
+//  ^--- will be overriden e when parsing flags anyway
+
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
 
@@ -299,18 +302,29 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 	tds.SetBlockNr(0)
-	blockWriter := tds.DbStateWriter()
-	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
-	}
-	// Always write changesets
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
-	}
-	// Optionally write history
-	if history {
-		if err := blockWriter.WriteHistory(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+	if UsePlainStateExecution {
+		blockWriter := tds.PlainStateWriter()
+		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		}
+		// Always write changesets
+		if err := blockWriter.WriteChangeSets(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		}
+	} else {
+		blockWriter := tds.DbStateWriter()
+		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		}
+		// Always write changesets
+		if err := blockWriter.WriteChangeSets(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		}
+		// Optionally write history
+		if history {
+			if err := blockWriter.WriteHistory(); err != nil {
+				return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+			}
 		}
 	}
 	if _, err := batch.Commit(); err != nil {
