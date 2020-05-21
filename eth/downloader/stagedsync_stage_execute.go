@@ -67,7 +67,7 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 1000000
+const StateBatchSize = 100000
 const ChangeBatchSize = 1000
 
 func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uint64, error) {
@@ -98,8 +98,8 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
-	accountCache, _ := lru.New(400000)
-	storageCache, _ := lru.New(400000)
+	accountCache, _ := lru.New(100000)
+	storageCache, _ := lru.New(100000)
 	codeCache, _ := lru.New(1000)
 	codeSizeCache, _ := lru.New(400000)
 	// uncommitedIncarnations map holds incarnations for accounts that were deleted,
