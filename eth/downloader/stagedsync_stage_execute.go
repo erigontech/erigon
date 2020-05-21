@@ -67,8 +67,8 @@ func (l *progressLogger) Stop() {
 const StateBatchSize = 1000000
 const ChangeBatchSize = 1000
 
-func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
-	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
+func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uint64, error) {
+	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return 0, err
 	}
@@ -87,44 +87,66 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			log.Error("could not start CPU profile", "error", err1)
 			return lastProcessedBlockNumber, err
 		}
-
-	stateBatch := d.stateDB.NewBatch()
-	changeBatch := d.stateDB.NewBatch()
+	
+	stateBatch := stateDB.NewBatch()
+	changeBatch := stateDB.NewBatch()
 
 	progressLogger := NewProgressLogger(logInterval)
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
-	// incarnationMap holds incarnations for accounts that were deleted, but their storage
-	// is not yet committed
-	var incarnationMap = make(map[common.Address]uint64)
 
-	chainConfig := d.blockchain.Config()
-	engine := d.blockchain.Engine()
-	vmConfig := d.blockchain.GetVMConfig()
 	accountCache, _ := lru.New(400000)
 	storageCache, _ := lru.New(400000)
 	codeCache, _ := lru.New(1000)
 	codeSizeCache, _ := lru.New(400000)
+	// uncommitedIncarnations map holds incarnations for accounts that were deleted,
+	// but their storage is not yet committed
+	var uncommitedIncarnations = make(map[common.Address]uint64)
+
+	chainConfig := blockchain.Config()
+	engine := blockchain.Engine()
+	vmConfig := blockchain.GetVMConfig()
 	for {
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
-		block := d.blockchain.GetBlockByNumber(blockNum)
+		block := blockchain.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
-		stateReader := state.NewDbStateReader(stateBatch, incarnationMap)
-		stateReader.SetAccountCache(accountCache)
-		stateReader.SetStorageCache(storageCache)
-		stateReader.SetCodeCache(codeCache)
-		stateReader.SetCodeSizeCache(codeSizeCache)
-		stateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, incarnationMap)
-		stateWriter.SetAccountCache(accountCache)
-		stateWriter.SetStorageCache(storageCache)
-		stateWriter.SetCodeCache(codeCache)
-		stateWriter.SetCodeSizeCache(codeSizeCache)
+
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
+
+		if core.UsePlainStateExecution {
+			plainReader := state.NewPlainStateReaderWithFallback(stateBatch, uncommitedIncarnations)
+			plainReader.SetAccountCache(accountCache)
+			plainReader.SetStorageCache(storageCache)
+			plainReader.SetCodeCache(codeCache)
+			plainReader.SetCodeSizeCache(codeSizeCache)
+			stateReader = plainReader
+			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
+			plainWriter.SetAccountCache(accountCache)
+			plainWriter.SetStorageCache(storageCache)
+			plainWriter.SetCodeCache(codeCache)
+			plainWriter.SetCodeSizeCache(codeSizeCache)
+			stateWriter = plainWriter
+		} else {
+			hashStateReader := state.NewDbStateReader(stateBatch, uncommitedIncarnations)
+			hashStateReader.SetAccountCache(accountCache)
+			hashStateReader.SetStorageCache(storageCache)
+			hashStateReader.SetCodeCache(codeCache)
+			hashStateReader.SetCodeSizeCache(codeSizeCache)
+			stateReader = hashStateReader
+			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
+			hashedStateWriter.SetAccountCache(accountCache)
+			hashedStateWriter.SetStorageCache(storageCache)
+			hashedStateWriter.SetCodeCache(codeCache)
+			hashedStateWriter.SetCodeSizeCache(codeSizeCache)
+			stateWriter = hashedStateWriter
+		}
 
 		// where the magic happens
-		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, d.blockchain, engine, block, stateReader, stateWriter)
+		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}
@@ -140,7 +162,7 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			if _, err = stateBatch.Commit(); err != nil {
 				return 0, err
 			}
-			incarnationMap = make(map[common.Address]uint64)
+			uncommitedIncarnations = make(map[common.Address]uint64)
 			log.Info("State batch committed", "in", time.Since(start))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {
@@ -153,10 +175,12 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 			log.Info("Change batch committed", "in", time.Since(start), "state-batch-size", stateBatch.BatchSize(),
 				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
+		/*
 			if blockNum-profileNumber == 100000 {
 				// Flush the profiler
 				pprof.StopCPUProfile()
 			}
+		*/
 	}
 	_, err = stateBatch.Commit()
 	if err != nil {
@@ -169,25 +193,22 @@ func (d *Downloader) spawnExecuteBlocksStage() (uint64, error) {
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
 
-func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
-	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Execution)
+//nolint:unparam
+func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error { //nolint:unparam
+	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
 	}
-	unwindPoint, err1 := GetStageUnwind(d.stateDB, Execution)
-	if err1 != nil {
-		return err1
-	}
 	if unwindPoint >= lastProcessedBlockNumber {
-		err = SaveStageUnwind(d.stateDB, Execution, 0)
+		err = SaveStageUnwind(stateDB, Execution, 0)
 		if err != nil {
 			return fmt.Errorf("unwind Execution: reset: %v", err)
 		}
 		return nil
 	}
-	log.Info("Unwdind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
-	mutation := d.stateDB.NewBatch()
-	accountMap, storageMap, err2 := d.stateDB.RewindData(lastProcessedBlockNumber, unwindPoint)
+	log.Info("Unwind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
+	mutation := stateDB.NewBatch()
+	accountMap, storageMap, err2 := stateDB.RewindData(lastProcessedBlockNumber, unwindPoint)
 	if err2 != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
@@ -201,7 +222,7 @@ func (d *Downloader) unwindExecutionStage(unwindPoint uint64) error {
 			}
 			// Fetch the code hash
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err2 := d.stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
+				if codeHash, err2 := stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				}
 			}

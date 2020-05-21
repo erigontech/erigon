@@ -106,20 +106,14 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	var addrHashP *common.Hash
 	if dbr.codeCache != nil {
-		addrHash, err1 := common.HashData(address[:])
-		if err1 != nil {
-			return nil, err1
-		}
-		if cached, ok := dbr.codeCache.Get(addrHash); ok {
+		if cached, ok := dbr.codeCache.Get(address); ok {
 			return cached.([]byte), nil
 		}
-		addrHashP = &addrHash
 	}
 	code, err = dbr.db.Get(dbutils.CodeBucket, codeHash[:])
 	if dbr.codeCache != nil {
-		dbr.codeCache.Add(*addrHashP, code)
+		dbr.codeCache.Add(address, code)
 	}
 	return code, err
 }
@@ -128,16 +122,10 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash c
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}
-	var addrHashP *common.Hash
 	if dbr.codeSizeCache != nil {
-		addrHash, err1 := common.HashData(address[:])
-		if err1 != nil {
-			return 0, err1
-		}
-		if cached, ok := dbr.codeSizeCache.Get(addrHash); ok {
+		if cached, ok := dbr.codeSizeCache.Get(address); ok {
 			return cached.(int), nil
 		}
-		addrHashP = &addrHash
 	}
 	var code []byte
 	code, err = dbr.db.Get(dbutils.CodeBucket, codeHash[:])
@@ -145,7 +133,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash c
 		return 0, err
 	}
 	if dbr.codeSizeCache != nil {
-		dbr.codeSizeCache.Add(*addrHashP, len(code))
+		dbr.codeSizeCache.Add(address, len(code))
 	}
 	return len(code), nil
 }

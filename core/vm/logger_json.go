@@ -62,7 +62,10 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 		log.Memory = memory.Data()
 	}
 	if !l.cfg.DisableStack {
-		log.Stack = stack.Data()
+		log.Stack = make([]*big.Int, len(stack.Data()))
+		for i, item := range stack.Data() {
+			log.Stack[i] = item.ToBig()
+		}
 	}
 	return l.encoder.Encode(log)
 }

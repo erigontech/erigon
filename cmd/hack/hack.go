@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -619,11 +621,76 @@ func trieChart() {
 	check(err)
 }
 
+func mgrSchedule(chaindata string, block uint64) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+
+	//bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	//check(err)
+	//defer db.Close()
+	//tds, err := bc.GetTrieDbState()
+	//check(err)
+	//currentBlock := bc.CurrentBlock()
+	//currentBlockNr := currentBlock.NumberU64()
+
+	loader := trie.NewSubTrieLoader(0)
+	tr := trie.New(common.Hash{})
+	rs := trie.NewRetainList(0)
+	rs.AddHex([]byte{})
+	subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	check(err)
+
+	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
+	check(err)
+
+	stateSize := tr.EstimateWitnessSize([]byte{})
+	schedule := mgr.NewStateSchedule(stateSize, block, block+mgr.BlocksPerCycle+100)
+
+	var buf bytes.Buffer
+	var witnessSizeAccumulator uint64
+	var witnessCount int64
+	var witnessEstimatedSizeAccumulator uint64
+	//fmt.Printf("%s\n", schedule)
+	//fmt.Printf("stateSize: %d\n", stateSize)
+	for i := range schedule.Ticks {
+		tick := schedule.Ticks[i]
+		for j := range tick.StateSizeSlices {
+			ss := tick.StateSizeSlices[j]
+			stateSlice, err2 := mgr.StateSizeSlice2StateSlice(db, tr, ss)
+			if err2 != nil {
+				panic(err2)
+			}
+			retain := trie.NewRetainRange(common.CopyBytes(stateSlice.From), common.CopyBytes(stateSlice.To))
+			//if tick.IsLastInCycle() {
+			//	fmt.Printf("\nretain: %s\n", retain)
+			//}
+			witness, err2 := tr.ExtractWitness(false, retain)
+			if err2 != nil {
+				panic(err2)
+			}
+
+			buf.Reset()
+			_, err = witness.WriteTo(&buf)
+			if err != nil {
+				panic(err)
+			}
+
+			witnessCount++
+			witnessSizeAccumulator += uint64(buf.Len())
+		}
+		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
+	}
+
+	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
+	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
+	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
+}
+
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 32
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	defer blockDb.Close()
 	if fromScratch {
@@ -634,9 +701,9 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil, false /* history */)
+	_, _, _, err = core.SetupGenesisBlock(stateDb, nil, false /* history */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
@@ -655,7 +722,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 100 || i == block {
+		if len(blocks) >= 1000 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
 				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
@@ -691,7 +758,7 @@ func extractTrie(block int) {
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
@@ -710,7 +777,7 @@ func testRewind(chaindata string, block, rewind int) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -772,7 +839,7 @@ func testStartup() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -810,7 +877,7 @@ func testResolve(chaindata string) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	//check(err)
 	/*
 		currentBlock := bc.CurrentBlock()
@@ -1932,17 +1999,220 @@ func resetState(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer db.Close()
-	err = db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.AccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.StorageChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
+	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = db.DeleteBucket(dbutils.AccountChangeSetBucket)
-	check(err)
-	err = db.DeleteBucket(dbutils.StorageChangeSetBucket)
-	check(err)
+	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.Execution, 0)
 	check(err)
 	fmt.Printf("Reset state done\n")
+}
+
+type Receiver struct {
+	defaultReceiver *trie.DefaultReceiver
+	accountMap      map[string]*accounts.Account
+	storageMap      map[string][]byte
+	unfurlList      []string
+	currentIdx      int
+}
+
+func (r *Receiver) Receive(
+	itemType trie.StreamItem,
+	accountKey []byte,
+	storageKeyPart1 []byte,
+	storageKeyPart2 []byte,
+	accountValue *accounts.Account,
+	storageValue []byte,
+	hash []byte,
+	cutoff int,
+	witnessLen uint64,
+) error {
+	for r.currentIdx < len(r.unfurlList) {
+		ks := r.unfurlList[r.currentIdx]
+		k := []byte(ks)
+		var c int
+		switch itemType {
+		case trie.StorageStreamItem, trie.SHashStreamItem:
+			if len(k) > common.HashLength {
+				c = bytes.Compare(k[:common.HashLength], storageKeyPart1)
+				if c == 0 {
+					c = bytes.Compare(k[common.HashLength+common.IncarnationLength:], storageKeyPart2)
+				}
+			} else {
+				c = bytes.Compare(k, storageKeyPart1)
+			}
+		case trie.AccountStreamItem, trie.AHashStreamItem:
+			c = bytes.Compare(k, accountKey)
+		case trie.CutoffStreamItem:
+			c = -1
+		}
+		if c > 0 {
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+		}
+		if len(k) > common.HashLength {
+			v := r.storageMap[ks]
+			if c <= 0 && len(v) > 0 {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k[:32], k[40:], nil, v, nil, 0, 0); err != nil {
+					return err
+				}
+			}
+		} else {
+			v := r.accountMap[ks]
+			if c <= 0 && v != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, nil, v, nil, nil, 0, 0); err != nil {
+					return err
+				}
+			}
+		}
+		r.currentIdx++
+		if c == 0 {
+			return nil
+		}
+	}
+	// We ran out of modifications, simply pass through
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+}
+
+func (r *Receiver) Result() trie.SubTries {
+	return r.defaultReceiver.Result()
+}
+
+func testGetProof(chaindata string, block uint64, account common.Address) {
+	fmt.Printf("testGetProof %s, %d, %x\n", chaindata, block, account)
+	// Find all changesets larger than given blocks
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	ts := dbutils.EncodeTimestamp(block)
+	accountCs := 0
+	accountMap := make(map[string]*accounts.Account)
+	if err = db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+		if changeset.Len(v) > 0 {
+			walker := func(kk, vv []byte) error {
+				if _, ok := accountMap[string(kk)]; !ok {
+					if len(vv) > 0 {
+						var a accounts.Account
+						check(a.DecodeForStorage(vv))
+						accountMap[string(kk)] = &a
+					} else {
+						accountMap[string(kk)] = nil
+					}
+				}
+				return nil
+			}
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
+				return false, innerErr
+			}
+		}
+		accountCs++
+		return true, nil
+	}); err != nil {
+		panic(err)
+	}
+	storageCs := 0
+	storageMap := make(map[string][]byte)
+	if err = db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+		if changeset.Len(v) > 0 {
+			walker := func(kk, vv []byte) error {
+				if _, ok := storageMap[string(kk)]; !ok {
+					storageMap[string(kk)] = vv
+				}
+				return nil
+			}
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
+				return false, innerErr
+			}
+		}
+		storageCs++
+		return true, nil
+	}); err != nil {
+		panic(err)
+	}
+	var unfurlList = make([]string, len(accountMap)+len(storageMap))
+	unfurl := trie.NewRetainList(0)
+	i := 0
+	for ks, acc := range accountMap {
+		unfurlList[i] = ks
+		i++
+		unfurl.AddKey([]byte(ks))
+		if acc != nil {
+			// Fill the code hashes
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+					copy(acc.CodeHash[:], codeHash)
+				}
+			}
+		}
+	}
+	for ks := range storageMap {
+		unfurlList[i] = ks
+		i++
+		var sk [64]byte
+		copy(sk[:], []byte(ks)[:common.HashLength])
+		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
+		unfurl.AddKey(sk[:])
+	}
+	sort.Strings(unfurlList)
+	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
+	loader := trie.NewFlatDbSubTrieLoader()
+	if err = loader.Reset(db, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
+		panic(err)
+	}
+	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
+	rl := trie.NewRetainList(0)
+	r.defaultReceiver.Reset(rl, false)
+	loader.SetStreamReceiver(r)
+	subTries, err := loader.LoadSubTries()
+	if err != nil {
+		panic(err)
+	}
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
+	fmt.Printf("Head block number: %d, root hash: %x\n", *headNumber, headHeader.Root)
+	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
+	hash := rawdb.ReadCanonicalHash(db, block-1)
+	header := rawdb.ReadHeader(db, hash, block-1)
+	fmt.Printf("Block state root: %x\n", header.Root)
+}
+
+func testSeek(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	if err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		c := b.Cursor()
+		//kk := common.FromHex("0x434751")
+		kk := common.FromHex("0x434750c1bd61c93ad930ba5b31d2181636e06fcad87ea82ac78c3ad9515d099f")
+		c.Seek(kk)
+		/*
+			for k, _ := c.Seek(common.FromHex("4347500d81465512b2397af46c12792c44f2a89e3601af951cf9c7735385b0cb")); k != nil; k, _ = c.Next() {
+				if bytes.Compare(k, kk) > 0 {
+					fmt.Printf("Found nexgt key: %x\n", k)
+					break
+				}
+			}
+		*/
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func main() {
@@ -2074,7 +2344,16 @@ func main() {
 	if *action == "slice" {
 		dbSlice(*chaindata, common.FromHex(*hash))
 	}
+	if *action == "mgrSchedule" {
+		mgrSchedule(*chaindata, uint64(*block))
+	}
 	if *action == "resetState" {
 		resetState(*chaindata)
+	}
+	if *action == "getProof" {
+		testGetProof(*chaindata, uint64(*block), common.HexToAddress(*account))
+	}
+	if *action == "seek" {
+		testSeek(*chaindata)
 	}
 }

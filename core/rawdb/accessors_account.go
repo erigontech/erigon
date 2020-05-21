@@ -40,10 +40,7 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.CurrentStateBucket, addrHashBytes, value); err != nil {
-		return err
-	}
-	return nil
+	return db.Put(dbutils.CurrentStateBucket, addrHashBytes, value)
 }
 
 type DatabaseReaderDeleter interface {

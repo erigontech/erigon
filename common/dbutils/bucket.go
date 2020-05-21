@@ -4,6 +4,31 @@ import "github.com/ledgerwatch/turbo-geth/metrics"
 
 // The fields below define the low level database schema prefixing.
 var (
+	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
+
+	// Contains Accounts:
+	//   key - address (unhashed)
+	//   value - account encoded for storage
+	// Contains Storage:
+	//   key - address (unhashed) + incarnation + storage key (unhashed)
+	//   value - storage value(common.hash)
+	PlainStateBucket = []byte("PLAIN-CST")
+
+	// "Plain State"
+	//key - address+incarnation
+	//value - code hash
+	PlainContractCodeBucket = []byte("PLAIN-contractCode")
+
+	// PlainAccountChangeSetBucket keeps changesets of accounts ("plain state")
+	// key - encoded timestamp(block number)
+	// value - encoded ChangeSet{k - address v - account(encoded).
+	PlainAccountChangeSetBucket = []byte("PLAIN-ACS")
+
+	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
+	// key - encoded timestamp(block number)
+	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
+	PlainStorageChangeSetBucket = []byte("PLAIN-SCS")
+
 	// Contains Accounts:
 	// key - address hash
 	// value - account encoded for storage
@@ -48,6 +73,9 @@ var (
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket = []byte("iTh")
+
+	// some_prefix_of(hash_of_address_of_account) => estimated_number_of_witness_bytes
+	IntermediateTrieWitnessLenBucket = []byte("iTw")
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = []byte("DBINFO")
@@ -123,6 +151,7 @@ var Buckets = [][]byte{
 	AccountChangeSetBucket,
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
+	IntermediateTrieWitnessLenBucket,
 	DatabaseVerisionKey,
 	HeadHeaderKey,
 	HeadBlockKey,

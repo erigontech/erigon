@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"math/big"
+
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"

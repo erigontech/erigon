@@ -155,7 +155,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	genesis := gspec.MustCommit(db)
 
 	dbCopy := db.MemCopy()
-	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil)
+	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
 
 	// Generate a small n-block chain and an uncle block for it
@@ -207,9 +207,6 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 
 func (b *testWorkerBackend) BlockChain() *core.BlockChain { return b.chain }
 func (b *testWorkerBackend) TxPool() *core.TxPool         { return b.txPool }
-func (b *testWorkerBackend) PostChainEvents(events []interface{}) {
-	b.chain.PostChainEvents(events, nil)
-}
 
 func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend Backend, h hooks, waitInit bool) *worker {
 	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h, true)
@@ -282,7 +279,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 
 	db2 := ethdb.NewMemDatabase()
 	b.genesis.MustCommit(db2)
-	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil)
+	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil)
 	defer chain.Stop()
 
 	// Ignore empty commit here for less noise
@@ -304,9 +301,9 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 		if err := b.txPool.AddLocal(b.newRandomTx(testCase, false)); err != nil {
 			t.Fatal(err)
 		}
+		w.postSideBlock(core.ChainSideEvent{Block: b.newRandomUncle()})
+		w.postSideBlock(core.ChainSideEvent{Block: b.newRandomUncle()})
 
-		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
-		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
 		select {
 		case ev := <-sub.Chan():
 			block := ev.Data.(core.NewMinedBlockEvent).Block
@@ -517,7 +514,7 @@ func TestStreamUncleBlock(t *testing.T) {
 		}
 	}
 
-	b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.uncleBlock}})
+	w.postSideBlock(core.ChainSideEvent{Block: b.uncleBlock})
 
 	select {
 	case <-taskCh:

@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
@@ -15,6 +14,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
+
+var _ WriterWithChangeSets = (*DbStateWriter)(nil)
 
 func NewDbStateWriter(stateDb, changeDb ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
 	return &DbStateWriter{
@@ -112,12 +113,16 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := dsw.csw.UpdateAccountCode(addrHash, incarnation, codeHash, code); err != nil {
+func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if err := dsw.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
 	//save contract code mapping
 	if err := dsw.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+		return err
+	}
+	addrHash, err := common.HashData(address.Bytes())
+	if err != nil {
 		return err
 	}
 	//save contract to codeHash mapping
@@ -125,10 +130,10 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 		return err
 	}
 	if dsw.codeCache != nil {
-		dsw.codeCache.Add(addrHash, code)
+		dsw.codeCache.Add(address, code)
 	}
 	if dsw.codeSizeCache != nil {
-		dsw.codeSizeCache.Add(addrHash, len(code))
+		dsw.codeSizeCache.Add(address, len(code))
 	}
 	return nil
 }
@@ -145,24 +150,30 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-	v := bytes.TrimLeft(value[:], "\x00")
-	vv := make([]byte, len(v))
-	copy(vv, v)
-
 	addrHash, err := dsw.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
-	if dsw.storageCache != nil {
-		var storageKey [20 + 32]byte
-		copy(storageKey[:], address[:])
-		copy(storageKey[20:], key[:])
-		dsw.storageCache.Add(storageKey, vv)
-	}
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
+
+	v := cleanUpTrailingZeroes(value[:])
 	if len(v) == 0 {
+		if dsw.storageCache != nil {
+			var storageKey [20 + 32]byte
+			copy(storageKey[:], address[:])
+			copy(storageKey[20:], key[:])
+			dsw.storageCache.Add(storageKey, nil)
+		}
 		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
+		vv := make([]byte, len(v))
+		copy(vv, v)
+		if dsw.storageCache != nil {
+			var storageKey [20 + 32]byte
+			copy(storageKey[:], address[:])
+			copy(storageKey[20:], key[:])
+			dsw.storageCache.Add(storageKey, vv)
+		}
 		return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }

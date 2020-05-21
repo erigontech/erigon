@@ -24,6 +24,13 @@ func (m *mutation) KV() *bolt.DB {
 	}
 }
 
+func (m *mutation) AbstractKV() KV {
+	if casted, ok := m.db.(HasAbstractKV); ok {
+		return casted.AbstractKV()
+	}
+	return nil
+}
+
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -153,23 +160,21 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	tuples := common.NewTuples(m.puts.Size(), 3, 1)
+	tuples := make(MultiPutTuples, 0, m.puts.Size()*3)
 	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			value, _ := bt.GetStr(key)
-			if err := tuples.Append(bucketB, []byte(key), value); err != nil {
-				return 0, fmt.Errorf("tuples.Append failed: %w", err)
-			}
+			tuples = append(tuples, bucketB, []byte(key), value)
 		}
 	}
 	sort.Sort(tuples)
 
-	written, err := m.db.MultiPut(tuples.Values...)
+	written, err := m.db.MultiPut(tuples...)
 	if err != nil {
 		return 0, fmt.Errorf("db.MultiPut failed: %w", err)
 	}
+
 	m.puts = newPuts()
 	return written, nil
 }

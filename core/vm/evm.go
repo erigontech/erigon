@@ -17,11 +17,12 @@
 package vm
 
 import (
+	"errors"
 	"math/big"
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/evmc/bindings/go/evmc"
+	"github.com/ethereum/evmc/v7/bindings/go/evmc"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -68,7 +69,7 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 			return interpreter.Run(contract, input, readOnly)
 		}
 	}
-	return nil, ErrNoCompatibleInterpreter
+	return nil, errors.New("no compatible interpreter")
 }
 
 // Context provides the EVM with auxiliary information. Once provided
@@ -195,7 +196,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
-
 	// Fail if we're trying to execute above the call depth limit
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
@@ -204,7 +204,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	if !evm.Context.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
 		return nil, gas, ErrInsufficientBalance
 	}
-
 	var (
 		to       = AccountRef(addr)
 		snapshot = evm.IntraBlockState.Snapshot()
@@ -254,7 +253,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	// when we're in homestead this also counts for code storage gas errors.
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
-		if err != errExecutionReverted {
+		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas)
 		}
 	}
@@ -272,16 +271,17 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
-
 	// Fail if we're trying to execute above the call depth limit
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
 	// Fail if we're trying to transfer more than the available balance
+	// Note although it's noop to transfer X ether to caller itself. But
+	// if caller doesn't have enough balance, it would be an error to allow
+	// over-charging itself. So the check here is necessary.
 	if !evm.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
 		return nil, gas, ErrInsufficientBalance
 	}
-
 	var (
 		snapshot = evm.IntraBlockState.Snapshot()
 		to       = AccountRef(caller.Address())
@@ -294,7 +294,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	ret, err = run(evm, contract, input, false)
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
-		if err != errExecutionReverted {
+		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas)
 		}
 	}
@@ -314,12 +314,10 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-
 	var (
 		snapshot = evm.IntraBlockState.Snapshot()
 		to       = AccountRef(caller.Address())
 	)
-
 	// Initialise a new contract and make initialise the delegate values
 	contract := NewContract(caller, to, nil, gas).AsDelegate()
 	contract.SetCallCode(&addr, evm.IntraBlockState.GetCodeHash(addr), evm.IntraBlockState.GetCode(addr))
@@ -327,7 +325,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	ret, err = run(evm, contract, input, false)
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
-		if err != errExecutionReverted {
+		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas)
 		}
 	}
@@ -346,7 +344,6 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-
 	var (
 		to       = AccountRef(addr)
 		snapshot = evm.IntraBlockState.Snapshot()
@@ -360,7 +357,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 	// but is the correct thing to do and matters on other networks, in tests, and potential
 	// future scenarios
-	evm.IntraBlockState.AddBalance(addr, bigZero)
+	evm.IntraBlockState.AddBalance(addr, common.Big0)
 
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -368,7 +365,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	ret, err = run(evm, contract, input, true)
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
-		if err != errExecutionReverted {
+		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas)
 		}
 	}
@@ -449,13 +446,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// when we're in homestead this also counts for code storage gas errors.
 	if maxCodeSizeExceeded || (err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas)) {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
-		if err != errExecutionReverted {
+		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas)
 		}
 	}
 	// Assign err if contract code size exceeds the max while the err is still empty.
 	if maxCodeSizeExceeded && err == nil {
-		err = errMaxCodeSizeExceeded
+		err = ErrMaxCodeSizeExceeded
 	}
 	if evm.vmConfig.Debug {
 		evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)

@@ -32,6 +32,9 @@ import (
 	"github.com/petar/GoLLRB/llrb"
 )
 
+var _ StateReader = (*DbState)(nil)
+var _ StateWriter = (*DbState)(nil)
+
 type storageItem struct {
 	key, seckey, value common.Hash
 }
@@ -251,7 +254,7 @@ func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, ori
 	return nil
 }
 
-func (dbs *DbState) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (dbs *DbState) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 

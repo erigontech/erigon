@@ -310,7 +310,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	}
 	handler := node.NewHTTPHandlerStack(srv, cors, vhosts)
 
-	listener, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
+	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
 	if err != nil {
 		log.Error("Could not start RPC api", "error", err)
 		return

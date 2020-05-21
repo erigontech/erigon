@@ -18,7 +18,7 @@ const search = (prefix, api, setState) => {
     });
   };
 
-  return api.lookupStorageTombstones(prefix).then(lookupSuccess).catch(lookupFail);
+  return api.lookupIntermediateHashes(prefix).then(lookupSuccess).catch(lookupFail);
 };
 
 const LookupIntermediateHashForm = ({ api }) => {

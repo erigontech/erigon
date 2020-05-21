@@ -8,15 +8,10 @@ import (
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)
-type RetainDecider interface {
-	Retain([]byte) bool
-	IsCodeTouched(common.Hash) bool
-	Current() []byte
-}
 
 type MerklePathLimiter struct {
 	RetainDecider RetainDecider
-	HashFunc HashNodeFunc
+	HashFunc      HashNodeFunc
 }
 
 type WitnessBuilder struct {
@@ -101,19 +96,19 @@ func (b *WitnessBuilder) makeHashNode(n node, force bool, hashNodeFunc HashNodeF
 	default:
 		var hash common.Hash
 		if _, err := hashNodeFunc(n, force, hash[:]); err != nil {
-			return nil, err
+			return hashNode{}, err
 		}
-		return hashNode(hash[:]), nil
+		return hashNode{hash: hash[:], witnessLength: n.witnessLen()}, nil
 	}
 }
 
 func (b *WitnessBuilder) addHashOp(n hashNode) error {
 	if b.trace {
-		fmt.Printf("HASH: type: %T v %x\n", n, n)
+		fmt.Printf("HASH: type: %T v %s\n", n, n)
 	}
 
 	var op OperatorHash
-	op.Hash = common.BytesToHash(n)
+	op.Hash = common.BytesToHash(n.hash)
 
 	b.operands = append(b.operands, &op)
 	return nil
@@ -159,7 +154,7 @@ func (b *WitnessBuilder) processAccountCode(n *accountNode, retainDec RetainDeci
 	}
 
 	if n.code == nil || (retainDec != nil && !retainDec.IsCodeTouched(n.CodeHash)) {
-		return b.addHashOp(hashNode(n.CodeHash[:]))
+		return b.addHashOp(hashNode{hash: n.CodeHash[:], witnessLength: uint64(n.codeSize)})
 	}
 
 	return b.addCodeOp(n.code)
@@ -267,15 +262,10 @@ func (b *WitnessBuilder) makeBlockWitness(
 
 	case hashNode:
 		hashOnly := limiter == nil || !limiter.RetainDecider.Retain(hex)
-		if !hashOnly {
-			if c := limiter.RetainDecider.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
-				hashOnly = true
-			}
-		}
 		if hashOnly {
 			return b.addHashOp(n)
 		}
-		return fmt.Errorf("unexpected hashNode: %s, at hex: %x, rs.Current: %x (%d)", n, hex, limiter.RetainDecider.Current(), len(hex))
+		return fmt.Errorf("unexpected hashNode: %s, at hex: %x, (%d), hashOnly: %t", n, hex, len(hex), hashOnly)
 	default:
 		return fmt.Errorf("unexpected node type: %T", nd)
 	}

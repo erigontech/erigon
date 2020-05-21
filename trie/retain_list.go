@@ -24,6 +24,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
+type RetainDecider interface {
+	Retain([]byte) bool
+	IsCodeTouched(common.Hash) bool
+}
+
 // RetainList encapsulates the list of keys that are required to be fully available, or loaded
 // (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
 // pairs
@@ -119,13 +124,6 @@ func (rl *RetainList) Retain(prefix []byte) bool {
 	return false
 }
 
-// Current returns the hex value that has been used for the latest comparison in `Retain` function
-// It is only used in one edge case at the moment - to distinguish between the accounts' key
-// and the storage keys of the same account
-func (rl *RetainList) Current() []byte {
-	return rl.hexes[rl.lteIndex]
-}
-
 // Rewind lets us reuse this list from the beginning
 func (rl *RetainList) Rewind() {
 	rl.lteIndex = 0
@@ -134,3 +132,56 @@ func (rl *RetainList) Rewind() {
 func (rl *RetainList) String() string {
 	return fmt.Sprintf("%x", rl.hexes)
 }
+
+// RetainRange encapsulates the range of keys that are required to be fully available, or loaded
+// (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
+// pairs
+// DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
+type RetainRange struct {
+	from        []byte
+	to          []byte
+	codeTouches map[common.Hash]struct{}
+}
+
+// NewRetainRange creates new NewRetainRange
+// to=nil - means no upper bound
+func NewRetainRange(from, to []byte) *RetainRange {
+	return &RetainRange{from: from, to: to, codeTouches: make(map[common.Hash]struct{})}
+}
+
+// Retain decides whether to emit `HASHER` or `BRANCH` for a given prefix, by
+// checking if this is prefix of any of the keys added to the set
+// it returns True:
+//	- for keys between from and to
+//  - for keys which are prefixes of from and to
+//  - for keys which are contains from and to as a prefix
+func (rr *RetainRange) Retain(prefix []byte) (retain bool) {
+	if bytes.HasPrefix(rr.from, prefix) || bytes.HasPrefix(prefix, rr.from) {
+		return true
+	}
+	if bytes.HasPrefix(rr.to, prefix) || bytes.HasPrefix(prefix, rr.to) {
+		return true
+	}
+	from := bytes.Compare(prefix, rr.from)
+	to := -1
+	if rr.to != nil {
+		to = bytes.Compare(prefix, rr.to)
+	}
+
+	return from >= 0 && to <= 0
+}
+
+// AddCodeTouch adds a new code touch into the resolve set
+func (rr *RetainRange) AddCodeTouch(codeHash common.Hash) {
+	rr.codeTouches[codeHash] = struct{}{}
+}
+
+func (rr *RetainRange) IsCodeTouched(codeHash common.Hash) bool {
+	_, ok := rr.codeTouches[codeHash]
+	return ok
+}
+
+func (rr *RetainRange) String() string {
+	return fmt.Sprintf("%x-%x", rr.from, rr.to)
+}
+

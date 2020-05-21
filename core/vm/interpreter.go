@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"fmt"
 	"hash"
 	"sync/atomic"
 
@@ -84,8 +83,6 @@ type EVMInterpreter struct {
 	evm *EVM
 	cfg Config
 
-	intPool *intPool
-
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared aross opcodes
 
@@ -137,16 +134,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 //
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
-// errExecutionReverted which means revert-and-keep-gas-left.
+// ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
-	if in.intPool == nil {
-		in.intPool = poolOfIntPools.get()
-		defer func() {
-			poolOfIntPools.put(in.intPool)
-			in.intPool = nil
-		}()
-	}
-
 	// Increment the call depth which is restricted to 1024
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
@@ -189,9 +178,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	)
 	contract.Input = input
 
-	// Reclaim the stack as an int pool when the execution stops
-	defer func() { in.intPool.put(stack.data...) }()
-
 	if in.cfg.Debug {
 		defer func() {
 			if err != nil {
@@ -224,13 +210,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		operation := in.cfg.JumpTable[op]
 
 		if !operation.valid {
-			return nil, fmt.Errorf("invalid opcode 0x%x", int(op))
+			return nil, &ErrInvalidOpCode{opcode: op}
 		}
 		// Validate stack
 		if sLen := stack.len(); sLen < operation.minStack {
-			return nil, fmt.Errorf("stack underflow (%d <=> %d)", sLen, operation.minStack)
+			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.minStack}
 		} else if sLen > operation.maxStack {
-			return nil, fmt.Errorf("stack limit reached %d (%d)", sLen, operation.maxStack)
+			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// If the operation is valid, enforce and write restrictions
 		if in.readOnly && in.evm.chainRules.IsByzantium {
@@ -240,7 +226,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// account to the others means the state is modified and should also
 			// return with an error.
 			if operation.writes || (op == CALL && stack.Back(2).Sign() != 0) {
-				return nil, errWriteProtection
+				return nil, ErrWriteProtection
 			}
 		}
 		// Static portion of gas
@@ -257,12 +243,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if operation.memorySize != nil {
 			memSize, overflow := operation.memorySize(stack)
 			if overflow {
-				return nil, errGasUintOverflow
+				return nil, ErrGasUintOverflow
 			}
 			// memory is expanded in words of 32 bytes. Gas
 			// is also calculated in words.
 			if memorySize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
-				return nil, errGasUintOverflow
+				return nil, ErrGasUintOverflow
 			}
 		}
 		// Dynamic portion of gas
@@ -287,11 +273,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
-		// verifyPool is a build flag. Pool verification makes sure the integrity
-		// of the integer pool by comparing values to a default value.
-		if verifyPool {
-			verifyIntegerPool(in.intPool)
-		}
+
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
 		if operation.returns {
@@ -302,7 +284,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		case err != nil:
 			return nil, err
 		case operation.reverts:
-			return res, errExecutionReverted
+			return res, ErrExecutionReverted
 		case operation.halts:
 			return res, nil
 		case !operation.jumps:

@@ -105,12 +105,12 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			tt.gasForSSTORE += cost
 		}
 		if stack.Len() > 0 {
-			tt.queryStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
-			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+			tt.queryStorageAccess(contract.Address(), common.Hash(stack.Back(0).Bytes32()))
+			tt.markStorageAccess(contract.Address(), common.Hash(stack.Back(0).Bytes32()))
 		}
 	case vm.SLOAD:
 		if stack.Len() > 0 {
-			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+			tt.markStorageAccess(contract.Address(), common.Hash(stack.Back(0).Bytes32()))
 		}
 	case vm.CREATE, vm.CREATE2:
 		tt.measureCurrentGas = gas
@@ -126,11 +126,11 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			tt.gasForEthSendingCALL += (cost - callGas)
 		}
 		if stack.Len() > 1 {
-			tt.queryAccountAccess(common.BigToAddress(stack.Back(1)))
+			tt.queryAccountAccess(common.Address(stack.Back(1).Bytes20()))
 		}
 	case vm.SELFDESTRUCT:
 		if stack.Len() > 0 {
-			tt.queryAccountAccess(common.BigToAddress(stack.Back(0)))
+			tt.queryAccountAccess(common.Address(stack.Back(0).Bytes20()))
 		}
 	}
 	return nil
@@ -194,7 +194,7 @@ func transactionStats(blockNum uint64) {
 	tt := NewTxTracer()
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
 	check(err)
 	interrupt := false
 	for !interrupt {
@@ -217,9 +217,10 @@ func transactionStats(blockNum uint64) {
 			tt.measureDepth = 0
 			tt.measureCurrentGas = tx.Gas()
 			tt.trace = (blockNum == 1279578) && (txIdx == 3)
-			if _, usedGas, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {
+				usedGas := result.UsedGas
 				var neededGas uint64
 				usedGas += statedb.GetRefund()
 				if usedGas > tt.gasForSSTORE+tt.gasForCREATE+tt.gasForEthSendingCALL {

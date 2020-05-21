@@ -44,9 +44,19 @@ export default class API {
     });
   }
 
-  lookupStorageTombstones(prefix) {
+  lookupIntermediateHashes(prefix) {
     return axios({
       url: this.endpoint('/api/v1/intermediate-hash/'),
+      method: 'get',
+      params: {
+        prefix: prefix,
+      },
+    });
+  }
+
+  lookupIntermediateDataLen(prefix) {
+    return axios({
+      url: this.endpoint('/api/v1/intermediate-data-len/'),
       method: 'get',
       params: {
         prefix: prefix,

@@ -174,6 +174,27 @@ type EthLogs struct {
 	Result []*Log `json:"result"`
 }
 
+type EthGetProof struct {
+	CommonResponse
+	Result AccountResult `json:"result"`
+}
+
+// Result structs for GetProof
+type AccountResult struct {
+	Address      common.Address  `json:"address"`
+	AccountProof []string        `json:"accountProof"`
+	Balance      *hexutil.Big    `json:"balance"`
+	CodeHash     common.Hash     `json:"codeHash"`
+	Nonce        hexutil.Uint64  `json:"nonce"`
+	StorageHash  common.Hash     `json:"storageHash"`
+	StorageProof []StorageResult `json:"storageProof"`
+}
+type StorageResult struct {
+	Key   string       `json:"key"`
+	Value *hexutil.Big `json:"value"`
+	Proof []string     `json:"proof"`
+}
+
 func post(client *http.Client, url, request string, response interface{}) error {
 	log.Info("Getting", "url", url, "request", request)
 	start := time.Now()
@@ -256,19 +277,19 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 	r := trace.Result
 	rg := traceg.Result
 	if r.Gas != rg.Gas {
-		fmt.Printf("Trace different Gas: %d %d\n", r.Gas, rg.Gas)
+		fmt.Printf("Trace different Gas: %d / %d\n", r.Gas, rg.Gas)
 		return false
 	}
 	if r.Failed != rg.Failed {
-		fmt.Printf("Trace different Failed: %t %t\n", r.Failed, rg.Failed)
+		fmt.Printf("Trace different Failed: %t / %t\n", r.Failed, rg.Failed)
 		return false
 	}
 	if r.ReturnValue != rg.ReturnValue {
-		fmt.Printf("Trace different ReturnValue: %s %s\n", r.ReturnValue, rg.ReturnValue)
+		fmt.Printf("Trace different ReturnValue: %s / %s\n", r.ReturnValue, rg.ReturnValue)
 		return false
 	}
 	if len(r.StructLogs) != len(rg.StructLogs) {
-		fmt.Printf("Trace different length: %d %d\n", len(r.StructLogs), len(rg.StructLogs))
+		fmt.Printf("Trace different length: %d / %d\n", len(r.StructLogs), len(rg.StructLogs))
 		return false
 	}
 	for i, l := range r.StructLogs {
@@ -471,8 +492,8 @@ const Geth = "geth"
 const TurboGeth = "turbo_geth"
 
 var routes = map[string]string{
-	Geth:      "http://192.168.1.238:8545",
-	TurboGeth: "http://192.168.1.126:8545",
+	Geth:      "http://192.168.1.252:8545",
+	TurboGeth: "http://192.168.1.238:8545",
 }
 
 type CallResult struct {
@@ -528,9 +549,18 @@ func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) s
 }
 
 func (g *RequestGenerator) accountRange(bn int, page []byte) string {
-	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, true, true, true], "id":%d}`
+	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false, false], "id":%d}`
 	encodedKey := base64.StdEncoding.EncodeToString(page)
 	return fmt.Sprintf(template, bn, encodedKey, 256, g.reqID)
+}
+
+func (g *RequestGenerator) getProof(bn int, account common.Address, storageList []common.Hash) string {
+	const template = `{ "jsonrpc": "2.0", "method": "eth_getProof", "params": ["0x%x", [%s], "0x%x"], "id":%d}`
+	var storageStr = make([]string, len(storageList))
+	for i, location := range storageList {
+		storageStr[i] = fmt.Sprintf(`"x%x"`, location)
+	}
+	return fmt.Sprintf(template, account, strings.Join(storageStr, ","), bn, g.reqID)
 }
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
@@ -672,26 +702,26 @@ func bench1(needCompare bool, fullTest bool) {
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
-		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
 		resultsCh <- res
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block %d: %v\n", bn, res.Err)
+			fmt.Printf("Could not retrieve block (turbo-geth) %d: %v\n", bn, res.Err)
 			return
 		}
 
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
+			fmt.Printf("Error retrieving block (turbo-geth): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
 			var bg EthBlockByNumber
-			res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
+			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
 			if res.Err != nil {
-				fmt.Printf("Could not retrieve block g %d: %v\n", bn, res.Err)
+				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
 				return
 			}
 			if bg.Error != nil {
-				fmt.Printf("Error retrieving block g: %d %s\n", bg.Error.Code, bg.Error.Message)
+				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
 				return
 			}
 			if !compareBlocks(&b, &bg) {
@@ -721,16 +751,15 @@ func bench1(needCompare bool, fullTest bool) {
 					counter := 16
 					for nextKey != nil && counter > 0 {
 						sm = make(map[common.Hash]storageEntry)
-						smGeth = make(map[common.Hash]storageEntry)
 						reqGen.reqID++
 						res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
-							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
+							fmt.Printf("Could not get storageRange (turbo-geth): %s: %v\n", tx.Hash, res.Err)
 							break
 						}
 						if sr.Error != nil {
-							fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+							fmt.Printf("Error getting storageRange (turbo-geth): %d %s\n", sr.Error.Code, sr.Error.Message)
 							break
 						} else {
 							nextKey = sr.Result.NextKey
@@ -738,37 +767,40 @@ func bench1(needCompare bool, fullTest bool) {
 								sm[k] = v
 							}
 						}
-						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyGeth), &srGeth)
-						resultsCh <- res
-						if res.Err != nil {
-							fmt.Printf("Could not get storageRange geth: %s: %v\n", tx.Hash, res.Err)
-							break
-						}
-						if srGeth.Error != nil {
-							fmt.Printf("Error getting storageRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
-							break
-						} else {
-							nextKeyGeth = srGeth.Result.NextKey
-							for k, v := range srGeth.Result.Storage {
-								smGeth[k] = v
+						if needCompare {
+							smGeth = make(map[common.Hash]storageEntry)
+							res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyGeth), &srGeth)
+							resultsCh <- res
+							if res.Err != nil {
+								fmt.Printf("Could not get storageRange (geth): %s: %v\n", tx.Hash, res.Err)
+								break
 							}
-						}
-						if nextKey != nil && nextKeyGeth != nil && *nextKey != *nextKeyGeth {
-							fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyGeth)
-							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smGeth))
-							fmt.Printf("================sm\n")
-							printStorageRange(sm)
-							fmt.Printf("================smg\n")
-							printStorageRange(smGeth)
-							return
-						}
-						if !compareStorageRanges(sm, smGeth) {
-							fmt.Printf("len(sm) %d, len(smGeth) %d\n", len(sm), len(smGeth))
-							fmt.Printf("================sm\n")
-							printStorageRange(sm)
-							fmt.Printf("================smg\n")
-							printStorageRange(smGeth)
-							return
+							if srGeth.Error != nil {
+								fmt.Printf("Error getting storageRange (geth): %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
+								break
+							} else {
+								nextKeyGeth = srGeth.Result.NextKey
+								for k, v := range srGeth.Result.Storage {
+									smGeth[k] = v
+								}
+							}
+							if nextKey != nil && nextKeyGeth != nil && *nextKey != *nextKeyGeth {
+								fmt.Printf("Non matching nextKey %x %x\n", *nextKey, *nextKeyGeth)
+								fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smGeth))
+								fmt.Printf("================sm\n")
+								printStorageRange(sm)
+								fmt.Printf("================smg\n")
+								printStorageRange(smGeth)
+								return
+							}
+							if !compareStorageRanges(sm, smGeth) {
+								fmt.Printf("len(sm) %d, len(smGeth) %d\n", len(sm), len(smGeth))
+								fmt.Printf("================sm\n")
+								printStorageRange(sm)
+								fmt.Printf("================smg\n")
+								printStorageRange(smGeth)
+								return
+							}
 						}
 						counter--
 					}
@@ -782,28 +814,28 @@ func bench1(needCompare bool, fullTest bool) {
 			reqGen.reqID++
 
 			var trace EthTxTrace
-			res = reqGen.Geth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
+			res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not trace transaction %s: %v\n", tx.Hash, res.Err)
-				print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
+				fmt.Printf("Could not trace transaction (turbo-geth) %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
 			}
 
 			if trace.Error != nil {
-				fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
+				fmt.Printf("Error tracing transaction (turbo-geth): %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
 
 			if needCompare {
 				var traceg EthTxTrace
-				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
+				res = reqGen.Geth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
 				resultsCh <- res
 				if res.Err != nil {
-					fmt.Printf("Could not trace transaction g %s: %v\n", tx.Hash, res.Err)
-					print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
+					fmt.Printf("Could not trace transaction (geth) %s: %v\n", tx.Hash, res.Err)
+					print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
 					return
 				}
 				if traceg.Error != nil {
-					fmt.Printf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
+					fmt.Printf("Error tracing transaction (geth): %d %s\n", traceg.Error.Code, traceg.Error.Message)
 					return
 				}
 				if res.Err == nil && trace.Error == nil {
@@ -816,28 +848,28 @@ func bench1(needCompare bool, fullTest bool) {
 			reqGen.reqID++
 
 			var receipt EthReceipt
-			res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
+			res = reqGen.TurboGeth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, res.Err)
-				print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
+				fmt.Printf("Count not get receipt (turbo-geth): %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
 				return
 			}
 			if receipt.Error != nil {
-				fmt.Printf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
+				fmt.Printf("Error getting receipt (turbo-geth): %d %s\n", receipt.Error.Code, receipt.Error.Message)
 				return
 			}
 			if needCompare {
 				var receiptg EthReceipt
-				res = reqGen.TurboGeth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receiptg)
+				res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receiptg)
 				resultsCh <- res
 				if res.Err != nil {
-					fmt.Printf("Count not get receipt g: %s: %v\n", tx.Hash, res.Err)
-					print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
+					fmt.Printf("Count not get receipt (geth): %s: %v\n", tx.Hash, res.Err)
+					print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
 					return
 				}
 				if receiptg.Error != nil {
-					fmt.Printf("Error getting receipt g: %d %s\n", receiptg.Error.Code, receiptg.Error.Message)
+					fmt.Printf("Error getting receipt (geth): %d %s\n", receiptg.Error.Code, receiptg.Error.Message)
 					return
 				}
 				if !compareReceipts(&receipt, &receiptg) {
@@ -851,26 +883,26 @@ func bench1(needCompare bool, fullTest bool) {
 		reqGen.reqID++
 
 		var balance EthBalance
-		res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
+		res = reqGen.TurboGeth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
 		resultsCh <- res
 		if res.Err != nil {
-			fmt.Printf("Could not get account balance: %v\n", res.Err)
+			fmt.Printf("Could not get account balance (turbo-geth): %v\n", res.Err)
 			return
 		}
 		if balance.Error != nil {
-			fmt.Printf("Error getting account balance: %d %s", balance.Error.Code, balance.Error.Message)
+			fmt.Printf("Error getting account balance (turbo-geth): %d %s", balance.Error.Code, balance.Error.Message)
 			return
 		}
 		if needCompare {
 			var balanceg EthBalance
-			res = reqGen.TurboGeth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balanceg)
+			res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balanceg)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not get account balance g: %v\n", res.Err)
+				fmt.Printf("Could not get account balance (geth): %v\n", res.Err)
 				return
 			}
 			if balanceg.Error != nil {
-				fmt.Printf("Error getting account balance g: %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
+				fmt.Printf("Error getting account balance (geth): %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
 				return
 			}
 			if !compareBalances(&balance, &balanceg) {
@@ -886,11 +918,11 @@ func bench1(needCompare bool, fullTest bool) {
 			res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not get modified accounts g: %v\n", res.Err)
+				fmt.Printf("Could not get modified accounts (turbo-geth): %v\n", res.Err)
 				return
 			}
 			if mag.Error != nil {
-				fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
+				fmt.Printf("Error getting modified accounts (turbo-geth): %d %s\n", mag.Error.Code, mag.Error.Message)
 				return
 			}
 			if res.Err == nil && mag.Error == nil {
@@ -898,30 +930,32 @@ func bench1(needCompare bool, fullTest bool) {
 				for account := range accountSet {
 					reqGen.reqID++
 					var logs EthLogs
-					res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
+					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
 					resultsCh <- res
 					if res.Err != nil {
-						fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
+						fmt.Printf("Could not get logs for account (turbo-geth) %x: %v\n", account, res.Err)
 						return
 					}
 					if logs.Error != nil {
-						fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
+						fmt.Printf("Error getting logs for account (turbo-geth) %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
 						return
 					}
-					var logsg EthLogs
-					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
-					resultsCh <- res
-					if res.Err != nil {
-						fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
-						return
-					}
-					if logsg.Error != nil {
-						fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
-						return
-					}
-					if !compareLogs(&logs, &logsg) {
-						fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-						return
+					if needCompare {
+						var logsg EthLogs
+						res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
+						resultsCh <- res
+						if res.Err != nil {
+							fmt.Printf("Could not get logs for account (geth) %x: %v\n", account, res.Err)
+							return
+						}
+						if logsg.Error != nil {
+							fmt.Printf("Error getting logs for account (geth) %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
+							return
+						}
+						if !compareLogs(&logs, &logsg) {
+							fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
+							return
+						}
 					}
 				}
 			}
@@ -942,12 +976,12 @@ func bench1(needCompare bool, fullTest bool) {
 				resultsCh <- res
 
 				if res.Err != nil {
-					fmt.Printf("Could not get accountRange: %v\n", res.Err)
+					fmt.Printf("Could not get accountRange (turbo-geth): %v\n", res.Err)
 					return
 				}
 
 				if sr.Error != nil {
-					fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+					fmt.Printf("Error getting accountRange (turbo-geth): %d %s\n", sr.Error.Code, sr.Error.Message)
 					break
 				} else {
 					page = sr.Result.Next
@@ -955,28 +989,30 @@ func bench1(needCompare bool, fullTest bool) {
 						accRangeTG[k] = v
 					}
 				}
-				var srGeth DebugAccountRange
-				res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth), &srGeth)
-				resultsCh <- res
-				if res.Err != nil {
-					fmt.Printf("Could not get accountRange geth: %v\n", res.Err)
-					return
-				}
-				if srGeth.Error != nil {
-					fmt.Printf("Error getting accountRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
-					break
-				} else {
-					pageGeth = srGeth.Result.Next
-					for k, v := range srGeth.Result.Accounts {
-						accRangeGeth[k] = v
+				if needCompare {
+					var srGeth DebugAccountRange
+					res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth), &srGeth)
+					resultsCh <- res
+					if res.Err != nil {
+						fmt.Printf("Could not get accountRange geth: %v\n", res.Err)
+						return
 					}
-				}
-				if !bytes.Equal(page, pageGeth) {
-					fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
-				}
-				if !compareAccountRanges(accRangeTG, accRangeGeth) {
-					fmt.Printf("Different in account ranges tx\n")
-					return
+					if srGeth.Error != nil {
+						fmt.Printf("Error getting accountRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
+						break
+					} else {
+						pageGeth = srGeth.Result.Next
+						for k, v := range srGeth.Result.Accounts {
+							accRangeGeth[k] = v
+						}
+					}
+					if !bytes.Equal(page, pageGeth) {
+						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
+					}
+					if !compareAccountRanges(accRangeTG, accRangeGeth) {
+						fmt.Printf("Different in account ranges tx\n")
+						return
+					}
 				}
 			}
 			prevBn = bn
@@ -1532,6 +1568,178 @@ func bench8() {
 	}
 }
 
+// bench9 tests eth_getProof
+func bench9(needCompare bool) {
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+
+	var res CallResult
+	reqGen := &RequestGenerator{
+		client: client,
+	}
+
+	reqGen.reqID++
+	var blockNumber EthBlockNumber
+	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		fmt.Printf("Could not get block number: %v\n", res.Err)
+		return
+	}
+	if blockNumber.Error != nil {
+		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+		return
+	}
+	lastBlock := blockNumber.Number
+	fmt.Printf("Last block: %d\n", lastBlock)
+	// Go back 256 blocks
+	bn := int(lastBlock) - 256
+	page := common.Hash{}.Bytes()
+
+	for len(page) > 0 {
+		accRangeTG := make(map[common.Address]state.DumpAccount)
+		var sr DebugAccountRange
+		reqGen.reqID++
+		res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+
+		if res.Err != nil {
+			fmt.Printf("Could not get accountRange (turbo-geth): %v\n", res.Err)
+			return
+		}
+
+		if sr.Error != nil {
+			fmt.Printf("Error getting accountRange (turbo-geth): %d %s\n", sr.Error.Code, sr.Error.Message)
+			break
+		} else {
+			page = sr.Result.Next
+			for k, v := range sr.Result.Accounts {
+				accRangeTG[k] = v
+			}
+		}
+		for address, dumpAcc := range accRangeTG {
+			var proof EthGetProof
+			reqGen.reqID++
+			var storageList []common.Hash
+			// And now with the storage, if present
+			if len(dumpAcc.Storage) > 0 {
+				for key := range dumpAcc.Storage {
+					storageList = append(storageList, common.HexToHash(key))
+					if len(storageList) > 100 {
+						break
+					}
+				}
+			}
+			res = reqGen.TurboGeth("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
+			if res.Err != nil {
+				fmt.Printf("Could not get getProof (turbo-geth): %v\n", res.Err)
+				return
+			}
+			if proof.Error != nil {
+				fmt.Printf("Error getting getProof (turbo-geth): %d %s\n", proof.Error.Code, proof.Error.Message)
+				break
+			}
+			if needCompare {
+				var gethProof EthGetProof
+				reqGen.reqID++
+				res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
+				if res.Err != nil {
+					fmt.Printf("Could not get getProof (geth): %v\n", res.Err)
+					return
+				}
+				if gethProof.Error != nil {
+					fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)
+					break
+				}
+				if !compareProofs(&proof, &gethProof) {
+					fmt.Printf("Proofs are different\n")
+					break
+				}
+			}
+		}
+	}
+}
+
+func compareProofs(proof, gethProof *EthGetProof) bool {
+	r := proof.Result
+	rg := gethProof.Result
+
+	/*
+	   	Address      common.Address  `json:"address"`
+	   	AccountProof []string        `json:"accountProof"`
+	   	Balance      *hexutil.Big    `json:"balance"`
+	   	CodeHash     common.Hash     `json:"codeHash"`
+	   	Nonce        hexutil.Uint64  `json:"nonce"`
+	   	StorageHash  common.Hash     `json:"storageHash"`
+	   	StorageProof []StorageResult `json:"storageProof"`
+	   }
+	   type StorageResult struct {
+	   	Key   string       `json:"key"`
+	   	Value *hexutil.Big `json:"value"`
+	   	Proof []string     `json:"proof"`
+	*/
+	equal := true
+	if r.Address != rg.Address {
+		fmt.Printf("Different addresses %x / %x\n", r.Address, rg.Address)
+		equal = false
+	}
+	if len(r.AccountProof) == len(rg.AccountProof) {
+		for i, ap := range r.AccountProof {
+			if ap != rg.AccountProof[i] {
+				fmt.Printf("Different item %d in account proof: %s %s\n", i, ap, rg.AccountProof[i])
+				equal = false
+			}
+		}
+	} else {
+		fmt.Printf("Different length of AccountProof: %d / %d\n", len(r.AccountProof), len(rg.AccountProof))
+		equal = false
+	}
+	if r.Balance.ToInt().Cmp(rg.Balance.ToInt()) != 0 {
+		fmt.Printf("Different balance: %s / %s\n", r.Balance.ToInt(), rg.Balance.ToInt())
+		equal = false
+	}
+	if r.CodeHash != rg.CodeHash {
+		fmt.Printf("Different CodeHash: %x / %x\n", r.CodeHash, rg.CodeHash)
+		equal = false
+	}
+	if r.Nonce != rg.Nonce {
+		fmt.Printf("Different nonce: %d / %d\n", r.Nonce, rg.Nonce)
+		equal = false
+	}
+	if r.StorageHash != rg.StorageHash {
+		fmt.Printf("Different StorageHash: %x / %x\n", r.StorageHash, rg.StorageHash)
+		equal = false
+	}
+	if len(r.StorageProof) == len(rg.StorageProof) {
+		for i, sp := range r.StorageProof {
+			spg := rg.StorageProof[i]
+			if sp.Key != spg.Key {
+				fmt.Printf("Different storage proof key in item %d: %s / %s\n", i, sp.Key, spg.Key)
+				equal = false
+			}
+			if sp.Value.ToInt().Cmp(spg.Value.ToInt()) != 0 {
+				fmt.Printf("Different storage proof values in item %d: %x / %x\n", i, sp.Value.ToInt().Bytes(), spg.Value.ToInt().Bytes())
+				equal = false
+			}
+			if len(sp.Proof) == len(spg.Proof) {
+				for j, p := range sp.Proof {
+					pg := spg.Proof[j]
+					if p != pg {
+						fmt.Printf("Different storage proof item %d in item %d: %s / %s\n", j, i, p, pg)
+						equal = false
+					}
+				}
+			} else {
+				fmt.Printf("Different length of storage proof in the item %d: %d / %d\n", i, len(sp.Proof), len(spg.Proof))
+				equal = false
+			}
+		}
+	} else {
+		fmt.Printf("Different length of StorageProof: %d / %d\n", len(r.StorageProof), len(rg.StorageProof))
+		equal = false
+	}
+	return equal
+}
+
 func main() {
 
 	var (
@@ -1563,5 +1771,7 @@ func main() {
 		bench7()
 	case "bench8":
 		bench8()
+	case "bench9":
+		bench9(false)
 	}
 }
