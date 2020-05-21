@@ -121,6 +121,9 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 	if dbr.codeCache != nil {
 		dbr.codeCache.Add(address, code)
 	}
+	if dbr.codeSizeCache != nil {
+		dbr.codeSizeCache.Add(address, len(code))
+	}
 	return code, err
 }
 
