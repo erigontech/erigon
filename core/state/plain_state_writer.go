@@ -117,25 +117,19 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	if len(v) == common.HashLength {
 		v = common.CopyBytes(v)
 	}
+	if w.storageCache != nil {
+		var storageKey [20 + 32]byte
+		copy(storageKey[:], address[:])
+		copy(storageKey[20:], key[:])
+		w.storageCache.Add(storageKey, v)
+	}
 	if len(v) == 0 {
-		if w.storageCache != nil {
-			var storageKey [20 + 32]byte
-			copy(storageKey[:], address[:])
-			copy(storageKey[20:], key[:])
-			w.storageCache.Add(storageKey, []byte{})
-		}
 		if err := w.stateDb.Delete(dbutils.PlainStateBucket, compositeKey); err != nil {
 			if err != ethdb.ErrKeyNotFound {
 				return err
 			}
 		}
 		return nil
-	}
-	if w.storageCache != nil {
-		var storageKey [20 + 32]byte
-		copy(storageKey[:], address[:])
-		copy(storageKey[20:], key[:])
-		w.storageCache.Add(storageKey, v)
 	}
 	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, v)
 }

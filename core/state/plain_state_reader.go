@@ -96,7 +96,7 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 		return nil, err
 	}
 	if r.storageCache != nil {
-		r.storageCache.Add(*storageKeyP, nil)
+		r.storageCache.Add(*storageKeyP, []byte{})
 	}
 	return nil, nil
 }
