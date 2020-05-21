@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	logInterval = 5 // seconds
+	logInterval = 30 // seconds
 )
 
 type progressLogger struct {
@@ -163,17 +163,15 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 				return 0, err
 			}
 			uncommitedIncarnations = make(map[common.Address]uint64)
-			log.Info("State batch committed", "in", time.Since(start))
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("State batch committed", "in", time.Since(start),
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {
-			start := time.Now()
 			if _, err = changeBatch.Commit(); err != nil {
 				return 0, err
 			}
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Change batch committed", "in", time.Since(start), "state-batch-size", stateBatch.BatchSize(),
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		/*
 			if blockNum-profileNumber == 100000 {
