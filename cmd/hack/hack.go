@@ -633,7 +633,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	t2 := time.Now()
 	tds, err := bc.GetTrieDbState()
 	check(err)
-	fmt.Println("2", time.Since(t2))
+	fmt.Println("GetTrieDbState: ", time.Since(t2))
 	//currentBlock := bc.CurrentBlock()
 	//currentBlockNr := currentBlock.NumberU64()
 
@@ -644,11 +644,11 @@ func mgrSchedule(chaindata string, block uint64) {
 	rs.AddHex([]byte{})
 	subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
 	check(err)
-	fmt.Println("3", time.Since(t3))
+	fmt.Println("LoadSubTries: ", time.Since(t3))
 	t4 := time.Now()
 	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
 	check(err)
-	fmt.Println("4", time.Since(t4))
+	fmt.Println("HookSubTries: ", time.Since(t4))
 
 	schedule := mgr.NewSchedule(tds)
 	var toBlock = block + mgr.BlocksPerCycle + 100
@@ -689,7 +689,7 @@ func mgrSchedule(chaindata string, block uint64) {
 		block = tick.ToBlock + 1
 	}
 
-	fmt.Println("5", time.Since(t5))
+	fmt.Println("MGR Get All Ticks: ", time.Since(t5))
 
 	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
 	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
@@ -2003,7 +2003,7 @@ func (r *Receiver) Receive(
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessLen uint64,
+	witnessSize uint64,
 ) error {
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
@@ -2025,7 +2025,7 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
@@ -2048,7 +2048,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessSize)
 }
 
 func (r *Receiver) Result() trie.SubTries {

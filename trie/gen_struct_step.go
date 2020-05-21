@@ -67,8 +67,8 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash       common.Hash
-	WitnessLen uint64
+	Hash        common.Hash
+	WitnessSize uint64
 }
 
 func (GenStructStepHashData) GenStructStepData() {}
@@ -128,7 +128,7 @@ func GenStructStep(
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash[:], v.WitnessLen); err != nil {
+				if err := e.hash(v.Hash[:], v.WitnessSize); err != nil {
 					return nil, err
 				}
 				buildExtensions = true

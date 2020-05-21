@@ -36,34 +36,34 @@ type node interface {
 
 	// if not empty, returns node's RLP or hash thereof
 	reference() []byte
-	witnessLen() uint64
+	witnessSize() uint64
 }
 
 type (
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	fullNode struct {
-		ref           nodeRef
-		Children      [17]node // Actual trie node data to encode/decode (needs custom encoder)
-		witnessLength uint64   // amount of bytes holded in DB by all storage/code under this prefix. equal to sum of children's witnessLength
+		ref      nodeRef
+		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
+		iws      uint64   // IntermediateWitnessSize - amount of bytes used in DB by all storage/code under this prefix + few bytes for Trie structure encoding. equal to sum of children's iws
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	duoNode struct {
-		ref           nodeRef
-		mask          uint32 // Bitmask. The set bits indicate the child is not nil
-		child1        node
-		child2        node
-		witnessLength uint64
+		ref    nodeRef
+		mask   uint32 // Bitmask. The set bits indicate the child is not nil
+		child1 node
+		child2 node
+		iws    uint64
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		ref           nodeRef
-		Key           []byte // HEX encoding
-		Val           node
-		witnessLength uint64
+		ref nodeRef
+		Key []byte // HEX encoding
+		Val node
+		iws uint64
 	}
 	hashNode struct {
-		hash          []byte
-		witnessLength uint64
+		hash []byte
+		iws  uint64
 	}
 	valueNode []byte
 
@@ -84,9 +84,9 @@ var nilValueNode = valueNode(nil)
 
 func NewShortNode(key []byte, value node) *shortNode {
 	return &shortNode{
-		Key:           key,
-		Val:           value,
-		witnessLength: 1 + uint64(1)/2 + value.witnessLen(), //opcode + len(key)/2 + childrenWitnessLen
+		Key: key,
+		Val: value,
+		iws: 1 + uint64(1)/2 + value.witnessSize(), //opcode + len(key)/2 + childrenWitnessSize
 	}
 }
 
@@ -238,50 +238,50 @@ func (n *duoNode) reference() []byte      { return n.ref.data[0:n.ref.len] }
 func (n *shortNode) reference() []byte    { return n.ref.data[0:n.ref.len] }
 func (an *accountNode) reference() []byte { return nil }
 
-// WitnessLen calculation logic:
+// WitnessSize calculation logic:
 // hashNode: represents full underlying witness
 // valueNode: opcode + len(storage)
 // codeNode: opcode + len(code)
-// fullNode: opcode + mask + childrenWitnessLen
-// duoNode: opcode + mask + childrenWitnessLen
-// shortNode: opcode + len(key)/2 + childrenWitnessLen
-// accountNode: opcode + account data len + codeWitnessLen + storageWitnessLen
-func (n hashNode) witnessLen() uint64   { return n.witnessLength }
-func (n valueNode) witnessLen() uint64  { return uint64(len(n)) + 1 }
-func (n codeNode) witnessLen() uint64   { return uint64(len(n)) + 1 }
-func (n *fullNode) witnessLen() uint64  { return n.witnessLength }
-func (n *duoNode) witnessLen() uint64   { return n.witnessLength }
-func (n *shortNode) witnessLen() uint64 { return n.witnessLength }
-func (an *accountNode) witnessLen() uint64 {
+// fullNode: opcode + mask + childrenWitnessSize
+// duoNode: opcode + mask + childrenWitnessSize
+// shortNode: opcode + len(key)/2 + childrenWitnessSize
+// accountNode: opcode + account data len + codeWitnessSize + storageWitnessSize
+func (n hashNode) witnessSize() uint64   { return n.iws }
+func (n valueNode) witnessSize() uint64  { return uint64(len(n)) + 1 }
+func (n codeNode) witnessSize() uint64   { return uint64(len(n)) + 1 }
+func (n *fullNode) witnessSize() uint64  { return n.iws }
+func (n *duoNode) witnessSize() uint64   { return n.iws }
+func (n *shortNode) witnessSize() uint64 { return n.iws }
+func (an *accountNode) witnessSize() uint64 {
 	res := 1 + uint64(an.EncodingLengthForStorage())
 	if an.storage != nil {
-		res += an.storage.witnessLen()
+		res += an.storage.witnessSize()
 	}
 	if an.code != nil {
-		res += an.code.witnessLen()
+		res += an.code.witnessSize()
 	}
 	return res
 }
 
-func (n *fullNode) recalculateWitnessLen() {
-	n.witnessLength = 1 + 1 // opcode + mask + childrenWitnessLen
+func (n *fullNode) recalculateWitnessSize() {
+	n.iws = 1 + 1 // opcode + mask + childrenWitnessSize
 	for j := range n.Children {
 		if n.Children[j] != nil {
-			n.witnessLength += n.Children[j].witnessLen()
+			n.iws += n.Children[j].witnessSize()
 		}
 	}
 }
-func (n *duoNode) recalculateWitnessLen() {
-	n.witnessLength = 1 + 1 // opcode + mask + childrenWitnessLen
+func (n *duoNode) recalculateWitnessSize() {
+	n.iws = 1 + 1 // opcode + mask + childrenWitnessSize
 	if n.child1 != nil {
-		n.witnessLength += n.child1.witnessLen()
+		n.iws += n.child1.witnessSize()
 	}
 	if n.child2 != nil {
-		n.witnessLength += n.child2.witnessLen()
+		n.iws += n.child2.witnessSize()
 	}
 }
-func (n *shortNode) recalculateWitnessLen() {
-	n.witnessLength = 1 + 1 + uint64(len(n.Key))/2 + n.Val.witnessLen() // opcode + len(key)/2 + childrenWitnessLen
+func (n *shortNode) recalculateWitnessSize() {
+	n.iws = 1 + 1 + uint64(len(n.Key))/2 + n.Val.witnessSize() // opcode + len(key)/2 + childrenWitnessSize
 }
 
 // Pretty printing.

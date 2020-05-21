@@ -42,27 +42,17 @@ func ChangeSetByIndexBucket(b []byte) []byte {
 	panic("wrong bucket")
 }
 
-// Cmp - like bytes.Compare, but nil - means "bucket over" and has highest order.
-func Cmp(k1, k2 []byte) int {
-	if k1 == nil && k2 == nil {
-		return 0
-	}
-	if k1 == nil {
-		return 1
-	}
-	if k2 == nil {
-		return -1
-	}
+// NextSubtree does []byte++. Returns false if overflow.
+func NextSubtree(in []byte) ([]byte, bool) {
+	r := make([]byte, len(in))
+	copy(r, in)
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] != 255 {
+			r[i]++
+			return r, true
+		}
 
-	return bytes.Compare(k1, k2)
-}
-
-// IsBefore - kind of bytes.Compare, but nil is the last key. And return
-func IsBefore(k1, k2 []byte) (bool, []byte) {
-	switch Cmp(k1, k2) {
-	case -1, 0:
-		return true, k1
-	default:
-		return false, k2
+		r[i] = 0
 	}
+	return nil, false
 }

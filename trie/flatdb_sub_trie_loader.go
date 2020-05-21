@@ -31,7 +31,7 @@ type StreamReceiver interface {
 		storageValue []byte,
 		hash []byte,
 		cutoff int,
-		witnessLen uint64,
+		witnessSize uint64,
 	) error
 
 	Result() SubTries
@@ -52,9 +52,9 @@ type FlatDbSubTrieLoader struct {
 	ihK, ihV           []byte
 	minKeyAsNibbles    bytes.Buffer
 
-	itemPresent   bool
-	itemType      StreamItem
-	getWitnessLen func(prefix []byte) uint64
+	itemPresent    bool
+	itemType       StreamItem
+	getWitnessSize func(prefix []byte) uint64
 
 	// Storage item buffer
 	storageKeyPart1 []byte
@@ -66,7 +66,7 @@ type FlatDbSubTrieLoader struct {
 	accountValue accounts.Account
 	hashValue    []byte
 	streamCutoff int
-	witnessLen   uint64
+	witnessSize  uint64
 
 	receiver        StreamReceiver
 	defaultReceiver *DefaultReceiver
@@ -90,7 +90,7 @@ type DefaultReceiver struct {
 	a            accounts.Account
 	leafData     GenStructStepLeafData
 	accData      GenStructStepAccountData
-	witnessLen   uint64
+	witnessSize  uint64
 }
 
 func NewDefaultReceiver() *DefaultReceiver {
@@ -356,18 +356,18 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 		}
 		fstl.hashValue = fstl.ihV
 		fstl.storageValue = nil
-		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
+		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	} else {
 		fstl.itemType = AHashStreamItem
 		fstl.accountKey = fstl.ihK
 		fstl.storageKeyPart1 = nil
 		fstl.storageKeyPart2 = nil
 		fstl.hashValue = fstl.ihV
-		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
+		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	}
 
 	// skip subtree
-	next, ok := nextSubtree(fstl.ihK)
+	next, ok := dbutils.NextSubtree(fstl.ihK)
 	if !ok { // no siblings left
 		if !retain { // last sub-tree was taken from IH, then nothing to look in the main bucket. Can stop.
 			fstl.k = nil
@@ -438,7 +438,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessLen uint64,
+	witnessSize uint64,
 ) error {
 	switch itemType {
 	case StorageStreamItem:
@@ -448,7 +448,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		dr.saveValueStorage(false, storageValue, hash, witnessLen)
+		dr.saveValueStorage(false, storageValue, hash, witnessSize)
 	case SHashStreamItem:
 		dr.advanceKeysStorage(storageKeyPart1, storageKeyPart2, false /* terminator */)
 		if dr.currStorage.Len() > 0 {
@@ -456,7 +456,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		dr.saveValueStorage(true, storageValue, hash, witnessLen)
+		dr.saveValueStorage(true, storageValue, hash, witnessSize)
 	case AccountStreamItem:
 		dr.advanceKeysAccount(accountKey, true /* terminator */)
 		if dr.curr.Len() > 0 && !dr.wasIH {
@@ -485,7 +485,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if err := dr.saveValueAccount(false, accountValue, hash, witnessLen); err != nil {
+		if err := dr.saveValueAccount(false, accountValue, hash, witnessSize); err != nil {
 			return err
 		}
 	case AHashStreamItem:
@@ -516,7 +516,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if err := dr.saveValueAccount(true, accountValue, hash, witnessLen); err != nil {
+		if err := dr.saveValueAccount(true, accountValue, hash, witnessSize); err != nil {
 			return err
 		}
 	case CutoffStreamItem:
@@ -606,14 +606,14 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	if err := fstl.boltDB.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		ih := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		iwl := tx.Bucket(dbutils.IntermediateWitnessLenBucket).Cursor()
-		fstl.getWitnessLen = func(prefix []byte) uint64 {
+		iwl := tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor()
+		fstl.getWitnessSize = func(prefix []byte) uint64 {
 			if !debug.IsTrackWitnessSizeEnabled() {
 				return 0
 			}
 			k, v := iwl.SeekTo(prefix)
 			if !bytes.Equal(k, prefix) {
-				panic(fmt.Sprintf("IH and WitnessLen buckets must have same keys set: %x, %x", k, prefix))
+				panic(fmt.Sprintf("IH and WitnessSize buckets must have same keys set: %x, %x", k, prefix))
 			}
 			return binary.BigEndian.Uint64(v)
 		}
@@ -627,7 +627,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				}
 			}
 			if fstl.itemPresent {
-				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKeyPart1, fstl.storageKeyPart2, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessLen); err != nil {
+				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKeyPart1, fstl.storageKeyPart2, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessSize); err != nil {
 					return err
 				}
 				fstl.itemPresent = false
@@ -718,7 +718,7 @@ func (dr *DefaultReceiver) genStructStorage() error {
 	var data GenStructStepData
 	if dr.wasIHStorage {
 		dr.hashData.Hash = common.BytesToHash(dr.valueStorage.Bytes())
-		dr.hashData.WitnessLen = dr.witnessLen
+		dr.hashData.WitnessSize = dr.witnessSize
 		data = &dr.hashData
 	} else {
 		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
@@ -731,13 +731,13 @@ func (dr *DefaultReceiver) genStructStorage() error {
 	return nil
 }
 
-func (dr *DefaultReceiver) saveValueStorage(isIH bool, v, h []byte, witnessLen uint64) {
+func (dr *DefaultReceiver) saveValueStorage(isIH bool, v, h []byte, witnessSize uint64) {
 	// Remember the current value
 	dr.wasIHStorage = isIH
 	dr.valueStorage.Reset()
 	if isIH {
 		dr.valueStorage.Write(h)
-		dr.witnessLen = witnessLen
+		dr.witnessSize = witnessSize
 	} else {
 		dr.valueStorage.Write(v)
 	}
@@ -770,7 +770,7 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	var data GenStructStepData
 	if dr.wasIH {
 		copy(dr.hashData.Hash[:], dr.value.Bytes())
-		dr.hashData.WitnessLen = dr.witnessLen
+		dr.hashData.WitnessSize = dr.witnessSize
 		data = &dr.hashData
 	} else {
 		dr.accData.Balance.Set(&dr.a.Balance)
@@ -795,12 +795,12 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	return nil
 }
 
-func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []byte, witnessLen uint64) error {
+func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []byte, witnessSize uint64) error {
 	dr.wasIH = isIH
 	if isIH {
 		dr.value.Reset()
 		dr.value.Write(h)
-		dr.witnessLen = witnessLen
+		dr.witnessSize = witnessSize
 		return nil
 	}
 	dr.a.Copy(v)
@@ -813,21 +813,6 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 		}
 	}
 	return nil
-}
-
-// nextSubtree does []byte++. Returns false if overflow.
-func nextSubtree(in []byte) ([]byte, bool) {
-	r := make([]byte, len(in))
-	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
-			r[i]++
-			return r, true
-		}
-
-		r[i] = 0
-	}
-	return nil, false
 }
 
 func nextAccount(in, out []byte) bool {

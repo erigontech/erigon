@@ -42,7 +42,6 @@ func (t Tick) IsLastInCycle() bool {
 func newTick(blockNr, stateSize uint64) Tick {
 	number := blockNr / BlocksPerTick % TicksPerCycle
 	fromSize := number * stateSize / TicksPerCycle
-	fmt.Printf("%d %d,%d\n", blockNr, blockNr-blockNr%BlocksPerTick+BlocksPerTick-1, blockNr%BlocksPerTick)
 
 	tick := Tick{
 		Number:    number,
@@ -79,8 +78,8 @@ type Schedule struct {
 }
 
 type WitnessEstimator interface {
-	CumulativeWitnessLen(key []byte) uint64
-	PrefixByCumulativeWitnessLen(size uint64) (prefix []byte, err error)
+	CumulativeWitnessSize(key []byte) uint64
+	PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, err error)
 }
 
 func NewSchedule(estimator WitnessEstimator) *Schedule {
@@ -88,18 +87,17 @@ func NewSchedule(estimator WitnessEstimator) *Schedule {
 }
 
 func (s *Schedule) Tick(block uint64) (Tick, error) {
-	tick := newTick(block, s.estimator.CumulativeWitnessLen([]byte{}))
+	tick := newTick(block, s.estimator.CumulativeWitnessSize([]byte{}))
 	tick.StateSlices = append(tick.StateSlices)
 	for i := range tick.StateSlices {
 		var err error
-		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessLen(tick.StateSlices[i].FromSize); err != nil {
+		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].FromSize); err != nil {
 			return Tick{}, err
 		}
-		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessLen(tick.StateSlices[i].ToSize); err != nil {
+		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].ToSize); err != nil {
 			return Tick{}, err
 		}
 	}
 
 	return tick, nil
-
 }

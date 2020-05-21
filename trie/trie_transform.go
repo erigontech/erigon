@@ -31,7 +31,7 @@ func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTrans
 		}
 		transformSubTrie(n.storage, aHex, newTrie, transformFunc)
 	case hashNode:
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), hashNode{hash: common.CopyBytes(n.hash), witnessLength: n.witnessLength})
+		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), hashNode{hash: common.CopyBytes(n.hash), iws: n.iws})
 		return
 	case *shortNode:
 		var hexVal []byte
