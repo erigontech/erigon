@@ -32,8 +32,6 @@ type Config struct {
 	NoRecursion             bool   // Disables call, callcode, delegate call and create
 	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
 
-	JumpTable [256]operation // EVM instruction table, automatically populated if unset
-
 	EWASMInterpreter string // External EWASM interpreter options
 	EVMInterpreter   string // External EVM interpreter options
 
@@ -83,6 +81,8 @@ type EVMInterpreter struct {
 	evm *EVM
 	cfg Config
 
+	jt *JumpTable // EVM instruction table
+
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared aross opcodes
 
@@ -92,40 +92,39 @@ type EVMInterpreter struct {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	// We use the STOP instruction whether to see
-	// the jump table was initialised. If it was not
-	// we'll set the default jump table.
-	if !cfg.JumpTable[STOP].valid {
-		var jt JumpTable
-		switch {
-		case evm.chainRules.IsIstanbul:
-			jt = istanbulInstructionSet
-		case evm.chainRules.IsConstantinople:
-			jt = constantinopleInstructionSet
-		case evm.chainRules.IsByzantium:
-			jt = byzantiumInstructionSet
-		case evm.chainRules.IsEIP158:
-			jt = spuriousDragonInstructionSet
-		case evm.chainRules.IsEIP150:
-			jt = tangerineWhistleInstructionSet
-		case evm.chainRules.IsHomestead:
-			jt = homesteadInstructionSet
-		default:
-			jt = frontierInstructionSet
-		}
+	var jt *JumpTable
+	switch {
+	case evm.chainRules.IsIstanbul:
+		jt = &istanbulInstructionSet
+	case evm.chainRules.IsConstantinople:
+		jt = &constantinopleInstructionSet
+	case evm.chainRules.IsByzantium:
+		jt = &byzantiumInstructionSet
+	case evm.chainRules.IsEIP158:
+		jt = &spuriousDragonInstructionSet
+	case evm.chainRules.IsEIP150:
+		jt = &tangerineWhistleInstructionSet
+	case evm.chainRules.IsHomestead:
+		jt = &homesteadInstructionSet
+	default:
+		jt = &frontierInstructionSet
+	}
+	if len(cfg.ExtraEips) > 0 {
+		jtCopy := *jt
 		for i, eip := range cfg.ExtraEips {
-			if err := EnableEIP(eip, &jt); err != nil {
+			if err := EnableEIP(eip, &jtCopy); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
 				log.Error("EIP activation failed", "eip", eip, "error", err)
 			}
 		}
-		cfg.JumpTable = jt
+		jt = &jtCopy
 	}
 
 	return &EVMInterpreter{
 		evm: evm,
 		cfg: cfg,
+		jt:  jt,
 	}
 }
 
@@ -207,7 +206,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		operation := &in.cfg.JumpTable[op]
+		operation := &in.jt[op]
 
 		if !operation.valid {
 			return nil, &ErrInvalidOpCode{opcode: op}
