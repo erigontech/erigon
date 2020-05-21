@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
-	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -634,8 +633,6 @@ func mgrSchedule(chaindata string, block uint64) {
 	tds, err := bc.GetTrieDbState()
 	check(err)
 	fmt.Println("GetTrieDbState: ", time.Since(t2))
-	//currentBlock := bc.CurrentBlock()
-	//currentBlockNr := currentBlock.NumberU64()
 
 	t3 := time.Now()
 	loader := trie.NewSubTrieLoader(0)
@@ -650,8 +647,6 @@ func mgrSchedule(chaindata string, block uint64) {
 	check(err)
 	fmt.Println("HookSubTries: ", time.Since(t4))
 
-	schedule := mgr.NewSchedule(tds)
-	var toBlock = block + mgr.BlocksPerCycle + 100
 	//var buf bytes.Buffer
 	var witnessSizeAccumulator uint64
 	var witnessCount int64
@@ -660,34 +655,58 @@ func mgrSchedule(chaindata string, block uint64) {
 	//fmt.Printf("stateSize: %d\n", stateSize)
 	t5 := time.Now()
 
-	for tick, err := schedule.Tick(block); block <= toBlock; tick, err = schedule.Tick(block) {
-		if err != nil {
-			panic(err)
-		}
-		//fmt.Printf("BlocK: %d\n", block)
-		//fmt.Printf("Tick: %s\n", tick)
+	r1, _ := tds.PrefixByCumulativeWitnessSize(127_099)
+	fmt.Println()
+	fmt.Println()
+	r2, _ := tds.PrefixByCumulativeWitnessSize2(127_099)
+	fmt.Printf("%x %x\n", r1, r2)
 
-		//for _, slice := range tick.StateSlices {
-		//	retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
-		//	if tick.IsLastInCycle() {
-		//		fmt.Printf("\nretain: %s\n", retain)
-		//	}
-		//	witness, err2 := tds.Trie().ExtractWitness(false, retain)
-		//	if err2 != nil {
-		//		panic(err2)
-		//	}
-		//
-		//	buf.Reset()
-		//	_, err = witness.WriteTo(&buf)
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	witnessCount++
-		//	witnessSizeAccumulator += uint64(buf.Len())
-		//}
-		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
-		block = tick.ToBlock + 1
-	}
+	//schedule := mgr.NewSchedule(tds)
+	//var toBlock = block + mgr.BlocksPerCycle + 100
+	//for tick, err := schedule.Tick(block); block <= toBlock; tick, err = schedule.Tick(block) {
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	//	//fmt.Printf("BlocK: %d\n", block)
+	//	//fmt.Printf("Tick: %s\n", tick)
+	//
+	//	for _, slice := range tick.StateSlices {
+	//		_ = slice
+	//		from2, err := tds.PrefixByCumulativeWitnessSize2(slice.FromSize)
+	//		check(err)
+	//		to2, err := tds.PrefixByCumulativeWitnessSize2(slice.ToSize)
+	//		check(err)
+	//
+	//		if !bytes.Equal(from2, slice.From) {
+	//			fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.From, from2)
+	//			return
+	//		}
+	//		if !bytes.Equal(to2, slice.To) {
+	//			fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.To, to2)
+	//			return
+	//		}
+	//
+	//		//retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
+	//		//if tick.IsLastInCycle() {
+	//		//	fmt.Printf("\nretain: %s\n", retain)
+	//		//}
+	//		//witness, err2 := tds.Trie().ExtractWitness(false, retain)
+	//		//if err2 != nil {
+	//		//	panic(err2)
+	//		//}
+	//		//
+	//		//buf.Reset()
+	//		//_, err = witness.WriteTo(&buf)
+	//		//if err != nil {
+	//		//	panic(err)
+	//		//}
+	//		//witnessCount++
+	//		//witnessSizeAccumulator += uint64(buf.Len())
+	//	}
+	//	witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
+	//	block = tick.ToBlock + 1
+	//}
 
 	fmt.Println("MGR Get All Ticks: ", time.Since(t5))
 

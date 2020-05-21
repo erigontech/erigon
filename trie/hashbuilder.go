@@ -17,6 +17,8 @@ import (
 )
 
 const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
+const CountWitnessSizeWithoutStructure = false
+
 var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
@@ -123,7 +125,11 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	if err != nil {
 		return err
 	}
-	hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes()))+1+uint64(len(key))/2) // + node opcode + len(key)/2
+	if CountWitnessSizeWithoutStructure {
+		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes())))
+	} else {
+		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes()))+1+uint64(len(key))/2) // + node opcode + len(key)/2
+	}
 
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
@@ -327,8 +333,13 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	if err != nil {
 		return err
 	}
-	dataLen := 1 + uint64(hb.acc.EncodingLengthForStorage()) // + opcode + account data len
-	dataLen += 1 + uint64(len(key))/2                        // + opcode + len(key)/2
+	dataLen := uint64(0)
+	if CountWitnessSizeWithoutStructure {
+		dataLen = uint64(hb.acc.EncodingLengthForStorage())
+	} else {
+		dataLen = 1 + uint64(hb.acc.EncodingLengthForStorage()) // + opcode + account data len
+		dataLen += 1 + uint64(len(key))/2                       // + opcode + len(key)/2
+	}
 
 	if popped > 0 {
 		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*hashStackStride]
@@ -438,7 +449,11 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		return err
 	}
 	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
-	hb.dataLenStack[len(hb.dataLenStack)-1] = 1 + uint64(len(key))/2 + hb.dataLenStack[len(hb.dataLenStack)-1] // + opcode + len(key)/2 + childrenWitnessSize
+	if CountWitnessSizeWithoutStructure {
+		hb.dataLenStack[len(hb.dataLenStack)-1] = 0 + hb.dataLenStack[len(hb.dataLenStack)-1] // + opcode + len(key)/2 + childrenWitnessSize
+	} else {
+		hb.dataLenStack[len(hb.dataLenStack)-1] = 1 + uint64(len(key))/2 + hb.dataLenStack[len(hb.dataLenStack)-1] // + opcode + len(key)/2 + childrenWitnessSize
+	}
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
 		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
 	}
@@ -542,12 +557,21 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
 		return err
 	}
-	dataLen := uint64(1 + 1) // fullNode: opcode + mask + childrenWitnessSize
-	for _, l := range hb.dataLenStack[len(hb.dataLenStack)-digits:] {
-		dataLen += l
+	if CountWitnessSizeWithoutStructure {
+		dataLen := uint64(0)
+		for _, l := range hb.dataLenStack[len(hb.dataLenStack)-digits:] {
+			dataLen += l
+		}
+		hb.dataLenStack[len(hb.dataLenStack)-digits] = dataLen
+		hb.dataLenStack = hb.dataLenStack[:len(hb.dataLenStack)-digits+1]
+	} else {
+		dataLen := uint64(1 + 1) // fullNode: opcode + mask + childrenWitnessSize
+		for _, l := range hb.dataLenStack[len(hb.dataLenStack)-digits:] {
+			dataLen += l
+		}
+		hb.dataLenStack[len(hb.dataLenStack)-digits] = dataLen
+		hb.dataLenStack = hb.dataLenStack[:len(hb.dataLenStack)-digits+1]
 	}
-	hb.dataLenStack[len(hb.dataLenStack)-digits] = dataLen
-	hb.dataLenStack = hb.dataLenStack[:len(hb.dataLenStack)-digits+1]
 
 	if hashStackStride*len(hb.nodeStack) > len(hb.hashStack) {
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
@@ -584,7 +608,11 @@ func (hb *HashBuilder) code(code []byte) error {
 	codeCopy := common.CopyBytes(code)
 	n := codeNode(codeCopy)
 	hb.nodeStack = append(hb.nodeStack, n)
-	hb.dataLenStack = append(hb.dataLenStack, 1+uint64(len(code))) // opcode + len(code)
+	if CountWitnessSizeWithoutStructure {
+		hb.dataLenStack = append(hb.dataLenStack, 0)
+	} else {
+		hb.dataLenStack = append(hb.dataLenStack, 1+uint64(len(code))) // opcode + len(code)
+	}
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(codeCopy); err != nil {
 		return err

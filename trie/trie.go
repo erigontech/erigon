@@ -1259,38 +1259,41 @@ func (t *Trie) EvictNode(hex []byte) {
 	}
 }
 
-func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, n node) {
+func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
 	const (
 		dbPageSize          = 4096           // common OS page size is 4KB
 		minNodeSizeToNotify = 4 * dbPageSize // store in DB only IH which allowing do big jumps over state
 	)
+	//if nd.witnessSize() < 128 {
+	//	return
+	//}
 
-	if n.witnessSize() < minNodeSizeToNotify {
-		return
-	}
-
-	switch nn := n.(type) {
+	switch n := nd.(type) {
 	case *shortNode:
-		t.notifyUnloadRecursive(append(hex, nn.Key...), incarnation, nn.Val)
+		hex = append(hex, n.Key...)
+		if hex[len(hex)-1] == 16 {
+			hex = hex[:len(hex)-1]
+		}
+		t.notifyUnloadRecursive(hex, incarnation, n.Val)
 	case *accountNode:
-		if nn.storage != nil {
-			t.notifyUnloadRecursive(hex, nn.Incarnation, nn.storage)
+		if n.storage != nil {
+			t.notifyUnloadRecursive(hex, n.Incarnation, n.storage)
 		}
 	case *fullNode:
 		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
-		for i := range nn.Children {
-			if nn.Children[i] != nil {
-				t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, nn.Children[i])
+		for i := range n.Children {
+			if n.Children[i] != nil {
+				t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
 			}
 		}
 	case *duoNode:
 		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
-		i1, i2 := nn.childrenIdx()
-		if nn.child1 != nil {
-			t.notifyUnloadRecursive(append(hex, i1), incarnation, nn.child1)
+		i1, i2 := n.childrenIdx()
+		if n.child1 != nil {
+			t.notifyUnloadRecursive(append(hex, i1), incarnation, n.child1)
 		}
-		if nn.child2 != nil {
-			t.notifyUnloadRecursive(append(hex, i2), incarnation, nn.child2)
+		if n.child2 != nil {
+			t.notifyUnloadRecursive(append(hex, i2), incarnation, n.child2)
 		}
 	default:
 		// nothing to do
@@ -1403,50 +1406,62 @@ Loop:
 			found = false
 			break Loop
 		case *shortNode:
-			accumulator += 1 + uint64(len(n.Key)/2)
-			//fmt.Printf("short node: %d %d\n", accumulator, accumulator+1+uint64(len(n.Key)/2))
+			//accumulator += 1 + uint64(len(n.Key)/2)
 			prefix = append(prefix, n.Key...)
 			if prefix[len(prefix)-1] == 0x10 { // remove terminator
 				prefix = prefix[:len(prefix)-1]
 			}
 			nd = n.Val
+			fmt.Printf("short node: %d\n", accumulator)
 		case *duoNode:
-			accumulator += 2
+			var acc2 uint64
+			//accumulator += 2
 			i1, i2 := n.childrenIdx()
 			if accumulator+n.child1.witnessSize() >= size {
 				prefix = append(prefix, i1)
 				nd = n.child1
-				//fmt.Printf("duo overflow1: %d %d, %x\n", accumulator, accumulator+nd.witnessSize(), prefix)
+				fmt.Printf("duo overflow1: %d+%d=%d <= %d, %x\n", accumulator, n.child1.witnessSize(), accumulator+n.child1.witnessSize(), size, prefix)
 				continue
 			}
-			accumulator += n.child1.witnessSize()
+			acc2 += n.child1.witnessSize()
 
-			prefix = append(prefix, i2)
-			nd = n.child2
-			//fmt.Printf("duo: %d, %x\n", accumulator, prefix)
+			if accumulator+acc2+n.child2.witnessSize() >= size {
+				prefix = append(prefix, i2)
+				nd = n.child2
+				fmt.Printf("duo overflow2: %d+%d+%d=%d <= %d, %x\n", accumulator, acc2, n.child2.witnessSize(), accumulator+acc2+n.child2.witnessSize(), size, prefix)
+				accumulator += acc2
+				continue
+			}
+
+			fmt.Printf("duo: %d, %x\n", accumulator, prefix)
+			break Loop
 		case *fullNode:
-			accumulator += 2
+			//accumulator += 2
+			var acc2 uint64
 			for i := range n.Children {
 				if n.Children[i] == nil {
 					continue
 				}
 
-				if accumulator+n.Children[i].witnessSize() >= size {
+				if accumulator+acc2+n.Children[i].witnessSize() >= size {
 					prefix = append(prefix, uint8(i))
 					nd = n.Children[i]
-					//fmt.Printf("full overflow: %d %d, %x\n", accumulator, accumulator+nd.witnessSize(), prefix)
-					break
+					fmt.Printf("full overflow(%d): %d+%d+%d=%d <= %d, %x\n", i, accumulator, acc2, n.Children[i].witnessSize(), accumulator+acc2+n.Children[i].witnessSize(), size, prefix)
+					accumulator += acc2
+					continue Loop
 				}
-				accumulator += n.Children[i].witnessSize()
-				//fmt.Printf("full: %d, %x\n", accumulator, prefix)
+				acc2 += n.Children[i].witnessSize()
 			}
+
+			fmt.Printf("full: %d+%d=%d<=%d, %x\n", accumulator, acc2, accumulator+acc2, size, prefix)
+			break Loop
 		case *accountNode:
-			witnessOverhead := 1 + uint64(n.EncodingLengthForStorage())
-			if n.codeSize != -1 {
-				witnessOverhead += uint64(n.codeSize)
-			}
-			//fmt.Printf("accountNode: %d %d\n", accumulator, accumulator+witnessOverhead)
-			accumulator += witnessOverhead
+			//witnessOverhead := 1 + uint64(n.EncodingLengthForStorage())
+			//if n.codeSize != -1 {
+			//	witnessOverhead += uint64(n.codeSize)
+			//}
+			fmt.Printf("accountNode: %d\n", accumulator)
+			//accumulator += witnessOverhead
 			if n.storage == nil {
 				found = true
 				break Loop
@@ -1472,7 +1487,5 @@ Loop:
 		}
 	}
 
-	// return only prefixes of Even length
-	CompressNibbles(prefix[:len(prefix)-len(prefix)%2], &prefix)
 	return prefix, incarnation, accumulator, found
 }
