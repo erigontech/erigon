@@ -44,7 +44,10 @@ func (l *progressLogger) Start(numberRef *uint64) {
 		printFunc := func() {
 			now := atomic.LoadUint64(numberRef)
 			speed := float64(now-prev) / float64(l.interval)
-			log.Info("Executed blocks:", "currentBlock", now, "speed (blk/second)", speed)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Executed blocks:", "currentBlock", now, "speed (blk/second)", speed,
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			prev = now
 		}
 		for {
@@ -163,10 +166,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 				return 0, err
 			}
 			uncommitedIncarnations = make(map[common.Address]uint64)
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("State batch committed", "in", time.Since(start),
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+			log.Info("State batch committed", "in", time.Since(start))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {
 			if _, err = changeBatch.Commit(); err != nil {
