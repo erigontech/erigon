@@ -108,10 +108,7 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 
-	v := cleanUpTrailingZeroes(value[:])
-	if len(v) == common.HashLength {
-		v = common.CopyBytes(v)
-	}
+	v := common.CopyBytes(cleanUpTrailingZeroes(value[:]))
 	if w.storageCache != nil {
 		var storageKey [20 + 32]byte
 		copy(storageKey[:], address[:])

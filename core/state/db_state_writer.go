@@ -156,10 +156,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	}
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 
-	v := cleanUpTrailingZeroes(value[:])
-	if len(v) == common.HashLength {
-		v = common.CopyBytes(v)
-	}
+	v := common.CopyBytes(cleanUpTrailingZeroes(value[:]))
 	if dsw.storageCache != nil {
 		var storageKey [20 + 32]byte
 		copy(storageKey[:], address[:])
