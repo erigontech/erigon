@@ -99,7 +99,7 @@ func (r *PlainStateReader) ReadAccountCode(address common.Address, codeHash comm
 	}
 	code, err := r.db.Get(dbutils.CodeBucket, codeHash[:])
 	if r.codeCache != nil && len(code) <= 1024 {
-		 r.codeCache.Set(address[:], code)
+		r.codeCache.Set(address[:], code)
 	}
 	if r.codeSizeCache != nil {
 		var b [4]byte

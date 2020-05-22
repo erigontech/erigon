@@ -2,8 +2,8 @@ package state
 
 import (
 	"context"
-	"fmt"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/VictoriaMetrics/fastcache"
 
