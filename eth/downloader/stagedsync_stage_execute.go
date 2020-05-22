@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/VictoriaMetrics/fastcache"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -100,10 +100,10 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
-	accountCache, _ := lru.New(400000)
-	storageCache, _ := lru.New(400000)
-	codeCache, _ := lru.New(1000)
-	codeSizeCache, _ := lru.New(400000)
+	accountCache := fastcache.New(128*1024*1024) // 128 Mb
+	storageCache := fastcache.New(128*1024*1024) // 128 Mb
+	codeCache := fastcache.New(32*1024*1024) // 32 Mb (the minimum)
+	codeSizeCache := fastcache.New(32*1024*1024) // 32 Mb (the minimum)
 	// uncommitedIncarnations map holds incarnations for accounts that were deleted,
 	// but their storage is not yet committed
 	var uncommitedIncarnations = make(map[common.Address]uint64)
