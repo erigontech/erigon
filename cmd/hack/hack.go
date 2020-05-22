@@ -2316,6 +2316,9 @@ func main() {
 	if *action == "readAccount" {
 		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
 	}
+	if *action == "readPlainAccount" {
+		readPlainAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
+	}
 	if *action == "fixAccount" {
 		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
 	}
