@@ -1264,7 +1264,8 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
 		dbPageSize          = 4096           // common OS page size is 4KB
 		minNodeSizeToNotify = 4 * dbPageSize // store in DB only IH which allowing do big jumps over state
 	)
-	//if nd.witnessSize() < 128 {
+	// Make a better experiment if make sense to enable it
+	//if nd.witnessSize() < minNodeSizeToNotify {
 	//	return
 	//}
 
@@ -1276,15 +1277,23 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
 		}
 		t.notifyUnloadRecursive(hex, incarnation, n.Val)
 	case *accountNode:
-		if n.storage != nil {
-			t.notifyUnloadRecursive(hex, n.Incarnation, n.storage)
+		if n.storage == nil {
+			return
 		}
+		if _, ok := n.storage.(hashNode); ok {
+			return
+		}
+		t.notifyUnloadRecursive(hex, n.Incarnation, n.storage)
 	case *fullNode:
 		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
 		for i := range n.Children {
-			if n.Children[i] != nil {
-				t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
+			if n.Children[i] == nil {
+				continue
 			}
+			if _, ok := n.Children[i].(hashNode); ok {
+				continue
+			}
+			t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
 		}
 	case *duoNode:
 		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
