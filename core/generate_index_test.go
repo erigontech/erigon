@@ -256,8 +256,7 @@ func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
 			t.Fatal()
 		}
 	}
-	fmt.Println(common.Bytes2Hex(compositeKey1), common.Bytes2Hex(compositeKey2), common.Bytes2Hex(compositeKey3))
-	debugIndexes(db, dbutils.StorageHistoryBucket)
+
 	check(compositeKey1, 0, expected11)
 	check(compositeKey1, 999, expected11)
 	check(compositeKey1, 1000, expected12)
@@ -381,7 +380,7 @@ func lastChunkCheck(t *testing.T, db ethdb.Database, key []byte, expected []uint
 		t.Fatal()
 	}
 }
-func debugIndexes(db ethdb.Database, bucket []byte) {
+func debugIndexes(db ethdb.Database, bucket []byte) { //nolint
 	l := common.HashLength
 	if bytes.Equal(dbutils.StorageHistoryBucket, bucket) {
 		l = common.HashLength * 2
