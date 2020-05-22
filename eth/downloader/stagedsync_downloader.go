@@ -10,6 +10,7 @@ var UsePlainStateExecution = false // FIXME: when we can move the hashed state f
 //  ^--- will be overriden e when parsing flags anyway
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
+	fmt.Println("doStagedSyncWithFetchers")
 	log.Info("Sync stage 1/5. Downloading headers...")
 
 	var err error
@@ -21,7 +22,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 1/5. Downloading headers... Complete!")
+	log.Info("Sync stage 1/6. Downloading headers... Complete!")
 	log.Info("Checking for unwinding...")
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
 	for stage := Finish - 1; stage > Headers; stage-- {
@@ -43,6 +44,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 			if !UsePlainStateExecution {
 				err = d.unwindHashCheckStage(unwindPoint)
 			}
+		case IndexGeneration:
+			err = unwindGenerateIndexes(unwindPoint, d.stateDB, UsePlainStateExecution)
 		default:
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
@@ -51,7 +54,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		}
 	}
 	log.Info("Checking for unwinding... Complete!")
-	log.Info("Sync stage 2/5. Downloading block bodies...")
+	log.Info("Sync stage 2/6. Downloading block bodies...")
 
 	/*
 	* Stage 2. Download Block bodies
@@ -65,19 +68,19 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 2/5. Downloading block bodies... Complete!")
+	log.Info("Sync stage 2/6. Downloading block bodies... Complete!")
 	/*
 	* Stage 3. Recover senders from tx signatures
 	 */
-	log.Info("Sync stage 3/5. Recovering senders from tx signatures...")
+	log.Info("Sync stage 3/6. Recovering senders from tx signatures...")
 
 	err = d.spawnRecoverSendersStage()
 	if err != nil {
 		return err
 	}
 
-	log.Info("Sync stage 3/5. Recovering senders from tx signatures... Complete!")
-	log.Info("Sync stage 4/5. Executing blocks w/o hash checks...")
+	log.Info("Sync stage 3/6. Recovering senders from tx signatures... Complete!")
+	log.Info("Sync stage 4/6. Executing blocks w/o hash checks...")
 
 	/*
 	* Stage 4. Execute block bodies w/o calculating trie roots
@@ -89,16 +92,26 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 4/5. Executing blocks w/o hash checks... Complete!")
+	log.Info("Sync stage 4/6. Executing blocks w/o hash checks... Complete!")
 
 	// Further stages go there
-	log.Info("Sync stage 5/5. Validating final hash")
+	log.Info("Sync stage 5/6. Validating final hash")
 	if !UsePlainStateExecution {
 		if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
 			return err
 		}
 	}
-	log.Info("Sync stage 5/5. Validating final hash... Complete!")
+
+	log.Info("Sync stage 5/6. Validating final hash... Complete!")
+
+	if d.history {
+		log.Info("Sync stage 6/6. Generating history indexes")
+		err = spawnGenerateIndexes(d.stateDB, UsePlainStateExecution, syncHeadNumber, 0)
+		if err != nil {
+			return err
+		}
+		log.Info("Sync stage 6/6. Generating history indexes... Complete!")
+	}
 
 	return err
 }

@@ -1,4 +1,4 @@
-package stateless
+package generate
 
 import (
 	"bytes"
@@ -27,8 +27,8 @@ func RegenerateIndex(chaindata string, indexBucket []byte, csBucket []byte) erro
 		}
 	}
 
-	ig := core.NewIndexGenerator(db, csBucket, indexBucket, walker)
-	err = ig.GenerateIndex()
+	ig := core.NewIndexGenerator(db)
+	err = ig.GenerateIndex(0, 0, csBucket, indexBucket, walker, nil)
 	if err != nil {
 		return err
 	}

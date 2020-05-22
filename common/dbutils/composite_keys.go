@@ -170,21 +170,6 @@ func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {
 	return addrHash, inc
 }
 
-func DecodeIncarnation(buf []byte) uint64 {
-	incarnation := binary.BigEndian.Uint64(buf)
-	return incarnation ^ ^uint64(0)
-}
-
-func RemoveIncarnationFromKey(key []byte, buf *[]byte) {
-	tmp := *buf
-	if len(key) <= common.HashLength {
-		tmp = append(tmp, key...)
-	} else {
-		tmp = append(tmp, key[:common.HashLength]...)
-		tmp = append(tmp, key[common.HashLength+8:]...)
-	}
-	*buf = tmp
-}
 
 // Key + blockNum
 func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []byte) {
@@ -195,10 +180,3 @@ func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []by
 	return composite, encodedTS
 }
 
-// blockNum + history bucket
-func CompositeChangeSetKey(encodedTS, hBucket []byte) []byte {
-	changeSetKey := make([]byte, len(encodedTS)+len(hBucket))
-	copy(changeSetKey, encodedTS)
-	copy(changeSetKey[len(encodedTS):], hBucket)
-	return changeSetKey
-}

@@ -161,8 +161,12 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 }
 
 func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database) {
+	sm, err := GetStorageModeFromDB(chaindb)
+	if err != nil {
+		log.Error("Get storage mode", "err", err)
+	}
 	// Construct the different synchronisation mechanisms
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer)
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer, sm.History)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
@@ -1137,10 +1141,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					return err2
 				}
 				/*
-				node := rr.NodeRLP
-				response.Nodes[i] = make([]byte, len(node))
-				copy(response.Nodes[i], node)
-				responseSize += len(node)
+					node := rr.NodeRLP
+					response.Nodes[i] = make([]byte, len(node))
+					copy(response.Nodes[i], node)
+					responseSize += len(node)
 				*/
 			}
 		} else {
@@ -1197,10 +1201,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 						return err2
 					}
 					/*
-					node := rr.NodeRLP
-					response.Nodes[j][i] = make([]byte, len(node))
-					copy(response.Nodes[j][i], node)
-					responseSize += len(node)
+						node := rr.NodeRLP
+						response.Nodes[j][i] = make([]byte, len(node))
+						copy(response.Nodes[j][i], node)
+						responseSize += len(node)
 					*/
 				}
 			}

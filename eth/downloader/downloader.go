@@ -155,6 +155,8 @@ type Downloader struct {
 	bodyFetchHook    func([]*types.Header) // Method to call upon starting a block body fetch
 	receiptFetchHook func([]*types.Header) // Method to call upon starting a receipt fetch
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
+	// generate history index, disable/enable pruning
+	history bool
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -231,7 +233,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn) *Downloader {
+func New(checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, history bool) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -253,6 +255,8 @@ func New(checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, 
 		receiptWakeCh: make(chan bool, 1),
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
+		//generate index, disable/enable pruning
+		history: history,
 	}
 	go dl.qosTuner()
 	return dl

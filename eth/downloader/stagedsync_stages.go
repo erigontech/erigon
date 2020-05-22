@@ -33,6 +33,7 @@ const (
 	Senders                    // "From" recovered from signatures, bodies re-written
 	Execution                  // Executing each block w/o buildinf a trie
 	HashCheck                  // Checking the root hash
+	IndexGeneration            // Generating indexes for history
 	Finish                     // Nominal stage after all other stages
 )
 
