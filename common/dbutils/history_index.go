@@ -155,6 +155,10 @@ func (hi HistoryIndexBytes) LastElement() (uint64, bool) {
 	return minElement + (uint64(hi[idx]&0x7f) << 16) + (uint64(hi[idx+1]) << 8) + uint64(hi[idx+2]), true
 }
 
+func CurrentChunkKey(key []byte) []byte {
+	return IndexChunkKey(key, ^uint64(0))
+}
+
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	var blockNumBytes []byte // make([]byte, len(key)+8)
 	switch len(key) {
@@ -174,7 +178,15 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 
 	return blockNumBytes
 }
-
+func CompositeKeyWithoutIncarnation(key []byte) []byte {
+	if len(key) == common.HashLength*2+common.IncarnationLength {
+		kk := make([]byte, common.HashLength*2)
+		copy(kk, key[:common.HashLength])
+		copy(kk[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		return kk
+	}
+	return key
+}
 func IsIndexBucket(b []byte) bool {
 	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
 }

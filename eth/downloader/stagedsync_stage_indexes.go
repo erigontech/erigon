@@ -10,14 +10,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func spawnGenerateIndexes(db ethdb.Database, plainState bool, from, to uint64) error {
+func spawnGenerateIndexes(db ethdb.Database, plainState bool, from uint64) error {
 	if plainState {
 		log.Info("Skip index generation for plain state")
 		return nil
 	}
 
 	ig := core.NewIndexGenerator(db)
-	if err := ig.GenerateIndex(from, to, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
+	if err := ig.GenerateIndex(from, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
 		return SaveStageProgress(innerDB, IndexGeneration, blockNum)
 	}); err != nil {
 		fmt.Println("AccountChangeSetBucket, err", err)
@@ -25,7 +25,7 @@ func spawnGenerateIndexes(db ethdb.Database, plainState bool, from, to uint64) e
 	}
 
 	ig = core.NewIndexGenerator(db)
-	if err := ig.GenerateIndex(from, to, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
+	if err := ig.GenerateIndex(from, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
 		return SaveStageProgress(innerDB, IndexGeneration, blockNum)
 	}); err != nil {
 		fmt.Println("StorageChangeSetBucket, err", err)

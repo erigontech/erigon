@@ -206,8 +206,10 @@ func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]b
 		b := tx.Bucket(bucket)
 		if b != nil {
 			c := b.Cursor()
+			fmt.Println(common.Bytes2Hex(dbutils.IndexChunkKey(key, timestamp)), "seek chunk")
+			fmt.Println(key, "seek chunk")
 			k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
-			if !bytes.HasPrefix(k, key) {
+			if !bytes.HasPrefix(k, dbutils.CompositeKeyWithoutIncarnation(key)) {
 				return ErrKeyNotFound
 			}
 			dat = make([]byte, len(v))

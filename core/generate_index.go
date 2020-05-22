@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"sort"
 	"time"
 
@@ -31,7 +30,8 @@ type IndexWithKey struct {
 
 func (ig *IndexGenerator) changeSetWalker(blockNum uint64, indexBucket []byte) func([]byte, []byte) error {
 	return func(k, v []byte) error {
-		indexes, ok := ig.cache[string(k)]
+		cacheKey := k
+		indexes, ok := ig.cache[string(cacheKey)]
 		if !ok || len(indexes) == 0 {
 
 			indexBytes, err := ig.db.GetIndexChunk(indexBucket, k, blockNum)
@@ -51,49 +51,45 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64, indexBucket []byte) f
 			indexes = append(indexes, IndexWithKey{
 				Val: index,
 			})
-			ig.cache[string(k)] = indexes
+			ig.cache[string(cacheKey)] = indexes
 		}
 
 		lastIndex := indexes[len(indexes)-1]
 		if dbutils.CheckNewIndexChunk(lastIndex.Val, blockNum) {
 			lastIndex.Val = dbutils.NewHistoryIndex()
 			indexes = append(indexes, lastIndex)
-			ig.cache[string(k)] = indexes
+			ig.cache[string(cacheKey)] = indexes
 		}
 		lastIndex.Val = lastIndex.Val.Append(blockNum, len(v) == 0)
 		indexes[len(indexes)-1] = lastIndex
-		ig.cache[string(k)] = indexes
+		ig.cache[string(cacheKey)] = indexes
 
 		return nil
 	}
 }
 
-func (ig *IndexGenerator) GenerateIndex(from, to uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker, commitHook func(db ethdb.Database, blockNum uint64) error) error {
+func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker, commitHook func(db ethdb.Database, blockNum uint64) error) error {
 	startTime := time.Now()
 	batchSize := ig.db.IdealBatchSize() * 3
 	//addrHash - > index or addhash + last block for full chunk contracts
 	ig.cache = make(map[string][]IndexWithKey, batchSize)
 
-	if to == 0 {
-		to = math.MaxUint64
-	}
-
-	if to < from {
-		return errors.New("incorrect from/to value")
-	}
-
-	log.Info("Index generation started", "from", from, "to", to)
+	log.Info("Index generation started", "from", from)
 	commit := func() error {
 		tuples := make(ethdb.MultiPutTuples, 0, len(ig.cache)*3)
 		for key, vals := range ig.cache {
-			for _, val := range vals {
+			for i, val := range vals {
 				var (
 					chunkKey []byte
 					err      error
 				)
-				chunkKey, err = val.Val.Key([]byte(key))
-				if err != nil {
-					return err
+				if i == len(vals)-1 {
+					chunkKey = dbutils.CurrentChunkKey([]byte(key))
+				} else {
+					chunkKey, err = val.Val.Key([]byte(key))
+					if err != nil {
+						return err
+					}
 				}
 				tuples = append(tuples, indexBucket, chunkKey, val.Val)
 			}
@@ -113,10 +109,7 @@ func (ig *IndexGenerator) GenerateIndex(from, to uint64, changeSetBucket []byte,
 	for {
 		stop := true
 		err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
-			blockNum, _ := dbutils.DecodeTimestamp(k)
-			if blockNum >= to {
-				return false, nil
-			}
+			blockNum, _ = dbutils.DecodeTimestamp(k)
 
 			currentKey = common.CopyBytes(k)
 			err := walkerAdapter(v).Walk(ig.changeSetWalker(blockNum, indexBucket))
@@ -141,6 +134,11 @@ func (ig *IndexGenerator) GenerateIndex(from, to uint64, changeSetBucket []byte,
 		}
 
 		if len(ig.cache) > 0 {
+			log.Info("Commit batch",
+				"blocknum", blockNum,
+				"time", time.Since(startTime),
+				"chunk size", len(ig.cache),
+			)
 			err = commit()
 			if err != nil {
 				return err
