@@ -2,8 +2,9 @@ package state
 
 import (
 	"context"
+	"encoding/binary"
 
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/VictoriaMetrics/fastcache"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -20,10 +21,10 @@ type PlainStateWriter struct {
 	uncommitedIncarnations map[common.Address]uint64
 	csw                    *ChangeSetWriter
 	blockNumber            uint64
-	accountCache           *lru.Cache
-	storageCache           *lru.Cache
-	codeCache              *lru.Cache
-	codeSizeCache          *lru.Cache
+	accountCache           *fastcache.Cache
+	storageCache           *fastcache.Cache
+	codeCache              *fastcache.Cache
+	codeSizeCache          *fastcache.Cache
 }
 
 func NewPlainStateWriter(stateDb, changeDb ethdb.Database, blockNumber uint64, uncommitedIncarnations map[common.Address]uint64) *PlainStateWriter {
@@ -36,19 +37,19 @@ func NewPlainStateWriter(stateDb, changeDb ethdb.Database, blockNumber uint64, u
 	}
 }
 
-func (w *PlainStateWriter) SetAccountCache(accountCache *lru.Cache) {
+func (w *PlainStateWriter) SetAccountCache(accountCache *fastcache.Cache) {
 	w.accountCache = accountCache
 }
 
-func (w *PlainStateWriter) SetStorageCache(storageCache *lru.Cache) {
+func (w *PlainStateWriter) SetStorageCache(storageCache *fastcache.Cache) {
 	w.storageCache = storageCache
 }
 
-func (w *PlainStateWriter) SetCodeCache(codeCache *lru.Cache) {
+func (w *PlainStateWriter) SetCodeCache(codeCache *fastcache.Cache) {
 	w.codeCache = codeCache
 }
 
-func (w *PlainStateWriter) SetCodeSizeCache(codeSizeCache *lru.Cache) {
+func (w *PlainStateWriter) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
 	w.codeSizeCache = codeSizeCache
 }
 
@@ -56,11 +57,11 @@ func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common
 	if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
-	if w.accountCache != nil {
-		w.accountCache.Add(address, account)
-	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
+	if w.accountCache != nil {
+		w.accountCache.Set(address[:], value)
+	}
 	return w.stateDb.Put(dbutils.PlainStateBucket, address[:], value)
 }
 
@@ -69,10 +70,16 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 		return err
 	}
 	if w.codeCache != nil {
-		w.codeCache.Add(address, code)
+		if len(code) <= 1024 {
+			w.codeCache.Set(address[:], code)
+		} else {
+			w.codeCache.Del(address[:])
+		}
 	}
 	if w.codeSizeCache != nil {
-		w.codeSizeCache.Add(address, len(code))
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
+		w.codeSizeCache.Set(address[:], b[:])
 	}
 	if err := w.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
@@ -88,14 +95,17 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 		w.uncommitedIncarnations[address] = original.Incarnation
 	}
 	if w.accountCache != nil {
-		w.accountCache.Add(address, nil)
+		w.accountCache.Set(address[:], nil)
 	}
-	if err := w.stateDb.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
-		if err != ethdb.ErrKeyNotFound {
-			return err
-		}
+	if w.codeCache != nil {
+		w.codeCache.Set(address[:], nil)
 	}
-	return nil
+	if w.codeSizeCache != nil {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], 0)
+		w.codeSizeCache.Set(address[:], b[:])
+	}
+	return w.stateDb.Delete(dbutils.PlainStateBucket, address[:])
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -105,25 +115,16 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	if *original == *value {
 		return nil
 	}
-
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 
-	v := common.CopyBytes(cleanUpTrailingZeroes(value[:]))
+	v := cleanUpTrailingZeroes(value[:])
 	if w.storageCache != nil {
-		var storageKey [20 + 32]byte
-		copy(storageKey[:], address[:])
-		copy(storageKey[20:], key[:])
-		w.storageCache.Add(storageKey, v)
+		w.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
-		if err := w.stateDb.Delete(dbutils.PlainStateBucket, compositeKey); err != nil {
-			if err != ethdb.ErrKeyNotFound {
-				return err
-			}
-		}
-		return nil
+		return w.stateDb.Delete(dbutils.PlainStateBucket, compositeKey)
 	}
-	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, v)
+	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, common.CopyBytes(v))
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {

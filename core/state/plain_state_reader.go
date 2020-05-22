@@ -2,7 +2,8 @@ package state
 
 import (
 	"bytes"
-	lru "github.com/hashicorp/golang-lru"
+	"encoding/binary"
+	"github.com/VictoriaMetrics/fastcache"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -18,104 +19,92 @@ var _ StateReader = (*PlainStateReader)(nil)
 type PlainStateReader struct {
 	db                     ethdb.Getter
 	uncommitedIncarnations map[common.Address]uint64
-	accountCache           *lru.Cache
-	storageCache           *lru.Cache
-	codeCache              *lru.Cache
-	codeSizeCache          *lru.Cache
+	accountCache           *fastcache.Cache
+	storageCache           *fastcache.Cache
+	codeCache              *fastcache.Cache
+	codeSizeCache          *fastcache.Cache
 }
 
-func NewPlainStateReaderWithFallback(db ethdb.Getter, incarnations map[common.Address]uint64) *PlainStateReader {
+func NewPlainStateReader(db ethdb.Getter, incarnations map[common.Address]uint64) *PlainStateReader {
 	return &PlainStateReader{
 		db:                     db,
 		uncommitedIncarnations: incarnations,
 	}
 }
 
-func (r *PlainStateReader) SetAccountCache(accountCache *lru.Cache) {
+func (r *PlainStateReader) SetAccountCache(accountCache *fastcache.Cache) {
 	r.accountCache = accountCache
 }
 
-func (r *PlainStateReader) SetStorageCache(storageCache *lru.Cache) {
+func (r *PlainStateReader) SetStorageCache(storageCache *fastcache.Cache) {
 	r.storageCache = storageCache
 }
 
-func (r *PlainStateReader) SetCodeCache(codeCache *lru.Cache) {
+func (r *PlainStateReader) SetCodeCache(codeCache *fastcache.Cache) {
 	r.codeCache = codeCache
 }
 
-func (r *PlainStateReader) SetCodeSizeCache(codeSizeCache *lru.Cache) {
+func (r *PlainStateReader) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
 	r.codeSizeCache = codeSizeCache
 }
 
 func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	var enc []byte
+	var ok bool
 	if r.accountCache != nil {
-		if cached, ok := r.accountCache.Get(address); ok {
-			if cached == nil {
-				return nil, nil
-			}
-			return cached.(*accounts.Account), nil
-		}
+		enc, ok = r.accountCache.HasGet(nil, address[:])
 	}
-	enc, err := r.db.Get(dbutils.PlainStateBucket, address[:])
-	if err == nil {
-		acc := &accounts.Account{}
-		if err = acc.DecodeForStorage(enc); err != nil {
+	if !ok {
+		var err error
+		enc, err = r.db.Get(dbutils.PlainStateBucket, address[:])
+		if err != nil && !entryNotFound(err) {
 			return nil, err
 		}
-		if r.accountCache != nil {
-			r.accountCache.Add(address, acc)
-		}
-		return acc, nil
-	} else if !entryNotFound(err) {
+	}
+	if !ok && r.accountCache != nil {
+		r.accountCache.Set(address[:], enc)
+	}
+	if enc == nil {
+		return nil, nil
+	}
+	acc := &accounts.Account{}
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
-	if r.accountCache != nil {
-		r.accountCache.Add(address, nil)
-	}
-	return nil, nil
+	return acc, nil
 }
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	var storageKeyP *[20 + 32]byte
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	if r.storageCache != nil {
-		var storageKey [20 + 32]byte
-		copy(storageKey[:], address[:])
-		copy(storageKey[20:], key[:])
-		if cached, ok := r.storageCache.Get(storageKey); ok {
-			if cached == nil {
-				return nil, nil
-			}
-			return cached.([]byte), nil
+		if enc, ok := r.storageCache.HasGet(nil, compositeKey); ok {
+			return enc, nil
 		}
-		storageKeyP = &storageKey
 	}
-	enc, err := r.db.Get(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key))
-	if err == nil {
-		if r.storageCache != nil {
-			r.storageCache.Add(*storageKeyP, enc)
-		}
-		return enc, nil
-	} else if !entryNotFound(err) {
+	enc, err := r.db.Get(dbutils.PlainStateBucket, compositeKey)
+	if err != nil && !entryNotFound(err) {
 		return nil, err
 	}
 	if r.storageCache != nil {
-		r.storageCache.Add(*storageKeyP, nil)
+		r.storageCache.Set(compositeKey, enc)
 	}
-	return nil, nil
+	return enc, nil
 }
 
 func (r *PlainStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return nil, nil
-	}
 	if r.codeCache != nil {
-		if cached, ok := r.codeCache.Get(address); ok {
-			return cached.([]byte), nil
+		if code, ok := r.codeCache.HasGet(nil, address[:]); ok {
+			return code, nil
 		}
 	}
 	code, err := r.db.Get(dbutils.CodeBucket, codeHash[:])
-	if r.codeCache != nil {
-		r.codeCache.Add(address, code)
+	if r.codeCache != nil && len(code) <= 1024 {
+		r.codeCache.Set(address[:], code)
+	}
+	if r.codeSizeCache != nil {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
+		r.codeSizeCache.Set(address[:], b[:])
 	}
 	return code, err
 }
@@ -125,8 +114,8 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash 
 		return 0, nil
 	}
 	if r.codeSizeCache != nil {
-		if cached, ok := r.codeSizeCache.Get(address); ok {
-			return cached.(int), nil
+		if b, ok := r.codeSizeCache.HasGet(nil, address[:]); ok {
+			return int(binary.BigEndian.Uint32(b)), nil
 		}
 	}
 	code, err := r.db.Get(dbutils.CodeBucket, codeHash[:])
@@ -134,7 +123,9 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash 
 		return 0, err
 	}
 	if r.codeSizeCache != nil {
-		r.codeSizeCache.Add(address, len(code))
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
+		r.codeSizeCache.Set(address[:], b[:])
 	}
 	return len(code), nil
 }
