@@ -2383,7 +2383,7 @@ func main() {
 		resetState(*chaindata)
 	}
 	if *action == "resetHistoryIndex" {
-		resetState(*chaindata)
+		resetHistoryIndex(*chaindata)
 	}
 	if *action == "getProof" {
 		testGetProof(*chaindata, uint64(*block), common.HexToAddress(*account))
