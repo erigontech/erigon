@@ -59,8 +59,6 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	}
 
 	ig := NewIndexGenerator(db)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-
 	err = ig.GenerateIndex(0, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
 		return changeset.AccountChangeSetBytes(bytes)
 	}, nil)
@@ -230,8 +228,6 @@ func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
 	}
 
 	ig := NewIndexGenerator(db)
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-
 	err = ig.GenerateIndex(0, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, func(bytes []byte) ChangesetWalker {
 		return changeset.StorageChangeSetBytes(bytes)
 	}, nil)
