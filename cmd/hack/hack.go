@@ -1231,6 +1231,22 @@ func printBranches(block uint64) {
 	}
 }
 
+func readPlainAccount(chaindata string, address common.Address, block uint64, rewind uint64) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	var acc accounts.Account
+	enc, err := ethDb.Get(dbutils.PlainStateBucket, address[:])
+	if err != nil {
+		panic(err)
+	} else if enc == nil {
+		panic("acc not found")
+	}
+	if err = acc.DecodeForStorage(enc); err != nil {
+		panic(err)
+	}
+	fmt.Printf("%x\n%x\n%x\n%d\n", address, acc.Root, acc.CodeHash, acc.Incarnation)
+}
+
 func readAccount(chaindata string, account common.Address, block uint64, rewind uint64) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
