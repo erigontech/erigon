@@ -3,8 +3,8 @@ package core
 import (
 	"encoding/binary"
 	"errors"
-	"sort"
 	"runtime"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
