@@ -90,6 +90,12 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 	if w.accountCache != nil {
 		w.accountCache.Add(address, nil)
 	}
+	if w.codeCache != nil {
+		w.codeCache.Add(address, nil)
+	}
+	if w.codeSizeCache != nil {
+		w.codeSizeCache.Add(address, 0)
+	}
 	if err := w.stateDb.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
 		if err != ethdb.ErrKeyNotFound {
 			return err

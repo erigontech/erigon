@@ -110,6 +110,12 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if dsw.accountCache != nil {
 		dsw.accountCache.Add(address, nil)
 	}
+	if dsw.codeCache != nil {
+		dsw.codeCache.Add(address, nil)
+	}
+	if dsw.codeSizeCache != nil {
+		dsw.codeSizeCache.Add(address, 0)
+	}
 	return nil
 }
 

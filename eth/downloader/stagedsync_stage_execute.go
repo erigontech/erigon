@@ -94,7 +94,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		}
 	*/
 	stateBatch := stateDB.NewBatch()
-	//changeBatch := stateDB.NewBatch()
+	changeBatch := stateDB.NewBatch()
 
 	progressLogger := NewProgressLogger(logInterval, stateBatch)
 	progressLogger.Start(&nextBlockNumber)
@@ -129,7 +129,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			plainReader.SetCodeCache(codeCache)
 			plainReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = plainReader
-			plainWriter := state.NewPlainStateWriter(stateBatch, stateBatch, blockNum, uncommitedIncarnations)
+			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
 			plainWriter.SetAccountCache(accountCache)
 			plainWriter.SetStorageCache(storageCache)
 			plainWriter.SetCodeCache(codeCache)
@@ -142,7 +142,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			hashStateReader.SetCodeCache(codeCache)
 			hashStateReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = hashStateReader
-			hashedStateWriter := state.NewDbStateWriter(stateBatch, stateBatch, blockNum, uncommitedIncarnations)
+			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
 			hashedStateWriter.SetAccountCache(accountCache)
 			hashedStateWriter.SetStorageCache(storageCache)
 			hashedStateWriter.SetCodeCache(codeCache)
@@ -170,13 +170,11 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			uncommitedIncarnations = make(map[common.Address]uint64)
 			log.Info("State batch committed", "in", time.Since(start))
 		}
-		/*
 		if changeBatch.BatchSize() >= ChangeBatchSize {
 			if _, err = changeBatch.Commit(); err != nil {
 				return 0, err
 			}
 		}
-		*/
 		/*
 			if blockNum-profileNumber == 100000 {
 				// Flush the profiler
@@ -188,12 +186,10 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	if err != nil {
 		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
 	}
-	/*
 	_, err = changeBatch.Commit()
 	if err != nil {
 		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
-	*/
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
 
