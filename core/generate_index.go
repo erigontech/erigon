@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"sort"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -69,8 +68,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64, indexBucket []byte) f
 }
 
 func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker, commitHook func(db ethdb.Database, blockNum uint64) error) error {
-	startTime := time.Now()
-	batchSize := 10000
+	batchSize := 100000
 	//addrHash - > index or addhash + last block for full chunk contracts
 	ig.cache = make(map[string][]IndexWithKey, batchSize)
 
@@ -117,11 +115,6 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 			}
 
 			if len(ig.cache) > batchSize {
-				log.Info("Next chunk",
-					"blocknum", blockNum,
-					"time", time.Since(startTime),
-					"chunk size", len(ig.cache),
-				)
 				currentKey = common.CopyBytes(k)
 				stop = false
 				return false, nil
@@ -134,15 +127,14 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 		}
 
 		if len(ig.cache) > 0 {
-			log.Info("Commit batch",
-				"blocknum", blockNum,
-				"time", time.Since(startTime),
-				"chunk size", len(ig.cache),
-			)
 			err = commit()
 			if err != nil {
 				return err
 			}
+			log.Info("Committed batch",
+				"blocknum", blockNum,
+				"chunk size", len(ig.cache),
+			)
 		}
 		if commitHook != nil {
 			err = commitHook(ig.db, blockNum)
