@@ -101,12 +101,7 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 		binary.BigEndian.PutUint32(b[:], 0)
 		w.codeSizeCache.Set(address[:], b[:])
 	}
-	if err := w.stateDb.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
-		if err != ethdb.ErrKeyNotFound {
-			return err
-		}
-	}
-	return nil
+	return w.stateDb.Delete(dbutils.PlainStateBucket, address[:])
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
