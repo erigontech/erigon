@@ -121,7 +121,7 @@ func storageReadWrites(blockNum uint64) {
 	defer w.Flush()
 	st := NewStorageTracer()
 	vmConfig := vm.Config{Tracer: st, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
 	check(err)
 	interrupt := false
 	totalSstores := 0
@@ -147,7 +147,7 @@ func storageReadWrites(blockNum uint64) {
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 		}

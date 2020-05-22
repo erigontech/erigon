@@ -80,6 +80,7 @@ type ProtocolManager struct {
 
 	txpool     txPool
 	blockchain *core.BlockChain
+	chaindb    ethdb.Database
 	maxPeers   int
 
 	downloader   *downloader.Downloader
@@ -118,6 +119,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		eventMux:   mux,
 		txpool:     txpool,
 		blockchain: blockchain,
+		chaindb:    chaindb,
 		peers:      newPeerSet(),
 		whitelist:  whitelist,
 		mode:       mode,
@@ -1321,7 +1323,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()
-		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil)
 		if err != nil {
 			return fmt.Errorf("NewBlockChain: %w", err)
 		}

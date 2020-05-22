@@ -147,9 +147,10 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db     ethdb.DbWithPendingMutations // Low level persistent database to store final content in
-	triegc *prque.Prque                 // Priority queue mapping block numbers to tries to gc
-	gcproc time.Duration                // Accumulates canonical block processing for trie dumping
+	db            ethdb.DbWithPendingMutations // Low level persistent database to store final content in
+	triegc        *prque.Prque                 // Priority queue mapping block numbers to tries to gc
+	gcproc        time.Duration                // Accumulates canonical block processing for trie dumping
+	txLookupLimit uint64
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -203,7 +204,7 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -261,6 +262,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	if bc.genesisBlock == nil {
 		return nil, ErrNoGenesis
 	}
+
+	var nilBlock *types.Block
+	bc.currentBlock.Store(nilBlock)
+	bc.currentFastBlock.Store(nilBlock)
 
 	if err := bc.loadLastState(); err != nil {
 		return nil, err
@@ -1090,79 +1095,94 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	// this function only accepts canonical chain data. All side chain will be reverted
 	// eventually.
 	/*
-		writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
-			var (
-				previous = bc.CurrentFastBlock()
-			)
-			// If any error occurs before updating the head or we are inserting a side chain,
-			// all the data written this time wll be rolled back.
-			defer func() {
-				if previous != nil {
-					if err := bc.truncateAncient(previous.NumberU64()); err != nil {
-						log.Crit("Truncate ancient store failed", "err", err)
+				writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
+					var (
+						previous = bc.CurrentFastBlock()
+					)
+					// If any error occurs before updating the head or we are inserting a side chain,
+					// all the data written this time wll be rolled back.
+					defer func() {
+						if previous != nil {
+							if err := bc.truncateAncient(previous.NumberU64()); err != nil {
+								log.Crit("Truncate ancient store failed", "err", err)
+							}
+						}
+					}()
+					var deleted []*numberHash
+					for i, block := range blockChain {
+						// Short circuit insertion if shutting down or processing failed
+						if bc.getProcInterrupt() {
+							return 0, errInsertionInterrupted
+						}
+						// Short circuit insertion if it is required(used in testing only)
+						if bc.terminateInsert != nil && bc.terminateInsert(block.Hash(), block.NumberU64()) {
+							return i, errors.New("insertion is terminated for testing purpose")
+						}
+						// Short circuit if the owner header is unknown
+						if !bc.HasHeader(block.Hash(), block.NumberU64()) {
+							return i, fmt.Errorf("containing header #%d [%x…] unknown", block.Number(), block.Hash().Bytes()[:4])
+						}
+
+						// Turbo-Geth doesn't have fast sync support
+						// Flush data into ancient database.
+						size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
+						if bc.enableTxLookupIndex {
+							rawdb.WriteTxLookupEntries(bc.db, block)
+						}
+
+						// Write tx indices if any condition is satisfied:
+		 				// * If user requires to reserve all tx indices(txlookuplimit=0)
+		 				// * If all ancient tx indices are required to be reserved(txlookuplimit is even higher than ancientlimit)
+		 				// * If block number is large enough to be regarded as a recent block
+		 				// It means blocks below the ancientLimit-txlookupLimit won't be indexed.
+		 				//
+		 				// But if the `TxIndexTail` is not nil, e.g. Geth is initialized with
+		 				// an external ancient database, during the setup, blockchain will start
+		 				// a background routine to re-indexed all indices in [ancients - txlookupLimit, ancients)
+		 				// range. In this case, all tx indices of newly imported blocks should be
+		 				// generated.
+		 				if bc.txLookupLimit == 0 || ancientLimit <= bc.txLookupLimit || block.NumberU64() >= ancientLimit-bc.txLookupLimit {
+		 					rawdb.WriteTxLookupEntries(batch, block)
+		 				} else if rawdb.ReadTxIndexTail(bc.db) != nil {
+		 					rawdb.WriteTxLookupEntries(batch, block)
+		 				}
+						stats.processed++
 					}
-				}
-			}()
-			var deleted []*numberHash
-			for i, block := range blockChain {
-				// Short circuit insertion if shutting down or processing failed
-				if bc.getProcInterrupt() {
-					return 0, errInsertionInterrupted
-				}
-				// Short circuit insertion if it is required(used in testing only)
-				if bc.terminateInsert != nil && bc.terminateInsert(block.Hash(), block.NumberU64()) {
-					return i, errors.New("insertion is terminated for testing purpose")
-				}
-				// Short circuit if the owner header is unknown
-				if !bc.HasHeader(block.Hash(), block.NumberU64()) {
-					return i, fmt.Errorf("containing header #%d [%x…] unknown", block.Number(), block.Hash().Bytes()[:4])
-				}
 
-				// Turbo-Geth doesn't have fast sync support
-
-				// Flush data into ancient database.
-				size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
-				if bc.enableTxLookupIndex {
-					rawdb.WriteTxLookupEntries(bc.db, block)
-				}
-
-				stats.processed++
-			}
-
-			if !updateHead(blockChain[len(blockChain)-1]) {
-				return 0, errors.New("side blocks can't be accepted as the ancient chain data")
-			}
-			previous = nil // disable rollback explicitly
-
-			// Wipe out canonical block data.
-			for _, nh := range deleted {
-				rawdb.DeleteBlockWithoutNumber(bc.db, nh.hash, nh.number)
-				rawdb.DeleteCanonicalHash(bc.db, nh.number)
-			}
-			for _, block := range blockChain {
-				// Always keep genesis block in active database.
-				if block.NumberU64() != 0 {
-					rawdb.DeleteBlockWithoutNumber(bc.db, block.Hash(), block.NumberU64())
-					rawdb.DeleteCanonicalHash(bc.db, block.NumberU64())
-				}
-			}
-
-			// Wipe out side chain too.
-			for _, nh := range deleted {
-				for _, hash := range rawdb.ReadAllHashes(bc.db, nh.number) {
-					rawdb.DeleteBlock(bc.db, hash, nh.number)
-				}
-			}
-			for _, block := range blockChain {
-				// Always keep genesis block in active database.
-				if block.NumberU64() != 0 {
-					for _, hash := range rawdb.ReadAllHashes(bc.db, block.NumberU64()) {
-						rawdb.DeleteBlock(bc.db, hash, block.NumberU64())
+					if !updateHead(blockChain[len(blockChain)-1]) {
+						return 0, errors.New("side blocks can't be accepted as the ancient chain data")
 					}
+					previous = nil // disable rollback explicitly
+
+					// Wipe out canonical block data.
+					for _, nh := range deleted {
+						rawdb.DeleteBlockWithoutNumber(bc.db, nh.hash, nh.number)
+						rawdb.DeleteCanonicalHash(bc.db, nh.number)
+					}
+					for _, block := range blockChain {
+						// Always keep genesis block in active database.
+						if block.NumberU64() != 0 {
+							rawdb.DeleteBlockWithoutNumber(bc.db, block.Hash(), block.NumberU64())
+							rawdb.DeleteCanonicalHash(bc.db, block.NumberU64())
+						}
+					}
+
+					// Wipe out side chain too.
+					for _, nh := range deleted {
+						for _, hash := range rawdb.ReadAllHashes(bc.db, nh.number) {
+							rawdb.DeleteBlock(bc.db, hash, nh.number)
+						}
+					}
+					for _, block := range blockChain {
+						// Always keep genesis block in active database.
+						if block.NumberU64() != 0 {
+							for _, hash := range rawdb.ReadAllHashes(bc.db, block.NumberU64()) {
+								rawdb.DeleteBlock(bc.db, hash, block.NumberU64())
+							}
+						}
+					}
+					return 0, nil
 				}
-			}
-			return 0, nil
-		}
 	*/
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
@@ -1207,14 +1227,27 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		return 0, nil
 	}
 
-	// Write downloaded chain data and corresponding receipt chain data.
 	/*
+		// Write downloaded chain data and corresponding receipt chain data
 		if len(ancientBlocks) > 0 {
 			if n, err := writeAncient(ancientBlocks, ancientReceipts); err != nil {
 				if err == errInsertionInterrupted {
 					return 0, nil
 				}
 				return n, err
+
+		}
+		// Write the tx index tail (block number from where we index) before write any live blocks
+		if len(liveBlocks) > 0 && liveBlocks[0].NumberU64() == ancientLimit+1 {
+			// The tx index tail can only be one of the following two options:
+			// * 0: all ancient blocks have been indexed
+			// * ancient-limit: the indices of blocks before ancient-limit are ignored
+			if tail := rawdb.ReadTxIndexTail(bc.db); tail == nil {
+				if bc.txLookupLimit == 0 || ancientLimit <= bc.txLookupLimit {
+					rawdb.WriteTxIndexTail(bc.db, 0)
+				} else {
+					rawdb.WriteTxIndexTail(bc.db, ancientLimit-bc.txLookupLimit)
+				}
 			}
 		}
 	*/
@@ -1239,6 +1272,18 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	log.Info("Imported new block receipts", context...)
 
 	return 0, nil
+}
+
+// SetTxLookupLimit is responsible for updating the txlookup limit to the
+// original one stored in db if the new mismatches with the old one.
+func (bc *BlockChain) SetTxLookupLimit(limit uint64) {
+	bc.txLookupLimit = limit
+}
+
+// TxLookupLimit retrieves the txlookup limit used by blockchain to prune
+// stale transaction indices.
+func (bc *BlockChain) TxLookupLimit() uint64 {
+	return bc.txLookupLimit
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
@@ -1349,14 +1394,16 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		if len(logs) > 0 {
 			bc.logsFeed.Send(logs)
 		}
-	}
-	// In theory we should fire a ChainHeadEvent when we inject
-	// a canonical block, but sometimes we can insert a batch of
-	// canonicial blocks. Avoid firing too much ChainHeadEvents,
-	// we will fire an accumulated ChainHeadEvent and disable fire
-	// event here.
-	if emitHeadEvent && execute {
-		bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		// In theory we should fire a ChainHeadEvent when we inject
+		// a canonical block, but sometimes we can insert a batch of
+		// canonicial blocks. Avoid firing too much ChainHeadEvents,
+		// we will fire an accumulated ChainHeadEvent and disable fire
+		// event here.
+		if emitHeadEvent {
+			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		}
+	} else {
+		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
 	return status, nil
 }
@@ -1629,6 +1676,21 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if bc.CurrentBlock().NumberU64() >= block.NumberU64() {
 				//fmt.Printf("Skipped known block %d\n", block.NumberU64())
 				stats.ignored++
+
+				// Special case. Commit the empty receipt slice if we meet the known
+				// block in the middle. It can only happen in the clique chain. Whenever
+				// we insert blocks via `insertSideChain`, we only commit `td`, `header`
+				// and `body` if it's non-existent. Since we don't have receipts without
+				// reexecution, so nothing to commit. But if the sidechain will be adpoted
+				// as the canonical chain eventually, it needs to be reexecuted for missing
+				// state, but if it's this special case here(skip reexecution) we will lose
+				// the empty receipt entry.
+				if len(block.Transactions()) == 0 {
+					rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
+				} else {
+					log.Error("Please file an issue, skip known block execution without receipt",
+						"hash", block.Hash(), "number", block.NumberU64())
+				}
 				continue
 			}
 
@@ -1862,7 +1924,7 @@ func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWit
 		context := []interface{}{
 			"blocks", st.processed, "txs", txs, "mgas", float64(st.usedGas) / 1000000,
 			"elapsed", common.PrettyDuration(elapsed), "mgasps", float64(st.usedGas) * 1000 / float64(elapsed),
-			"number", end.Number(), "hash", end.Hash(), "batch", batch.BatchSize(),
+			"number", end.Number(), "hash", end.Hash(), "batch", common.StorageSize(batch.BatchSize()),
 		}
 		if timestamp := time.Unix(int64(end.Time()), 0); time.Since(timestamp) > time.Minute {
 			context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
@@ -2053,28 +2115,6 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		}
 	}
 	return nil
-}
-
-// PostChainEvents iterates over the events generated by a chain insertion and
-// posts them into the event feed.
-// TODO: Should not expose PostChainEvents. The chain events should be posted in WriteBlock.
-func (bc *BlockChain) PostChainEvents(events []interface{}, logs []*types.Log) {
-	// post event logs for further processing
-	if logs != nil {
-		bc.logsFeed.Send(logs)
-	}
-	for _, event := range events {
-		switch ev := event.(type) {
-		case ChainEvent:
-			bc.chainFeed.Send(ev)
-
-		case ChainHeadEvent:
-			bc.chainHeadFeed.Send(ev)
-
-		case ChainSideEvent:
-			bc.chainSideFeed.Send(ev)
-		}
-	}
 }
 
 func (bc *BlockChain) update() {

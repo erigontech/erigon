@@ -26,7 +26,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/evmc/bindings/go/evmc"
+	"github.com/ethereum/evmc/v7/bindings/go/evmc"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -246,8 +246,8 @@ func (host *hostContext) EmitLog(addr evmc.Address, evmcTopics []evmc.Hash, data
 }
 
 func (host *hostContext) Call(kind evmc.CallKind,
-	evmcDestination evmc.Address, evmcSender evmc.Address, value *big.Int, input []byte, gas int64, depth int,
-	static bool, salt *big.Int) (output []byte, gasLeft int64, createAddrEvmc evmc.Address, err error) {
+	evmcDestination evmc.Address, evmcSender evmc.Address, valueBytes evmc.Hash, input []byte, gas int64, depth int,
+	static bool, saltBytes evmc.Hash) (output []byte, gasLeft int64, createAddrEvmc evmc.Address, err error) {
 
 	destination := common.Address(evmcDestination)
 
@@ -255,6 +255,12 @@ func (host *hostContext) Call(kind evmc.CallKind,
 
 	gasU := uint64(gas)
 	var gasLeftU uint64
+
+	value := big.NewInt(0)
+	value.SetBytes(valueBytes[:])
+
+	salt := big.NewInt(0)
+	salt.SetBytes(saltBytes[:])
 
 	switch kind {
 	case evmc.Call:
@@ -275,7 +281,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 		if !isHomestead && err == ErrCodeStoreOutOfGas {
 			err = nil
 		}
-		if err == errExecutionReverted {
+		if err == ErrExecutionReverted {
 			// Assign return buffer from REVERT.
 			// TODO: Bad API design: return data buffer and the code is returned in the same place. In worst case
 			//       the code is returned also when there is not enough funds to deploy the code.
@@ -285,7 +291,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 		var createOutput []byte
 		createOutput, createAddr, gasLeftU, err = host.env.Create2(host.contract, input, gasU, value, salt)
 		createAddrEvmc = evmc.Address(createAddr)
-		if err == errExecutionReverted {
+		if err == ErrExecutionReverted {
 			// Assign return buffer from REVERT.
 			// TODO: Bad API design: return data buffer and the code is returned in the same place. In worst case
 			//       the code is returned also when there is not enough funds to deploy the code.
@@ -296,7 +302,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 	}
 
 	// Map errors.
-	if err == errExecutionReverted {
+	if err == ErrExecutionReverted {
 		err = evmc.Revert
 	} else if err != nil {
 		err = evmc.Failure
@@ -368,7 +374,7 @@ func (evm *EVMC) Run(contract *Contract, input []byte, readOnly bool) (ret []byt
 	contract.Gas = uint64(gasLeft)
 
 	if err == evmc.Revert {
-		err = errExecutionReverted
+		err = ErrExecutionReverted
 	} else if evmcError, ok := err.(evmc.Error); ok && evmcError.IsInternalError() {
 		panic(fmt.Sprintf("EVMC VM internal error: %s", evmcError.Error()))
 	}

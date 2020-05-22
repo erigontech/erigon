@@ -129,8 +129,12 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.Miner.GasPrice = new(big.Int).Set(DefaultConfig.Miner.GasPrice)
 	}
 	if !config.Pruning && config.TrieDirtyCache > 0 {
-		config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
-		config.SnapshotCache += config.TrieDirtyCache * 3 / 5
+		if config.SnapshotCache > 0 {
+			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
+			config.SnapshotCache += config.TrieDirtyCache * 2 / 5
+		} else {
+			config.TrieCleanCache += config.TrieDirtyCache
+		}
 		config.TrieDirtyCache = 0
 	}
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
@@ -146,13 +150,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(
-		chainDb,
-		config.Genesis,
-		config.OverrideIstanbul,
-		config.OverrideMuirGlacier,
-		config.StorageMode.History,
-	)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
+
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -225,15 +224,15 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			BlocksToPrune:       config.BlocksToPrune,
 			PruneTimeout:        config.PruningTimeout,
 			TrieCleanLimit:      config.TrieCleanCache,
-			TrieDirtyLimit:      config.TrieDirtyCache,
 			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieDirtyLimit:      config.TrieDirtyCache,
 			TrieTimeLimit:       config.TrieTimeout,
 			DownloadOnly:        config.DownloadOnly,
 			NoHistory:           !config.StorageMode.History,
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -625,7 +625,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 
-	//bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	//bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	//check(err)
 	//defer db.Close()
 	//tds, err := bc.GetTrieDbState()
@@ -690,7 +690,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 32
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	defer blockDb.Close()
 	if fromScratch {
@@ -701,9 +701,9 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil, false /* history */)
+	_, _, _, err = core.SetupGenesisBlock(stateDb, nil, false /* history */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
@@ -758,7 +758,7 @@ func extractTrie(block int) {
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
@@ -777,7 +777,7 @@ func testRewind(chaindata string, block, rewind int) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -839,7 +839,7 @@ func testStartup() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -877,7 +877,7 @@ func testResolve(chaindata string) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	//check(err)
 	/*
 		currentBlock := bc.CurrentBlock()
@@ -1999,12 +1999,21 @@ func resetState(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer db.Close()
-	err = db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.AccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.StorageChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
+	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = db.DeleteBucket(dbutils.AccountChangeSetBucket)
-	check(err)
-	err = db.DeleteBucket(dbutils.StorageChangeSetBucket)
-	check(err)
+	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.Execution, 0)
@@ -2055,23 +2064,17 @@ func (r *Receiver) Receive(
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
-			if c < 0 || (c == 0 && len(v) > 0) {
+			if c <= 0 && len(v) > 0 {
 				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k[:32], k[40:], nil, v, nil, 0, 0); err != nil {
 					return err
 				}
 			}
-			if c < 0 && len(v) == 0 {
-				panic("")
-			}
 		} else {
 			v := r.accountMap[ks]
-			if c < 0 || (c == 0 && v != nil) {
+			if c <= 0 && v != nil {
 				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
-			}
-			if c < 0 && v == nil {
-				panic("")
 			}
 		}
 		r.currentIdx++
@@ -2143,10 +2146,18 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
-	for ks := range accountMap {
+	for ks, acc := range accountMap {
 		unfurlList[i] = ks
 		i++
 		unfurl.AddKey([]byte(ks))
+		if acc != nil {
+			// Fill the code hashes
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+					copy(acc.CodeHash[:], codeHash)
+				}
+			}
+		}
 	}
 	for ks := range storageMap {
 		unfurlList[i] = ks
@@ -2170,10 +2181,38 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	if err != nil {
 		panic(err)
 	}
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
+	fmt.Printf("Head block number: %d, root hash: %x\n", *headNumber, headHeader.Root)
 	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
 	hash := rawdb.ReadCanonicalHash(db, block-1)
 	header := rawdb.ReadHeader(db, hash, block-1)
 	fmt.Printf("Block state root: %x\n", header.Root)
+}
+
+func testSeek(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	if err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		c := b.Cursor()
+		//kk := common.FromHex("0x434751")
+		kk := common.FromHex("0x434750c1bd61c93ad930ba5b31d2181636e06fcad87ea82ac78c3ad9515d099f")
+		c.Seek(kk)
+		/*
+			for k, _ := c.Seek(common.FromHex("4347500d81465512b2397af46c12792c44f2a89e3601af951cf9c7735385b0cb")); k != nil; k, _ = c.Next() {
+				if bytes.Compare(k, kk) > 0 {
+					fmt.Printf("Found nexgt key: %x\n", k)
+					break
+				}
+			}
+		*/
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func main() {
@@ -2313,5 +2352,8 @@ func main() {
 	}
 	if *action == "getProof" {
 		testGetProof(*chaindata, uint64(*block), common.HexToAddress(*account))
+	}
+	if *action == "seek" {
+		testSeek(*chaindata)
 	}
 }

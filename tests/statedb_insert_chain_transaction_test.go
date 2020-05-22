@@ -675,7 +675,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()
 
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		return nil, nil, nil, err
 	}

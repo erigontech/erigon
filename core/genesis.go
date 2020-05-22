@@ -40,6 +40,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
+//  ^--- will be overriden e when parsing flags anyway
+
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
 
@@ -153,16 +156,7 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil, nil, history)
-}
-func SetupGenesisBlockWithOverride(db ethdb.Database,
-	genesis *Genesis,
-	overrideIstanbul *big.Int,
-	overrideMuirGlacier *big.Int,
-	history bool,
-) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
-
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
 	}
@@ -177,9 +171,9 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 		}
 		block, stateDB1, err := genesis.Commit(db, history)
 		if err != nil {
-			return nil, common.Hash{}, nil, err
+			return genesis.Config, common.Hash{}, nil, err
 		}
-		return genesis.Config, block.Hash(), stateDB1, err
+		return genesis.Config, block.Hash(), stateDB1, nil
 	}
 
 	// Check whether the genesis block is already written.
@@ -196,12 +190,6 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
-	if overrideIstanbul != nil {
-		newcfg.IstanbulBlock = overrideIstanbul
-	}
-	if overrideMuirGlacier != nil {
-		newcfg.MuirGlacierBlock = overrideMuirGlacier
-	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}
@@ -314,18 +302,29 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 	tds.SetBlockNr(0)
-	blockWriter := tds.DbStateWriter()
-	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
-	}
-	// Always write changesets
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
-	}
-	// Optionally write history
-	if history {
-		if err := blockWriter.WriteHistory(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+	if UsePlainStateExecution {
+		blockWriter := tds.PlainStateWriter()
+		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		}
+		// Always write changesets
+		if err := blockWriter.WriteChangeSets(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		}
+	} else {
+		blockWriter := tds.DbStateWriter()
+		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		}
+		// Always write changesets
+		if err := blockWriter.WriteChangeSets(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		}
+		// Optionally write history
+		if history {
+			if err := blockWriter.WriteHistory(); err != nil {
+				return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+			}
 		}
 	}
 	if _, err := batch.Commit(); err != nil {

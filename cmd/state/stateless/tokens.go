@@ -134,7 +134,7 @@ func makeTokens(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	tt := NewTokenTracer()
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
 	check(err)
 	if blockNum > 1 {
 		tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
@@ -160,7 +160,7 @@ func makeTokens(blockNum uint64) {
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 		}
@@ -193,7 +193,7 @@ func makeTokenBalances() {
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -251,11 +251,11 @@ func makeTokenBalances() {
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-		_, _, failed, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
+		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)
 		}
-		if failed {
+		if result.Failed() {
 			fmt.Printf("Call failed\n")
 		}
 		pi := statedb.Preimages()
@@ -413,7 +413,7 @@ func makeTokenAllowances() {
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -474,11 +474,11 @@ func makeTokenAllowances() {
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-		_, _, failed, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
+		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)
 		}
-		if failed {
+		if result.Failed() {
 			fmt.Printf("Call failed\n")
 		}
 		pi := statedb.Preimages()
