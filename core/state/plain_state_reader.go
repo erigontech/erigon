@@ -24,7 +24,7 @@ type PlainStateReader struct {
 	codeSizeCache          *lru.Cache
 }
 
-func NewPlainStateReaderWithFallback(db ethdb.Getter, incarnations map[common.Address]uint64) *PlainStateReader {
+func NewPlainStateReader(db ethdb.Getter, incarnations map[common.Address]uint64) *PlainStateReader {
 	return &PlainStateReader{
 		db:                     db,
 		uncommitedIncarnations: incarnations,

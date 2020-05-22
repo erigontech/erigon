@@ -123,14 +123,14 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		var stateWriter state.WriterWithChangeSets
 
 		if core.UsePlainStateExecution {
-			plainReader := state.NewPlainStateReaderWithFallback(stateBatch, uncommitedIncarnations)
-			plainReader.SetAccountCache(accountCache)
+			plainReader := state.NewPlainStateReader(stateBatch, uncommitedIncarnations)
+			//plainReader.SetAccountCache(accountCache)
 			plainReader.SetStorageCache(storageCache)
 			plainReader.SetCodeCache(codeCache)
 			plainReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = plainReader
 			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
-			plainWriter.SetAccountCache(accountCache)
+			//plainWriter.SetAccountCache(accountCache)
 			plainWriter.SetStorageCache(storageCache)
 			plainWriter.SetCodeCache(codeCache)
 			plainWriter.SetCodeSizeCache(codeSizeCache)
