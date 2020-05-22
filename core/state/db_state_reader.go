@@ -100,7 +100,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 	return enc, nil
 }
 
-func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
+func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -109,7 +109,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 			return code, nil
 		}
 	}
-	code, err = dbr.db.Get(dbutils.CodeBucket, codeHash[:])
+	code, err := dbr.db.Get(dbutils.CodeBucket, codeHash[:])
 	if dbr.codeCache != nil && len(code) <= 1024 {
 		dbr.codeCache.Set(address[:], code)
 	}
