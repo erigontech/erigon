@@ -11,22 +11,26 @@ import (
 )
 
 func spawnGenerateIndexes(db ethdb.Database, plainState bool, from uint64) error {
+	lastProcessedBlockNumber, err := GetStageProgress(db, HistoryIndex)
+	if err != nil {
+		return err
+	}
 	if plainState {
 		log.Info("Skip index generation for plain state")
 		return nil
 	}
 
 	ig := core.NewIndexGenerator(db)
-	if err := ig.GenerateIndex(from, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
-		return SaveStageProgress(innerDB, IndexGeneration, blockNum)
+	if err := ig.GenerateIndex(lastProcessedBlockNumber, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
+		return SaveStageProgress(innerDB, HistoryIndex, blockNum)
 	}); err != nil {
 		fmt.Println("AccountChangeSetBucket, err", err)
 		return err
 	}
 
 	ig = core.NewIndexGenerator(db)
-	if err := ig.GenerateIndex(from, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
-		return SaveStageProgress(innerDB, IndexGeneration, blockNum)
+	if err := ig.GenerateIndex(lastProcessedBlockNumber, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
+		return SaveStageProgress(innerDB, HistoryIndex, blockNum)
 	}); err != nil {
 		fmt.Println("StorageChangeSetBucket, err", err)
 		return err

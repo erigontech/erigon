@@ -42,7 +42,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 			if !core.UsePlainStateExecution {
 				err = d.unwindHashCheckStage(unwindPoint)
 			}
-		case IndexGeneration:
+		case HistoryIndex:
 			err = unwindGenerateIndexes(unwindPoint, d.stateDB, core.UsePlainStateExecution)
 		default:
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)

@@ -70,7 +70,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64, indexBucket []byte) f
 
 func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker, commitHook func(db ethdb.Database, blockNum uint64) error) error {
 	startTime := time.Now()
-	batchSize := ig.db.IdealBatchSize()
+	batchSize := 10000
 	//addrHash - > index or addhash + last block for full chunk contracts
 	ig.cache = make(map[string][]IndexWithKey, batchSize)
 
@@ -111,7 +111,6 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 		err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
 			blockNum, _ = dbutils.DecodeTimestamp(k)
 
-			currentKey = common.CopyBytes(k)
 			err := walkerAdapter(v).Walk(ig.changeSetWalker(blockNum, indexBucket))
 			if err != nil {
 				return false, err
@@ -123,6 +122,7 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 					"time", time.Since(startTime),
 					"chunk size", len(ig.cache),
 				)
+				currentKey = common.CopyBytes(k)
 				stop = false
 				return false, nil
 			}
