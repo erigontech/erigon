@@ -175,6 +175,10 @@ func DecodeIncarnation(buf []byte) uint64 {
 	return incarnation ^ ^uint64(0)
 }
 
+func EncodeIncarnation(incarnation uint64, buf []byte) {
+	binary.BigEndian.PutUint64(buf, ^incarnation)
+}
+
 func RemoveIncarnationFromKey(key []byte, out *[]byte) {
 	tmp := (*out)[:0]
 	if len(key) <= common.HashLength {

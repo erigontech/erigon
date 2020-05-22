@@ -80,6 +80,7 @@ type Schedule struct {
 type WitnessEstimator interface {
 	CumulativeWitnessSize(key []byte) uint64
 	PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, err error)
+	PrefixByCumulativeWitnessSize2(size uint64) (prefix []byte, err error)
 }
 
 func NewSchedule(estimator WitnessEstimator) *Schedule {
@@ -91,10 +92,10 @@ func (s *Schedule) Tick(block uint64) (Tick, error) {
 	tick.StateSlices = append(tick.StateSlices)
 	for i := range tick.StateSlices {
 		var err error
-		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].FromSize); err != nil {
+		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSize2(tick.StateSlices[i].FromSize); err != nil {
 			return Tick{}, err
 		}
-		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].ToSize); err != nil {
+		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSize2(tick.StateSlices[i].ToSize); err != nil {
 			return Tick{}, err
 		}
 	}

@@ -188,15 +188,20 @@ func (rr *RetainRange) String() string {
 // RetainAll - returns true to any prefix
 type RetainAll struct {
 	codeTouches map[common.Hash]struct{}
+	decider     RetainDecider
 }
 
 // NewRetainRange creates new NewRetainRange
 // to=nil - means no upper bound
-func NewRetainAll() *RetainAll {
-	return &RetainAll{codeTouches: make(map[common.Hash]struct{})}
+func NewRetainAll(decider RetainDecider) *RetainAll {
+	return &RetainAll{decider: decider, codeTouches: make(map[common.Hash]struct{})}
 }
 
 func (rr *RetainAll) Retain(prefix []byte) (retain bool) {
+	if len(prefix) > 4 {
+		return rr.decider.Retain(prefix)
+	}
+
 	return true
 }
 

@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -633,7 +634,6 @@ func mgrSchedule(chaindata string, block uint64) {
 	tds, err := bc.GetTrieDbState()
 	check(err)
 	fmt.Println("GetTrieDbState: ", time.Since(t2))
-
 	t3 := time.Now()
 	loader := trie.NewSubTrieLoader(0)
 	tr := tds.Trie()
@@ -651,15 +651,14 @@ func mgrSchedule(chaindata string, block uint64) {
 	var witnessSizeAccumulator uint64
 	var witnessCount int64
 	var witnessEstimatedSizeAccumulator uint64
-	//fmt.Printf("%s\n", schedule)
-	//fmt.Printf("stateSize: %d\n", stateSize)
 	t5 := time.Now()
 
-	r1, _ := tds.PrefixByCumulativeWitnessSize(127_099)
+	//Test2(db.KV())
+	r1, _ := tds.PrefixByCumulativeWitnessSize(10_000_000)
 	fmt.Println()
 	fmt.Println()
-	r2, _ := tds.PrefixByCumulativeWitnessSize2(127_099)
-	fmt.Printf("%x %x\n", r1, r2)
+	r2, _ := tds.PrefixByCumulativeWitnessSize2(10_000_000)
+	fmt.Printf("R: %x %x\n", r1, r2)
 
 	//schedule := mgr.NewSchedule(tds)
 	//var toBlock = block + mgr.BlocksPerCycle + 100
@@ -673,19 +672,21 @@ func mgrSchedule(chaindata string, block uint64) {
 	//
 	//	for _, slice := range tick.StateSlices {
 	//		_ = slice
-	//		from2, err := tds.PrefixByCumulativeWitnessSize2(slice.FromSize)
-	//		check(err)
-	//		to2, err := tds.PrefixByCumulativeWitnessSize2(slice.ToSize)
-	//		check(err)
-	//
-	//		if !bytes.Equal(from2, slice.From) {
-	//			fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.From, from2)
-	//			return
-	//		}
-	//		if !bytes.Equal(to2, slice.To) {
-	//			fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.To, to2)
-	//			return
-	//		}
+	//		//from2, err := tds.PrefixByCumulativeWitnessSize2(slice.FromSize)
+	//		//check(err)
+	//		//to2, err := tds.PrefixByCumulativeWitnessSize2(slice.ToSize)
+	//		//check(err)
+	//		//_ = from2
+	//		//_ = to2
+	//		//
+	//		//if !bytes.Equal(from2, slice.From) {
+	//		//	fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.From, from2)
+	//		//	return
+	//		//}
+	//		//if !bytes.Equal(to2, slice.To) {
+	//		//	fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.To, to2)
+	//		//	return
+	//		//}
 	//
 	//		//retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
 	//		//if tick.IsLastInCycle() {
@@ -716,16 +717,16 @@ func mgrSchedule(chaindata string, block uint64) {
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
-	state.MaxTrieCacheSize = 32
+	state.MaxTrieCacheSize = 100 * 1024
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	defer blockDb.Close()
 	if fromScratch {
-		os.Remove("statedb")
+		os.Remove("statedb-ih-greater-4k-only")
 	}
-	stateDb, err := ethdb.NewBoltDatabase("statedb")
+	stateDb, err := ethdb.NewBoltDatabase("statedb-ih-greater-4k-only")
 	check(err)
 	defer stateDb.Close()
 

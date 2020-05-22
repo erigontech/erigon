@@ -2,7 +2,6 @@ package state
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -57,7 +56,6 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 	if debug.IsTrackWitnessSizeEnabled() {
 		lenBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(lenBytes, witnessSize)
-		fmt.Printf("Put: %dK %x\n", witnessSize/1000, key)
 		if err := ih.putter.Put(dbutils.IntermediateWitnessSizeBucket, common.CopyBytes(key), lenBytes); err != nil {
 			log.Warn("could not put intermediate trie data len", "err", err)
 		}

@@ -246,14 +246,31 @@ func (an *accountNode) reference() []byte { return nil }
 // duoNode: opcode + mask + childrenWitnessSize
 // shortNode: opcode + len(key)/2 + childrenWitnessSize
 // accountNode: opcode + account data len + codeWitnessSize + storageWitnessSize
-/*
-func (n hashNode) witnessSize() uint64   { return n.iws }
-func (n valueNode) witnessSize() uint64  { return uint64(len(n)) + 1}
-func (n codeNode) witnessSize() uint64   { return uint64(len(n)) + 1 }
+func (n hashNode) witnessSize() uint64 { return n.iws }
+func (n valueNode) witnessSize() uint64 {
+	if CountWitnessSizeWithoutStructure {
+		return uint64(len(n))
+	}
+	return uint64(len(n)) + 1
+}
+func (n codeNode) witnessSize() uint64 {
+	if CountWitnessSizeWithoutStructure {
+		return uint64(len(n))
+	}
+	return uint64(len(n)) + 1
+}
 func (n *fullNode) witnessSize() uint64  { return n.iws }
 func (n *duoNode) witnessSize() uint64   { return n.iws }
 func (n *shortNode) witnessSize() uint64 { return n.iws }
 func (an *accountNode) witnessSize() uint64 {
+	if CountWitnessSizeWithoutStructure {
+		res := uint64(an.EncodingLengthForStorage())
+		if an.storage != nil {
+			res += an.storage.witnessSize()
+		}
+		return res
+	}
+
 	res := 1 + uint64(an.EncodingLengthForStorage())
 	if an.storage != nil {
 		res += an.storage.witnessSize()
@@ -265,6 +282,15 @@ func (an *accountNode) witnessSize() uint64 {
 }
 
 func (n *fullNode) recalculateWitnessSize() {
+	if CountWitnessSizeWithoutStructure {
+		n.iws = 0
+		for j := range n.Children {
+			if n.Children[j] != nil {
+				n.iws += n.Children[j].witnessSize()
+			}
+		}
+		return
+	}
 	n.iws = 1 + 1 // opcode + mask + childrenWitnessSize
 	for j := range n.Children {
 		if n.Children[j] != nil {
@@ -273,6 +299,17 @@ func (n *fullNode) recalculateWitnessSize() {
 	}
 }
 func (n *duoNode) recalculateWitnessSize() {
+	if CountWitnessSizeWithoutStructure {
+		n.iws = 0
+		if n.child1 != nil {
+			n.iws += n.child1.witnessSize()
+		}
+		if n.child2 != nil {
+			n.iws += n.child2.witnessSize()
+		}
+		return
+	}
+
 	n.iws = 1 + 1 // opcode + mask + childrenWitnessSize
 	if n.child1 != nil {
 		n.iws += n.child1.witnessSize()
@@ -282,46 +319,12 @@ func (n *duoNode) recalculateWitnessSize() {
 	}
 }
 func (n *shortNode) recalculateWitnessSize() {
+	if CountWitnessSizeWithoutStructure {
+		n.iws = n.Val.witnessSize()
+		return
+	}
+
 	n.iws = 1 + 1 + uint64(len(n.Key))/2 + n.Val.witnessSize() // opcode + len(key)/2 + childrenWitnessSize
-}
-*/
-
-func (n hashNode) witnessSize() uint64   { return n.iws }
-func (n valueNode) witnessSize() uint64  { return uint64(len(n)) }
-func (n codeNode) witnessSize() uint64   { return uint64(len(n)) }
-func (n *fullNode) witnessSize() uint64  { return n.iws }
-func (n *duoNode) witnessSize() uint64   { return n.iws }
-func (n *shortNode) witnessSize() uint64 { return n.iws }
-func (an *accountNode) witnessSize() uint64 {
-	res := uint64(an.EncodingLengthForStorage())
-	if an.storage != nil {
-		res += an.storage.witnessSize()
-	}
-	//if an.code != nil {
-	//	res += an.code.witnessSize()
-	//}
-	return res
-}
-
-func (n *fullNode) recalculateWitnessSize() {
-	n.iws = 0
-	for j := range n.Children {
-		if n.Children[j] != nil {
-			n.iws += n.Children[j].witnessSize()
-		}
-	}
-}
-func (n *duoNode) recalculateWitnessSize() {
-	n.iws = 0
-	if n.child1 != nil {
-		n.iws += n.child1.witnessSize()
-	}
-	if n.child2 != nil {
-		n.iws += n.child2.witnessSize()
-	}
-}
-func (n *shortNode) recalculateWitnessSize() {
-	n.iws = 0 + n.Val.witnessSize()
 }
 
 // Pretty printing.

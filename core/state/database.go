@@ -42,8 +42,8 @@ import (
 )
 
 var (
-	prefixByWitnessSizeTimer      = metrics.NewRegisteredTimer("db/prefixbysize", nil)
-	prefixByWitnessSizeSeeksMeter = metrics.NewRegisteredMeter("db/prefixbysize/seeks", nil)
+	cumulativeSearchTimer = metrics.NewRegisteredTimer("db/cumulativesearch", nil)
+	cumulativeSearchMeter = metrics.NewRegisteredMeter("db/cumulativesearch/seeks", nil)
 )
 
 var _ StateWriter = (*TrieStateWriter)(nil)
@@ -52,7 +52,7 @@ var _ StateWriter = (*TrieStateWriter)(nil)
 var MaxTrieCacheSize = uint64(1024 * 1024)
 
 const (
-	//FirstContractIncarnations - first incarnation for contract accounts. After 1 it increases by 1.
+	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
 	//NonContractIncarnation incarnation for non contracts
 	NonContractIncarnation = 0
@@ -1461,14 +1461,12 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromTrie(size uint64) (pref
 }
 
 func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDb(prefixInTrie []byte, incarnation uint64, size uint64) (prefix []byte, err error) {
-	var accumulator uint64
+	//fmt.Printf("FromTrie: %x\n", prefixInTrie)
 	seeks := int64(0)
-	defer prefixByWitnessSizeTimer.UpdateSince(time.Now())
-	defer prefixByWitnessSizeSeeksMeter.Mark(seeks)
+	defer cumulativeSearchTimer.UpdateSince(time.Now())
+	defer cumulativeSearchMeter.Mark(seeks)
 
 	fixedbits := len(prefixInTrie) * 8 / 2
-	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
-	fmt.Printf("AAAA...: %x, %b\n", prefixInTrie, mask, len(prefixInTrie), fixedbits)
 
 	if len(prefixInTrie)%2 == 1 {
 		prefixInTrie = append(prefixInTrie, 0)
@@ -1486,79 +1484,30 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDb(prefixInTrie []byte,
 		return nil, fmt.Errorf("unexpected db type: %T\n", tds.db)
 	}
 
-	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor()
-		fmt.Printf("From Trie: %x\n", prefixInTrie)
-		parent := prefixInTrie
-		next := append(parent, 0)
-		var k, v []byte
-		var ok bool
-		seeks++
-		k, v, err = c.SeekTo(next)
-		//fmt.Printf("c.SeekTo(%x)=%x\n", next, k)
-		if err != nil {
-			return err
-		}
-		//fmt.Printf("Alex: %d, %d, %b\n", fixedbits, fixedbytes, mask)
-		for k != nil && len(k) >= fixedbytes && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], parent[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (parent[fixedbytes-1]&mask)) {
-			// found sibling
-			prefixSize := binary.BigEndian.Uint64(v)
-			for accumulator+prefixSize >= size {
-				fmt.Printf("Child loop: %d+%d=%d >= %d==%t\n", accumulator, prefixSize, accumulator+prefixSize, size, accumulator+prefixSize >= size)
-				parent = common.CopyBytes(k)
-				fixedbytes, mask = ethdb.Bytesmask(len(parent) * 8)
-
-				seeks++
-				k, v, err = c.Next() // go to child
-				if err != nil {
-					return err
-				}
-				if k == nil {
-					prefix = nil
-					return nil
-				}
-
-				//fmt.Printf("c.Next()=%x, parent=%x\n", k, parent)
-				if !bytes.HasPrefix(k, parent) {
-					//fmt.Printf("No More children: %x, %x\n", k, parent)
-					prefix = parent
-					return nil
-				}
-				prefixSize = binary.BigEndian.Uint64(v)
-			}
-			//fmt.Printf("Acc++: %d+%d=%d <= %d\n", accumulator, prefixSize, accumulator+prefixSize, size)
+	var accumulator uint64
+	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, prefixInTrie, fixedbits, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+		prefixSize := binary.BigEndian.Uint64(v)
+		//fmt.Printf("loop %d+%d=%d <= %d, %x\n", accumulator, prefixSize, accumulator+prefixSize, size, k)
+		overflow := accumulator+prefixSize >= size
+		if !overflow {
 			accumulator += prefixSize
-			next, ok = dbutils.NextSubtree(k)
-			if !ok {
-				prefix = nil
-				return nil
-			}
-			seeks++
-			k, v, err = c.SeekTo(next)
-			if err != nil {
-				return err
-			}
-			if k == nil {
-				prefix = nil
-				return nil
-			}
-
-			//fmt.Printf("c.SeekTo(%x)=%x\n", next, k)
 		}
-		prefix = parent
-		return nil
-	}); err != nil {
+		return overflow, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
 	if len(prefix) > common.HashLength {
 		dbutils.RemoveIncarnationFromKey(prefix, &prefix)
 	}
-	fmt.Printf("Result: %x\n", prefix)
+	//fmt.Printf("Result: %x\n", prefix)
 	return prefix, nil
 }
 
 func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size uint64) (prefix []byte, err error) {
+	defer func(t time.Time) { fmt.Println("database.go:1543", time.Since(t)) }(time.Now())
+
 	if size == 0 {
 		return []byte{}, nil
 	}
@@ -1566,14 +1515,6 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize2(size uint64) (prefix []by
 }
 
 func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDb2(size uint64) (prefix []byte, err error) {
-	seeks := int64(0)
-	defer prefixByWitnessSizeTimer.UpdateSince(time.Now())
-	defer prefixByWitnessSizeSeeksMeter.Mark(seeks)
-
-	//if len(prefixInTrie) >= common.HashLength {
-	//	prefixInTrie = dbutils.GenerateCompositeStoragePrefix(prefixInTrie[:common.HashLength], incarnation, prefixInTrie[common.HashLength:])
-	//}
-
 	var kv ethdb.KV
 	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
 		kv = hasBolt.AbstractKV()
@@ -1581,73 +1522,175 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDb2(size uint64) (prefi
 		return nil, fmt.Errorf("unexpected db type: %T\n", tds.db)
 	}
 
-	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor()
-
-		parent := []byte{}
-		var accumulator uint64
-		next := append(parent, 0)
-		var k, v []byte
-		var ok bool
-		for {
-			seeks++
-			k, v, err = c.SeekTo(next)
-			if err != nil {
-				return err
-			}
-
-			//fmt.Printf("c.SeekTo(%x)=%x\n", next, k)
-
-			if k == nil {
-				prefix = nil
-				return nil
-			}
-
-			if !bytes.HasPrefix(k, parent) {
-				//fmt.Printf("No More Siblings: next=%x, k=%x,  parent=%x\n", next, k, parent)
-				prefix = parent
-				return nil
-			}
-
-			// found sibling
-			prefixSize := binary.BigEndian.Uint64(v)
-			for accumulator+prefixSize >= size {
-				//fmt.Printf("Child loop: %d+%d=%d >= %d==%t\n", accumulator, prefixSize, accumulator+prefixSize, size, accumulator+prefixSize >= size)
-				seeks++
-				parent = common.CopyBytes(k)
-				k, v, err = c.Next() // go to child
-				if k == nil {
-					prefix = nil
-					return nil
-				}
-
-				if err != nil {
-					return err
-				}
-				//fmt.Printf("c.Next()=%x, parent=%x\n", k, parent)
-				if !bytes.HasPrefix(k, parent) {
-					//fmt.Printf("No More children: %x, parent=%x\n", k, parent)
-					prefix = parent
-					return nil
-				}
-				prefixSize = binary.BigEndian.Uint64(v)
-			}
-			//fmt.Printf("Acc++: %d+%d=%d <= %d\n", accumulator, prefixSize, accumulator+prefixSize, size)
+	var accumulator uint64
+	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+		prefixSize := binary.BigEndian.Uint64(v)
+		//fmt.Printf("loop %d+%d=%d <= %d, %x\n", accumulator, prefixSize, accumulator+prefixSize, size, k)
+		overflow := accumulator+prefixSize >= size
+		if !overflow {
 			accumulator += prefixSize
-			next, ok = dbutils.NextSubtree(k)
-			if !ok {
-				prefix = nil
-				return nil
-			}
 		}
-		return nil
-	}); err != nil {
+		return overflow, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	if len(prefix) > common.HashLength {
 		dbutils.RemoveIncarnationFromKey(prefix, &prefix)
 	}
 
-	//fmt.Printf("Result: %x\n", prefix)
+	//fmt.Printf("Result from db2: %x\n", prefix)
 	return prefix, nil
+}
+
+type CumulativeSearchF func(k, v []byte) (itsTimeToVisitChild bool, err error)
+
+// CumulativeSearch - on each iteration jumps to next subtries (siblings) by default until not get command to go to child
+func CumulativeSearch(kv ethdb.KV, bucket []byte, parent []byte, fixedbits int, f CumulativeSearchF) (lastVisitedParent []byte, err error) {
+	const doCorrectIncarnation = true
+	seeks := int64(0)
+	accountSeek := int64(0)
+	defer cumulativeSearchTimer.UpdateSince(time.Now())
+	defer cumulativeSearchMeter.Mark(seeks)
+
+	var ok bool
+	a := accounts.NewAccount()
+
+	if err := kv.View(context.TODO(), func(tx ethdb.Tx) error {
+		c := tx.Bucket(bucket).Cursor()
+		cs := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+		var k, v, csK, csV []byte
+		// move 2 cursors until find correct incarnation or face shorter prefix
+		var skipIncorrectIncarnation = func() error {
+			if !doCorrectIncarnation || len(k) < 32 || len(parent) > 32 || bytes.Equal(csK, k[:32]) {
+				return nil
+			}
+			counter := 0
+
+			for !(bytes.Equal(csK, k[:32]) && a.Incarnation == dbutils.DecodeIncarnation(k[32:40])) {
+				counter++
+				next := k[:32]
+				accountSeek++
+				var doSkip bool
+				csK, csV, err = cs.SeekTo(next)
+				//fmt.Printf("Adjust happened: parent=%x, k=%x\n", parent, k)
+				for ; len(csK) != 32; csK, csV, err = cs.SeekTo(next) {
+					counter++
+					if err != nil {
+						return err
+					}
+					doSkip = true
+					accountSeek++
+					next, ok = dbutils.NextSubtree(csK[:32])
+					if !ok {
+						k = nil
+						return nil
+					}
+				}
+
+				if doSkip {
+					k, v, err = c.SeekTo(next)
+					if err != nil {
+						return err
+					}
+					if !bytes.HasPrefix(k, parent) || k == nil {
+						//fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+						k = nil
+						return nil
+					}
+				}
+				if len(k) < 32 {
+					return nil // skipped all incarnations
+				}
+
+				err = a.DecodeForStorage(csV)
+				if err != nil {
+					return err
+				}
+
+				if bytes.Equal(csK, k[:32]) && a.Incarnation != dbutils.DecodeIncarnation(k[32:40]) {
+					seeks++
+					k, v, err = c.SeekTo(dbutils.GenerateStoragePrefix(k[:32], a.Incarnation))
+					if err != nil {
+						return err
+					}
+					if !bytes.HasPrefix(k, parent) || k == nil {
+						//fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+						k = nil
+						return nil
+					}
+					if len(k) < 32 {
+						return nil // skipped all incarnations
+					}
+				}
+			}
+			//fmt.Printf("After correction: k=%x, csK=%x\n", k, csK)
+			return nil
+		}
+
+		fixedbytes, mask := ethdb.Bytesmask(fixedbits)
+		next := append(parent, 0)
+		seeks++
+		k, v, err = c.SeekTo(next)
+		if err != nil {
+			return err
+		}
+
+		for k != nil && len(k) >= fixedbytes && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], parent[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (parent[fixedbytes-1]&mask)) {
+			itsTimeToVisitChild, err2 := f(k, v)
+			if err2 != nil {
+				return err2
+			}
+			if !itsTimeToVisitChild { // go to sibling
+				next, ok = dbutils.NextSubtree(k)
+				if !ok {
+					k = nil
+					continue
+				}
+				seeks++
+				k, v, err = c.SeekTo(next)
+				if err != nil {
+					return err
+				}
+				if !bytes.HasPrefix(k, parent) {
+					//fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+					k = nil
+				}
+				err = skipIncorrectIncarnation()
+				if err != nil {
+					return err
+				}
+				if k == nil {
+					return nil // do something to express that it's end of state
+				}
+				continue
+			}
+
+			parent = common.CopyBytes(k)
+			fixedbits = len(parent) * 8
+			fixedbytes, mask = ethdb.Bytesmask(fixedbits)
+			seeks++
+			k, v, err = c.Next() // go to child
+			if err != nil {
+				return err
+			}
+			if !bytes.HasPrefix(k, parent) {
+				//fmt.Printf("No Child: %x --> %x\n", parent, k)
+				k = nil
+			}
+			err = skipIncorrectIncarnation()
+			if err != nil {
+				return err
+			}
+			if k == nil {
+				return nil // do something to express that it's end
+			}
+			continue
+		}
+		return nil
+	}); err != nil {
+		return parent, err
+	}
+	fmt.Printf("Seeks: %d, accountSeek: %d\n", seeks, accountSeek)
+	return parent, nil
 }

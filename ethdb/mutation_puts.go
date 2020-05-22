@@ -2,7 +2,8 @@ package ethdb
 
 type puts struct {
 	mp   map[string]putsBucket //map[bucket]putsBucket
-	size intlen int
+	size int
+	len  int
 }
 
 func newPuts() *puts {

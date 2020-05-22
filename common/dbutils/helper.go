@@ -1,6 +1,8 @@
 package dbutils
 
-import "bytes"
+import (
+	"bytes"
+)
 
 // EncodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
 func EncodeTimestamp(timestamp uint64) []byte {
@@ -55,4 +57,23 @@ func NextSubtree(in []byte) ([]byte, bool) {
 		r[i] = 0
 	}
 	return nil, false
+}
+
+func NextS(in []byte, out *[]byte) bool {
+	tmp := *out
+	if cap(tmp) < len(in) {
+		tmp = make([]byte, len(in))
+	}
+	tmp = tmp[:len(in)]
+	copy(tmp, in)
+	for i := len(tmp) - 1; i >= 0; i-- {
+		if tmp[i] != 255 {
+			tmp[i]++
+			*out = tmp
+			return true
+		}
+		tmp[i] = 0
+	}
+	*out = tmp
+	return false
 }

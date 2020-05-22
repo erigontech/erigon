@@ -1261,8 +1261,8 @@ func (t *Trie) EvictNode(hex []byte) {
 
 func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
 	const (
-		dbPageSize          = 4096           // common OS page size is 4KB
-		minNodeSizeToNotify = 4 * dbPageSize // store in DB only IH which allowing do big jumps over state
+		dbPageSize          = 4096            // common OS page size is 4KB
+		minNodeSizeToNotify = dbPageSize / 16 // store in DB only IH which allowing do big jumps over state
 	)
 	// Make a better experiment if make sense to enable it
 	//if nd.witnessSize() < minNodeSizeToNotify {
@@ -1415,21 +1415,19 @@ Loop:
 			found = false
 			break Loop
 		case *shortNode:
-			//accumulator += 1 + uint64(len(n.Key)/2)
 			prefix = append(prefix, n.Key...)
 			if prefix[len(prefix)-1] == 0x10 { // remove terminator
 				prefix = prefix[:len(prefix)-1]
 			}
 			nd = n.Val
-			fmt.Printf("short node: %d\n", accumulator)
+			//fmt.Printf("short node: %d\n", accumulator)
 		case *duoNode:
 			var acc2 uint64
-			//accumulator += 2
 			i1, i2 := n.childrenIdx()
 			if accumulator+n.child1.witnessSize() >= size {
 				prefix = append(prefix, i1)
 				nd = n.child1
-				fmt.Printf("duo overflow1: %d+%d=%d <= %d, %x\n", accumulator, n.child1.witnessSize(), accumulator+n.child1.witnessSize(), size, prefix)
+				//fmt.Printf("duo overflow1: %d+%d=%d <= %d, %x\n", accumulator, n.child1.witnessSize(), accumulator+n.child1.witnessSize(), size, prefix)
 				continue
 			}
 			acc2 += n.child1.witnessSize()
@@ -1437,40 +1435,33 @@ Loop:
 			if accumulator+acc2+n.child2.witnessSize() >= size {
 				prefix = append(prefix, i2)
 				nd = n.child2
-				fmt.Printf("duo overflow2: %d+%d+%d=%d <= %d, %x\n", accumulator, acc2, n.child2.witnessSize(), accumulator+acc2+n.child2.witnessSize(), size, prefix)
+				//fmt.Printf("duo overflow2: %d+%d+%d=%d <= %d, %x\n", accumulator, acc2, n.child2.witnessSize(), accumulator+acc2+n.child2.witnessSize(), size, prefix)
 				accumulator += acc2
 				continue
 			}
 
-			fmt.Printf("duo: %d, %x\n", accumulator, prefix)
+			//fmt.Printf("duo: %d, %x\n", accumulator, prefix)
 			break Loop
 		case *fullNode:
-			//accumulator += 2
 			var acc2 uint64
 			for i := range n.Children {
 				if n.Children[i] == nil {
 					continue
 				}
-
 				if accumulator+acc2+n.Children[i].witnessSize() >= size {
 					prefix = append(prefix, uint8(i))
 					nd = n.Children[i]
-					fmt.Printf("full overflow(%d): %d+%d+%d=%d <= %d, %x\n", i, accumulator, acc2, n.Children[i].witnessSize(), accumulator+acc2+n.Children[i].witnessSize(), size, prefix)
+					//fmt.Printf("full overflow(%d): %d+%d+%d=%d <= %d, %x\n", i, accumulator, acc2, n.Children[i].witnessSize(), accumulator+acc2+n.Children[i].witnessSize(), size, prefix)
 					accumulator += acc2
 					continue Loop
 				}
 				acc2 += n.Children[i].witnessSize()
 			}
 
-			fmt.Printf("full: %d+%d=%d<=%d, %x\n", accumulator, acc2, accumulator+acc2, size, prefix)
+			//fmt.Printf("full: %d+%d=%d<=%d, %x\n", accumulator, acc2, accumulator+acc2, size, prefix)
 			break Loop
 		case *accountNode:
-			//witnessOverhead := 1 + uint64(n.EncodingLengthForStorage())
-			//if n.codeSize != -1 {
-			//	witnessOverhead += uint64(n.codeSize)
-			//}
-			fmt.Printf("accountNode: %d\n", accumulator)
-			//accumulator += witnessOverhead
+			//fmt.Printf("accountNode: %d, %x\n", accumulator, prefix)
 			if n.storage == nil {
 				found = true
 				break Loop
@@ -1479,17 +1470,15 @@ Loop:
 			incarnation = n.Incarnation
 		case valueNode:
 			//fmt.Printf("valueNode: %d %d %x\n", accumulator, accumulator+n.witnessSize(), prefix)
-			//accumulator += nd.witnessSize()
 			found = true
 			break Loop
 		case codeNode:
 			//fmt.Printf("codeNode: %d %d %x\n", accumulator, accumulator+n.witnessSize(), prefix)
-			//accumulator += nd.witnessSize()
 			found = true
 			break Loop
 		case hashNode:
+			//fmt.Printf("hashNode: %x %d\n", prefix, n.witnessSize())
 			found = false
-			//fmt.Printf("hashNode: %x\n", prefix)
 			break Loop
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
