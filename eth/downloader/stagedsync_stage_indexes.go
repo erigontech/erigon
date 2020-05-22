@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func spawnGenerateIndexes(db ethdb.Database, plainState bool, from uint64) error {
+func spawnGenerateIndexes(db ethdb.Database, plainState bool) error {
 	lastProcessedBlockNumber, err := GetStageProgress(db, HistoryIndex)
 	if err != nil {
 		return err
