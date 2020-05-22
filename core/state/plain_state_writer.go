@@ -69,8 +69,12 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 	if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
-	if w.codeCache != nil && len(code) <= 1024 {
-		w.codeCache.Set(address[:], code)
+	if w.codeCache != nil {
+		if len(code) <= 1024 {
+			w.codeCache.Set(address[:], code)
+		} else {
+			w.codeCache.Del(address[:])
+		}
 	}
 	if w.codeSizeCache != nil {
 		var b [4]byte
