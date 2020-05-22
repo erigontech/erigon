@@ -1231,7 +1231,7 @@ func printBranches(block uint64) {
 	}
 }
 
-func readPlainAccount(chaindata string, address common.Address, block uint64, rewind uint64) {
+func readPlainAccount(chaindata string, address common.Address) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	var acc accounts.Account
@@ -2317,7 +2317,7 @@ func main() {
 		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
 	}
 	if *action == "readPlainAccount" {
-		readPlainAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
+		readPlainAccount(*chaindata, common.HexToAddress(*account))
 	}
 	if *action == "fixAccount" {
 		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
