@@ -160,7 +160,7 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	tuples := make(MultiPutTuples, 0, m.puts.Size()*3)
+	tuples := make(MultiPutTuples, 0, m.puts.Len()*3)
 	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
@@ -188,7 +188,7 @@ func (m *mutation) Rollback() {
 func (m *mutation) Keys() ([][]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	tuples := common.NewTuples(m.puts.Size(), 2, 1)
+	tuples := common.NewTuples(m.puts.Len(), 2, 1)
 	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {

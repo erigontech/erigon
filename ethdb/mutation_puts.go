@@ -3,12 +3,12 @@ package ethdb
 type puts struct {
 	mp   map[string]putsBucket //map[bucket]putsBucket
 	size int
+	len  int
 }
 
 func newPuts() *puts {
 	return &puts{
-		mp:   make(map[string]putsBucket),
-		size: 0,
+		mp: make(map[string]putsBucket),
 	}
 }
 
@@ -19,14 +19,16 @@ func (p *puts) set(bucket, key, value []byte) {
 		bucketPuts = make(putsBucket)
 		p.mp[string(bucket)] = bucketPuts
 	}
+	oldLen := len(bucketPuts)
 	skey := string(key)
 	if oldVal, ok := bucketPuts[skey]; ok {
 		p.size -= len(oldVal)
 	} else {
 		p.size += len(skey) + 32 // Add fixed overhead per key
 	}
-	bucketPuts[string(key)] = value
+	bucketPuts[skey] = value
 	p.size += len(value)
+	p.len += len(bucketPuts) - oldLen
 }
 
 func (p *puts) get(bucket, key []byte) ([]byte, bool) {
@@ -40,6 +42,10 @@ func (p *puts) get(bucket, key []byte) ([]byte, bool) {
 
 func (p *puts) Delete(bucket, key []byte) {
 	p.set(bucket, key, nil)
+}
+
+func (p *puts) Len() int {
+	return p.len
 }
 
 func (p *puts) Size() int {
