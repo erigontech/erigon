@@ -2037,6 +2037,21 @@ func resetState(chaindata string) {
 	fmt.Printf("Reset state done\n")
 }
 
+func resetHistoryIndex(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.AccountsHistoryBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.StorageHistoryBucket)
+	err = downloader.SaveStageProgress(db, downloader.AccountHistoryIndex, 0)
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.StorageHistoryIndex, 0)
+	check(err)
+	fmt.Printf("Reset history index done\n")
+}
+
 type Receiver struct {
 	defaultReceiver *trie.DefaultReceiver
 	accountMap      map[string]*accounts.Account
@@ -2368,6 +2383,9 @@ func main() {
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)
+	}
+	if *action == "resetHistoryIndex" {
+		resetHistoryIndex(*chaindata)
 	}
 	if *action == "getProof" {
 		testGetProof(*chaindata, uint64(*block), common.HexToAddress(*account))

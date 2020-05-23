@@ -10,7 +10,7 @@ import (
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	sm, err := getStorageModeFromDB(db)
+	sm, err := GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sm, err = getStorageModeFromDB(db)
+	sm, err = GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)
 	}

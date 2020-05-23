@@ -51,7 +51,7 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 	emptyHash := common.Hash{}
 	var blockNumber big.Int
 
-	const batchSize = 10000
+	const batchSize = 1000
 
 	jobs := make(chan *senderRecoveryJob, batchSize)
 	out := make(chan *senderRecoveryJob, batchSize)

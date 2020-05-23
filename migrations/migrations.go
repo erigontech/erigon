@@ -8,7 +8,7 @@ import (
 
 type Migration struct {
 	Name string
-	Up   func(db ethdb.Database, history, receipts, txIndex, preImages, thinHistory bool) error
+	Up   func(db ethdb.Database, history, receipts, txIndex, preImages bool) error
 }
 
 func NewMigrator() *Migrator {
@@ -21,7 +21,7 @@ type Migrator struct {
 	Migrations []Migration
 }
 
-func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImages, thinHistory bool) error {
+func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -41,7 +41,7 @@ func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImage
 	m.Migrations = m.Migrations[i+1:]
 	for _, v := range m.Migrations {
 		log.Warn("Apply migration", "name", v.Name)
-		err := v.Up(db, history, receipts, txIndex, preImages, thinHistory)
+		err := v.Up(db, history, receipts, txIndex, preImages)
 		if err != nil {
 			return err
 		}
@@ -54,6 +54,4 @@ func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImage
 	return nil
 }
 
-var migrations = []Migration{
-
-}
+var migrations = []Migration{}

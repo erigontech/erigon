@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/state/stats"
+	"github.com/ledgerwatch/turbo-geth/cmd/state/verify"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +15,6 @@ var checkEncCmd = &cobra.Command{
 	Use:   "checkEnc",
 	Short: "Check changesets Encoding",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return stats.CheckEnc(chaindata)
+		return verify.CheckEnc(chaindata)
 	},
 }

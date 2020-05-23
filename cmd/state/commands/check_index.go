@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
+	"github.com/ledgerwatch/turbo-geth/cmd/state/verify"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +16,6 @@ var checkIndexCMD = &cobra.Command{
 	Use:   "checkIndex",
 	Short: "Index checker",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return stateless.CheckIndex(chaindata, []byte(changeSetBucket), []byte(indexBucket))
+		return verify.CheckIndex(chaindata, []byte(changeSetBucket), []byte(indexBucket))
 	},
 }

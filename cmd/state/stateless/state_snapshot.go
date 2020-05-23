@@ -208,7 +208,7 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 
 	err = copyDatabase(diskDb, db)
 	check(err)
-	err = migrations.NewMigrator().Apply(diskDb, false, false, false, false, false)
+	err = migrations.NewMigrator().Apply(diskDb, false, false, false, false)
 	check(err)
 }
 

@@ -11,13 +11,13 @@ func TestApplyWithInit(t *testing.T) {
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, history, receipts, txIndex, preImages, thinHistory bool) error {
+			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, history, receipts, txIndex, preImages, thinHistory bool) error {
+			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
 				return nil
 			},
 		},
@@ -25,7 +25,7 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err := migrator.Apply(db, false, false, false, false, false)
+	err := migrator.Apply(db, false, false, false, false)
 	if err != nil {
 		t.Fatal()
 	}
@@ -43,14 +43,14 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, history, receipts, txIndex, preImages, thinHistory bool) error {
+			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, history, receipts, txIndex, preImages, thinHistory bool) error {
+			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
 				return nil
 			},
 		},
@@ -62,7 +62,7 @@ func TestApplyWithoutInit(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err = migrator.Apply(db, false, false, false, false, false)
+	err = migrator.Apply(db, false, false, false, false)
 	if err != nil {
 		t.Fatal()
 	}

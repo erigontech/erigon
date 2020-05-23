@@ -200,14 +200,13 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 // GetIndexChunk returns proper index chunk or return error if index is not created.
 // key must contain inverted block number in the end
 func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
-
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b != nil {
 			c := b.Cursor()
 			k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
-			if !bytes.HasPrefix(k, key) {
+			if !bytes.HasPrefix(k, dbutils.CompositeKeyWithoutIncarnation(key)) {
 				return ErrKeyNotFound
 			}
 			dat = make([]byte, len(v))

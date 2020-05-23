@@ -412,7 +412,7 @@ func copyDb(ctx *cli.Context) error {
 	if syncMode == downloader.FastSync {
 		//syncBloom = trie.NewSyncBloom(uint64(ctx.GlobalInt(utils.CacheFlag.Name)/2), chainDb)
 	}
-	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil)
+	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, true)
 
 	// Create a source peer to satisfy downloader requests from
 	db, err := ethdb.NewBoltDatabase(ctx.Args().First())

@@ -18,12 +18,20 @@ package core
 
 import (
 	"runtime"
+	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
 // senderCacher is a concurrent transaction sender recoverer and cacher.
-var senderCacher = newTxSenderCacher(runtime.NumCPU())
+var senderCacher *txSenderCacher
+var once sync.Once
+
+func InitTxCacher() {
+	once.Do(func() {
+		senderCacher = newTxSenderCacher(runtime.NumCPU())
+	})
+}
 
 // txSenderCacherRequest is a request for recovering transaction senders with a
 // specific signature scheme and caching it into the transactions themselves.
