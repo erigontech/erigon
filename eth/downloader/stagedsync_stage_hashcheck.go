@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/pkg/errors"
+	//"github.com/ledgerwatch/turbo-geth/trie"
+	//"github.com/pkg/errors"
 )
 
 func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
@@ -24,12 +24,12 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 
 	// make sure that we won't write the the real DB
 	// should never be commited
-	euphemeralMutation := d.stateDB.NewBatch()
+	//euphemeralMutation := d.stateDB.NewBatch()
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
-
+/*
 	loader := trie.NewSubTrieLoader(blockNr)
 	rl := trie.NewRetainList(0)
 	subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)
@@ -44,6 +44,8 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 	}
 
 	return SaveStageProgress(d.stateDB, HashCheck, blockNr)
+*/
+	return nil
 }
 
 func (d *Downloader) unwindHashCheckStage(unwindPoint uint64) error {
