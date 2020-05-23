@@ -1,4 +1,4 @@
-package stateless
+package verify
 
 import (
 	"bytes"

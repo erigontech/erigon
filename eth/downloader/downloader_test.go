@@ -88,7 +88,7 @@ func newTester() *downloadTester {
 	}
 	tester.stateDb = ethdb.NewMemDatabase()
 	tester.stateDb.Put(nil, testGenesis.Root().Bytes(), []byte{0x00})
-	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, false)
 	return tester
 }
 

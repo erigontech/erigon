@@ -30,7 +30,7 @@ type stagedSyncTester struct {
 	lock          sync.RWMutex
 }
 
-func newStagedSyncTester() *stagedSyncTester {
+func newStagedSyncTester(history bool) *stagedSyncTester {
 	tester := &stagedSyncTester{
 		peers:   make(map[string]*stagedSyncTesterPeer),
 		genesis: testGenesis,
@@ -41,7 +41,7 @@ func newStagedSyncTester() *stagedSyncTester {
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
 	tester.currentHeader = tester.genesis.Header()
-	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer)
+	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, history)
 	return tester
 }
 
@@ -319,7 +319,7 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 }
 
 func TestUnwind(t *testing.T) {
-	tester := newStagedSyncTester()
+	tester := newStagedSyncTester(false)
 	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
 	}

@@ -193,7 +193,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	sm, err := getStorageModeFromDB(chainDb)
+	sm, err := GetStorageModeFromDB(chainDb)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.StorageMode.Receipts,
 		config.StorageMode.TxIndex,
 		config.StorageMode.Preimages,
-		true,
 	)
 	if err != nil {
 		return nil, err
@@ -700,7 +699,7 @@ func setModeOnEmpty(db ethdb.Database, key []byte, currentValue bool) error {
 	return nil
 }
 
-func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
+func GetStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
 	var (
 		sm  StorageMode
 		v   []byte

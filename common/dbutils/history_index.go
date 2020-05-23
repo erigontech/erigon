@@ -48,7 +48,7 @@ func (hi HistoryIndexBytes) Decode() ([]uint64, []bool, error) {
 	return numbers, sets, nil
 }
 
-func (hi HistoryIndexBytes) Append(v uint64, s bool) HistoryIndexBytes {
+func (hi HistoryIndexBytes) Append(v uint64, emptyValue bool) HistoryIndexBytes {
 	if len(hi) < 8 {
 		panic(fmt.Errorf("minimal length of index chunk is %d, got %d", 8, len(hi)))
 	}
@@ -67,7 +67,7 @@ func (hi HistoryIndexBytes) Append(v uint64, s bool) HistoryIndexBytes {
 		panic(fmt.Errorf("item %d cannot be placed into the chunk with minElement %d", v, minElement))
 	}
 	v -= minElement
-	if s {
+	if emptyValue {
 		hi = append(hi, 0x80|byte(v>>16))
 	} else {
 		hi = append(hi, byte(v>>16))
@@ -133,6 +133,7 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool, bool) {
 func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
 	blockNum, ok := hi.LastElement()
 	if !ok {
+		fmt.Println(hi)
 		return nil, errors.New("empty index")
 	}
 	return IndexChunkKey(key, blockNum), nil
@@ -154,6 +155,10 @@ func (hi HistoryIndexBytes) LastElement() (uint64, bool) {
 	return minElement + (uint64(hi[idx]&0x7f) << 16) + (uint64(hi[idx+1]) << 8) + uint64(hi[idx+2]), true
 }
 
+func CurrentChunkKey(key []byte) []byte {
+	return IndexChunkKey(key, ^uint64(0))
+}
+
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	var blockNumBytes []byte // make([]byte, len(key)+8)
 	switch len(key) {
@@ -173,7 +178,15 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 
 	return blockNumBytes
 }
-
+func CompositeKeyWithoutIncarnation(key []byte) []byte {
+	if len(key) == common.HashLength*2+common.IncarnationLength {
+		kk := make([]byte, common.HashLength*2)
+		copy(kk, key[:common.HashLength])
+		copy(kk[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		return kk
+	}
+	return key
+}
 func IsIndexBucket(b []byte) bool {
 	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
 }
