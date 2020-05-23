@@ -29,7 +29,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 	changesets := make([]byte, changeSetBufSize) // 128 Mb buffer
 	var offsets []int
 	var blockNums []uint64
-	var blockNum = lastProcessedBlockNumber
+	var blockNum = lastProcessedBlockNumber + 1
 	var done = false
 	batch := db.NewBatch()
 	for !done {
@@ -58,7 +58,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 			changeset := changeset.AccountChangeSetBytes(changesets[prevOffset:offset])
 			if err := changeset.Walk(func(k, v []byte) error {
 				currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
-				indexBytes, err := batch.Get(dbutils.AccountChangeSetBucket, currentChunkKey)
+				indexBytes, err := batch.Get(dbutils.AccountsHistoryBucket, currentChunkKey)
 				if err != nil && err != ethdb.ErrKeyNotFound {
 					return fmt.Errorf("find chunk failed: %w", err)
 				}
@@ -73,7 +73,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 						return err
 					}
 					// Flush the old chunk
-					if err := batch.Put(dbutils.AccountChangeSetBucket, indexKey, index); err != nil {
+					if err := batch.Put(dbutils.AccountsHistoryBucket, indexKey, index); err != nil {
 						return err
 					}
 					// Start a new chunk
@@ -83,7 +83,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 				}
 				index = index.Append(blockNr, len(v) == 0)
 
-				if err := batch.Put(dbutils.AccountChangeSetBucket, currentChunkKey, index); err != nil {
+				if err := batch.Put(dbutils.AccountsHistoryBucket, currentChunkKey, index); err != nil {
 					return err
 				}
 				return nil
@@ -121,7 +121,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 	changesets := make([]byte, changeSetBufSize) // 128 Mb buffer
 	var offsets []int
 	var blockNums []uint64
-	var blockNum = lastProcessedBlockNumber
+	var blockNum = lastProcessedBlockNumber + 1
 	var done = false
 	batch := db.NewBatch()
 	for !done {
@@ -150,7 +150,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 			changeset := changeset.StorageChangeSetBytes(changesets[prevOffset:offset])
 			if err := changeset.Walk(func(k, v []byte) error {
 				currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
-				indexBytes, err := batch.Get(dbutils.StorageChangeSetBucket, currentChunkKey)
+				indexBytes, err := batch.Get(dbutils.StorageHistoryBucket, currentChunkKey)
 				if err != nil && err != ethdb.ErrKeyNotFound {
 					return fmt.Errorf("find chunk failed: %w", err)
 				}
@@ -165,7 +165,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 						return err
 					}
 					// Flush the old chunk
-					if err := batch.Put(dbutils.StorageChangeSetBucket, indexKey, index); err != nil {
+					if err := batch.Put(dbutils.StorageHistoryBucket, indexKey, index); err != nil {
 						return err
 					}
 					// Start a new chunk
@@ -175,7 +175,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 				}
 				index = index.Append(blockNr, len(v) == 0)
 
-				if err := batch.Put(dbutils.StorageChangeSetBucket, currentChunkKey, index); err != nil {
+				if err := batch.Put(dbutils.StorageHistoryBucket, currentChunkKey, index); err != nil {
 					return err
 				}
 				return nil
