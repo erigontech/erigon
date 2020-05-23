@@ -3,16 +3,16 @@ package downloader
 import (
 	"bytes"
 	"fmt"
-	"runtime"
-	"time"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"runtime"
+	"time"
 )
 
-const changeSetBufSize = 128*1024*1024
+const changeSetBufSize = 128 * 1024 * 1024
 
 func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 	lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex)
@@ -39,7 +39,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 		done = true
 		if err := db.Walk(dbutils.AccountChangeSetBucket, startKey, 0, func(k, v []byte) (bool, error) {
 			blockNum, _ = dbutils.DecodeTimestamp(k)
-			if offset + len(v) > changeSetBufSize { // Adding the current changeset would overflow the buffer
+			if offset+len(v) > changeSetBufSize { // Adding the current changeset would overflow the buffer
 				done = false
 				return false, nil
 			}
@@ -55,12 +55,12 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 		for i, offset := range offsets {
 			blockNr := blockNums[i]
 			changeset := changeset.AccountChangeSetBytes(changesets[prevOffset:offset])
-			if err := changeset.Walk(func (k, v []byte) error {
+			if err := changeset.Walk(func(k, v []byte) error {
 				currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 				indexBytes, err := batch.Get(dbutils.AccountChangeSetBucket, currentChunkKey)
 				if err != nil && err != ethdb.ErrKeyNotFound {
 					return fmt.Errorf("find chunk failed: %w", err)
-				}		
+				}
 				var index dbutils.HistoryIndexBytes
 				if len(indexBytes) == 0 {
 					index = dbutils.NewHistoryIndex()
@@ -81,17 +81,19 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 					index = dbutils.WrapHistoryIndex(indexBytes)
 				}
 				index = index.Append(blockNr, len(v) == 0)
-		
+
 				if err := batch.Put(dbutils.AccountChangeSetBucket, currentChunkKey, index); err != nil {
 					return err
 				}
-				return nil			
+				return nil
 			}); err != nil {
 				return err
 			}
 			prevOffset = offset
 		}
-		SaveStageProgress(batch, AccountHistoryIndex, blockNum)
+		if err := SaveStageProgress(batch, AccountHistoryIndex, blockNum); err != nil {
+			return err
+		}
 		batchSize := batch.BatchSize()
 		start := time.Now()
 		if _, err := batch.Commit(); err != nil {
@@ -129,7 +131,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 		done = true
 		if err := db.Walk(dbutils.StorageChangeSetBucket, startKey, 0, func(k, v []byte) (bool, error) {
 			blockNum, _ = dbutils.DecodeTimestamp(k)
-			if offset + len(v) > changeSetBufSize { // Adding the current changeset would overflow the buffer
+			if offset+len(v) > changeSetBufSize { // Adding the current changeset would overflow the buffer
 				done = false
 				return false, nil
 			}
@@ -145,12 +147,12 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 		for i, offset := range offsets {
 			blockNr := blockNums[i]
 			changeset := changeset.StorageChangeSetBytes(changesets[prevOffset:offset])
-			if err := changeset.Walk(func (k, v []byte) error {
+			if err := changeset.Walk(func(k, v []byte) error {
 				currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 				indexBytes, err := batch.Get(dbutils.StorageChangeSetBucket, currentChunkKey)
 				if err != nil && err != ethdb.ErrKeyNotFound {
 					return fmt.Errorf("find chunk failed: %w", err)
-				}		
+				}
 				var index dbutils.HistoryIndexBytes
 				if len(indexBytes) == 0 {
 					index = dbutils.NewHistoryIndex()
@@ -171,17 +173,19 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 					index = dbutils.WrapHistoryIndex(indexBytes)
 				}
 				index = index.Append(blockNr, len(v) == 0)
-		
+
 				if err := batch.Put(dbutils.StorageChangeSetBucket, currentChunkKey, index); err != nil {
 					return err
 				}
-				return nil			
+				return nil
 			}); err != nil {
 				return err
 			}
 			prevOffset = offset
 		}
-		SaveStageProgress(batch, StorageHistoryIndex, blockNum)
+		if err := SaveStageProgress(batch, StorageHistoryIndex, blockNum); err != nil {
+			return err
+		}
 		batchSize := batch.BatchSize()
 		start := time.Now()
 		if _, err := batch.Commit(); err != nil {
