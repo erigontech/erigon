@@ -117,7 +117,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 7/7. Generating storage history index")
-		err = spawnAccountHistoryIndex(d.stateDB, core.UsePlainStateExecution)
+		err = spawnStorageHistoryIndex(d.stateDB, core.UsePlainStateExecution)
 		if err != nil {
 			return err
 		}
