@@ -232,9 +232,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
-	if config.SyncMode != downloader.StagedSync {
-		core.InitTxCacher()
-	}
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
 	if err != nil {
 		return nil, err
