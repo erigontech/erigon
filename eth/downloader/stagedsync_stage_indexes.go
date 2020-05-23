@@ -10,41 +10,51 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func spawnGenerateIndexes(db ethdb.Database, plainState bool) error {
-	lastProcessedBlockNumber, err := GetStageProgress(db, HistoryIndex)
+func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
+	lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex)
 	if err != nil {
 		return err
 	}
 	if plainState {
-		log.Info("Skip index generation for plain state")
+		log.Info("Skipped account index generation for plain state")
 		return nil
 	}
-
 	ig := core.NewIndexGenerator(db)
 	if err := ig.GenerateIndex(lastProcessedBlockNumber, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
-		return SaveStageProgress(innerDB, HistoryIndex, blockNum)
+		return SaveStageProgress(innerDB, AccountHistoryIndex, blockNum)
 	}); err != nil {
 		fmt.Println("AccountChangeSetBucket, err", err)
 		return err
 	}
+	return nil
+}
 
-	ig = core.NewIndexGenerator(db)
+func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
+	lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex)
+	if err != nil {
+		return err
+	}
+	if plainState {
+		log.Info("Skipped storaged index generation for plain state")
+		return nil
+	}
+	ig := core.NewIndexGenerator(db)
 	if err := ig.GenerateIndex(lastProcessedBlockNumber, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState), func(innerDB ethdb.Database, blockNum uint64) error {
-		return SaveStageProgress(innerDB, HistoryIndex, blockNum)
+		return SaveStageProgress(innerDB, StorageHistoryIndex, blockNum)
 	}); err != nil {
 		fmt.Println("StorageChangeSetBucket, err", err)
 		return err
 	}
-
 	return nil
 }
 
-func unwindGenerateIndexes(unwindPoint uint64, db ethdb.Database, plainState bool) error {
+func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool) error {
 	ig := core.NewIndexGenerator(db)
-	err := ig.Truncate(unwindPoint, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState))
-	if err != nil {
-		return err
-	}
+	return ig.Truncate(unwindPoint, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState))
+}
+
+func unwindStorageHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool) error {
+	ig := core.NewIndexGenerator(db)
 	return ig.Truncate(unwindPoint, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState))
 }
 

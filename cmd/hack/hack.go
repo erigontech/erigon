@@ -2045,7 +2045,9 @@ func resetHistoryIndex(chaindata string) {
 	db.DeleteBucket(dbutils.AccountsHistoryBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageHistoryBucket)
-	err = downloader.SaveStageProgress(db, downloader.HistoryIndex, 0)
+	err = downloader.SaveStageProgress(db, downloader.AccountHistoryIndex, 0)
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.StorageHistoryIndex, 0)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }

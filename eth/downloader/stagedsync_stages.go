@@ -33,7 +33,8 @@ const (
 	Senders                    // "From" recovered from signatures, bodies re-written
 	Execution                  // Executing each block w/o buildinf a trie
 	HashCheck                  // Checking the root hash
-	HistoryIndex               // Generating indexes for history
+	AccountHistoryIndex        // Generating history index for accounts
+	StorageHistoryIndex        // Generating history index for storage
 	Finish                     // Nominal stage after all other stages
 )
 

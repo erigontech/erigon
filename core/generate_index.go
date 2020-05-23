@@ -104,7 +104,7 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 	}
 
 	var blockNum uint64
-	currentKey := dbutils.EncodeBlockNumber(from)
+	currentKey := dbutils.EncodeTimestamp(from)
 	for {
 		stop := true
 		err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
@@ -156,7 +156,7 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 }
 
 func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker) error {
-	currentKey := dbutils.EncodeBlockNumber(timestampTo)
+	currentKey := dbutils.EncodeTimestamp(timestampTo)
 	keys := make(map[string]struct{})
 	err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
 		currentKey = common.CopyBytes(k)
