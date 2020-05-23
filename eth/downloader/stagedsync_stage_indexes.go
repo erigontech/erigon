@@ -100,7 +100,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, plainState bool) error {
 			return err
 		}
 		runtime.ReadMemStats(&m)
-		log.Info("Commited account index batch", "in", time.Since(start), "up to block", blockNum, "batch size", batchSize,
+		log.Info("Commited account index batch", "in", time.Since(start), "up to block", blockNum, "batch size", common.StorageSize(batchSize),
 			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	}
 	return nil
@@ -192,7 +192,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, plainState bool) error {
 			return err
 		}
 		runtime.ReadMemStats(&m)
-		log.Info("Commited storage index batch", "in", time.Since(start), "up to block", blockNum, "batch size", batchSize,
+		log.Info("Commited storage index batch", "in", time.Since(start), "up to block", blockNum, "batch size", common.StorageSize(batchSize),
 			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	}
 	return nil

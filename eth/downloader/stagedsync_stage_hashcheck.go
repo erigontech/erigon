@@ -29,22 +29,22 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
-/*
-	loader := trie.NewSubTrieLoader(blockNr)
-	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)
-	if err1 != nil {
-		return errors.Wrap(err1, "checking root hash failed")
-	}
-	if len(subTries.Hashes) != 1 {
-		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
-	}
-	if subTries.Hashes[0] != syncHeadBlock.Root() {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
-	}
+	/*
+		loader := trie.NewSubTrieLoader(blockNr)
+		rl := trie.NewRetainList(0)
+		subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)
+		if err1 != nil {
+			return errors.Wrap(err1, "checking root hash failed")
+		}
+		if len(subTries.Hashes) != 1 {
+			return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
+		}
+		if subTries.Hashes[0] != syncHeadBlock.Root() {
+			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
+		}
 
-	return SaveStageProgress(d.stateDB, HashCheck, blockNr)
-*/
+		return SaveStageProgress(d.stateDB, HashCheck, blockNr)
+	*/
 	return nil
 }
 
