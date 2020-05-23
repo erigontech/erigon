@@ -99,6 +99,7 @@ var (
 	queuedReplaceMeter   = metrics.NewRegisteredMeter("txpool/queued/replace", nil)
 	queuedRateLimitMeter = metrics.NewRegisteredMeter("txpool/queued/ratelimit", nil) // Dropped due to rate limiting
 	queuedNofundsMeter   = metrics.NewRegisteredMeter("txpool/queued/nofunds", nil)   // Dropped due to out-of-funds
+	queuedEvictionMeter  = metrics.NewRegisteredMeter("txpool/queued/eviction", nil)  // Dropped due to lifetime
 
 	// General tx metrics
 	knownTxMeter       = metrics.NewRegisteredMeter("txpool/known", nil)
@@ -226,11 +227,12 @@ type TxPool struct {
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
 
-	pending map[common.Address]*txList   // All currently processable transactions
-	queue   map[common.Address]*txList   // Queued but non-processable transactions
-	beats   map[common.Address]time.Time // Last heartbeat from each known account
-	all     *txLookup                    // All transactions to allow lookups
-	priced  *txPricedList                // All transactions sorted by price
+	pending  map[common.Address]*txList   // All currently processable transactions
+	queue    map[common.Address]*txList   // Queued but non-processable transactions
+	beats    map[common.Address]time.Time // Last heartbeat from each known account
+	queuedTs map[common.Hash]time.Time    // Timestamp for when queued transactions were added
+	all      *txLookup                    // All transactions to allow lookups
+	priced   *txPricedList                // All transactions sorted by price
 
 	reqResetCh      chan *txpoolResetRequest
 	reqPromoteCh    chan *accountSet
@@ -263,6 +265,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *et
 		pending:        make(map[common.Address]*txList),
 		queue:          make(map[common.Address]*txList),
 		beats:          make(map[common.Address]time.Time),
+		queuedTs:        make(map[common.Hash]time.Time),
 		all:            newTxLookup(),
 		chainHeadCh:    make(chan ChainHeadEvent, chainHeadChanSize),
 		reqResetCh:     make(chan *txpoolResetRequest),
@@ -360,7 +363,10 @@ func (pool *TxPool) loop() {
 				// Any non-locals old enough should be removed
 				if time.Since(pool.beats[addr]) > pool.config.Lifetime {
 					for _, tx := range pool.queue[addr].Flatten() {
+						if time.Since(pool.queuedTs[tx.Hash()]) > pool.config.Lifetime {
+							queuedEvictionMeter.Mark(1)
 						pool.RemoveTx(tx.Hash(), true)
+						}
 					}
 				}
 			}
@@ -635,6 +641,7 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		pool.all.Add(tx)
 		pool.priced.Put(tx)
 		pool.journalTx(from, tx)
+		pool.beats[from] = time.Now()
 		pool.queueTxEvent(tx)
 		log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.To())
 		return old != nil, nil
@@ -677,16 +684,20 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction) (bool, er
 	}
 	// Discard any previous transaction and mark this
 	if old != nil {
-		pool.all.Remove(old.Hash())
+		old_hash := old.Hash()
+		pool.all.Remove(old_hash)
 		pool.priced.Removed(1)
+		delete(pool.queuedTs, old_hash)
 		queuedReplaceMeter.Mark(1)
 	} else {
 		// Nothing was replaced, bump the queued counter
 		queuedGauge.Inc(1)
+		pool.queuedTs[hash] = time.Now()
 	}
 	if pool.all.Get(hash) == nil {
 		pool.all.Add(tx)
 		pool.priced.Put(tx)
+		pool.queuedTs[hash] = time.Now()
 	}
 	return old != nil, nil
 }
@@ -719,7 +730,7 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 		// An older transaction was better, discard this
 		pool.all.Remove(hash)
 		pool.priced.Removed(1)
-
+		delete(pool.queuedTs, hash)
 		pendingDiscardMeter.Mark(1)
 		return false
 	}
@@ -727,7 +738,6 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	if old != nil {
 		pool.all.Remove(old.Hash())
 		pool.priced.Removed(1)
-
 		pendingReplaceMeter.Mark(1)
 	} else {
 		// Nothing was replaced, bump the pending counter
@@ -740,6 +750,7 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
 	pool.beats[addr] = time.Now()
+	delete(pool.queuedTs, hash)
 	pool.pendingNonces.set(addr, tx.Nonce()+1)
 
 	return true
@@ -914,7 +925,6 @@ func (pool *TxPool) RemoveTx(hash common.Hash, outofbound bool) {
 			// If no more pending transactions are left, remove the list
 			if pending.Empty() {
 				delete(pool.pending, addr)
-				delete(pool.beats, addr)
 			}
 			// Postpone any invalidated transactions
 			for _, tx := range invalids {
@@ -932,6 +942,7 @@ func (pool *TxPool) RemoveTx(hash common.Hash, outofbound bool) {
 		if removed, _ := future.Remove(tx); removed {
 			// Reduce the queued counter
 			queuedGauge.Dec(1)
+			delete(pool.queuedTs, hash)
 		}
 		if future.Empty() {
 			delete(pool.queue, addr)
@@ -1116,6 +1127,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 		for _, tx := range forwards {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
+			delete(pool.queuedTs, hash)
 		}
 		log.Trace("Removed old queued transactions", "count", len(forwards))
 		// Drop all transactions that are too costly (low balance or out of gas)
@@ -1123,6 +1135,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 		for _, tx := range drops {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
+			delete(pool.queuedTs, hash)
 		}
 		log.Trace("Removed unpayable queued transactions", "count", len(drops))
 		queuedNofundsMeter.Mark(int64(len(drops)))
@@ -1145,6 +1158,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			for _, tx := range caps {
 				hash := tx.Hash()
 				pool.all.Remove(hash)
+				delete(pool.queuedTs, hash)
 				log.Trace("Removed cap-exceeding queued transaction", "hash", hash)
 			}
 			queuedRateLimitMeter.Mark(int64(len(caps)))
@@ -1339,7 +1353,7 @@ func (pool *TxPool) demoteUnexecutables() {
 			}
 			pendingGauge.Dec(int64(len(gapped)))
 		}
-		// Delete the entire queue entry if it became empty.
+		// Delete the entire pending entry if it became empty.
 		if list.Empty() {
 			delete(pool.pending, addr)
 			delete(pool.beats, addr)
