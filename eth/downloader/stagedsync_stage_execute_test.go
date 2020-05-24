@@ -126,6 +126,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
 	ctx := context.Background()
 	acc1 := accounts.NewAccount()
+	acc1.Incarnation = 1
 	acc := &acc1
 	acc.Initialised = true
 	var addr common.Address = common.HexToAddress("0x1234567890")
@@ -157,6 +158,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 				t.Fatal(err)
 			}
+			newAcc.CodeHash = codeHash
 		}
 		if err := blockWriter.WriteAccountStorage(ctx, addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
 			t.Fatal(err)
@@ -199,7 +201,7 @@ func compareBucket(t *testing.T, db1, db2 ethdb.Database, bucketName []byte) {
 	})
 	assert.Nil(t, err)
 
-	assert.Equal(t, bucket1, bucket2)
+	assert.Equal(t, bucket1 /*expected*/, bucket2 /*actual*/)
 }
 
 type stateWriterGen func(uint64) state.WriterWithChangeSets
