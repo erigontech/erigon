@@ -522,8 +522,9 @@ func opMstore8(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 
 func opSload(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	loc := callContext.stack.peek()
-	hash := common.Hash(loc.Bytes32())
-	val := interpreter.evm.IntraBlockState.GetState(callContext.contract.Address(), hash)
+	interpreter.hasherBuf = loc.Bytes32()
+	var val common.Hash
+	interpreter.evm.IntraBlockState.GetState(callContext.contract.Address(), &interpreter.hasherBuf, &val)
 	loc.SetBytes(val.Bytes())
 	return nil, nil
 }

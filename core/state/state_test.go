@@ -18,16 +18,16 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"math/big"
 	"testing"
 
-	"context"
+	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	checker "gopkg.in/check.v1"
 )
 
 type StateSuite struct {
@@ -122,7 +122,8 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
 
-	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
+	s.state.GetCommittedState(address, &common.Hash{}, &value)
+	if value != (common.Hash{}) {
 		c.Errorf("expected empty hash. got %x", value)
 	}
 }
@@ -144,13 +145,18 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	s.state.SetState(stateobjaddr, storageaddr, data2)
 	s.state.RevertToSnapshot(snapshot)
 
-	c.Assert(s.state.GetState(stateobjaddr, storageaddr), checker.DeepEquals, data1)
-	c.Assert(s.state.GetCommittedState(stateobjaddr, storageaddr), checker.DeepEquals, common.Hash{})
+	var value common.Hash
+	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, data1)
+	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
-	c.Assert(s.state.GetState(stateobjaddr, storageaddr), checker.DeepEquals, common.Hash{})
-	c.Assert(s.state.GetCommittedState(stateobjaddr, storageaddr), checker.DeepEquals, common.Hash{})
+	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, common.Hash{})
+	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 
 func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
@@ -221,7 +227,8 @@ func TestSnapshot2(t *testing.T) {
 
 	so0Restored := state.getStateObject(stateobjaddr0)
 	// Update lazily-loaded values before comparing.
-	so0Restored.GetState(storageaddr)
+	var tmp common.Hash
+	so0Restored.GetState(&storageaddr, &tmp)
 	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)

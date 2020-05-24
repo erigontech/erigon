@@ -94,10 +94,10 @@ var (
 )
 
 func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	var (
-		y, x    = stack.Back(1), stack.Back(0)
-		current = evm.IntraBlockState.GetState(contract.Address(), common.Hash(x.Bytes32()))
-	)
+	y, x := stack.Back(1), stack.Back(0)
+	key := common.Hash(x.Bytes32())
+	var current common.Hash
+	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
 
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
@@ -136,7 +136,8 @@ func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySi
 	if current == value { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
-	original := evm.IntraBlockState.GetCommittedState(contract.Address(), common.Hash(x.Bytes32()))
+	var original common.Hash
+	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
 		if original == (common.Hash{}) { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
@@ -183,16 +184,17 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 		return 0, errors.New("not enough gas for reentrancy sentry")
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
-	var (
-		y, x    = stack.Back(1), stack.Back(0)
-		current = evm.IntraBlockState.GetState(contract.Address(), common.Hash(x.Bytes32()))
-	)
+	y, x := stack.Back(1), stack.Back(0)
+	key := common.Hash(x.Bytes32())
+	var current common.Hash
+	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
 	value := common.Hash(y.Bytes32())
 
 	if current == value { // noop (1)
 		return params.SstoreNoopGasEIP2200, nil
 	}
-	original := evm.IntraBlockState.GetCommittedState(contract.Address(), common.Hash(x.Bytes32()))
+	var original common.Hash
+	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
 		if original == (common.Hash{}) { // create slot (2.1.1)
 			return params.SstoreInitGasEIP2200, nil
