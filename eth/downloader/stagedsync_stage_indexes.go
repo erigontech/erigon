@@ -97,9 +97,6 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		}); err != nil {
 			return err
 		}
-		if blockNum >= 4000000 {
-			done = true
-		}
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
 		for i, offset := range offsets {
@@ -179,7 +176,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		}
 		// Read first key
 		keyBuf := make([]byte, common.HashLength)
-		if n, err2 := readers[i].Read(keyBuf); err2 == nil && n == common.HashLength {
+		if n, err2 := io.ReadFull(readers[i], keyBuf); err2 == nil && n == common.HashLength {
 			heap.Push(h, HeapElem{keyBuf, i})
 		} else {
 			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err2)
@@ -194,14 +191,14 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		k := element.key
 		// Read number of items for this key
 		var count int
-		if n, err2 := reader.Read(nbytes[:]); err2 == nil && n == 8 {
+		if n, err2 := io.ReadFull(reader, nbytes[:]); err2 == nil && n == 8 {
 			count = int(binary.BigEndian.Uint64(nbytes[:]))
 		} else {
 			return fmt.Errorf("reading from account buffer file: %d %v", n, err2)
 		}
 		for i := 0; i < count; i++ {
 			var b uint64
-			if n, err2 := reader.Read(nbytes[:]); err2 == nil && n == 8 {
+			if n, err2 := io.ReadFull(reader, nbytes[:]); err2 == nil && n == 8 {
 				b = binary.BigEndian.Uint64(nbytes[:])
 			} else {
 				return fmt.Errorf("reading from account buffer file: %d %v", n, err2)
@@ -248,7 +245,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			}
 		}
 		// Try to read the next key (reuse the element)
-		if n, err2 := readers[element.timeIdx].Read(element.key); err2 == nil && n == common.HashLength {
+		if n, err2 := io.ReadFull(reader, element.key); err2 == nil && n == common.HashLength {
 			heap.Push(h, element)
 		} else if err2 != io.EOF {
 			// If it is EOF, we simply do not return anything into the heap
