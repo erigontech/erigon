@@ -19,7 +19,6 @@ import (
 	"sort"
 )
 
-
 func fillChangeSetBuffer(db ethdb.Database, bucket []byte, blockNum uint64, changesets []byte, offsets []int, blockNums []uint64) (bool, uint64, []int, []uint64, error) {
 	offset := 0
 	offsets = offsets[:0]
