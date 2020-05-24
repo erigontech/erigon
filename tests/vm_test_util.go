@@ -109,7 +109,8 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	var haveV common.Hash
 	for addr, account := range t.json.Post {
 		for k, wantV := range account.Storage {
-			state.GetState(addr, &k, &haveV)
+			key := k
+			state.GetState(addr, &key, &haveV)
 			if haveV != wantV {
 				return fmt.Errorf("wrong storage value at %x:\n  got  %x\n  want %x", k, haveV, wantV)
 			}
