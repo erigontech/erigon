@@ -159,6 +159,9 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		if err2 := bufferFile.Close(); err2 != nil {
 			return err2
 		}
+		runtime.ReadMemStats(&m)
+		log.Info("Created a buffer file", "name", bufferFile.Name(), "up to block", blockNum,
+			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	}
 	h := &Heap{}
 	heap.Init(h)
