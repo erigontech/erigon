@@ -166,10 +166,8 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	for i, fileName := range bufferFileNames {
 		if f, err2 := os.Open(fileName); err2 == nil {
 			readers[i] = bufio.NewReader(f)
-			defer func() {
-				//nolint:checkerr
-				f.Close()
-			}
+			//nolint:errcheck
+			defer f.Close()
 		} else {
 			return err2
 		}

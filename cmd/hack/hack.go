@@ -2045,52 +2045,6 @@ func resetHistoryIndex(chaindata string) {
 	db.DeleteBucket(dbutils.AccountsHistoryBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageHistoryBucket)
-	// Cleansing account changesets
-	batch := db.NewBatch()
-	var key []byte
-	done := false
-	for !done {
-		done = true
-		err = db.Walk(dbutils.AccountChangeSetBucket, key, 0, func(k, _ []byte) (bool, error) {
-			if len(k) > 8 {
-				if batch.BatchSize() > db.IdealBatchSize() {
-					done = false
-					key = common.CopyBytes(k)
-					return false, nil
-				}
-				if err1 := batch.Delete(dbutils.AccountChangeSetBucket, common.CopyBytes(k)); err != nil {
-					return false, err1
-				}
-			}
-			return true, nil
-		})
-		check(err)
-		_, err = batch.Commit()
-		check(err)
-		fmt.Printf("Clean account changesets up to %x\n", key)
-	}
-	done = false
-	key = nil
-	for !done {
-		done = true
-		err = db.Walk(dbutils.StorageChangeSetBucket, key, 0, func(k, _ []byte) (bool, error) {
-			if len(k) > 8 {
-				if batch.BatchSize() > db.IdealBatchSize() {
-					done = false
-					key = common.CopyBytes(k)
-					return false, nil
-				}
-				if err1 := batch.Delete(dbutils.StorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
-					return false, err1
-				}
-			}
-			return true, nil
-		})
-		check(err)
-		_, err = batch.Commit()
-		check(err)
-		fmt.Printf("Clean storage changesets up to %x\n", key)
-	}
 	err = downloader.SaveStageProgress(db, downloader.AccountHistoryIndex, 0)
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.StorageHistoryIndex, 0)
