@@ -165,6 +165,9 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 
 func (manager *ProtocolManager) SetDataDir(datadir string) {
 	manager.datadir = datadir
+	if manager.downloader != nil {
+		manager.downloader.SetDataDir(datadir)
+	}
 }
 
 func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database) {
