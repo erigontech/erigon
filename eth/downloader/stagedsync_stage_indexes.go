@@ -58,12 +58,8 @@ func writeBufferMapToTempFile(datadir string, pattern string, bufferMap map[stri
 	sort.Strings(keys)
 	var w *bufio.Writer
 	if bufferFile, err := ioutil.TempFile(datadir, pattern); err == nil {
-		defer func() {
-			//nolint:errcheck
-			bufferFile.Close()
-			//nolint:errcheck
-			os.Remove(bufferFile.Name())
-		}()
+		//nolint:errcheck
+		defer bufferFile.Close()
 		filename = bufferFile.Name()
 		w = bufio.NewWriter(bufferFile)
 	} else {
@@ -276,6 +272,10 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			prevOffset = offset
 		}
 		if filename, err := writeBufferMapToTempFile(datadir, "account-history-inx-", bufferMap); err == nil {
+			defer func() {
+				//nolint:errcheck
+				os.Remove(filename)
+			}()
 			bufferFileNames = append(bufferFileNames, filename)
 			runtime.ReadMemStats(&m)
 			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
@@ -342,6 +342,10 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			prevOffset = offset
 		}
 		if filename, err := writeBufferMapToTempFile(datadir, "storage-history-inx-", bufferMap); err == nil {
+			defer func() {
+				//nolint:errcheck
+				os.Remove(filename)
+			}()
 			bufferFileNames = append(bufferFileNames, filename)
 			runtime.ReadMemStats(&m)
 			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
