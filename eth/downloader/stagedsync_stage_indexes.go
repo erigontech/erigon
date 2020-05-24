@@ -260,8 +260,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		prevOffset := 0
 		for i, offset := range offsets {
 			blockNr := blockNums[i]
-			changeset := changeset.AccountChangeSetBytes(changesets[prevOffset:offset])
-			if err := changeset.Walk(func(k, v []byte) error {
+			if err := changeset.AccountChangeSetBytes(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
 				sKey := string(k)
 				list := bufferMap[sKey]
 				b := blockNr
@@ -327,8 +326,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		prevOffset := 0
 		for i, offset := range offsets {
 			blockNr := blockNums[i]
-			changeset := changeset.StorageChangeSetBytes(changesets[prevOffset:offset])
-			if err := changeset.Walk(func(k, v []byte) error {
+			if err := changeset.StorageChangeSetBytes(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
 				sKey := string(k)
 				list := bufferMap[sKey]
 				b := blockNr
