@@ -272,7 +272,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			}
 			prevOffset = offset
 		}
-		if filename, err := writeBufferMapToTempFile(datadir, "account-history-inx-", bufferMap); err == nil {
+		if filename, err := writeBufferMapToTempFile(datadir, "account-history-indx-", bufferMap); err == nil {
 			defer func() {
 				//nolint:errcheck
 				os.Remove(filename)
@@ -344,7 +344,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			}
 			prevOffset = offset
 		}
-		if filename, err := writeBufferMapToTempFile(datadir, "storage-history-inx-", bufferMap); err == nil {
+		if filename, err := writeBufferMapToTempFile(datadir, "storage-history-indx-", bufferMap); err == nil {
 			defer func() {
 				//nolint:errcheck
 				os.Remove(filename)
