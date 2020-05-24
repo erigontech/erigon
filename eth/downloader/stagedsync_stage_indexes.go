@@ -229,7 +229,9 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	}
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
-		blockNum = lastProcessedBlockNumber + 1
+		if lastProcessedBlockNumber > 0 {
+			blockNum = lastProcessedBlockNumber + 1
+		}
 	} else {
 		return fmt.Errorf("reading account history process: %v", err)
 	}
@@ -299,7 +301,9 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	}
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
-		blockNum = lastProcessedBlockNumber + 1
+		if lastProcessedBlockNumber > 0 {
+			blockNum = lastProcessedBlockNumber + 1
+		}
 	} else {
 		return fmt.Errorf("reading storage history process: %v", err)
 	}
