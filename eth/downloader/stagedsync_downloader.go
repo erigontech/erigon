@@ -79,8 +79,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 3/6. Recovering senders from tx signatures... Complete!")
-	log.Info("Sync stage 4/6. Executing blocks w/o hash checks...")
+	log.Info("Sync stage 3/7. Recovering senders from tx signatures... Complete!")
+	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
 
 	/*
 	* Stage 4. Execute block bodies w/o calculating trie roots
@@ -106,7 +106,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 6/7. Generating account history index")
-		err = spawnAccountHistoryIndex(d.stateDB, core.UsePlainStateExecution)
+		err = spawnAccountHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution)
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 7/7. Generating storage history index")
-		err = spawnStorageHistoryIndex(d.stateDB, core.UsePlainStateExecution)
+		err = spawnStorageHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution)
 		if err != nil {
 			return err
 		}

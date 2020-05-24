@@ -14,6 +14,10 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 		return err
 	}
 
+	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
+	if hashProgress == 0 {
+		return nil
+	}
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
@@ -29,7 +33,6 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
-
 	loader := trie.NewSubTrieLoader(blockNr)
 	rl := trie.NewRetainList(0)
 	subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)

@@ -157,6 +157,7 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 	// generate history index, disable/enable pruning
 	history bool
+	datadir string
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -260,6 +261,11 @@ func New(checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, 
 	}
 	go dl.qosTuner()
 	return dl
+}
+
+// DataDir sets the directory where download is allowed to create temporary files
+func (d *Downloader) SetDataDir(datadir string) {
+	d.datadir = datadir
 }
 
 // Progress retrieves the synchronisation boundaries, specifically the origin
