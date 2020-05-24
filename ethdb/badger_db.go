@@ -362,10 +362,6 @@ func (db *BadgerDatabase) MultiPut(triplets ...[]byte) (uint64, error) {
 	return uint64(l / 3), err
 }
 
-func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
-	return RewindData(db, timestampSrc, timestampDst)
-}
-
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:   db,

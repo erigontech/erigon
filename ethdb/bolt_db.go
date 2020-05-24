@@ -650,10 +650,6 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int
 	panic("Not implemented for arbitrary buckets")
 }
 
-func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
-	return RewindData(db, timestampSrc, timestampDst)
-}
-
 // Delete deletes the key from the queue and database
 func (db *BoltDatabase) Delete(bucket, key []byte) error {
 	// Execute the actual operation

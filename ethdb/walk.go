@@ -28,58 +28,6 @@ import (
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-// RewindData generates rewind data for all buckets between the timestamp
-// timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
-	// Collect list of buckets and keys that need to be considered
-	accountMap := make(map[string][]byte)
-	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-	if err := db.Walk(dbutils.AccountChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
-		if timestamp > timestampSrc {
-			return false, nil
-		}
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := accountMap[string(kk)]; !ok {
-					accountMap[string(kk)] = vv
-				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
-			}
-		}
-		return true, nil
-	}); err != nil {
-		return nil, nil, err
-	}
-	storageMap := make(map[string][]byte)
-	if err := db.Walk(dbutils.StorageChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
-		if timestamp > timestampSrc {
-			return false, nil
-		}
-
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := storageMap[string(kk)]; !ok {
-					storageMap[string(kk)] = vv
-				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
-			}
-		}
-		return true, nil
-	}); err != nil {
-		return nil, nil, err
-	}
-	return accountMap, storageMap, nil
-}
 
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
 	keys := make(map[common.Hash]struct{})

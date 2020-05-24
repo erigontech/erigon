@@ -43,17 +43,17 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	return db.Put(dbutils.CurrentStateBucket, addrHashBytes, value)
 }
 
-type DatabaseReaderDeleter interface {
-	DatabaseReader
-	DatabaseDeleter
+func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
+	return db.Delete(dbutils.CurrentStateBucket, addrHash[:])
 }
 
-func DeleteAccount(db DatabaseReaderDeleter, addrHash common.Hash) error {
-	addrHashBytes := addrHash[:]
+func PlainWriteAccount(db DatabaseWriter, address common.Address, acc accounts.Account) error {
+	//fmt.Printf("PlainWriteAccount: %x %x\n", addrHash, acc.Root)
+	value := make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(value)
+	return db.Put(dbutils.PlainStateBucket, address[:], value)
+}
 
-	if err := db.Delete(dbutils.CurrentStateBucket, addrHashBytes); err != nil {
-		return err
-	}
-
-	return nil
+func PlainDeleteAccount(db DatabaseDeleter, address common.Address) error {
+	return db.Delete(dbutils.PlainStateBucket, address[:])
 }
