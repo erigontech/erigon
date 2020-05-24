@@ -253,6 +253,9 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		} else {
 			return err
 		}
+		if len(offsets) == 0 {
+			break
+		}
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
 		for i, offset := range offsets {
@@ -285,8 +288,10 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			return err
 		}
 	}
-	if err := mergeFilesIntoBucket(bufferFileNames, db, dbutils.AccountsHistoryBucket, common.HashLength); err != nil {
-		return err
+	if len(offsets) > 0 {
+		if err := mergeFilesIntoBucket(bufferFileNames, db, dbutils.AccountsHistoryBucket, common.HashLength); err != nil {
+			return err
+		}
 	}
 	if err := SaveStageProgress(db, AccountHistoryIndex, blockNum); err != nil {
 		return err
@@ -325,6 +330,9 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		} else {
 			return err
 		}
+		if len(offsets) == 0 {
+			break
+		}
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
 		for i, offset := range offsets {
@@ -357,8 +365,10 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			return err
 		}
 	}
-	if err := mergeFilesIntoBucket(bufferFileNames, db, dbutils.StorageHistoryBucket, 2*common.HashLength+common.IncarnationLength); err != nil {
-		return err
+	if len(offsets) > 0 {
+		if err := mergeFilesIntoBucket(bufferFileNames, db, dbutils.StorageHistoryBucket, 2*common.HashLength+common.IncarnationLength); err != nil {
+			return err
+		}
 	}
 	if err := SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
 		return err

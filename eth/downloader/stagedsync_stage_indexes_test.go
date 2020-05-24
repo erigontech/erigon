@@ -5,7 +5,6 @@ import (
 )
 
 func TestName(t *testing.T) {
-	t.Skip("wip")
 	tester := newStagedSyncTester(true)
 	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
