@@ -1,26 +1,26 @@
 package downloader
 
 import (
-	"bytes"
-	"fmt"
-	"io/ioutil"
 	"bufio"
-	"encoding/binary"
+	"bytes"
 	"container/heap"
-	"io"
-	"os"
+	"encoding/binary"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"io"
+	"io/ioutil"
+	"os"
 	"runtime"
 	"sort"
 )
 
 type HeapElem struct {
-	key []byte
+	key     []byte
 	timeIdx int
 }
 
@@ -74,7 +74,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	var blockNums []uint64
 	var blockNum = lastProcessedBlockNumber + 1
 	var done = false
-	// In the first loop, we read all the changesets, create partial history indices, sort them, and 
+	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
 	for !done {
 		offset := 0
@@ -277,7 +277,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	var blockNums []uint64
 	var blockNum = lastProcessedBlockNumber + 1
 	var done = false
-	// In the first loop, we read all the changesets, create partial history indices, sort them, and 
+	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
 	for !done {
 		offset := 0
