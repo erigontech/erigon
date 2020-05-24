@@ -169,8 +169,9 @@ func TestCreate2Revive(t *testing.T) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
 	// We expect number 0x42 in the position [2], because it is the block number 2
+	key2 := common.BigToHash(big.NewInt(2))
 	var check2 common.Hash
-	st.GetState(create2address, common.BigToHash(big.NewInt(2)), &check2)
+	st.GetState(create2address, &key2, &check2)
 	if check2 != common.HexToHash("0x42") {
 		t.Errorf("expected 0x42 in position 2, got: %x", check2)
 	}
@@ -203,13 +204,14 @@ func TestCreate2Revive(t *testing.T) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
 	// We expect number 0x42 in the position [4], because it is the block number 4
+	key4 := common.BigToHash(big.NewInt(4))
 	var check4 common.Hash
-	st.GetState(create2address, common.BigToHash(big.NewInt(4)), &check4)
+	st.GetState(create2address, &key4, &check4)
 	if check4 != common.HexToHash("0x42") {
 		t.Errorf("expected 0x42 in position 4, got: %x", check4)
 	}
 	// We expect number 0x0 in the position [2], because it is the block number 4
-	st.GetState(create2address, common.BigToHash(big.NewInt(2)), &check2)
+	st.GetState(create2address, &key2, &check2)
 	if check2 != common.HexToHash("0x0") {
 		t.Errorf("expected 0x0 in position 2, got: %x", check2)
 	}
@@ -320,8 +322,8 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-	var correctValueX common.Hash
-	st.GetState(contractAddress, common.Hash{}, &correctValueX)
+	var key0, correctValueX common.Hash
+	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCKS 2 + 3
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1], blocks[2]}); err != nil {
@@ -350,7 +352,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 	st, _, _ = blockchain.State()
 	var valueX common.Hash
-	st.GetState(contractAddress, common.Hash{}, &valueX)
+	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
@@ -455,8 +457,8 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-	var correctValueX common.Hash
-	st.GetState(contractAddress, common.Hash{}, &correctValueX)
+	var key0, correctValueX common.Hash
+	st.GetState(contractAddress, &key0, &correctValueX)
 
 	fmt.Println("Insert block 2")
 	// BLOCK 2
@@ -481,7 +483,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 	st, _, _ = blockchain.State()
 	var valueX common.Hash
-	st.GetState(contractAddress, common.Hash{}, &valueX)
+	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
@@ -744,8 +746,8 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
-	var check0 common.Hash
-	st.GetState(contractAddress, common.BigToHash(big.NewInt(0)), &check0)
+	var key0, check0 common.Hash
+	st.GetState(contractAddress, &key0, &check0)
 	if check0 != common.HexToHash("0x0") {
 		t.Errorf("expected 0x00 in position 0, got: %x", check0)
 	}

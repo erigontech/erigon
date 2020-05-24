@@ -420,12 +420,12 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 		if obj := state.getStateObject(addr); obj != nil {
 			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
 				var out common.Hash
-				checkstate.GetState(addr, key, &out)
+				checkstate.GetState(addr, &key, &out)
 				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
 			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
 				var out common.Hash
-				state.GetState(addr, key, &out)
+				state.GetState(addr, &key, &out)
 				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
 		}

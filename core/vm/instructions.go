@@ -524,7 +524,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 	loc := callContext.stack.peek()
 	hash := common.Hash(loc.Bytes32())
 	var val common.Hash
-	interpreter.evm.IntraBlockState.GetState(callContext.contract.Address(), hash, &val)
+	interpreter.evm.IntraBlockState.GetState(callContext.contract.Address(), &hash, &val)
 	loc.SetBytes(val.Bytes())
 	return nil, nil
 }

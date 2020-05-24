@@ -86,7 +86,7 @@ func (a *Account) Storage(ctx context.Context, args struct{ Slot common.Hash }) 
 		return common.Hash{}, err
 	}
 	var val common.Hash
-	state.GetState(a.address, args.Slot, &val)
+	state.GetState(a.address, &args.Slot, &val)
 	return val, nil
 }
 

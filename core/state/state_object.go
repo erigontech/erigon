@@ -155,14 +155,14 @@ func (so *stateObject) touch() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key common.Hash, out *common.Hash) {
-	value, dirty := so.dirtyStorage[key]
+func (so *stateObject) GetState(key *common.Hash, out *common.Hash) {
+	value, dirty := so.dirtyStorage[*key]
 	if dirty {
 		*out = value
 		return
 	}
 	// Otherwise return the entry's original value
-	so.GetCommittedState(&key, out)
+	so.GetCommittedState(key, out)
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
@@ -199,7 +199,7 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *common.Hash) {
 func (so *stateObject) SetState(key, value common.Hash) {
 	// If the new value is the same as old, don't set
 	var prev common.Hash
-	so.GetState(key, &prev)
+	so.GetState(&key, &prev)
 	if prev == value {
 		return
 	}
