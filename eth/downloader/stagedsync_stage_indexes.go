@@ -235,12 +235,14 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 				return err4
 			}
 			batchSize := batch.BatchSize()
-			if _, err4 := batch.Commit(); err4 != nil {
-				return err4
+			if batchSize > batch.IdealBatchSize() {
+				if _, err4 := batch.Commit(); err4 != nil {
+					return err4
+				}
+				runtime.ReadMemStats(&m)
+				log.Info("Commited account index batch", "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x", k),
+					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			}
-			runtime.ReadMemStats(&m)
-			log.Info("Commited account index batch", "size", common.StorageSize(batchSize),
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		// Try to read the next key (reuse the element)
 		if n, err2 := readers[element.timeIdx].Read(element.key); err2 == nil && n == common.HashLength {
