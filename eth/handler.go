@@ -107,6 +107,7 @@ type ProtocolManager struct {
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
 	mode downloader.SyncMode // Sync mode passed from the command line
+	datadir string
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
@@ -162,6 +163,10 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	return manager, nil
 }
 
+func (manager *ProtocolManager) SetDataDir(datadir string) {
+	manager.datadir = datadir
+}
+
 func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database) {
 	sm, err := GetStorageModeFromDB(chaindb)
 	if err != nil {
@@ -169,6 +174,7 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 	}
 	// Construct the different synchronisation mechanisms
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer, sm.History)
+	manager.downloader.SetDataDir(manager.datadir)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {

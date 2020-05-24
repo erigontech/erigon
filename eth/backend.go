@@ -273,6 +273,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
+	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
+
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
