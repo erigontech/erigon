@@ -155,46 +155,51 @@ func (so *stateObject) touch() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key common.Hash) common.Hash {
+func (so *stateObject) GetState(key common.Hash, out *common.Hash) {
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
-		return value
+		*out = value
+		return
 	}
 	// Otherwise return the entry's original value
-	return so.GetCommittedState(key)
+	so.GetCommittedState(key, out)
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
+func (so *stateObject) GetCommittedState(key common.Hash, out *common.Hash) {
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
 		if cached {
-			return value
+			*out = value
+			return
 		}
 	}
 	if so.created {
-		return common.Hash{}
+		out.Clear()
+		return
 	}
 	// Load from DB in case it is missing.
 	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), &key)
 	if err != nil {
 		so.setError(err)
-		return common.Hash{}
+		out.Clear()
+		return
 	}
-	var value common.Hash
 	if enc != nil {
-		value.SetBytes(enc)
+		out.SetBytes(enc)
+	} else {
+		out.Clear()
 	}
-	so.originStorage[key] = value
-	so.blockOriginStorage[key] = value
-	return value
+	so.originStorage[key] = *out
+	so.blockOriginStorage[key] = *out
 }
 
 // SetState updates a value in account storage.
 func (so *stateObject) SetState(key, value common.Hash) {
 	// If the new value is the same as old, don't set
-	prev := so.GetState(key)
+	var prev common.Hash
+	so.GetState(key, &prev)
 	if prev == value {
 		return
 	}

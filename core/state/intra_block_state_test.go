@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -28,13 +29,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
-	"context"
-
 	check "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -421,10 +419,14 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 		// Check storage.
 		if obj := state.getStateObject(addr); obj != nil {
 			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
-				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
+				var out common.Hash
+				checkstate.GetState(addr, key, &out)
+				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
 			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
-				return checkeq("GetState("+key.Hex()+")", state.GetState(addr, key), value)
+				var out common.Hash
+				state.GetState(addr, key, &out)
+				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
 		}
 		if err != nil {

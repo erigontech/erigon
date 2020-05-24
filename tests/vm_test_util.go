@@ -106,9 +106,11 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	if gasRemaining != uint64(*t.json.GasRemaining) {
 		return fmt.Errorf("remaining gas %v, want %v", gasRemaining, *t.json.GasRemaining)
 	}
+	var haveV common.Hash
 	for addr, account := range t.json.Post {
 		for k, wantV := range account.Storage {
-			if haveV := state.GetState(addr, k); haveV != wantV {
+			state.GetState(addr, k, &haveV)
+			if haveV != wantV {
 				return fmt.Errorf("wrong storage value at %x:\n  got  %x\n  want %x", k, haveV, wantV)
 			}
 		}

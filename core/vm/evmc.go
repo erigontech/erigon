@@ -122,20 +122,24 @@ func (host *hostContext) AccountExists(evmcAddr evmc.Address) bool {
 }
 
 func (host *hostContext) GetStorage(addr evmc.Address, key evmc.Hash) evmc.Hash {
-	return evmc.Hash(host.env.IntraBlockState.GetState(common.Address(addr), common.Hash(key)))
+	var value common.Hash
+	host.env.IntraBlockState.GetState(common.Address(addr), common.Hash(key), &value)
+	return evmc.Hash(value)
 }
 
 func (host *hostContext) SetStorage(evmcAddr evmc.Address, evmcKey evmc.Hash, evmcValue evmc.Hash) (status evmc.StorageStatus) {
 	addr := common.Address(evmcAddr)
 	key := common.Hash(evmcKey)
 	value := common.Hash(evmcValue)
-	oldValue := host.env.IntraBlockState.GetState(addr, key)
+	var oldValue common.Hash
+	host.env.IntraBlockState.GetState(addr, key, &oldValue)
 	if oldValue == value {
 		return evmc.StorageUnchanged
 	}
 
-	current := host.env.IntraBlockState.GetState(addr, key)
-	original := host.env.IntraBlockState.GetCommittedState(addr, key)
+	var current, original common.Hash
+	host.env.IntraBlockState.GetState(addr, key, &current)
+	host.env.IntraBlockState.GetCommittedState(addr, key, &original)
 
 	host.env.IntraBlockState.SetState(addr, key, value)
 

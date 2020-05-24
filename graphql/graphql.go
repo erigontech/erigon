@@ -22,7 +22,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth"
+	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -85,7 +85,9 @@ func (a *Account) Storage(ctx context.Context, args struct{ Slot common.Hash }) 
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return state.GetState(a.address, args.Slot), nil
+	var val common.Hash
+	state.GetState(a.address, args.Slot, &val)
+	return val, nil
 }
 
 // Log represents an individual log message. All arguments are mandatory.

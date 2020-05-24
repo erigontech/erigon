@@ -373,15 +373,16 @@ func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
 
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetState(addr common.Address, hash common.Hash) common.Hash {
+func (sdb *IntraBlockState) GetState(addr common.Address, hash common.Hash, value *common.Hash) {
 	sdb.Lock()
 	defer sdb.Unlock()
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil {
-		return stateObject.GetState(hash)
+		stateObject.GetState(hash, value)
+	} else {
+		value.Clear()
 	}
-	return common.Hash{}
 }
 
 // GetProof returns the Merkle proof for a given account
@@ -410,15 +411,16 @@ func (sdb *IntraBlockState) GetStorageProof(a common.Address, key common.Hash) (
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
+func (sdb *IntraBlockState) GetCommittedState(addr common.Address, hash common.Hash, value *common.Hash) {
 	sdb.Lock()
 	defer sdb.Unlock()
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil {
-		return stateObject.GetCommittedState(hash)
+		stateObject.GetCommittedState(hash, value)
+	} else {
+		value.Clear()
 	}
-	return common.Hash{}
 }
 
 func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
