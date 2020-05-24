@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/log"
-	//"github.com/ledgerwatch/turbo-geth/trie"
-	//"github.com/pkg/errors"
+	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/pkg/errors"
 )
 
 func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
@@ -14,6 +14,10 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 		return err
 	}
 
+	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
+	if hashProgress == 0 {
+		return nil
+	}
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
@@ -24,27 +28,25 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 
 	// make sure that we won't write the the real DB
 	// should never be commited
-	//euphemeralMutation := d.stateDB.NewBatch()
+	euphemeralMutation := d.stateDB.NewBatch()
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
-	/*
-		loader := trie.NewSubTrieLoader(blockNr)
-		rl := trie.NewRetainList(0)
-		subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)
-		if err1 != nil {
-			return errors.Wrap(err1, "checking root hash failed")
-		}
-		if len(subTries.Hashes) != 1 {
-			return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
-		}
-		if subTries.Hashes[0] != syncHeadBlock.Root() {
-			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
-		}
+	loader := trie.NewSubTrieLoader(blockNr)
+	rl := trie.NewRetainList(0)
+	subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)
+	if err1 != nil {
+		return errors.Wrap(err1, "checking root hash failed")
+	}
+	if len(subTries.Hashes) != 1 {
+		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
+	}
+	if subTries.Hashes[0] != syncHeadBlock.Root() {
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
+	}
 
-		return SaveStageProgress(d.stateDB, HashCheck, blockNr)
-	*/
+	return SaveStageProgress(d.stateDB, HashCheck, blockNr)
 	return nil
 }
 
