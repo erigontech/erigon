@@ -202,7 +202,7 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 					return err
 				}
 				runtime.ReadMemStats(&m)
-				log.Info("Commited index batch", "bucket", bucket, "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x...", k[:8]),
+				log.Info("Commited index batch", "bucket", string(bucket), "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x...", k[:4]),
 					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			}
 		}
