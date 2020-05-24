@@ -254,6 +254,9 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	if err2 := SaveStageProgress(batch, AccountHistoryIndex, blockNum); err2 != nil {
 		return err2
 	}
+	if _, err2 := batch.Commit(); err2 != nil {
+		return err2
+	}
 	return nil
 }
 
@@ -452,6 +455,9 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		}
 	}
 	if err2 := SaveStageProgress(batch, StorageHistoryIndex, blockNum); err2 != nil {
+		return err2
+	}
+	if _, err2 := batch.Commit(); err2 != nil {
 		return err2
 	}
 	return nil
