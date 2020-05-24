@@ -599,6 +599,9 @@ func (d *Downloader) cancel() {
 // Cancel aborts all of the operations and waits for all download goroutines to
 // finish before returning.
 func (d *Downloader) Cancel() {
+	fmt.Printf("=======================================\n")
+	fmt.Printf("d.Cancel() is called\n")
+	fmt.Printf("---------------------------------------\n")
 	d.cancel()
 	d.cancelWg.Wait()
 
@@ -609,6 +612,9 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
+	fmt.Printf("=======================================\n")
+	fmt.Printf("d.Terminate() is called\n")
+	fmt.Printf("---------------------------------------\n")
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
 	select {
