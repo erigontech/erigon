@@ -122,7 +122,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, common.Hash{}, &value)
+	s.state.GetCommittedState(address, &common.Hash{}, &value)
 	if value != (common.Hash{}) {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -148,14 +148,14 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	var value common.Hash
 	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
-	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
 	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
-	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 

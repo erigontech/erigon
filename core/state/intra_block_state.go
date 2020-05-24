@@ -411,13 +411,13 @@ func (sdb *IntraBlockState) GetStorageProof(a common.Address, key common.Hash) (
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr common.Address, hash common.Hash, value *common.Hash) {
+func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *common.Hash) {
 	sdb.Lock()
 	defer sdb.Unlock()
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil {
-		stateObject.GetCommittedState(hash, value)
+		stateObject.GetCommittedState(key, value)
 	} else {
 		value.Clear()
 	}

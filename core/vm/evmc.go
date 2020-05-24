@@ -139,7 +139,7 @@ func (host *hostContext) SetStorage(evmcAddr evmc.Address, evmcKey evmc.Hash, ev
 
 	var current, original common.Hash
 	host.env.IntraBlockState.GetState(addr, key, &current)
-	host.env.IntraBlockState.GetCommittedState(addr, key, &original)
+	host.env.IntraBlockState.GetCommittedState(addr, &key, &original)
 
 	host.env.IntraBlockState.SetState(addr, key, value)
 
