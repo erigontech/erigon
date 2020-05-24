@@ -97,6 +97,9 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		}); err != nil {
 			return err
 		}
+		if blockNum >= 4000000 {
+			done = true
+		}
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
 		for i, offset := range offsets {
@@ -179,7 +182,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		if n, err2 := readers[i].Read(keyBuf); err2 == nil && n == common.HashLength {
 			heap.Push(h, HeapElem{keyBuf, i})
 		} else {
-			return fmt.Errorf("reading from account buffer file: %d %v", n, err2)
+			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err2)
 		}
 	}
 	// By now, the heap has one element for each buffer file
@@ -249,7 +252,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			heap.Push(h, element)
 		} else if err2 != io.EOF {
 			// If it is EOF, we simply do not return anything into the heap
-			return fmt.Errorf("reading from account buffer file: %d %v", n, err2)
+			return fmt.Errorf("next reading from account buffer file: %d %x %v", n, element.key[:n], err2)
 		}
 	}
 	if err2 := SaveStageProgress(batch, AccountHistoryIndex, blockNum); err2 != nil {
