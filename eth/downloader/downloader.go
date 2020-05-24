@@ -231,6 +231,9 @@ type BlockChain interface {
 
 	// GetVMConfig is necessary for staged sync
 	GetVMConfig() *vm.Config
+
+	// Stop the import that is going on
+	Stop()
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -615,6 +618,7 @@ func (d *Downloader) Terminate() {
 	fmt.Printf("=======================================\n")
 	fmt.Printf("d.Terminate() is called\n")
 	fmt.Printf("---------------------------------------\n")
+	d.blockchain.Stop()
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
 	select {
