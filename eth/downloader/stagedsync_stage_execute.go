@@ -111,8 +111,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	counter := 0
-	for counter < 1000 {
+	for {
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
 		block := blockchain.GetBlockByNumber(blockNum)
@@ -182,7 +181,6 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 				pprof.StopCPUProfile()
 			}
 		*/
-		counter++
 	}
 	_, err = stateBatch.Commit()
 	if err != nil {
