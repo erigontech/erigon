@@ -57,22 +57,70 @@ func (h *Heap) Pop() interface{} {
 
 const changeSetBufSize = 256 * 1024 * 1024
 
-func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
-	lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex)
-	if err != nil {
-		return err
+// writeBufferMapToTempFile creates temp file in the datadir and writes bufferMap into it
+// if sucessful, returns the name of the created file. File is closed
+func writeBufferMapToTempFile(datadir string, pattern string, bufferMap map[string][]uint64) (string, error) {
+	var filename string
+	keys := make([]string, len(bufferMap))
+	i := 0
+	for key := range bufferMap {
+		keys[i] = key
+		i++
 	}
+	sort.Strings(keys)
+	var w *bufio.Writer
+	if bufferFile, err := ioutil.TempFile(datadir, pattern); err == nil {
+		defer func() {
+			//nolint:errcheck
+			bufferFile.Close()
+			//nolint:errcheck
+			os.Remove(bufferFile.Name())
+		}()
+		filename = bufferFile.Name()
+		w = bufio.NewWriter(bufferFile)
+	} else {
+		return filename, fmt.Errorf("creating temp buf file %s: %v", pattern, err)
+	}
+	var nbytes [8]byte
+	for _, key := range keys {
+		if _, err := w.Write([]byte(key)); err != nil {
+			return filename, err
+		}
+		list := bufferMap[key]
+		binary.BigEndian.PutUint64(nbytes[:], uint64(len(list)))
+		if _, err := w.Write(nbytes[:]); err != nil {
+			return filename, err
+		}
+		for _, b := range list {
+			binary.BigEndian.PutUint64(nbytes[:], b)
+			if _, err := w.Write(nbytes[:]); err != nil {
+				return filename, err
+			}
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return filename, fmt.Errorf("flushing file %s: %v", filename, err)
+	}
+	return filename, nil
+}
+
+func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
 	if plainState {
 		log.Info("Skipped account index generation for plain state")
 		return nil
 	}
-	log.Info("Account history index generation started", "from", lastProcessedBlockNumber)
+	var blockNum uint64
+	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
+		blockNum = lastProcessedBlockNumber + 1
+	} else {
+		return fmt.Errorf("reading account history process: %v", err)
+	}
+	log.Info("Account history index generation started", "from", blockNum)
 	var m runtime.MemStats
 	var bufferFileNames []string
 	changesets := make([]byte, changeSetBufSize) // 256 Mb buffer
 	var offsets []int
 	var blockNums []uint64
-	var blockNum = lastProcessedBlockNumber + 1
 	var done = false
 	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
@@ -94,7 +142,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			blockNums = append(blockNums, blockNum)
 			return true, nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("walking over account changeset for block %d: %v", blockNum, err)
 		}
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
@@ -116,51 +164,14 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			}
 			prevOffset = offset
 		}
-		keys := make([]string, len(bufferMap))
-		i := 0
-		for key := range bufferMap {
-			keys[i] = key
-			i++
+		if filename, err := writeBufferMapToTempFile(datadir, "account-history-inx-", bufferMap); err == nil {
+			bufferFileNames = append(bufferFileNames, filename)
+			runtime.ReadMemStats(&m)
+			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		} else {
+			return err
 		}
-		sort.Strings(keys)
-		bufferFile, err1 := ioutil.TempFile(datadir, "account-history-idx")
-		if err1 != nil {
-			return err1
-		}
-		defer func() {
-			//nolint:errcheck
-			bufferFile.Close()
-			//nolint:errcheck
-			os.Remove(bufferFile.Name())
-		}()
-		bufferFileNames = append(bufferFileNames, bufferFile.Name())
-		w := bufio.NewWriter(bufferFile)
-		var nbytes [8]byte
-		for _, key := range keys {
-			if _, err2 := w.Write([]byte(key)); err2 != nil {
-				return err2
-			}
-			list := bufferMap[key]
-			binary.BigEndian.PutUint64(nbytes[:], uint64(len(list)))
-			if _, err2 := w.Write(nbytes[:]); err2 != nil {
-				return err2
-			}
-			for _, b := range list {
-				binary.BigEndian.PutUint64(nbytes[:], b)
-				if _, err2 := w.Write(nbytes[:]); err != nil {
-					return err2
-				}
-			}
-		}
-		if err2 := w.Flush(); err2 != nil {
-			return err2
-		}
-		if err2 := bufferFile.Close(); err2 != nil {
-			return err2
-		}
-		runtime.ReadMemStats(&m)
-		log.Info("Created a buffer file", "name", bufferFile.Name(), "up to block", blockNum,
-			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	}
 	h := &Heap{}
 	heap.Init(h)
@@ -239,7 +250,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 					return err4
 				}
 				runtime.ReadMemStats(&m)
-				log.Info("Commited account index batch", "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x...", k[8:]),
+				log.Info("Commited account index batch", "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x...", k[:8]),
 					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			}
 		}
@@ -261,21 +272,22 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 }
 
 func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
-	lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex)
-	if err != nil {
-		return err
-	}
 	if plainState {
 		log.Info("Skipped storage index generation for plain state")
 		return nil
 	}
-	log.Info("Storage history index generation started", "from", lastProcessedBlockNumber)
+	var blockNum uint64
+	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
+		blockNum = lastProcessedBlockNumber + 1
+	} else {
+		return fmt.Errorf("reading storage history process: %v", err)
+	}
+	log.Info("Storage history index generation started", "from", blockNum)
 	var m runtime.MemStats
 	var bufferFileNames []string
 	changesets := make([]byte, changeSetBufSize) // 256 Mb buffer
 	var offsets []int
 	var blockNums []uint64
-	var blockNum = lastProcessedBlockNumber + 1
 	var done = false
 	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
@@ -297,7 +309,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			blockNums = append(blockNums, blockNum)
 			return true, nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("walking over storage changeset for block %d: %v", blockNum, err)
 		}
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
@@ -319,51 +331,14 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			}
 			prevOffset = offset
 		}
-		keys := make([]string, len(bufferMap))
-		i := 0
-		for key := range bufferMap {
-			keys[i] = key
-			i++
+		if filename, err := writeBufferMapToTempFile(datadir, "storage-history-inx-", bufferMap); err == nil {
+			bufferFileNames = append(bufferFileNames, filename)
+			runtime.ReadMemStats(&m)
+			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		} else {
+			return err
 		}
-		sort.Strings(keys)
-		bufferFile, err1 := ioutil.TempFile(datadir, "storage-history-idx")
-		if err1 != nil {
-			return err1
-		}
-		defer func() {
-			//nolint:errcheck
-			bufferFile.Close()
-			//nolint:errcheck
-			os.Remove(bufferFile.Name())
-		}()
-		bufferFileNames = append(bufferFileNames, bufferFile.Name())
-		w := bufio.NewWriter(bufferFile)
-		var nbytes [8]byte
-		for _, key := range keys {
-			if _, err2 := w.Write([]byte(key)); err2 != nil {
-				return err2
-			}
-			list := bufferMap[key]
-			binary.BigEndian.PutUint64(nbytes[:], uint64(len(list)))
-			if _, err2 := w.Write(nbytes[:]); err2 != nil {
-				return err2
-			}
-			for _, b := range list {
-				binary.BigEndian.PutUint64(nbytes[:], b)
-				if _, err2 := w.Write(nbytes[:]); err != nil {
-					return err2
-				}
-			}
-		}
-		if err2 := w.Flush(); err2 != nil {
-			return err2
-		}
-		if err2 := bufferFile.Close(); err2 != nil {
-			return err2
-		}
-		runtime.ReadMemStats(&m)
-		log.Info("Created a buffer file", "name", bufferFile.Name(), "up to block", blockNum,
-			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	}
 	h := &Heap{}
 	heap.Init(h)
@@ -442,7 +417,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 					return err4
 				}
 				runtime.ReadMemStats(&m)
-				log.Info("Commited storage index batch", "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x...", k[8:]),
+				log.Info("Commited storage index batch", "size", common.StorageSize(batchSize), "current key", fmt.Sprintf("%x...", k[:8]),
 					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			}
 		}

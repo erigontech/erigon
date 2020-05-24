@@ -79,8 +79,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		return err
 	}
 
-	log.Info("Sync stage 3/6. Recovering senders from tx signatures... Complete!")
-	log.Info("Sync stage 4/6. Executing blocks w/o hash checks...")
+	log.Info("Sync stage 3/7. Recovering senders from tx signatures... Complete!")
+	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
 
 	/*
 	* Stage 4. Execute block bodies w/o calculating trie roots
