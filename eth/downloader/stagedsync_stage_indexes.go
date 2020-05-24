@@ -350,7 +350,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 			return err
 		}
 	}
-	if err := mergeFilesIntoBucket(bufferFileNames, db, dbutils.StorageHistoryBucket, 2*common.HashLength); err != nil {
+	if err := mergeFilesIntoBucket(bufferFileNames, db, dbutils.StorageHistoryBucket, 2*common.HashLength+common.IncarnationLength); err != nil {
 		return err
 	}
 	if err := SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
