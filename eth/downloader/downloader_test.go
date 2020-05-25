@@ -390,6 +390,9 @@ func (dl *downloadTester) GetHeader(common.Hash, uint64) *types.Header {
 	panic("not implemented and should not be called")
 }
 
+func (dl *downloadTester) Stop() {
+}
+
 type downloadTesterPeer struct {
 	dl            *downloadTester
 	id            string

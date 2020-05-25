@@ -275,6 +275,9 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	return err
 }
 
+func (st *stagedSyncTester) Stop() {
+}
+
 type stagedSyncTesterPeer struct {
 	st    *stagedSyncTester
 	id    string

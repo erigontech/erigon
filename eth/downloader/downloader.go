@@ -231,6 +231,9 @@ type BlockChain interface {
 
 	// GetVMConfig is necessary for staged sync
 	GetVMConfig() *vm.Config
+
+	// Stop the import that is going on
+	Stop()
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -609,6 +612,7 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
+	d.blockchain.Stop()
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
 	select {
