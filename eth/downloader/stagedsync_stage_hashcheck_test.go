@@ -23,6 +23,8 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
+	t.Skip("not implemented yet")
+
 	db1 := ethdb.NewMemDatabase()
 	db2 := ethdb.NewMemDatabase()
 
@@ -39,6 +41,8 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
+	t.Skip("not implemented yet")
+
 	db1 := ethdb.NewMemDatabase()
 	db2 := ethdb.NewMemDatabase()
 
