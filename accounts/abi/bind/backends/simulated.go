@@ -74,7 +74,7 @@ type SimulatedBackend struct {
 	gasPool       *core.GasPool
 	pendingBlock  *types.Block // Currently pending block that will be imported on request
 	pendingTds    *state.TrieDbState
-	pendingState  *state.IntraBlockState // Currently pending state that will be the active on on request
+	pendingState  *state.IntraBlockState // Currently pending state that will be the active on request
 
 	events *filters.EventSystem // Event system for filtering log events live
 
