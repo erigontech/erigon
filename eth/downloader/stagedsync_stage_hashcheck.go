@@ -24,11 +24,18 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, blockchain BlockChain, syn
 		return nil
 	}
 
+	mutation := stateDB.NewBatch()
+
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(stateDB, hashProgress)
+		err = promoteHashedState(mutation, hashProgress)
 		if err != nil {
 			return err
 		}
+	}
+
+	_, err = mutation.Commit()
+	if err != nil {
+		return err
 	}
 
 	syncHeadBlock := blockchain.GetBlockByNumber(syncHeadNumber)
@@ -148,7 +155,7 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 	if len(key) != common.AddressLength+common.IncarnationLength {
 		return nil, fmt.Errorf("could not convert code key from plain to hashed, unexpected len: %d", len(key))
 	}
-	address, incarnation := dbutils.ParseStoragePrefix(key)
+	address, incarnation := dbutils.PlainParseStoragePrefix(key)
 
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
