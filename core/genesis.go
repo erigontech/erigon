@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -41,7 +42,7 @@ import (
 )
 
 var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
-//  ^--- will be overriden e when parsing flags anyway
+//  ^--- will be overridden when parsing flags anyway
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
