@@ -1016,7 +1016,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 
 		tds, err := pm.blockchain.GetTrieDbState()
 		if err != nil {
-			return fmt.Errorf("GetTrieDbState: %w", err)
+			return fmt.Errorf("fail in GetTrieDbState: %w", err)
 		}
 		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, tds, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})

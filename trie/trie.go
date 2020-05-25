@@ -1260,10 +1260,10 @@ func (t *Trie) EvictNode(hex []byte) {
 }
 
 func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
-	const (
-		dbPageSize          = 4096            // common OS page size is 4KB
-		minNodeSizeToNotify = dbPageSize / 16 // store in DB only IH which allowing do big jumps over state
-	)
+	//const (
+	//	dbPageSize          = 4096             // common OS page size is 4KB
+	//	minNodeSizeToNotify = dbPageSize / 128 // store in DB only IH which allowing do big jumps over state
+	//)
 	// Make a better experiment if make sense to enable it
 	//if nd.witnessSize() < minNodeSizeToNotify {
 	//	return
@@ -1444,17 +1444,22 @@ Loop:
 			break Loop
 		case *fullNode:
 			var acc2 uint64
+			//fmt.Printf("full children %d\n", n.Children)
 			for i := range n.Children {
 				if n.Children[i] == nil {
+					//fmt.Printf("full nill child %d\n", i)
 					continue
 				}
+				//fmt.Printf("full child %d\n", i)
 				if accumulator+acc2+n.Children[i].witnessSize() >= size {
 					prefix = append(prefix, uint8(i))
 					nd = n.Children[i]
 					//fmt.Printf("full overflow(%d): %d+%d+%d=%d <= %d, %x\n", i, accumulator, acc2, n.Children[i].witnessSize(), accumulator+acc2+n.Children[i].witnessSize(), size, prefix)
 					accumulator += acc2
+					//fmt.Printf("full overflow(%d)++\n", accumulator)
 					continue Loop
 				}
+				//fmt.Printf("full no overflow (%d): %d\n", i, n.Children[i].witnessSize())
 				acc2 += n.Children[i].witnessSize()
 			}
 
@@ -1472,12 +1477,8 @@ Loop:
 			//fmt.Printf("valueNode: %d %d %x\n", accumulator, accumulator+n.witnessSize(), prefix)
 			found = true
 			break Loop
-		case codeNode:
-			//fmt.Printf("codeNode: %d %d %x\n", accumulator, accumulator+n.witnessSize(), prefix)
-			found = true
-			break Loop
 		case hashNode:
-			//fmt.Printf("hashNode: %x %d\n", prefix, n.witnessSize())
+			//fmt.Printf("hashNode: %x %d %d\n", prefix, accumulator, n.witnessSize())
 			found = false
 			break Loop
 		default:

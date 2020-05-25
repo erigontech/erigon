@@ -14,10 +14,10 @@ const (
 
 type Tick struct {
 	Number      uint64
-	FromBlock   uint64
-	ToBlock     uint64
 	FromSize    uint64
 	ToSize      uint64
+	FromBlock   uint64
+	ToBlock     uint64
 	StateSlices []StateSlice
 }
 
@@ -32,18 +32,18 @@ func (t Tick) String() string {
 	return fmt.Sprintf("Tick{%d,Blocks:%d-%d,Sizes:%d-%d,Slices:%s}", t.Number, t.FromBlock, t.ToBlock, t.FromSize, t.ToSize, t.StateSlices)
 }
 func (ss StateSlice) String() string {
-	return fmt.Sprintf("{Sizes:%x-%x,Prefixes:%x-%x}", ss.FromSize, ss.ToSize, ss.From, ss.To)
+	return fmt.Sprintf("{Sizes:%d-%d,Prefixes:%x-%x}", ss.FromSize, ss.ToSize, ss.From, ss.To)
 }
 
 func (t Tick) IsLastInCycle() bool {
 	return t.Number == TicksPerCycle-1
 }
 
-func newTick(blockNr, stateSize uint64) Tick {
+func newTick(blockNr, stateSize uint64, previousTick *Tick) *Tick {
 	number := blockNr / BlocksPerTick % TicksPerCycle
 	fromSize := number * stateSize / TicksPerCycle
 
-	tick := Tick{
+	tick := &Tick{
 		Number:    number,
 		FromBlock: blockNr,
 		ToBlock:   blockNr - blockNr%BlocksPerTick + BlocksPerTick - 1,
@@ -53,8 +53,13 @@ func newTick(blockNr, stateSize uint64) Tick {
 
 	for i := uint64(0); ; i++ {
 		ss := StateSlice{
-			FromSize: tick.FromSize + i*BytesPerWitness,
-			ToSize:   min(tick.FromSize+(i+1)*BytesPerWitness-1, tick.ToSize),
+			FromSize: fromSize + i*BytesPerWitness,
+			ToSize:   min(fromSize+(i+1)*BytesPerWitness-1, tick.ToSize),
+		}
+
+		if i == 0 && previousTick != nil {
+			ss.From = previousTick.StateSlices[len(previousTick.StateSlices)-1].To
+			ss.FromSize = previousTick.StateSlices[len(previousTick.StateSlices)-1].ToSize
 		}
 
 		tick.StateSlices = append(tick.StateSlices, ss)
@@ -75,30 +80,38 @@ func min(a, b uint64) uint64 {
 
 type Schedule struct {
 	estimator WitnessEstimator
+	lastTick  *Tick
 }
 
 type WitnessEstimator interface {
 	CumulativeWitnessSize(key []byte) uint64
 	PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, err error)
-	PrefixByCumulativeWitnessSize2(size uint64) (prefix []byte, err error)
+	PrefixByCumulativeWitnessSizeDBOnly(size uint64) (prefix []byte, err error)
+	PrefixByCumulativeWitnessSizeFrom(from []byte, size uint64) (prefix []byte, err error)
 }
 
 func NewSchedule(estimator WitnessEstimator) *Schedule {
 	return &Schedule{estimator: estimator}
 }
 
-func (s *Schedule) Tick(block uint64) (Tick, error) {
-	tick := newTick(block, s.estimator.CumulativeWitnessSize([]byte{}))
+func (s *Schedule) Tick(block uint64) (*Tick, error) {
+	tick := newTick(block, s.estimator.CumulativeWitnessSize([]byte{}), s.lastTick)
 	tick.StateSlices = append(tick.StateSlices)
 	for i := range tick.StateSlices {
 		var err error
-		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSize2(tick.StateSlices[i].FromSize); err != nil {
-			return Tick{}, err
+		if tick.StateSlices[i].From == nil {
+			if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSizeFrom([]byte{}, tick.StateSlices[i].FromSize); err != nil {
+				return tick, err
+			}
 		}
-		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSize2(tick.StateSlices[i].ToSize); err != nil {
-			return Tick{}, err
+		//fmt.Printf("toSize: %d, %d\n", startFromSize, tick.StateSlices[i].ToSize)
+		//tick.StateSlices[i].From = startFrom
+		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSizeFrom(tick.StateSlices[i].From, tick.StateSlices[i].ToSize-tick.StateSlices[i].FromSize); err != nil {
+			return tick, err
 		}
+		//fmt.Printf("%d: %s\n", i, tick.StateSlices[i])
 	}
 
+	s.lastTick = tick
 	return tick, nil
 }
