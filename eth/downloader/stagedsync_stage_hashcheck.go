@@ -3,13 +3,14 @@ package downloader
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/pkg/errors"
 )
 
-func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
-	hashProgress, err := GetStageProgress(d.stateDB, HashCheck)
+func spawnCheckFinalHashStage(stateDB ethdb.Database, blockchain BlockChain, syncHeadNumber uint64) error {
+	hashProgress, err := GetStageProgress(stateDB, HashCheck)
 	if err != nil {
 		return err
 	}
@@ -24,11 +25,11 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 		return nil
 	}
 
-	syncHeadBlock := d.blockchain.GetBlockByNumber(syncHeadNumber)
+	syncHeadBlock := blockchain.GetBlockByNumber(syncHeadNumber)
 
 	// make sure that we won't write the the real DB
 	// should never be commited
-	euphemeralMutation := d.stateDB.NewBatch()
+	euphemeralMutation := stateDB.NewBatch()
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
@@ -46,28 +47,28 @@ func (d *Downloader) spawnCheckFinalHashStage(syncHeadNumber uint64) error {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	return SaveStageProgress(d.stateDB, HashCheck, blockNr)
+	return SaveStageProgress(stateDB, HashCheck, blockNr)
 }
 
-func (d *Downloader) unwindHashCheckStage(unwindPoint uint64) error {
+func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
-	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, HashCheck)
+	lastProcessedBlockNumber, err := GetStageProgress(stateDB, HashCheck)
 	if err != nil {
 		return fmt.Errorf("unwind HashCheck: get stage progress: %v", err)
 	}
-	unwindPoint, err1 := GetStageUnwind(d.stateDB, HashCheck)
+	unwindPoint, err1 := GetStageUnwind(stateDB, HashCheck)
 	if err1 != nil {
 		return err1
 	}
 	if unwindPoint >= lastProcessedBlockNumber {
-		err = SaveStageUnwind(d.stateDB, HashCheck, 0)
+		err = SaveStageUnwind(stateDB, HashCheck, 0)
 		if err != nil {
 			return fmt.Errorf("unwind HashCheck: reset: %v", err)
 		}
 		return nil
 	}
-	mutation := d.stateDB.NewBatch()
+	mutation := stateDB.NewBatch()
 	err = SaveStageUnwind(mutation, HashCheck, 0)
 	if err != nil {
 		return fmt.Errorf("unwind HashCheck: reset: %v", err)

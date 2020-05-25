@@ -39,9 +39,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 		case Execution:
 			err = unwindExecutionStage(unwindPoint, d.stateDB)
 		case HashCheck:
-			if !core.UsePlainStateExecution {
-				err = d.unwindHashCheckStage(unwindPoint)
-			}
+			err = unwindHashCheckStage(unwindPoint, d.stateDB)
 		case AccountHistoryIndex:
 			err = unwindAccountHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution)
 		case StorageHistoryIndex:
@@ -96,10 +94,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
-	if !core.UsePlainStateExecution {
-		if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
-			return err
-		}
+	if err = spawnCheckFinalHashStage(d.stateDB, d.blockchain, syncHeadNumber); err != nil {
+		return err
 	}
 
 	log.Info("Sync stage 5/7. Validating final hash... Complete!")
