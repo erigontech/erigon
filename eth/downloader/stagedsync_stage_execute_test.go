@@ -6,14 +6,15 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -160,9 +161,8 @@ func generateBlocks(t *testing.T, numberOfBlocks uint64, stateWriterGen stateWri
 		}
 		blockWriter := stateWriterGen(blockNumber)
 
-		var oldValue common.Hash
-		var newValue common.Hash
-		newValue[0] = 1
+		var oldValue, newValue uint256.Int
+		newValue.SetOne()
 		var location common.Hash
 		location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
 
