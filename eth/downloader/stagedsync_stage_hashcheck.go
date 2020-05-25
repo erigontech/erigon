@@ -34,6 +34,11 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) err
 		}
 	}
 
+	_, err = hashedStatePromotion.Commit()
+	if err != nil {
+		return err
+	}
+
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
 	syncHeadBlock := rawdb.ReadBlock(stateDB, hash, syncHeadNumber)
 
@@ -42,7 +47,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) err
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 	loader := trie.NewSubTrieLoader(blockNr)
 	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(hashedStatePromotion, rl, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
 		return errors.Wrap(err1, "checking root hash failed")
 	}
@@ -53,13 +58,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) err
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	err = SaveStageProgress(hashedStatePromotion, HashCheck, blockNr)
-	if err != nil {
-		return err
-	}
-
-	_, err = hashedStatePromotion.Commit()
-	return err
+	return SaveStageProgress(stateDB, HashCheck, blockNr)
 }
 
 func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
