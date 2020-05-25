@@ -253,6 +253,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		statedb.SetCode(addr, account.Code)
 		statedb.SetNonce(addr, account.Nonce)
 		for key, value := range account.Storage {
+			key := key
 			val := uint256.NewInt().SetBytes(value.Bytes())
 			statedb.SetState(addr, &key, *val)
 		}

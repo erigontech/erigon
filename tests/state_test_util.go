@@ -247,8 +247,9 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		statedb.SetNonce(addr, a.Nonce)
 		statedb.SetBalance(addr, a.Balance)
 		for k, v := range a.Storage {
+			key := k
 			val := uint256.NewInt().SetBytes(v.Bytes())
-			statedb.SetState(addr, &k, *val)
+			statedb.SetState(addr, &key, *val)
 		}
 	}
 	// Commit and re-open to start with a clean state.

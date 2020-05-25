@@ -758,6 +758,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
+				key := key
 				state.SetState(addr, &key, value)
 			}
 		}
