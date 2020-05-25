@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/VictoriaMetrics/fastcache"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -155,7 +156,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	// We delegate here first to let the changeSetWrite make its own decision on whether to proceed in case *original == *value
 	if err := dsw.csw.WriteAccountStorage(ctx, address, incarnation, key, original, value); err != nil {
 		return err
@@ -173,14 +174,14 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	}
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 
-	v := cleanUpTrailingZeroes(value[:])
+	v := value.Bytes()
 	if dsw.storageCache != nil {
 		dsw.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
 		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
 	}
-	return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, common.CopyBytes(v))
+	return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, v)
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {

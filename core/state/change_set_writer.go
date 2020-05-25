@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -139,7 +141,7 @@ func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Addr
 	return nil
 }
 
-func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -149,11 +151,7 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 		return err
 	}
 
-	o := cleanUpTrailingZeroes(original[:])
-	originalValue := make([]byte, len(o))
-	copy(originalValue, o)
-
-	w.storageChanges[string(compositeKey)] = originalValue
+	w.storageChanges[string(compositeKey)] = original.Bytes()
 	w.storageChanged[address] = true
 
 	return nil

@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -87,7 +89,7 @@ func TestEIP2200(t *testing.T) {
 		s := state.New(tds)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.input))
-		s.SetState(address, common.Hash{}, common.BytesToHash([]byte{tt.original}))
+		s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
 
 		s.CommitBlock(context.Background(), tds.DbStateWriter())
 

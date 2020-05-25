@@ -23,20 +23,23 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+	"github.com/petar/GoLLRB/llrb"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 var _ StateReader = (*DbState)(nil)
 var _ StateWriter = (*DbState)(nil)
 
 type storageItem struct {
-	key, seckey, value common.Hash
+	key, seckey common.Hash
+	value       uint256.Int
 }
 
 func (a *storageItem) Less(b llrb.Item) bool {
@@ -67,7 +70,7 @@ func (dbs *DbState) GetBlockNr() uint64 {
 	return dbs.blockNr
 }
 
-func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) error {
+func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		log.Error("Error on hashing", "err", err)
@@ -93,7 +96,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
 			st.ReplaceOrInsert(item)
-			if item.value != emptyHash {
+			if !item.value.IsZero() {
 				copy(lastSecKey[:], item.seckey[:])
 				// Only count non-zero items
 				overrideCounter++
@@ -133,7 +136,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	var innerErr error
 	st.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*storageItem)
-		if item.value != emptyHash {
+		if !item.value.IsZero() {
 			// Skip if value == 0
 			if item.key == emptyHash {
 				key, err := dbs.db.Get(dbutils.PreimagePrefix, item.seckey[:])
@@ -258,7 +261,7 @@ func (dbs *DbState) UpdateAccountCode(address common.Address, incarnation uint64
 	return nil
 }
 
-func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()

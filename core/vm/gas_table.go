@@ -19,6 +19,8 @@ package vm
 import (
 	"errors"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -94,9 +96,9 @@ var (
 )
 
 func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	y, x := stack.Back(1), stack.Back(0)
+	value, x := stack.Back(1), stack.Back(0)
 	key := common.Hash(x.Bytes32())
-	var current common.Hash
+	var current uint256.Int
 	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
 
 	// The legacy gas metering only takes into consideration the current state
@@ -109,9 +111,9 @@ func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySi
 		// 2. From a non-zero value address to a zero-value address (DELETE)
 		// 3. From a non-zero to a non-zero                         (CHANGE)
 		switch {
-		case current == (common.Hash{}) && y.Sign() != 0: // 0 => non 0
+		case current.IsZero() && !value.IsZero(): // 0 => non 0
 			return params.SstoreSetGas, nil
-		case current != (common.Hash{}) && y.Sign() == 0: // non 0 => 0
+		case !current.IsZero() && value.IsZero(): // non 0 => 0
 			evm.IntraBlockState.AddRefund(params.SstoreRefundGas)
 			return params.SstoreClearGas, nil
 		default: // non 0 => non 0 (or 0 => 0)
@@ -132,30 +134,29 @@ func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySi
 	// 	  2.2.2. If original value equals new value (this storage slot is reset)
 	//       2.2.2.1. If original value is 0, add 19800 gas to refund counter.
 	// 	     2.2.2.2. Otherwise, add 4800 gas to refund counter.
-	value := common.Hash(y.Bytes32())
-	if current == value { // noop (1)
+	if current.Eq(value) { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
-	var original common.Hash
+	var original uint256.Int
 	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
-		if original == (common.Hash{}) { // create slot (2.1.1)
+		if original.IsZero() { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
 		}
-		if value == (common.Hash{}) { // delete slot (2.1.2b)
+		if value.IsZero() { // delete slot (2.1.2b)
 			evm.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 		}
 		return params.NetSstoreCleanGas, nil // write existing slot (2.1.2)
 	}
-	if original != (common.Hash{}) {
-		if current == (common.Hash{}) { // recreate slot (2.2.1.1)
+	if !original.IsZero() {
+		if current.IsZero() { // recreate slot (2.2.1.1)
 			evm.IntraBlockState.SubRefund(params.NetSstoreClearRefund)
-		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
+		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 		}
 	}
-	if original == value {
-		if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
+	if original.Eq(value) {
+		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 			evm.IntraBlockState.AddRefund(params.NetSstoreResetClearRefund)
 		} else { // reset to original existing slot (2.2.2.2)
 			evm.IntraBlockState.AddRefund(params.NetSstoreResetRefund)
@@ -184,35 +185,34 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 		return 0, errors.New("not enough gas for reentrancy sentry")
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
-	y, x := stack.Back(1), stack.Back(0)
+	value, x := stack.Back(1), stack.Back(0)
 	key := common.Hash(x.Bytes32())
-	var current common.Hash
+	var current uint256.Int
 	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
-	value := common.Hash(y.Bytes32())
 
-	if current == value { // noop (1)
+	if current.Eq(value) { // noop (1)
 		return params.SstoreNoopGasEIP2200, nil
 	}
-	var original common.Hash
+	var original uint256.Int
 	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
-		if original == (common.Hash{}) { // create slot (2.1.1)
+		if original.IsZero() { // create slot (2.1.1)
 			return params.SstoreInitGasEIP2200, nil
 		}
-		if value == (common.Hash{}) { // delete slot (2.1.2b)
+		if value.IsZero() { // delete slot (2.1.2b)
 			evm.IntraBlockState.AddRefund(params.SstoreClearRefundEIP2200)
 		}
 		return params.SstoreCleanGasEIP2200, nil // write existing slot (2.1.2)
 	}
-	if original != (common.Hash{}) {
-		if current == (common.Hash{}) { // recreate slot (2.2.1.1)
+	if !original.IsZero() {
+		if current.IsZero() { // recreate slot (2.2.1.1)
 			evm.IntraBlockState.SubRefund(params.SstoreClearRefundEIP2200)
-		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
+		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState.AddRefund(params.SstoreClearRefundEIP2200)
 		}
 	}
-	if original == value {
-		if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
+	if original.Eq(value) {
+		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 			evm.IntraBlockState.AddRefund(params.SstoreInitRefundEIP2200)
 		} else { // reset to original existing slot (2.2.2.2)
 			evm.IntraBlockState.AddRefund(params.SstoreCleanRefundEIP2200)

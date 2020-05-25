@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -235,9 +237,9 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	if err != nil {
 		return nil, err
 	}
-	var val common.Hash
+	var val uint256.Int
 	statedb.GetState(contract, &key, &val)
-	return val[:], nil
+	return val.Bytes(), nil
 }
 
 // TransactionReceipt returns the receipt of a transaction.

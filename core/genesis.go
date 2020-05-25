@@ -18,6 +18,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,7 @@ import (
 	"math/big"
 	"strings"
 
-	"context"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -41,7 +42,7 @@ import (
 )
 
 var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
-//  ^--- will be overriden e when parsing flags anyway
+//  ^--- will be overridden when parsing flags anyway
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
@@ -253,7 +254,9 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		statedb.SetCode(addr, account.Code)
 		statedb.SetNonce(addr, account.Nonce)
 		for key, value := range account.Storage {
-			statedb.SetState(addr, key, value)
+			key := key
+			val := uint256.NewInt().SetBytes(value.Bytes())
+			statedb.SetState(addr, &key, *val)
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 {

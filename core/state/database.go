@@ -28,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -61,7 +63,7 @@ type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
-	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
+	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error
 	CreateContract(address common.Address) error
 }
 
@@ -89,7 +91,7 @@ func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	return nil
 }
 
@@ -97,7 +99,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 	return nil
 }
 
-// Structure holding updates, deletes, and reads registered within one change period
+// Buffer is a structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
 	codeReads     map[common.Hash]common.Hash
@@ -1350,13 +1352,13 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address common.Address, incarnatio
 	return nil
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
 
-	v := bytes.TrimLeft(value[:], "\x00")
+	v := value.Bytes()
 	m, ok := tsw.tds.currentBuffer.storageUpdates[addrHash]
 	if !ok {
 		m = make(map[common.Hash][]byte)
@@ -1373,7 +1375,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 	}
 	m1[seckey] = struct{}{}
 	if len(v) > 0 {
-		m[seckey] = common.CopyBytes(v)
+		m[seckey] = v
 	} else {
 		m[seckey] = nil
 	}
