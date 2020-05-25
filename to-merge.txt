@@ -463,21 +463,3 @@ Author: Martin Holst Swende <martin@swende.se>
 Date:   Mon May 25 16:12:48 2020 +0200
 
     core/vm: improve jumpdest lookup (#21123)
-
-commit 25a661e0c2fef5b8de9e36f8c928f374d23e3b01
-Author: yutianwu <wzxingbupt@gmail.com>
-Date:   Mon May 25 18:00:18 2020 +0800
-
-    consensus/clique: remove redundant pair of parentheses (#21104)
-
-commit 4f2784b38f59066913bbaf1e6fa531ec724b3650
-Author: Martin Michlmayr <tbm@cyrius.com>
-Date:   Mon May 25 16:21:28 2020 +0800
-
-    all: fix typos in comments (#21118)
-
-commit 48e3b95e774535aee1104d1283d2536cd47c9389
-Author: ucwong <ucwong@126.com>
-Date:   Mon May 25 16:20:09 2020 +0800
-
-    miner: replace use of 'self' as receiver name (#21113)
