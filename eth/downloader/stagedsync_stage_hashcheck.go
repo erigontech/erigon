@@ -6,13 +6,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/pkg/errors"
 )
 
-func spawnCheckFinalHashStage(stateDB ethdb.Database, blockchain BlockChain, syncHeadNumber uint64) error {
+func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	hashProgress, err := GetStageProgress(stateDB, HashCheck)
 	if err != nil {
 		return err
@@ -24,21 +25,17 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, blockchain BlockChain, syn
 		return nil
 	}
 
-	mutation := stateDB.NewBatch()
+	hashedStatePromotion := stateDB.NewBatch()
 
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(mutation, hashProgress)
+		err = promoteHashedState(hashedStatePromotion, hashProgress)
 		if err != nil {
 			return err
 		}
 	}
 
-	_, err = mutation.Commit()
-	if err != nil {
-		return err
-	}
-
-	syncHeadBlock := blockchain.GetBlockByNumber(syncHeadNumber)
+	hash := rawdb.ReadCanonicalHash(hashedStatePromotion, syncHeadNumber)
+	syncHeadBlock := rawdb.ReadBlock(hashedStatePromotion, hash, syncHeadNumber)
 
 	// make sure that we won't write the the real DB
 	// should never be commited
@@ -60,7 +57,13 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, blockchain BlockChain, syn
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	return SaveStageProgress(stateDB, HashCheck, blockNr)
+	err = SaveStageProgress(hashedStatePromotion, HashCheck, blockNr)
+	if err != nil {
+		return err
+	}
+
+	_, err = hashedStatePromotion.Commit()
+	return err
 }
 
 func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {

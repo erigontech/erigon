@@ -94,7 +94,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
-	if err = spawnCheckFinalHashStage(d.stateDB, d.blockchain, syncHeadNumber); err != nil {
+	if err = spawnCheckFinalHashStage(d.stateDB, syncHeadNumber); err != nil {
 		return err
 	}
 
