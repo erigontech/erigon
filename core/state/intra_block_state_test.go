@@ -422,16 +422,22 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
 		// Check storage.
 		if obj := state.getStateObject(addr); obj != nil {
-			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
+			err = ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
 				var out uint256.Int
 				checkstate.GetState(addr, &key, &out)
 				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
-			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
+			if err != nil {
+				return err
+			}
+			err = checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
 				var out uint256.Int
 				state.GetState(addr, &key, &out)
 				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
+			if err != nil {
+				return err
+			}
 		}
 		if err != nil {
 			return err
