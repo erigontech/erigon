@@ -24,13 +24,17 @@ const (
 
 func TestUnwindExecutionStageHashedStatic(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 50, hashedWriterGen(initialDb), staticCodeStaticIncarnations)
+	generateBlocks(t, 50, hashedWriterGen(initialDb), staticCodeStaticIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 100, hashedWriterGen(mutation), staticCodeStaticIncarnations)
+	generateBlocks(t, 100, hashedWriterGen(mutation), staticCodeStaticIncarnations)
 
-	SaveStageProgress(mutation, Execution, 100)
-	err := unwindExecutionStage(50, mutation)
+	err := SaveStageProgress(mutation, Execution, 100)
+	if err != nil {
+		t.Errorf("error while saving progress: %v", err)
+	}
+
+	err = unwindExecutionStage(50, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -40,13 +44,16 @@ func TestUnwindExecutionStageHashedStatic(t *testing.T) {
 
 func TestUnwindExecutionStageHashedWithIncarnationChanges(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 50, hashedWriterGen(initialDb), changeCodeWithIncarnations)
+	generateBlocks(t, 50, hashedWriterGen(initialDb), changeCodeWithIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 100, hashedWriterGen(mutation), changeCodeWithIncarnations)
+	generateBlocks(t, 100, hashedWriterGen(mutation), changeCodeWithIncarnations)
 
-	SaveStageProgress(mutation, Execution, 100)
-	err := unwindExecutionStage(50, mutation)
+	err := SaveStageProgress(mutation, Execution, 100)
+	if err != nil {
+		t.Errorf("error while saving progress: %v", err)
+	}
+	err = unwindExecutionStage(50, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -57,13 +64,16 @@ func TestUnwindExecutionStageHashedWithIncarnationChanges(t *testing.T) {
 func TestUnwindExecutionStageHashedWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
 	initialDb := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 50, hashedWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
+	generateBlocks(t, 50, hashedWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 100, hashedWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
+	generateBlocks(t, 100, hashedWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
 
-	SaveStageProgress(mutation, Execution, 100)
-	err := unwindExecutionStage(50, mutation)
+	err := SaveStageProgress(mutation, Execution, 100)
+	if err != nil {
+		t.Errorf("error while saving progress: %v", err)
+	}
+	err = unwindExecutionStage(50, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -73,14 +83,17 @@ func TestUnwindExecutionStageHashedWithCodeChanges(t *testing.T) {
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 50, plainWriterGen(initialDb), staticCodeStaticIncarnations)
+	generateBlocks(t, 50, plainWriterGen(initialDb), staticCodeStaticIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 100, plainWriterGen(mutation), staticCodeStaticIncarnations)
+	generateBlocks(t, 100, plainWriterGen(mutation), staticCodeStaticIncarnations)
 
-	SaveStageProgress(mutation, Execution, 100)
+	err := SaveStageProgress(mutation, Execution, 100)
+	if err != nil {
+		t.Errorf("error while saving progress: %v", err)
+	}
 	core.UsePlainStateExecution = true
-	err := unwindExecutionStage(50, mutation)
+	err = unwindExecutionStage(50, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -90,14 +103,17 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 50, plainWriterGen(initialDb), changeCodeWithIncarnations)
+	generateBlocks(t, 50, plainWriterGen(initialDb), changeCodeWithIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeWithIncarnations)
+	generateBlocks(t, 100, plainWriterGen(mutation), changeCodeWithIncarnations)
 
-	SaveStageProgress(mutation, Execution, 100)
+	err := SaveStageProgress(mutation, Execution, 100)
+	if err != nil {
+		t.Errorf("error while saving progress: %v", err)
+	}
 	core.UsePlainStateExecution = true
-	err := unwindExecutionStage(50, mutation)
+	err = unwindExecutionStage(50, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -108,14 +124,17 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
 	initialDb := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 50, plainWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
+	generateBlocks(t, 50, plainWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
-	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
+	generateBlocks(t, 100, plainWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
 
-	SaveStageProgress(mutation, Execution, 100)
+	err := SaveStageProgress(mutation, Execution, 100)
+	if err != nil {
+		t.Errorf("error while saving progress: %v", err)
+	}
 	core.UsePlainStateExecution = true
-	err := unwindExecutionStage(50, mutation)
+	err = unwindExecutionStage(50, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -123,7 +142,8 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	compareCurrentState(t, initialDb, mutation, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }
 
-func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
+func generateBlocks(t *testing.T, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
+	from := uint64(1)
 	ctx := context.Background()
 	acc1 := accounts.NewAccount()
 	acc1.Incarnation = 1

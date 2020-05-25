@@ -276,15 +276,38 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	return nil
 }
 
-func writeAccountHashed(db rawdb.DatabaseWriter, key string, acc accounts.Account) error {
+func writeAccountHashed(db ethdb.Database, key string, acc accounts.Account) error {
 	var addrHash common.Hash
 	copy(addrHash[:], []byte(key))
+	if err := cleanupContractCodeBucket(
+		db,
+		dbutils.ContractCodeBucket,
+		acc,
+		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
+			return rawdb.ReadAccount(db, addrHash, out)
+		},
+		func(inc uint64) []byte { return dbutils.GenerateStoragePrefix(addrHash[:], inc) },
+	); err != nil {
+		return err
+	}
 	return rawdb.WriteAccount(db, addrHash, acc)
 }
 
-func writeAccountPlain(db rawdb.DatabaseWriter, key string, acc accounts.Account) error {
+func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) error {
 	var address common.Address
 	copy(address[:], []byte(key))
+	if err := cleanupContractCodeBucket(
+		db,
+		dbutils.PlainContractCodeBucket,
+		acc,
+		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
+			return rawdb.PlainReadAccount(db, address, out)
+		},
+		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address, inc) },
+	); err != nil {
+		return err
+	}
+
 	return rawdb.PlainWriteAccount(db, address, acc)
 }
 
@@ -296,6 +319,30 @@ func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
+}
+
+func cleanupContractCodeBucket(
+	db ethdb.Database,
+	bucket []byte,
+	acc accounts.Account,
+	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
+	getKeyForIncarnationFunc func(uint64) []byte,
+) error {
+	var original accounts.Account
+	got, err := readAccountFunc(db, &original)
+	if err != nil {
+		return err
+	}
+	if got {
+		// clean up all the code incarnations original incarnation and the new one
+		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Getter, key string) {

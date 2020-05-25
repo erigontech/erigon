@@ -47,6 +47,17 @@ func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
 	return db.Delete(dbutils.CurrentStateBucket, addrHash[:])
 }
 
+func PlainReadAccount(db DatabaseReader, address common.Address, acc *accounts.Account) (bool, error) {
+	enc, err := db.Get(dbutils.PlainStateBucket, address[:])
+	if err != nil {
+		return false, err
+	}
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func PlainWriteAccount(db DatabaseWriter, address common.Address, acc accounts.Account) error {
 	//fmt.Printf("PlainWriteAccount: %x %x\n", addrHash, acc.Root)
 	value := make([]byte, acc.EncodingLengthForStorage())
