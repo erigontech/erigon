@@ -39,7 +39,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) err
 
 	// make sure that we won't write the the real DB
 	// should never be commited
-	euphemeralMutation := stateDB.NewBatch()
+	euphemeralMutation := hashedStatePromotion.NewBatch()
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
@@ -72,10 +72,6 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	lastProcessedBlockNumber, err := GetStageProgress(stateDB, HashCheck)
 	if err != nil {
 		return fmt.Errorf("unwind HashCheck: get stage progress: %v", err)
-	}
-	unwindPoint, err1 := GetStageUnwind(stateDB, HashCheck)
-	if err1 != nil {
-		return err1
 	}
 	if unwindPoint >= lastProcessedBlockNumber {
 		err = SaveStageUnwind(stateDB, HashCheck, 0)
