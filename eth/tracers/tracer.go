@@ -25,12 +25,14 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/holiman/uint256"
+	duktape "gopkg.in/olebedev/go-duktape.v3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
-	duktape "gopkg.in/olebedev/go-duktape.v3"
 )
 
 // bigIntegerJS is the minified version of https://github.com/peterolson/BigInteger.js.
@@ -224,11 +226,11 @@ func (dw *dbWrapper) pushObject(vm *duktape.Context) {
 		addr := popSlice(ctx)
 
 		key := common.BytesToHash(hash)
-		var state common.Hash
+		var state uint256.Int
 		dw.db.GetState(common.BytesToAddress(addr), &key, &state)
 
-		ptr := ctx.PushFixedBuffer(len(state))
-		copy(makeSlice(ptr, uint(len(state))), state[:])
+		ptr := ctx.PushFixedBuffer(state.ByteLen())
+		copy(makeSlice(ptr, uint(state.ByteLen())), state.Bytes())
 		return 1
 	})
 	vm.PutPropString(obj, "getState")

@@ -18,6 +18,7 @@ package eth
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -25,9 +26,9 @@ import (
 	"strconv"
 	"testing"
 
-	"context"
-
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -183,7 +184,8 @@ func TestStorageRangeAt(t *testing.T) {
 	tds.StartNewBuffer()
 
 	for _, entry := range storage {
-		statedb.SetState(addr, *entry.Key, entry.Value)
+		val := uint256.NewInt().SetBytes(entry.Value.Bytes())
+		statedb.SetState(addr, entry.Key, *val)
 	}
 	//we are working with contract, so it need codehash&incarnation
 	statedb.SetIncarnation(addr, state.FirstContractIncarnation)

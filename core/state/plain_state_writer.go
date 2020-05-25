@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 
 	"github.com/VictoriaMetrics/fastcache"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -108,7 +109,7 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 	return w.stateDb.Delete(dbutils.PlainStateBucket, address[:])
 }
 
-func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if err := w.csw.WriteAccountStorage(ctx, address, incarnation, key, original, value); err != nil {
 		return err
 	}
@@ -117,14 +118,14 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 
-	v := cleanUpTrailingZeroes(value[:])
+	v := value.Bytes()
 	if w.storageCache != nil {
 		w.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
 		return w.stateDb.Delete(dbutils.PlainStateBucket, compositeKey)
 	}
-	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, common.CopyBytes(v))
+	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, v)
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {

@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -109,9 +110,9 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
 	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
-	var value common.Hash
+	var value uint256.Int
 
-	s.state.SetState(address, common.Hash{}, value)
+	s.state.SetState(address, &common.Hash{}, value)
 
 	ctx := context.TODO()
 	err := s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
@@ -123,7 +124,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	s.state.GetCommittedState(address, &common.Hash{}, &value)
-	if value != (common.Hash{}) {
+	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
 }
@@ -131,21 +132,21 @@ func (s *StateSuite) TestNull(c *checker.C) {
 func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
 	var storageaddr common.Hash
-	data1 := common.BytesToHash([]byte{42})
-	data2 := common.BytesToHash([]byte{43})
+	data1 := uint256.NewInt().SetUint64(42)
+	data2 := uint256.NewInt().SetUint64(43)
 
 	// snapshot the genesis state
 	genesis := s.state.Snapshot()
 
 	// set initial state object value
-	s.state.SetState(stateobjaddr, storageaddr, data1)
+	s.state.SetState(stateobjaddr, &storageaddr, *data1)
 	snapshot := s.state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	s.state.SetState(stateobjaddr, storageaddr, data2)
+	s.state.SetState(stateobjaddr, &storageaddr, *data2)
 	s.state.RevertToSnapshot(snapshot)
 
-	var value common.Hash
+	var value uint256.Int
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
@@ -176,11 +177,11 @@ func TestSnapshot2(t *testing.T) {
 	stateobjaddr1 := toAddr([]byte("so1"))
 	var storageaddr common.Hash
 
-	data0 := common.BytesToHash([]byte{17})
-	data1 := common.BytesToHash([]byte{18})
+	data0 := uint256.NewInt().SetUint64(17)
+	data1 := uint256.NewInt().SetUint64(18)
 
-	state.SetState(stateobjaddr0, storageaddr, data0)
-	state.SetState(stateobjaddr1, storageaddr, data1)
+	state.SetState(stateobjaddr0, &storageaddr, *data0)
+	state.SetState(stateobjaddr1, &storageaddr, *data1)
 
 	// db, trie are already non-empty values
 	so0 := state.getStateObject(stateobjaddr0)
@@ -227,7 +228,7 @@ func TestSnapshot2(t *testing.T) {
 
 	so0Restored := state.getStateObject(stateobjaddr0)
 	// Update lazily-loaded values before comparing.
-	var tmp common.Hash
+	var tmp uint256.Int
 	so0Restored.GetState(&storageaddr, &tmp)
 	so0Restored.Code()
 	// non-deleted is equal (restored)

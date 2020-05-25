@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
 	bip39 "github.com/tyler-smith/go-bip39"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -661,9 +662,9 @@ func (s *PublicBlockChainAPI) GetStorageAt(ctx context.Context, address common.A
 		return nil, err
 	}
 	keyHash := common.HexToHash(key)
-	var res common.Hash
+	var res uint256.Int
 	state.GetState(address, &keyHash, &res)
-	return res[:], state.Error()
+	return res.Bytes(), state.Error()
 }
 
 // CallArgs represents the arguments for a call.
@@ -722,8 +723,8 @@ type account struct {
 	Nonce     *hexutil.Uint64              `json:"nonce"`
 	Code      *hexutil.Bytes               `json:"code"`
 	Balance   **hexutil.Big                `json:"balance"`
-	State     *map[common.Hash]common.Hash `json:"state"`
-	StateDiff *map[common.Hash]common.Hash `json:"stateDiff"`
+	State     *map[common.Hash]uint256.Int `json:"state"`
+	StateDiff *map[common.Hash]uint256.Int `json:"stateDiff"`
 }
 
 func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]account, vmCfg vm.Config, timeout time.Duration, globalGasCap *big.Int) (*core.ExecutionResult, error) {
@@ -757,7 +758,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
-				state.SetState(addr, key, value)
+				state.SetState(addr, &key, value)
 			}
 		}
 	}

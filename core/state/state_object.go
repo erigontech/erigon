@@ -23,6 +23,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -39,7 +41,7 @@ func (c Code) String() string {
 	return string(c) //strings.Join(Disassemble(c), " ")
 }
 
-type Storage map[common.Hash]common.Hash
+type Storage map[common.Hash]uint256.Int
 
 func (s Storage) String() (str string) {
 	for key, value := range s {
@@ -155,7 +157,7 @@ func (so *stateObject) touch() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key *common.Hash, out *common.Hash) {
+func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
 	value, dirty := so.dirtyStorage[*key]
 	if dirty {
 		*out = value
@@ -166,7 +168,7 @@ func (so *stateObject) GetState(key *common.Hash, out *common.Hash) {
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (so *stateObject) GetCommittedState(key *common.Hash, out *common.Hash) {
+func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[*key]
@@ -196,17 +198,17 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *common.Hash) {
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key, value common.Hash) {
+func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
 	// If the new value is the same as old, don't set
-	var prev common.Hash
-	so.GetState(&key, &prev)
+	var prev uint256.Int
+	so.GetState(key, &prev)
 	if prev == value {
 		return
 	}
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
 		account:  &so.address,
-		key:      key,
+		key:      *key,
 		prevalue: prev,
 	})
 	so.setState(key, value)
@@ -218,7 +220,7 @@ func (so *stateObject) SetState(key, value common.Hash) {
 // lookup only happens in the fake state storage.
 //
 // Note this function should only be used for debugging purpose.
-func (so *stateObject) SetStorage(storage map[common.Hash]common.Hash) {
+func (so *stateObject) SetStorage(storage Storage) {
 	// Allocate fake storage if it's nil.
 	if so.fakeStorage == nil {
 		so.fakeStorage = make(Storage)
@@ -230,8 +232,8 @@ func (so *stateObject) SetStorage(storage map[common.Hash]common.Hash) {
 	// debugging and the `fake` storage won't be committed to database.
 }
 
-func (so *stateObject) setState(key, value common.Hash) {
-	so.dirtyStorage[key] = value
+func (so *stateObject) setState(key *common.Hash, value uint256.Int) {
+	so.dirtyStorage[*key] = value
 }
 
 // updateTrie writes cached storage modifications into the object's storage trie.

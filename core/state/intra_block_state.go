@@ -25,6 +25,9 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/holiman/uint256"
+	"github.com/petar/GoLLRB/llrb"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -32,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 type revision struct {
@@ -373,7 +375,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
 
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, value *common.Hash) {
+func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, value *uint256.Int) {
 	sdb.Lock()
 	defer sdb.Unlock()
 
@@ -411,7 +413,7 @@ func (sdb *IntraBlockState) GetStorageProof(a common.Address, key common.Hash) (
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *common.Hash) {
+func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *uint256.Int) {
 	sdb.Lock()
 	defer sdb.Unlock()
 
@@ -535,7 +537,7 @@ func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetState(addr common.Address, key, value common.Hash) {
+func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, value uint256.Int) {
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
@@ -544,7 +546,7 @@ func (sdb *IntraBlockState) SetState(addr common.Address, key, value common.Hash
 
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
-func (sdb *IntraBlockState) SetStorage(addr common.Address, storage map[common.Hash]common.Hash) {
+func (sdb *IntraBlockState) SetStorage(addr common.Address, storage Storage) {
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetStorage(storage)

@@ -29,6 +29,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/holiman/uint256"
 	check "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -52,7 +53,8 @@ func TestUpdateLeaks(t *testing.T) {
 		state.AddBalance(addr, big.NewInt(int64(11*i)))
 		state.SetNonce(addr, uint64(42*i))
 		if i%2 == 0 {
-			state.SetState(addr, common.BytesToHash([]byte{i, i, i}), common.BytesToHash([]byte{i, i, i, i}))
+			val := uint256.NewInt().SetBytes([]byte{i, i, i, i})
+			state.SetState(addr, &common.Hash{i, i, i}, *val)
 		}
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
@@ -96,8 +98,10 @@ func TestIntermediateLeaks(t *testing.T) {
 		state.SetBalance(addr, big.NewInt(int64(11*i)+int64(tweak)))
 		state.SetNonce(addr, uint64(42*i+tweak))
 		if i%2 == 0 {
-			state.SetState(addr, common.Hash{i, i, i, 0}, common.Hash{})
-			state.SetState(addr, common.Hash{i, i, i, tweak}, common.Hash{i, i, i, i, tweak})
+			val := uint256.NewInt()
+			state.SetState(addr, &common.Hash{i, i, i, 0}, *val)
+			val.SetBytes([]byte{i, i, i, i, tweak})
+			state.SetState(addr, &common.Hash{i, i, i, tweak}, *val)
 		}
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i, tweak})
@@ -247,10 +251,10 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		{
 			name: "SetState",
 			fn: func(a testAction, s *IntraBlockState) {
-				var key, val common.Hash
+				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
-				binary.BigEndian.PutUint16(val[:], uint16(a.args[1]))
-				s.SetState(addr, key, val)
+				val := uint256.NewInt().SetUint64(uint64(a.args[1]))
+				s.SetState(addr, &key, *val)
 			},
 			args: make([]int64, 2),
 		},
@@ -418,13 +422,13 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
 		// Check storage.
 		if obj := state.getStateObject(addr); obj != nil {
-			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
-				var out common.Hash
+			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
+				var out uint256.Int
 				checkstate.GetState(addr, &key, &out)
 				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)
-			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
-				var out common.Hash
+			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
+				var out uint256.Int
 				state.GetState(addr, &key, &out)
 				return checkeq("GetState("+key.Hex()+")", out, value)
 			}, 1000)

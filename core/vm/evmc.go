@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"github.com/ethereum/evmc/v7/bindings/go/evmc"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -122,37 +123,35 @@ func (host *hostContext) AccountExists(evmcAddr evmc.Address) bool {
 }
 
 func (host *hostContext) GetStorage(addr evmc.Address, evmcKey evmc.Hash) evmc.Hash {
-	var value common.Hash
+	var value uint256.Int
 	key := common.Hash(evmcKey)
 	host.env.IntraBlockState.GetState(common.Address(addr), &key, &value)
-	return evmc.Hash(value)
+	return evmc.Hash(value.Bytes32())
 }
 
 func (host *hostContext) SetStorage(evmcAddr evmc.Address, evmcKey evmc.Hash, evmcValue evmc.Hash) (status evmc.StorageStatus) {
 	addr := common.Address(evmcAddr)
 	key := common.Hash(evmcKey)
-	value := common.Hash(evmcValue)
-	var oldValue common.Hash
+	value := uint256.NewInt().SetBytes(evmcValue[:])
+	var oldValue uint256.Int
 	host.env.IntraBlockState.GetState(addr, &key, &oldValue)
-	if oldValue == value {
+	if oldValue.Eq(value) {
 		return evmc.StorageUnchanged
 	}
 
-	var current, original common.Hash
+	var current, original uint256.Int
 	host.env.IntraBlockState.GetState(addr, &key, &current)
 	host.env.IntraBlockState.GetCommittedState(addr, &key, &original)
 
-	host.env.IntraBlockState.SetState(addr, key, value)
+	host.env.IntraBlockState.SetState(addr, &key, *value)
 
 	hasNetStorageCostEIP := host.env.ChainConfig().IsConstantinople(host.env.BlockNumber) &&
 		!host.env.ChainConfig().IsPetersburg(host.env.BlockNumber)
 	if !hasNetStorageCostEIP {
-
-		zero := common.Hash{}
 		status = evmc.StorageModified
-		if oldValue == zero {
+		if oldValue.IsZero() {
 			return evmc.StorageAdded
-		} else if value == zero {
+		} else if value.IsZero() {
 			host.env.IntraBlockState.AddRefund(params.SstoreRefundGas)
 			return evmc.StorageDeleted
 		}
@@ -160,24 +159,24 @@ func (host *hostContext) SetStorage(evmcAddr evmc.Address, evmcKey evmc.Hash, ev
 	}
 
 	if original == current {
-		if original == (common.Hash{}) { // create slot (2.1.1)
+		if original.IsZero() { // create slot (2.1.1)
 			return evmc.StorageAdded
 		}
-		if value == (common.Hash{}) { // delete slot (2.1.2b)
+		if value.IsZero() { // delete slot (2.1.2b)
 			host.env.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 			return evmc.StorageDeleted
 		}
 		return evmc.StorageModified
 	}
-	if original != (common.Hash{}) {
-		if current == (common.Hash{}) { // recreate slot (2.2.1.1)
+	if !original.IsZero() {
+		if current.IsZero() { // recreate slot (2.2.1.1)
 			host.env.IntraBlockState.SubRefund(params.NetSstoreClearRefund)
-		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
+		} else if value.IsZero() { // delete slot (2.2.1.2)
 			host.env.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 		}
 	}
-	if original == value {
-		if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
+	if original.Eq(value) {
+		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 			host.env.IntraBlockState.AddRefund(params.NetSstoreResetClearRefund)
 		} else { // reset to original existing slot (2.2.2.2)
 			host.env.IntraBlockState.AddRefund(params.NetSstoreResetRefund)

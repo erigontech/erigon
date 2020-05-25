@@ -25,6 +25,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -36,7 +39,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // StateTest checks transaction processing without block context.
@@ -245,7 +247,8 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		statedb.SetNonce(addr, a.Nonce)
 		statedb.SetBalance(addr, a.Balance)
 		for k, v := range a.Storage {
-			statedb.SetState(addr, k, v)
+			val := uint256.NewInt().SetBytes(v.Bytes())
+			statedb.SetState(addr, &k, *val)
 		}
 	}
 	// Commit and re-open to start with a clean state.

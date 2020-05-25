@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -2763,26 +2764,26 @@ func TestDeleteRecreateSlots(t *testing.T) {
 
 	// If all is correct, then slot 1 and 2 are zero
 	key1 := common.HexToHash("01")
-	var got common.Hash
+	var got uint256.Int
 	statedb.GetState(aa, &key1, &got)
-	if exp := (common.Hash{}); got != exp {
-		t.Errorf("got %x exp %x", got, exp)
+	if !got.IsZero() {
+		t.Errorf("got %x exp %x", got, 0)
 	}
 	key2 := common.HexToHash("02")
 	statedb.GetState(aa, &key2, &got)
-	if exp := (common.Hash{}); got != exp {
-		t.Errorf("got %x exp %x", got, exp)
+	if !got.IsZero() {
+		t.Errorf("got %x exp %x", got, 0)
 	}
 	// Also, 3 and 4 should be set
 	key3 := common.HexToHash("03")
 	statedb.GetState(aa, &key3, &got)
-	if exp := common.HexToHash("03"); got != exp {
-		t.Fatalf("got %x exp %x", got, exp)
+	if got.Uint64() != 3 {
+		t.Fatalf("got %x exp %x", got, 3)
 	}
 	key4 := common.HexToHash("04")
 	statedb.GetState(aa, &key4, &got)
-	if exp := common.HexToHash("04"); got != exp {
-		t.Fatalf("got %x exp %x", got, exp)
+	if got.Uint64() != 4 {
+		t.Fatalf("got %x exp %x", got, 4)
 	}
 }
 
@@ -2860,15 +2861,15 @@ func TestDeleteRecreateAccount(t *testing.T) {
 
 	// If all is correct, then both slots are zero
 	key1 := common.HexToHash("01")
-	var got common.Hash
+	var got uint256.Int
 	statedb.GetState(aa, &key1, &got)
-	if exp := (common.Hash{}); got != exp {
-		t.Errorf("got %x exp %x", got, exp)
+	if !got.IsZero() {
+		t.Errorf("got %x exp %x", got, 0)
 	}
 	key2 := common.HexToHash("02")
 	statedb.GetState(aa, &key2, &got)
-	if exp := (common.Hash{}); got != exp {
-		t.Errorf("got %x exp %x", got, exp)
+	if !got.IsZero() {
+		t.Errorf("got %x exp %x", got, 0)
 	}
 }
 
@@ -3053,15 +3054,15 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		statedb, _, _ := chain.State()
 		// If all is correct, then slot 1 and 2 are zero
 		key1 := common.HexToHash("01")
-		var got common.Hash
+		var got uint256.Int
 		statedb.GetState(aa, &key1, &got)
-		if exp := (common.Hash{}); got != exp {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, exp)
+		if !got.IsZero() {
+			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 		}
 		key2 := common.HexToHash("02")
 		statedb.GetState(aa, &key2, &got)
-		if exp := (common.Hash{}); got != exp {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, exp)
+		if !got.IsZero() {
+			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 		}
 		exp := expectations[i]
 		if exp.exist {
@@ -3070,10 +3071,10 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			}
 			for slot, val := range exp.values {
 				key := asHash(slot)
-				var gotValue common.Hash
+				var gotValue uint256.Int
 				statedb.GetState(aa, &key, &gotValue)
-				if expValue := asHash(val); gotValue != expValue {
-					t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, expValue)
+				if gotValue.Uint64() != uint64(val) {
+					t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
 				}
 			}
 		} else {

@@ -22,6 +22,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -85,9 +87,9 @@ func (a *Account) Storage(ctx context.Context, args struct{ Slot common.Hash }) 
 	if err != nil {
 		return common.Hash{}, err
 	}
-	var val common.Hash
+	var val uint256.Int
 	state.GetState(a.address, &args.Slot, &val)
-	return val, nil
+	return val.Bytes32(), nil
 }
 
 // Log represents an individual log message. All arguments are mandatory.

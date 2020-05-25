@@ -22,9 +22,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -212,13 +213,13 @@ func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
 	}
 
-	v := bytes.TrimLeft(value[:], "\x00")
+	v := value.Bytes()
 	m, ok := s.storageUpdates[addrHash]
 	if !ok {
 		m = make(map[common.Hash][]byte)

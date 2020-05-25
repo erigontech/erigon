@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -419,9 +421,9 @@ func StorageRangeAt(dbstate *state.DbState, contractAddress common.Address, star
 	result := StorageRangeResult{Storage: StorageMap{}}
 	resultCount := 0
 
-	if err := dbstate.ForEachStorage(contractAddress, start, func(key, seckey, value common.Hash) bool {
+	if err := dbstate.ForEachStorage(contractAddress, start, func(key, seckey common.Hash, value uint256.Int) bool {
 		if resultCount < maxResult {
-			result.Storage[seckey] = StorageEntry{Key: &key, Value: value}
+			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
 		} else {
 			result.NextKey = &seckey
 		}

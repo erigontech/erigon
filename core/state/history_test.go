@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -19,7 +22,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
@@ -137,9 +139,9 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			t.Fatal("incorrect history index")
 		}
 
-		resAccStorage := make(map[common.Hash]common.Hash)
+		resAccStorage := make(map[common.Hash]uint256.Int)
 		err = db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
-			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
+			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = *uint256.NewInt().SetBytes(v)
 			return true, nil
 		})
 		if err != nil {
@@ -158,9 +160,9 @@ func TestMutationCommitThinHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			resultHash := common.BytesToHash(res)
-			if resultHash != v {
-				t.Fatalf("incorrect storage history for %x %x %x", addrHash.String(), v, resultHash)
+			result := uint256.NewInt().SetBytes(res)
+			if !v.Eq(result) {
+				t.Fatalf("incorrect storage history for %x %x %x", addrHash.String(), v, result)
 			}
 		}
 	}
@@ -211,7 +213,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			if err1 != nil {
 				t.Fatal(err1)
 			}
-			value := common.Hash{uint8(10 + j)}
+			value := uint256.NewInt().SetUint64(uint64(10 + j))
 			if err2 := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes()); err2 != nil {
 				t.Fatal(err2)
 			}
@@ -227,13 +229,13 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	}
 }
 
-func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numOfAccounts, numOfStateKeys int) ([]common.Hash, []*accounts.Account, []map[common.Hash]common.Hash, []*accounts.Account, []map[common.Hash]common.Hash) {
+func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numOfAccounts, numOfStateKeys int) ([]common.Hash, []*accounts.Account, []map[common.Hash]uint256.Int, []*accounts.Account, []map[common.Hash]uint256.Int) {
 	t.Helper()
 
 	accHistory := make([]*accounts.Account, numOfAccounts)
 	accState := make([]*accounts.Account, numOfAccounts)
-	accStateStorage := make([]map[common.Hash]common.Hash, numOfAccounts)
-	accHistoryStateStorage := make([]map[common.Hash]common.Hash, numOfAccounts)
+	accStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
+	accHistoryStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	addrs := make([]common.Address, numOfAccounts)
 	addrHashes := make([]common.Hash, numOfAccounts)
 	tds := NewTrieDbState(common.Hash{}, db, 1)
@@ -251,23 +253,23 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 		accState[i].Nonce++
 		accState[i].Balance = *big.NewInt(200)
 
-		accStateStorage[i] = make(map[common.Hash]common.Hash)
-		accHistoryStateStorage[i] = make(map[common.Hash]common.Hash)
+		accStateStorage[i] = make(map[common.Hash]uint256.Int)
+		accHistoryStateStorage[i] = make(map[common.Hash]uint256.Int)
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
 			keyHash, err := common.HashData(key.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
-			newValue := common.Hash{uint8(j)}
-			if newValue != (common.Hash{}) {
+			newValue := uint256.NewInt().SetUint64(uint64(j))
+			if !newValue.IsZero() {
 				// Empty value is not considered to be present
-				accStateStorage[i][keyHash] = newValue
+				accStateStorage[i][keyHash] = *newValue
 			}
 
-			value := common.Hash{uint8(10 + j)}
-			accHistoryStateStorage[i][keyHash] = value
-			if err := blockWriter.WriteAccountStorage(ctx, addrs[i], accHistory[i].Incarnation, &key, &value, &newValue); err != nil {
+			value := uint256.NewInt().SetUint64(uint64(10 + j))
+			accHistoryStateStorage[i][keyHash] = *value
+			if err := blockWriter.WriteAccountStorage(ctx, addrs[i], accHistory[i].Incarnation, &key, value, newValue); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -309,7 +311,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	blockWriter := tds.DbStateWriter()
 	ctx := context.Background()
-	emptyVal := common.Hash{}
+	emptyVal := uint256.NewInt()
 
 	block2Expected := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -330,15 +332,15 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		k := common.Hash{i}
 		keyHash, _ := common.HashData(k[:])
 		key := dbutils.GenerateCompositeStorageKey(addrHash, 1, keyHash)
-		val3 := common.BytesToHash([]byte("block 3 " + strconv.Itoa(int(i))))
-		val5 := common.BytesToHash([]byte("block 5 " + strconv.Itoa(int(i))))
-		val := common.BytesToHash([]byte("state   " + strconv.Itoa(int(i))))
+		val3 := uint256.NewInt().SetBytes([]byte("block 3 " + strconv.Itoa(int(i))))
+		val5 := uint256.NewInt().SetBytes([]byte("block 5 " + strconv.Itoa(int(i))))
+		val := uint256.NewInt().SetBytes([]byte("state   " + strconv.Itoa(int(i))))
 		if i <= 2 {
-			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val3, &val); err != nil {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, val3, val); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val3, &val5); err != nil {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, val3, val5); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -360,14 +362,14 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		k := common.Hash{i}
 		keyHash, _ := common.HashData(k[:])
 		key := dbutils.GenerateCompositeStorageKey(addrHash, 1, keyHash)
-		val5 := common.BytesToHash([]byte("block 5 " + strconv.Itoa(int(i))))
-		val := common.BytesToHash([]byte("state   " + strconv.Itoa(int(i))))
+		val5 := uint256.NewInt().SetBytes([]byte("block 5 " + strconv.Itoa(int(i))))
+		val := uint256.NewInt().SetBytes([]byte("state   " + strconv.Itoa(int(i))))
 		if i > 4 {
-			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val5, &emptyVal); err != nil {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, val5, emptyVal); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val5, &val); err != nil {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, val5, val); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -505,8 +507,8 @@ func TestUnwindTruncateHistory(t *testing.T) {
 			}
 			newAcc.Incarnation = FirstContractIncarnation
 		}
-		var oldValue common.Hash
-		var newValue common.Hash
+		var oldValue uint256.Int
+		var newValue uint256.Int
 		newValue[0] = 1
 		var location common.Hash
 		location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())

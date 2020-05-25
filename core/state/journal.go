@@ -20,6 +20,8 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
@@ -120,8 +122,9 @@ type (
 		prev    uint64
 	}
 	storageChange struct {
-		account       *common.Address
-		key, prevalue common.Hash
+		account  *common.Address
+		key      common.Hash
+		prevalue uint256.Int
 	}
 	codeChange struct {
 		account  *common.Address
@@ -212,7 +215,7 @@ func (ch codeChange) dirtied() *common.Address {
 }
 
 func (ch storageChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setState(ch.key, ch.prevalue)
+	s.getStateObject(*ch.account).setState(&ch.key, ch.prevalue)
 }
 
 func (ch storageChange) dirtied() *common.Address {

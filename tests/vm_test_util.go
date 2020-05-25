@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -106,12 +108,12 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	if gasRemaining != uint64(*t.json.GasRemaining) {
 		return fmt.Errorf("remaining gas %v, want %v", gasRemaining, *t.json.GasRemaining)
 	}
-	var haveV common.Hash
+	var haveV uint256.Int
 	for addr, account := range t.json.Post {
 		for k, wantV := range account.Storage {
 			key := k
 			state.GetState(addr, &key, &haveV)
-			if haveV != wantV {
+			if haveV.Bytes32() != wantV {
 				return fmt.Errorf("wrong storage value at %x:\n  got  %x\n  want %x", k, haveV, wantV)
 			}
 		}

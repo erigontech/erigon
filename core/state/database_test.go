@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -170,9 +171,9 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	// We expect number 0x42 in the position [2], because it is the block number 2
 	key2 := common.BigToHash(big.NewInt(2))
-	var check2 common.Hash
+	var check2 uint256.Int
 	st.GetState(create2address, &key2, &check2)
-	if check2 != common.HexToHash("0x42") {
+	if check2.Uint64() != 0x42 {
 		t.Errorf("expected 0x42 in position 2, got: %x", check2)
 	}
 
@@ -205,14 +206,14 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	// We expect number 0x42 in the position [4], because it is the block number 4
 	key4 := common.BigToHash(big.NewInt(4))
-	var check4 common.Hash
+	var check4 uint256.Int
 	st.GetState(create2address, &key4, &check4)
-	if check4 != common.HexToHash("0x42") {
+	if check4.Uint64() != 0x42 {
 		t.Errorf("expected 0x42 in position 4, got: %x", check4)
 	}
 	// We expect number 0x0 in the position [2], because it is the block number 4
 	st.GetState(create2address, &key2, &check2)
-	if check2 != common.HexToHash("0x0") {
+	if !check2.IsZero() {
 		t.Errorf("expected 0x0 in position 2, got: %x", check2)
 	}
 }
@@ -322,7 +323,8 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-	var key0, correctValueX common.Hash
+	var key0 common.Hash
+	var correctValueX uint256.Int
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCKS 2 + 3
@@ -351,7 +353,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
-	var valueX common.Hash
+	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
@@ -457,7 +459,8 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-	var key0, correctValueX common.Hash
+	var key0 common.Hash
+	var correctValueX uint256.Int
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	fmt.Println("Insert block 2")
@@ -482,7 +485,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
-	var valueX common.Hash
+	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
@@ -746,9 +749,10 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
-	var key0, check0 common.Hash
+	var key0 common.Hash
+	var check0 uint256.Int
 	st.GetState(contractAddress, &key0, &check0)
-	if check0 != common.HexToHash("0x0") {
+	if !check0.IsZero() {
 		t.Errorf("expected 0x00 in position 0, got: %x", check0)
 	}
 }
@@ -760,12 +764,12 @@ func TestReproduceCrash(t *testing.T) {
 	// 1. Setting storageKey 1 to a non-zero value
 	// 2. Setting storageKey 2 to a non-zero value
 	// 3. Setting both storageKey1 and storageKey2 to zero values
-	value0 := common.Hash{}
+	value0 := uint256.NewInt()
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	storageKey1 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541")
-	value1 := common.HexToHash("0x016345785d8a0000")
+	value1 := uint256.NewInt().SetUint64(0x016345785d8a0000)
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
-	value2 := common.HexToHash("0x58c00a51")
+	value2 := uint256.NewInt().SetUint64(0x58c00a51)
 	db := ethdb.NewMemDatabase()
 	tds := state.NewTrieDbState(common.Hash{}, db, 0)
 
@@ -780,22 +784,22 @@ func TestReproduceCrash(t *testing.T) {
 	}
 	// Start the 2nd transaction
 	tds.StartNewBuffer()
-	intraBlockState.SetState(contract, storageKey1, value1)
+	intraBlockState.SetState(contract, &storageKey1, *value1)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	tds.StartNewBuffer()
 	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
-	intraBlockState.SetState(contract, storageKey2, value2)
+	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	tds.StartNewBuffer()
 	intraBlockState.SubBalance(contract, big.NewInt(1000000000))
-	intraBlockState.SetState(contract, storageKey1, value0)
-	intraBlockState.SetState(contract, storageKey2, value0)
+	intraBlockState.SetState(contract, &storageKey1, *value0)
+	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}

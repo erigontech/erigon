@@ -18,6 +18,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,8 +26,7 @@ import (
 	"math/big"
 	"strings"
 
-	"context"
-
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -253,7 +253,8 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		statedb.SetCode(addr, account.Code)
 		statedb.SetNonce(addr, account.Nonce)
 		for key, value := range account.Storage {
-			statedb.SetState(addr, key, value)
+			val := uint256.NewInt().SetBytes(value.Bytes())
+			statedb.SetState(addr, &key, *val)
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 {
