@@ -193,8 +193,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
 }
 
-//nolint:unparam
-func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error { //nolint:unparam
+func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
@@ -208,51 +207,61 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error { //
 	}
 	log.Info("Unwind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
 	mutation := stateDB.NewBatch()
-	accountMap, storageMap, err2 := stateDB.RewindData(lastProcessedBlockNumber, unwindPoint)
+
+	rewindFunc := ethdb.RewindData
+	stateBucket := dbutils.CurrentStateBucket
+	accountChangeSetBucket := dbutils.AccountChangeSetBucket
+	storageChangeSetBucket := dbutils.StorageChangeSetBucket
+	storageKeyLength := common.HashLength + common.IncarnationLength + common.HashLength
+	deleteAccountFunc := deleteAccountHashed
+	writeAccountFunc := writeAccountHashed
+	recoverCodeHashFunc := recoverCodeHashHashed
+	if core.UsePlainStateExecution {
+		rewindFunc = ethdb.RewindDataPlain
+		stateBucket = dbutils.PlainStateBucket
+		accountChangeSetBucket = dbutils.PlainAccountChangeSetBucket
+		storageChangeSetBucket = dbutils.PlainStorageChangeSetBucket
+		storageKeyLength = common.AddressLength + common.IncarnationLength + common.HashLength
+		deleteAccountFunc = deleteAccountPlain
+		writeAccountFunc = writeAccountPlain
+		recoverCodeHashFunc = recoverCodeHashPlain
+	}
+
+	accountMap, storageMap, err2 := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
 	if err2 != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
 	for key, value := range accountMap {
-		var addrHash common.Hash
-		copy(addrHash[:], []byte(key))
 		if len(value) > 0 {
 			var acc accounts.Account
 			if err = acc.DecodeForStorage(value); err != nil {
 				return err
 			}
 			// Fetch the code hash
-			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err2 := stateDB.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
-					copy(acc.CodeHash[:], codeHash)
-				}
-			}
-			if err = rawdb.WriteAccount(mutation, addrHash, acc); err != nil {
+			recoverCodeHashFunc(&acc, stateDB, key)
+			if err = writeAccountFunc(mutation, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err = rawdb.DeleteAccount(mutation, addrHash); err != nil {
+			if err = deleteAccountFunc(mutation, key); err != nil {
 				return err
 			}
 		}
 	}
 	for key, value := range storageMap {
-		var addrHash common.Hash
-		copy(addrHash[:], []byte(key)[:common.HashLength])
-		var keyHash common.Hash
-		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
 		if len(value) > 0 {
-			if err = mutation.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+			if err = mutation.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err = mutation.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+			if err = mutation.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
 				return err
 			}
 		}
 	}
 
 	for i := lastProcessedBlockNumber; i > unwindPoint; i-- {
-		if err = deleteChangeSets(mutation, i); err != nil {
+		if err = deleteChangeSets(mutation, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
 		}
 	}
@@ -267,12 +276,103 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error { //
 	return nil
 }
 
-func deleteChangeSets(batch ethdb.Deleter, timestamp uint64) error {
-	changeSetKey := dbutils.EncodeTimestamp(timestamp)
-	if err := batch.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+func writeAccountHashed(db ethdb.Database, key string, acc accounts.Account) error {
+	var addrHash common.Hash
+	copy(addrHash[:], []byte(key))
+	if err := cleanupContractCodeBucket(
+		db,
+		dbutils.ContractCodeBucket,
+		acc,
+		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
+			return rawdb.ReadAccount(db, addrHash, out)
+		},
+		func(inc uint64) []byte { return dbutils.GenerateStoragePrefix(addrHash[:], inc) },
+	); err != nil {
 		return err
 	}
-	if err := batch.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+	return rawdb.WriteAccount(db, addrHash, acc)
+}
+
+func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) error {
+	var address common.Address
+	copy(address[:], []byte(key))
+	if err := cleanupContractCodeBucket(
+		db,
+		dbutils.PlainContractCodeBucket,
+		acc,
+		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
+			return rawdb.PlainReadAccount(db, address, out)
+		},
+		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address, inc) },
+	); err != nil {
+		return err
+	}
+
+	return rawdb.PlainWriteAccount(db, address, acc)
+}
+
+func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
+	var addrHash common.Hash
+	copy(addrHash[:], []byte(key))
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		if codeHash, err2 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
+			copy(acc.CodeHash[:], codeHash)
+		}
+	}
+}
+
+func cleanupContractCodeBucket(
+	db ethdb.Database,
+	bucket []byte,
+	acc accounts.Account,
+	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
+	getKeyForIncarnationFunc func(uint64) []byte,
+) error {
+	var original accounts.Account
+	got, err := readAccountFunc(db, &original)
+	if err != nil {
+		return err
+	}
+	if got {
+		// clean up all the code incarnations original incarnation and the new one
+		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Getter, key string) {
+	var address common.Address
+	copy(address[:], []byte(key))
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		if codeHash, err2 := db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address, acc.Incarnation)); err2 == nil {
+			copy(acc.CodeHash[:], codeHash)
+		}
+	}
+}
+
+func deleteAccountHashed(db rawdb.DatabaseDeleter, key string) error {
+	var addrHash common.Hash
+	copy(addrHash[:], []byte(key))
+	return rawdb.DeleteAccount(db, addrHash)
+}
+
+func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
+	var address common.Address
+	copy(address[:], []byte(key))
+	return rawdb.PlainDeleteAccount(db, address)
+}
+
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket []byte) error {
+	changeSetKey := dbutils.EncodeTimestamp(timestamp)
+	if err := batch.Delete(accountBucket, changeSetKey); err != nil {
+		return err
+	}
+	if err := batch.Delete(storageBucket, changeSetKey); err != nil {
 		return err
 	}
 	return nil

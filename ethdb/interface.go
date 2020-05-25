@@ -82,7 +82,6 @@ type Database interface {
 	// Entries are passed as an array:
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
-	RewindData(timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error)
 	Close()
 	NewBatch() DbWithPendingMutations
 
