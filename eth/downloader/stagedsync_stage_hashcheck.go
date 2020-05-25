@@ -34,19 +34,15 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) err
 		}
 	}
 
-	hash := rawdb.ReadCanonicalHash(hashedStatePromotion, syncHeadNumber)
-	syncHeadBlock := rawdb.ReadBlock(hashedStatePromotion, hash, syncHeadNumber)
-
-	// make sure that we won't write the the real DB
-	// should never be commited
-	euphemeralMutation := hashedStatePromotion.NewBatch()
+	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
+	syncHeadBlock := rawdb.ReadBlock(stateDB, hash, syncHeadNumber)
 
 	blockNr := syncHeadBlock.Header().Number.Uint64()
 
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 	loader := trie.NewSubTrieLoader(blockNr)
 	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(euphemeralMutation, rl, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := loader.LoadFromFlatDB(hashedStatePromotion, rl, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
 		return errors.Wrap(err1, "checking root hash failed")
 	}

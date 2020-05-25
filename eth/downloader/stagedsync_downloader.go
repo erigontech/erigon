@@ -8,7 +8,6 @@ import (
 )
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
-	fmt.Println("doStagedSyncWithFetchers")
 	log.Info("Sync stage 1/7. Downloading headers...")
 
 	var err error
