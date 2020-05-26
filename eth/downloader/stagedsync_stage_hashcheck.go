@@ -284,6 +284,7 @@ func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
 	}
 
 	b.entries = b.entries[:0] // keep the capacity
+	b.size = 0
 	return filename, nil
 }
 
