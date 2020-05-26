@@ -79,7 +79,7 @@ type Ethereum struct {
 	dialCandiates   enode.Iterator
 
 	// DB interfaces
-	chainDb ethdb.Database // Block chain database
+	chainDb ethdb.KV // Block chain database
 
 	eventMux       *event.TypeMux
 	engine         consensus.Engine
@@ -140,14 +140,18 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
 	// Assemble the Ethereum object
-	chainDb, err := ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer)
+	openedDb, err := ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer)
 	if err != nil {
 		return nil, err
 	}
+	var chainDb ethdb.KV
+	if casted, ok := chainDb.(ethdb.HasAbstractKV); ok {
+		chainDb = casted.AbstractKV()
+	} else {
+		return nil, fmt.Errorf("opened database does not have AbstractKV interface")
+	}
 	if ctx.Config.RemoteDbListenAddress != "" {
-		if casted, ok := chainDb.(ethdb.HasAbstractKV); ok {
-			remotedbserver.StartDeprecated(casted.AbstractKV(), ctx.Config.RemoteDbListenAddress)
-		}
+		remotedbserver.StartDeprecated(chainDb, ctx.Config.RemoteDbListenAddress)
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)

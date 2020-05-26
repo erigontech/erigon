@@ -197,6 +197,26 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
+func Get(db KV, bucket, key []byte) ([]byte, error) {
+	// Retrieve the key and increment the miss counter if not found
+	var dat []byte
+	err := db.View(context.Background(), func(tx Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			v, _ := b.Get(key)
+			if v != nil {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+			}
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, err
+}
+
 // GetIndexChunk returns proper index chunk or return error if index is not created.
 // key must contain inverted block number in the end
 func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
@@ -242,6 +262,31 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([
 		return nil, err
 	}
 	return dat, nil
+}
+
+func GetAsOf(db KV, bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	var dat []byte
+	err := db.View(context.Background(), func(tx Tx) error {
+		v, err := FindByHistory(tx, hBucket, key, timestamp)
+		if err != nil {
+			log.Debug("FindByHistory err", "err", err)
+		} else {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			return nil
+		}
+		{
+			v, _ := tx.Bucket(bucket).Get(key)
+			if v == nil {
+				return ErrKeyNotFound
+			}
+
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			return nil
+		}
+	})
+	return dat, err
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
@@ -369,9 +414,9 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
-func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func walkAsOfThinAccounts(db KV, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
-	err := db.db.View(func(tx *bolt.Tx) error {
+	err := db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return fmt.Errorf("currentStateBucket not found")
@@ -395,13 +440,25 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits int, tim
 			common.HashLength,   /* part2start */
 			common.HashLength+8, /* part3start */
 		)
-		k, v := mainCursor.Seek(startkey)
-		for k != nil && len(k) > common.HashLength {
-			k, v = mainCursor.Next()
+		k, v, err1 := mainCursor.Seek(startkey)
+		if err1 != nil {
+			return err1
 		}
-		hK, tsEnc, _, hV := historyCursor.Seek()
+		for k != nil && len(k) > common.HashLength {
+			k, v, err1 = mainCursor.Next()
+			if err1 != nil {
+				return err1
+			}
+		}
+		hK, tsEnc, _, hV, err1 := historyCursor.Seek()
+		if err1 != nil {
+			return err1
+		}
 		for hK != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
-			hK, tsEnc, _, hV = historyCursor.Next()
+			hK, tsEnc, _, hV, err1 = historyCursor.Next()
+			if err1 != nil {
+				return err1
+			}
 		}
 		goOn := true
 		var err error
@@ -457,15 +514,24 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits int, tim
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = mainCursor.Next()
+					k, v, err1 = mainCursor.Next()
+					if err1 != nil {
+						return err1
+					}
 					for k != nil && len(k) > common.HashLength {
-						k, v = mainCursor.Next()
+						k, v, err1 = mainCursor.Next()
+						if err1 != nil {
+							return err1
+						}
 					}
 				}
 				if cmp >= 0 {
 					hK0 := hK
 					for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
-						hK, tsEnc, _, hV = historyCursor.Next()
+						hK, tsEnc, _, hV, err1 = historyCursor.Next()
+						if err1 != nil {
+							return err1
+						}
 					}
 				}
 			}
@@ -483,7 +549,7 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits int, tim
 // functions `Seek` and `Next` deliver both
 // parts as well as the corresponding value
 type splitCursor struct {
-	c          *bolt.Cursor // Unlerlying bolt cursor
+	c          Cursor // Unlerlying bolt cursor
 	startkey   []byte       // Starting key (also contains bits that need to be preserved)
 	matchBytes int
 	mask       uint8
@@ -492,7 +558,7 @@ type splitCursor struct {
 	part3start int // Position in the key where the third part starts
 }
 
-func newSplitCursor(b *bolt.Bucket, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
+func newSplitCursor(b Bucket, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
 	var sc splitCursor
 	sc.c = b.Cursor()
 	sc.startkey = startkey
@@ -519,24 +585,30 @@ func (sc *splitCursor) matchKey(k []byte) bool {
 	return (k[sc.matchBytes-1] & sc.mask) == (sc.startkey[sc.matchBytes-1] & sc.mask)
 }
 
-func (sc *splitCursor) Seek() (key1, key2, key3, val []byte) {
-	k, v := sc.c.Seek(sc.startkey)
-	if !sc.matchKey(k) {
-		return nil, nil, nil, nil
+func (sc *splitCursor) Seek() (key1, key2, key3, val []byte, err error) {
+	k, v, err1 := sc.c.Seek(sc.startkey)
+	if err1 != nil {
+		return nil, nil, nil, nil, err1
 	}
-	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v
+	if !sc.matchKey(k) {
+		return nil, nil, nil, nil, nil
+	}
+	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v, nil
 }
 
-func (sc *splitCursor) Next() (key1, key2, key3, val []byte) {
-	k, v := sc.c.Next()
-	if !sc.matchKey(k) {
-		return nil, nil, nil, nil
+func (sc *splitCursor) Next() (key1, key2, key3, val []byte, err error) {
+	k, v, err1 := sc.c.Next()
+	if err1 != nil {
+		return nil, nil, nil, nil, err1
 	}
-	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v
+	if !sc.matchKey(k) {
+		return nil, nil, nil, nil, nil
+	}
+	return k[:sc.part1end], k[sc.part2start:sc.part3start], k[sc.part3start:], v, nil
 }
 
-func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
-	err := db.db.View(func(tx *bolt.Tx) error {
+func walkAsOfThinStorage(db KV, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+	err := db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return fmt.Errorf("storageBucket not found")
@@ -570,10 +642,19 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits int, time
 			common.HashLength,   /* part2start */
 			common.HashLength*2, /* part3start */
 		)
-		addrHash, keyHash, _, v := mainCursor.Seek()
-		hAddrHash, hKeyHash, tsEnc, hV := historyCursor.Seek()
+		addrHash, keyHash, _, v, err1 := mainCursor.Seek()
+		if err1 != nil {
+			return err1
+		}
+		hAddrHash, hKeyHash, tsEnc, hV, err2 := historyCursor.Seek()
+		if err2 != nil {
+			return err2
+		}
 		for hKeyHash != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
-			hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
+			hAddrHash, hKeyHash, tsEnc, hV, err2 = historyCursor.Next()
+			if err2 != nil {
+				return err2
+			}
 		}
 		goOn := true
 		var err error
@@ -623,12 +704,18 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits int, time
 			}
 			if goOn {
 				if cmp <= 0 {
-					addrHash, keyHash, _, v = mainCursor.Next()
+					addrHash, keyHash, _, v, err1 = mainCursor.Next()
+					if err1 != nil {
+						return err1
+					}
 				}
 				if cmp >= 0 {
 					hKeyHash0 := hKeyHash
 					for hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
-						hAddrHash, hKeyHash, tsEnc, hV = historyCursor.Next()
+						hAddrHash, hKeyHash, tsEnc, hV, err2 = historyCursor.Next()
+						if err2 != nil {
+							return err2
+						}
 					}
 				}
 			}
@@ -638,12 +725,12 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits int, time
 	return err
 }
 
-func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func WalkAsOf(db KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
 	if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
-		return db.walkAsOfThinAccounts(startkey, fixedbits, timestamp, walker)
+		return walkAsOfThinAccounts(db, startkey, fixedbits, timestamp, walker)
 	} else if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-		return db.walkAsOfThinStorage(startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
+		return walkAsOfThinStorage(db, startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
 			return walker(append(common.CopyBytes(k1), k2...), v)
 		})
 	}
@@ -747,6 +834,80 @@ func InspectDatabase(db Database) error {
 func NewDatabaseWithFreezer(db Database, dir, suffix string) (Database, error) {
 	// FIXME: implement freezer in Turbo-Geth
 	return db, nil
+}
+
+func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {
+	//check
+	hB := tx.Bucket(hBucket)
+	if hB == nil {
+		return nil, ErrKeyNotFound
+	}
+	var keyF []byte
+	if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
+		keyF = make([]byte, len(key)-common.IncarnationLength)
+		copy(keyF, key[:common.HashLength])
+		copy(keyF[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+	} else {
+		keyF = common.CopyBytes(key)
+	}
+
+	c := hB.Cursor()
+	k, v, err := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.HasPrefix(k, keyF) {
+		return nil, ErrKeyNotFound
+	}
+	index := dbutils.WrapHistoryIndex(v)
+
+	changeSetBlock, set, ok := index.Search(timestamp)
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	// set == true if this change was from empty record (non-existent account) to non-empty
+	// In such case, we do not need to examine changeSet and return empty data
+	if set {
+		return []byte{}, nil
+	}
+	csB := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
+	if csB == nil {
+		return nil, ErrKeyNotFound
+	}
+
+	csKey := dbutils.EncodeTimestamp(changeSetBlock)
+	changeSetData, _ := csB.Get(csKey)
+
+	var data []byte
+	switch {
+	case bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
+		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
+	case bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
+		data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
+	}
+	if err != nil {
+		return nil, ErrKeyNotFound
+	}
+
+	//restore codehash
+	if bytes.Equal(dbutils.AccountsHistoryBucket, hBucket) {
+		var acc accounts.Account
+		if err := acc.DecodeForStorage(data); err != nil {
+			return nil, err
+		}
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+			codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(key, acc.Incarnation))
+			if len(codeHash) > 0 {
+				acc.CodeHash = common.BytesToHash(codeHash)
+			}
+			data = make([]byte, acc.EncodingLengthForStorage())
+			acc.EncodeForStorage(data)
+		}
+		return data, nil
+	}
+
+	return data, nil
 }
 
 func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {

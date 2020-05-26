@@ -64,11 +64,9 @@ func (opts boltOpts) Path(path string) boltOpts {
 	return opts
 }
 
-func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
-	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
-	if err != nil {
-		return nil, err
-	}
+// WrapBoltDb provides a way for the code to gradually migrate
+// to the abstract interface
+func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -86,7 +84,15 @@ func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-	}, nil
+	}, nil	
+}
+
+func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
+	return opts.WrapBoltDb(boltDB)
 }
 
 func (opts boltOpts) MustOpen(ctx context.Context) KV {
