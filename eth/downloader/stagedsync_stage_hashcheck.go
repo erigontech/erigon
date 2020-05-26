@@ -156,7 +156,6 @@ func copyBucket(
 					"name", file,
 					"size", bufferSize,
 					"plainKey", fmt.Sprintf("%x...", k[:4]),
-					"hashedKey", fmt.Sprintf("%x...", newK[:4]),
 					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			}
 
