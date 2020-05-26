@@ -2266,7 +2266,7 @@ func testIndexFileCompress(chaindata string) {
 		if strings.HasPrefix(file.Name(), "account") {
 			keyLength = 32
 		} else {
-			keyLength = 64
+			keyLength = 72
 		}
 		keyBuf := make([]byte, keyLength)
 		for {
