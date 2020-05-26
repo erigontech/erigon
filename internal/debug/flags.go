@@ -290,7 +290,6 @@ func Setup(ctx *cli.Context) error {
 	}
 
 	address := fmt.Sprintf("%s:%d", listenHost, port)
-	fmt.Printf("Enabling metrics!%t\n", metrics.Enabled)
 	StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
 	return nil
 }

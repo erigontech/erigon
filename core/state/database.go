@@ -1429,10 +1429,33 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) CumulativeWitnessSize(key []byte) uint64 {
+func (tds *TrieDbState) CumulativeWitnessSize() uint64 {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
-	return tds.t.CumulativeWitnessSize(key)
+	return tds.t.CumulativeWitnessSize([]byte{})
+}
+
+func (tds *TrieDbState) CumulativeWitnessSizeDBOnly() (uint64, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	var kv ethdb.KV
+	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
+		kv = hasBolt.AbstractKV()
+	} else {
+		return 0, fmt.Errorf("unexpected db type: %T", tds.db)
+	}
+
+	var accumulator uint64
+	_, err := CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+		accumulator += binary.BigEndian.Uint64(v)
+		return false, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return accumulator, nil
 }
 
 // PrefixByCumulativeWitnessSize - returns maximal length prefix which cumulative witness len >= given len
@@ -1580,7 +1603,7 @@ type CumulativeSearchF func(k, v []byte) (itsTimeToVisitChild bool, err error)
 
 // CumulativeSearch - on each iteration jumps to next subtries (siblings) by default until not get command to go to child
 func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte, fixedbits int, f CumulativeSearchF) (lastVisitedParent []byte, err error) {
-	//fmt.Printf("Start FRoooom: %x\n", startKey)
+	//fmt.Printf("Start FRoooom: %x, %x\n", startKey, parent)
 
 	const doCorrectIncarnation = true
 	seeks := int64(0)
@@ -1590,7 +1613,6 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 
 	var ok bool
 	a := accounts.NewAccount()
-
 	if err = kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Bucket(bucket).Cursor()
 		cs := tx.Bucket(dbutils.CurrentStateBucket).Cursor()

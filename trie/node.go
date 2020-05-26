@@ -250,7 +250,7 @@ func (an *accountNode) reference() []byte { return nil }
 // fullNode: opcode + mask + childrenWitnessSize
 // duoNode: opcode + mask + childrenWitnessSize
 // shortNode: opcode + len(key)/2 + childrenWitnessSize
-// accountNode: opcode + account data len + codeWitnessSize + storageWitnessSize
+// accountNode: opcode + account data len + storageWitnessSize - could not include codeSize because it's not available yet
 func (n hashNode) witnessSize() uint64 { return n.iws }
 func (n valueNode) witnessSize() uint64 {
 	if CountWitnessSizeWithoutStructure {
@@ -260,6 +260,7 @@ func (n valueNode) witnessSize() uint64 {
 }
 func (n codeNode) witnessSize() uint64 {
 	if CountWitnessSizeWithoutStructure {
+		//return uint64(len(n))
 		return 0
 	}
 	return uint64(len(n)) + 1

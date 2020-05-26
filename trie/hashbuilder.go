@@ -17,7 +17,7 @@ import (
 )
 
 const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
-const CountWitnessSizeWithoutStructure = true
+const CountWitnessSizeWithoutStructure = false
 
 var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
@@ -611,7 +611,7 @@ func (hb *HashBuilder) code(code []byte) error {
 	if CountWitnessSizeWithoutStructure {
 		hb.dataLenStack = append(hb.dataLenStack, 0)
 	} else {
-		hb.dataLenStack = append(hb.dataLenStack, 1+uint64(len(code))) // opcode + len(code)
+		hb.dataLenStack = append(hb.dataLenStack, 0)
 	}
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(codeCopy); err != nil {
