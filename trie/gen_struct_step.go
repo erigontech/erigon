@@ -18,7 +18,8 @@ package trie
 
 import (
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
@@ -30,8 +31,8 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
 	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -52,7 +53,7 @@ type GenStructStepData interface {
 
 type GenStructStepAccountData struct {
 	FieldSet    uint32
-	Balance     big.Int
+	Balance     uint256.Int
 	Nonce       uint64
 	Incarnation uint64
 }

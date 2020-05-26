@@ -29,9 +29,9 @@ import (
 type IntraBlockState interface {
 	CreateAccount(common.Address, bool)
 
-	SubBalance(common.Address, *big.Int)
-	AddBalance(common.Address, *big.Int)
-	GetBalance(common.Address) *big.Int
+	SubBalance(common.Address, *uint256.Int)
+	AddBalance(common.Address, *uint256.Int)
+	GetBalance(common.Address) *uint256.Int
 
 	GetNonce(common.Address) uint64
 	SetNonce(common.Address, uint64)

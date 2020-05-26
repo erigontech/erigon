@@ -63,7 +63,7 @@ func enable1884(jt *JumpTable) {
 }
 
 func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	balance, _ := uint256.FromBig(interpreter.evm.IntraBlockState.GetBalance(callContext.contract.Address()))
+	balance := interpreter.evm.IntraBlockState.GetBalance(callContext.contract.Address())
 	callContext.stack.push(balance)
 	return nil, nil
 }

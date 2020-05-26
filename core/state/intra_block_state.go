@@ -270,7 +270,7 @@ func (sdb *IntraBlockState) Empty(addr common.Address) bool {
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetBalance(addr common.Address) *big.Int {
+func (sdb *IntraBlockState) GetBalance(addr common.Address) *uint256.Int {
 	sdb.Lock()
 	defer sdb.Unlock()
 
@@ -284,7 +284,7 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) *big.Int {
 	if stateObject != nil {
 		return stateObject.Balance()
 	}
-	return common.Big0
+	return common.Num0
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -442,7 +442,7 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *big.Int) {
+func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
 	sdb.Lock()
 
 	if sdb.trace {
@@ -464,7 +464,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *big.Int) {
 
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *big.Int) {
+func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int) {
 	sdb.Lock()
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
@@ -485,7 +485,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *big.Int) {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *big.Int) {
+func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int) {
 	sdb.Lock()
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
@@ -586,10 +586,10 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	sdb.journal.append(suicideChange{
 		account:     &addr,
 		prev:        stateObject.suicided,
-		prevbalance: new(big.Int).Set(stateObject.Balance()),
+		prevbalance: *stateObject.Balance(),
 	})
 	stateObject.markSuicided()
-	stateObject.data.Balance.SetInt64(0)
+	stateObject.data.Balance.Clear()
 
 	return true
 }

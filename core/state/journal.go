@@ -17,7 +17,6 @@
 package state
 
 import (
-	"math/big"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -109,13 +108,13 @@ type (
 	suicideChange struct {
 		account     *common.Address
 		prev        bool // whether account had already suicided
-		prevbalance *big.Int
+		prevbalance uint256.Int
 	}
 
 	// Changes to individual accounts.
 	balanceChange struct {
 		account *common.Address
-		prev    *big.Int
+		prev    uint256.Int
 	}
 	nonceChange struct {
 		account *common.Address
@@ -173,7 +172,7 @@ func (ch suicideChange) revert(s *IntraBlockState) {
 	obj := s.getStateObject(*ch.account)
 	if obj != nil {
 		obj.suicided = ch.prev
-		obj.setBalance(ch.prevbalance)
+		obj.setBalance(&ch.prevbalance)
 	}
 }
 
@@ -191,7 +190,7 @@ func (ch touchChange) dirtied() *common.Address {
 }
 
 func (ch balanceChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setBalance(ch.prev)
+	s.getStateObject(*ch.account).setBalance(&ch.prev)
 }
 
 func (ch balanceChange) dirtied() *common.Address {

@@ -3,8 +3,9 @@ package accounts
 import (
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
@@ -18,7 +19,7 @@ import (
 type Account struct {
 	Initialised bool
 	Nonce       uint64
-	Balance     big.Int
+	Balance     uint256.Int
 	Root        common.Hash // merkle root of the storage trie
 	CodeHash    common.Hash // hash of the bytecode
 	Incarnation uint64
@@ -26,8 +27,6 @@ type Account struct {
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-var b128 = big.NewInt(128)
-var b0 = big.NewInt(0)
 
 // NewAccount creates a new account w/o code nor storage.
 func NewAccount() Account {
@@ -50,8 +49,8 @@ func bytesToUint64(buf []byte) (x uint64) {
 func (a *Account) EncodingLengthForStorage() uint {
 	var structLength uint = 1 // 1 byte for fieldset
 
-	if b0.Cmp(&a.Balance) == -1 {
-		structLength += uint((a.Balance.BitLen()+7)/8) + 1
+	if !a.Balance.IsZero() {
+		structLength += uint(a.Balance.ByteLen()) + 1
 	}
 
 	if a.Nonce > 0 {
@@ -72,11 +71,9 @@ func (a *Account) EncodingLengthForStorage() uint {
 func (a *Account) EncodingLengthForHashing() uint {
 	var structLength uint
 
-	var balanceBytes int
-	if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
-		balanceBytes = 0
-	} else {
-		balanceBytes = (a.Balance.BitLen() + 7) / 8
+	balanceBytes := 0
+	if !a.Balance.LtUint64(128) {
+		balanceBytes = a.Balance.ByteLen()
 	}
 
 	var nonceBytes int
@@ -115,24 +112,12 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 	}
 
 	// Encoding balance
-	if b0.Cmp(&a.Balance) == -1 {
+	if !a.Balance.IsZero() {
 		fieldSet |= 2
-		balanceBytes := (a.Balance.BitLen() + 7) / 8
+		balanceBytes := a.Balance.ByteLen()
 		buffer[pos] = byte(balanceBytes)
 		pos++
-
-		balanceWords := a.Balance.Bits()
-		i := pos + balanceBytes
-		for _, d := range balanceWords {
-			for j := 0; j < bits.UintSize/8; j++ {
-				if i == pos {
-					break
-				}
-				i--
-				buffer[i] = byte(d)
-				d >>= 8
-			}
-		}
+		a.Balance.WriteToSlice(buffer[pos : pos+balanceBytes])
 		pos += balanceBytes
 	}
 
@@ -197,12 +182,9 @@ func (a *Account) EncodeRLP(w io.Writer) error {
 }
 
 func (a *Account) EncodeForHashing(buffer []byte) {
-
-	var balanceBytes int
-	if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
-		balanceBytes = 0
-	} else {
-		balanceBytes = (a.Balance.BitLen() + 7) / 8
+	balanceBytes := 0
+	if !a.Balance.LtUint64(128) {
+		balanceBytes = a.Balance.ByteLen()
 	}
 
 	var nonceBytes int
@@ -245,24 +227,13 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	pos += 1 + nonceBytes
 
 	// Encoding balance
-	if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
+	if a.Balance.LtUint64(128) && !a.Balance.IsZero() {
 		buffer[pos] = byte(a.Balance.Uint64())
 		pos++
 	} else {
 		buffer[pos] = byte(128 + balanceBytes)
 		pos++
-		balanceWords := a.Balance.Bits()
-		i := pos + balanceBytes
-		for _, d := range balanceWords {
-			for j := 0; j < bits.UintSize/8; j++ {
-				if i == pos {
-					break
-				}
-				i--
-				buffer[i] = byte(d)
-				d >>= 8
-			}
-		}
+		a.Balance.WriteToSlice(buffer[pos : pos+balanceBytes])
 		pos += balanceBytes
 	}
 
@@ -303,7 +274,7 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 
 	a.Initialised = true
 	a.Nonce = 0
-	a.Balance.SetInt64(0)
+	a.Balance.Clear()
 	a.Root = emptyRoot
 	a.CodeHash = emptyCodeHash
 	if length == 0 && structure {
@@ -356,16 +327,11 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 			)
 		}
 
-		var bigB big.Int
 		if balanceBytes == 0 && newPos == pos {
-			a.Balance.SetInt64(int64(enc[newPos]))
+			a.Balance.SetUint64(uint64(enc[newPos]))
 			pos = newPos + 1
 		} else {
-			for _, b := range enc[newPos : newPos+balanceBytes] {
-				a.Balance.Lsh(&a.Balance, 8)
-				bigB.SetUint64(uint64(b))
-				a.Balance.Add(&a.Balance, &bigB)
-			}
+			a.Balance.SetBytes(enc[newPos : newPos+balanceBytes])
 			pos = newPos + balanceBytes
 		}
 	}
@@ -460,7 +426,7 @@ func (a *Account) Reset() {
 	a.Initialised = true
 	a.Nonce = 0
 	a.Incarnation = 0
-	a.Balance.SetInt64(0)
+	a.Balance.Clear()
 	copy(a.Root[:], emptyRoot[:])
 	copy(a.CodeHash[:], emptyCodeHash[:])
 }

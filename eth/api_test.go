@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"reflect"
 	"sort"
 	"strconv"
@@ -77,7 +76,7 @@ func TestAccountRange(t *testing.T) {
 		hash := common.HexToHash(fmt.Sprintf("%x", i))
 		addr := common.BytesToAddress(crypto.Keccak256Hash(hash.Bytes()).Bytes())
 		addrs[i] = addr
-		sdb.SetBalance(addrs[i], big.NewInt(1))
+		sdb.SetBalance(addrs[i], common.Num1)
 		if _, ok := m[addr]; ok {
 			t.Fatalf("bad")
 		} else {

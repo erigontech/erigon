@@ -25,6 +25,9 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -33,16 +36,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // Ethash proof-of-work protocol constants.
 var (
-	FrontierBlockReward       = big.NewInt(5e+18) // Block reward in wei for successfully mining a block
-	ByzantiumBlockReward      = big.NewInt(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
-	ConstantinopleBlockReward = big.NewInt(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
-	maxUncles                 = 2                 // Maximum number of uncles allowed in a single block
-	allowedFutureBlockTime    = 15 * time.Second  // Max time from current time allowed for blocks, before they're considered future blocks
+	FrontierBlockReward       = uint256.NewInt().SetUint64(5e+18) // Block reward in wei for successfully mining a block
+	ByzantiumBlockReward      = uint256.NewInt().SetUint64(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
+	ConstantinopleBlockReward = uint256.NewInt().SetUint64(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
+	maxUncles                 = 2                                 // Maximum number of uncles allowed in a single block
+	allowedFutureBlockTime    = 15 * time.Second                  // Max time from current time allowed for blocks, before they're considered future blocks
 
 	// calcDifficultyEip2384 is the difficulty adjustment algorithm as specified by EIP 2384.
 	// It offsets the bomb 4M blocks from Constantinople, so in total 9M blocks.
@@ -606,12 +608,6 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
-// Some weird constants to avoid constant memory allocs for them.
-var (
-	big8  = big.NewInt(8)
-	big32 = big.NewInt(32)
-)
-
 // AccumulateRewards credits the coinbase of the given block with the mining
 // reward. The total reward consists of the static block reward and rewards for
 // included uncles. The coinbase of each uncle block is also rewarded.
@@ -625,16 +621,18 @@ func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 		blockReward = ConstantinopleBlockReward
 	}
 	// Accumulate the rewards for the miner and any included uncles
-	reward := new(big.Int).Set(blockReward)
-	r := new(big.Int)
+	reward := new(uint256.Int).Set(blockReward)
+	r := new(uint256.Int)
+	headerNum, _ := uint256.FromBig(header.Number)
 	for _, uncle := range uncles {
-		r.Add(uncle.Number, big8)
-		r.Sub(r, header.Number)
+		uncleNum, _ := uint256.FromBig(uncle.Number)
+		r.Add(uncleNum, common.Num8)
+		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
-		r.Div(r, big8)
+		r.Div(r, common.Num8)
 		state.AddBalance(uncle.Coinbase, r)
 
-		r.Div(blockReward, big32)
+		r.Div(blockReward, common.Num32)
 		reward.Add(reward, r)
 	}
 	state.AddBalance(header.Coinbase, reward)

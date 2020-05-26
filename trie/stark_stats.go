@@ -3,9 +3,10 @@ package trie
 import (
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 	"sort"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -117,7 +118,7 @@ func (hb *StarkStatsBuilder) code(_ []byte) common.Hash {
 	return common.Hash{}
 }
 
-func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
+func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64, balance *uint256.Int, nonce uint64, fieldSet uint32) (err error) {
 	key := keyHex[len(keyHex)-length:]
 	var acc accounts.Account
 	acc.Root = EmptyRoot
@@ -163,7 +164,7 @@ func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64
 	return nil
 }
 
-func (hb *StarkStatsBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, _ uint64, fieldSet uint32) (err error) {
+func (hb *StarkStatsBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *uint256.Int, nonce uint64, _ uint64, fieldSet uint32) (err error) {
 	return hb.accountLeafHash(length, keyHex, storageSize, balance, nonce, fieldSet)
 }
 
@@ -216,7 +217,7 @@ func StarkStats(witness *Witness, w io.Writer, trace bool) error {
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
-			balance := big.NewInt(0)
+			balance := uint256.NewInt()
 			balance.SetBytes(op.Balance.Bytes())
 			nonce := op.Nonce
 

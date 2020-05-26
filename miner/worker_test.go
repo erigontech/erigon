@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
@@ -377,7 +379,7 @@ func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *par
 	if block.NumberU64() != 1 {
 		t.Errorf("block number mismatch: have %d, want %d", block.NumberU64(), 1)
 	}
-	if balance := state.GetBalance(testCase.testUserAddress); balance.Cmp(big.NewInt(1000)) != 0 {
+	if balance := state.GetBalance(testCase.testUserAddress); balance.Uint64() != 1000 {
 		t.Errorf("account balance mismatch: have %d, want %d", balance, 1000)
 	}
 	b.txPool.AddLocals(testCase.newTxs)
@@ -385,7 +387,7 @@ func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *par
 	// Ensure the new tx events has been processed
 	time.Sleep(100 * time.Millisecond)
 	block, state, _ = w.pending()
-	if balance := state.GetBalance(testCase.testUserAddress); balance.Cmp(big.NewInt(2000)) != 0 {
+	if balance := state.GetBalance(testCase.testUserAddress); balance.Uint64() != 2000 {
 		t.Errorf("account balance mismatch: have %d, want %d", balance, 2000)
 	}
 }
@@ -549,7 +551,7 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 		newTaskHook: func(task *task) {
 			if task.block.NumberU64() == 1 {
 				if taskIndex == 2 {
-					receiptLen, balance := 2, big.NewInt(2000)
+					receiptLen, balance := 2, uint256.NewInt().SetUint64(2000)
 					if len(task.receipts) != receiptLen {
 						t.Errorf("receipt number mismatch: have %d, want %d", len(task.receipts), receiptLen)
 					}
