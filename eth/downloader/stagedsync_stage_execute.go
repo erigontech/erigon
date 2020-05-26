@@ -104,9 +104,6 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	storageCache := fastcache.New(128 * 1024 * 1024) // 128 Mb
 	codeCache := fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
 	codeSizeCache := fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
-	// uncommitedIncarnations map holds incarnations for accounts that were deleted,
-	// but their storage is not yet committed
-	var uncommitedIncarnations = make(map[common.Address]uint64)
 
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
@@ -123,26 +120,26 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		var stateWriter state.WriterWithChangeSets
 
 		if core.UsePlainStateExecution {
-			plainReader := state.NewPlainStateReader(stateBatch, uncommitedIncarnations)
+			plainReader := state.NewPlainStateReader(stateBatch)
 			plainReader.SetAccountCache(accountCache)
 			plainReader.SetStorageCache(storageCache)
 			plainReader.SetCodeCache(codeCache)
 			plainReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = plainReader
-			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
+			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum)
 			plainWriter.SetAccountCache(accountCache)
 			plainWriter.SetStorageCache(storageCache)
 			plainWriter.SetCodeCache(codeCache)
 			plainWriter.SetCodeSizeCache(codeSizeCache)
 			stateWriter = plainWriter
 		} else {
-			hashStateReader := state.NewDbStateReader(stateBatch, uncommitedIncarnations)
+			hashStateReader := state.NewDbStateReader(stateBatch)
 			hashStateReader.SetAccountCache(accountCache)
 			hashStateReader.SetStorageCache(storageCache)
 			hashStateReader.SetCodeCache(codeCache)
 			hashStateReader.SetCodeSizeCache(codeSizeCache)
 			stateReader = hashStateReader
-			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum, uncommitedIncarnations)
+			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum)
 			hashedStateWriter.SetAccountCache(accountCache)
 			hashedStateWriter.SetStorageCache(storageCache)
 			hashedStateWriter.SetCodeCache(codeCache)
@@ -167,7 +164,6 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			if _, err = stateBatch.Commit(); err != nil {
 				return 0, err
 			}
-			uncommitedIncarnations = make(map[common.Address]uint64)
 			log.Info("State batch committed", "in", time.Since(start))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {

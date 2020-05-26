@@ -19,7 +19,6 @@ var _ WriterWithChangeSets = (*PlainStateWriter)(nil)
 type PlainStateWriter struct {
 	stateDb                ethdb.Database
 	changeDb               ethdb.Database
-	uncommitedIncarnations map[common.Address]uint64
 	csw                    *ChangeSetWriter
 	blockNumber            uint64
 	accountCache           *fastcache.Cache
@@ -28,11 +27,10 @@ type PlainStateWriter struct {
 	codeSizeCache          *fastcache.Cache
 }
 
-func NewPlainStateWriter(stateDb, changeDb ethdb.Database, blockNumber uint64, uncommitedIncarnations map[common.Address]uint64) *PlainStateWriter {
+func NewPlainStateWriter(stateDb, changeDb ethdb.Database, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
 		stateDb:                stateDb,
 		changeDb:               changeDb,
-		uncommitedIncarnations: uncommitedIncarnations,
 		csw:                    NewChangeSetWriterPlain(),
 		blockNumber:            blockNumber,
 	}
@@ -92,9 +90,6 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 	if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
 		return err
 	}
-	if original.Incarnation > 0 {
-		w.uncommitedIncarnations[address] = original.Incarnation
-	}
 	if w.accountCache != nil {
 		w.accountCache.Set(address[:], nil)
 	}
@@ -106,7 +101,17 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 		binary.BigEndian.PutUint32(b[:], 0)
 		w.codeSizeCache.Set(address[:], b[:])
 	}
-	return w.stateDb.Delete(dbutils.PlainStateBucket, address[:])
+	if err := w.stateDb.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
+		return err
+	}
+	if original.Incarnation > 0 {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		if err := w.stateDb.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
@@ -129,7 +134,13 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {
-	return w.csw.CreateContract(address)
+	if err := w.csw.CreateContract(address); err != nil {
+		return err
+	}
+	if err := w.stateDb.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *PlainStateWriter) WriteChangeSets() error {

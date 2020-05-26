@@ -19,6 +19,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -262,6 +264,14 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 {
 			statedb.SetIncarnation(addr, 1)
+		}
+		if len(account.Code) == 0 && len(account.Storage) > 0 {
+			// Special case for weird tests - inaccessible storage
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], 1)
+			if err := db.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
+				return nil, nil, nil, err
+			}
 		}
 	}
 	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
