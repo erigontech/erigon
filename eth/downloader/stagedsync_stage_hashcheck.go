@@ -31,11 +31,6 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return err
 	}
 
-	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress == 0 {
-		return nil
-	}
-
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
@@ -54,6 +49,11 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	_, err = hashedStatePromotion.Commit()
 	if err != nil {
 		return err
+	}
+
+	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
+	if hashProgress == 0 {
+		return nil
 	}
 
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
