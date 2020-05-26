@@ -235,17 +235,8 @@ func (dbs *DbState) ReadAccountCodeSize(address common.Address, codeHash common.
 }
 
 func (dbs *DbState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return 0, err
-	}
-	incarnation, found, err := ethdb.GetHistoricalAccountIncarnation(dbs.db, addrHash, dbs.blockNr+1)
-	if err != nil {
-		return 0, err
-	}
-	if found {
-		return incarnation, nil
-	}
+	// We do not need to know the accurate incarnation value when DbState is used, because correct incarnation
+	// is stored in the account record
 	return 0, nil
 }
 

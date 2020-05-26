@@ -244,14 +244,14 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 	ctx := context.Background()
 	for i := range accHistory {
 		accHistory[i], addrs[i], addrHashes[i] = randomAccount(t)
-		accHistory[i].Balance = *big.NewInt(100)
+		accHistory[i].Balance = *uint256.NewInt().SetUint64(100)
 		accHistory[i].CodeHash = common.Hash{uint8(10 + i)}
 		accHistory[i].Root = common.Hash{uint8(10 + i)}
 		accHistory[i].Incarnation = uint64(i + 1)
 
 		accState[i] = accHistory[i].SelfCopy()
 		accState[i].Nonce++
-		accState[i].Balance = *big.NewInt(200)
+		accState[i].Balance = *uint256.NewInt().SetUint64(200)
 
 		accStateStorage[i] = make(map[common.Hash]uint256.Int)
 		accHistoryStateStorage[i] = make(map[common.Hash]uint256.Int)
@@ -294,7 +294,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 	}
 	acc := accounts.NewAccount()
 	acc.Initialised = true
-	acc.Balance = *big.NewInt(rand.Int63())
+	acc.Balance = *uint256.NewInt().SetUint64(uint64(rand.Int63()))
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	addrHash, err := common.HashData(addr.Bytes())
 	if err != nil {

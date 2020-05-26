@@ -29,13 +29,14 @@ import (
 	"testing/quick"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -602,7 +603,7 @@ func TestCodeNodeValid(t *testing.T) {
 		balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 		acc := accounts.NewAccount()
 		acc.Nonce = uint64(random.Int63())
-		acc.Balance = *balance
+		acc.Balance.SetFromBig(balance)
 		acc.Root = EmptyRoot
 		acc.CodeHash = codeHash
 
@@ -631,7 +632,7 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash
 
@@ -659,7 +660,7 @@ func TestCodeNodeGetNotExistingAccount(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash
 
@@ -704,7 +705,7 @@ func TestCodeNodeGetExistingAccountNoCodeNotEmpty(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash
 
@@ -727,7 +728,7 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash
 
@@ -752,7 +753,7 @@ func TestCodeNodeWrongHash(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash1
 
@@ -777,7 +778,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash1
 
@@ -809,7 +810,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash1
 
@@ -843,7 +844,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash1
 
@@ -876,7 +877,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 	acc.Root = EmptyRoot
 	acc.CodeHash = codeHash1
 
@@ -886,7 +887,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 
 	acc.Nonce = uint64(random.Int63())
 	balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
-	acc.Balance = *balance
+	acc.Balance.SetFromBig(balance)
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))

@@ -533,7 +533,7 @@ func (s *PublicBlockChainAPI) GetBalance(ctx context.Context, address common.Add
 	if state == nil || err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(state.GetBalance(address)), state.Error()
+	return (*hexutil.Big)(state.GetBalance(address).ToBig()), state.Error()
 }
 
 // GetHeaderByNumber returns the requested canonical block header.
@@ -746,7 +746,8 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 		}
 		// Override account balance.
 		if account.Balance != nil {
-			state.SetBalance(addr, (*big.Int)(*account.Balance))
+			balance, _ := uint256.FromBig((*big.Int)(*account.Balance))
+			state.SetBalance(addr, balance)
 		}
 		if account.State != nil && account.StateDiff != nil {
 			return nil, fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
@@ -866,7 +867,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, blockNrOrHash 
 			return 0, err
 		}
 		balance := state.GetBalance(*args.From) // from can't be nil
-		available := new(big.Int).Set(balance)
+		available := balance.ToBig()
 		if args.Value != nil {
 			if args.Value.ToInt().Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")

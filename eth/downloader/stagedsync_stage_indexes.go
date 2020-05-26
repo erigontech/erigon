@@ -6,17 +6,18 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"runtime"
+	"sort"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"io"
-	"io/ioutil"
-	"os"
-	"runtime"
-	"sort"
 )
 
 func fillChangeSetBuffer(db ethdb.Database, bucket []byte, blockNum uint64, changesets []byte, offsets []int, blockNums []uint64) (bool, uint64, []int, []uint64, error) {
@@ -87,42 +88,6 @@ func writeBufferMapToTempFile(datadir string, pattern string, bufferMap map[stri
 	return filename, nil
 }
 
-type HeapElem struct {
-	key     []byte
-	timeIdx int
-}
-
-type Heap []HeapElem
-
-func (h Heap) Len() int {
-	return len(h)
-}
-
-func (h Heap) Less(i, j int) bool {
-	if c := bytes.Compare(h[i].key, h[j].key); c != 0 {
-		return c < 0
-	}
-	return h[i].timeIdx < h[j].timeIdx
-}
-
-func (h Heap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *Heap) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*h = append(*h, x.(HeapElem))
-}
-
-func (h *Heap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
-}
-
 func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []byte, keyLength int) error {
 	var m runtime.MemStats
 	h := &Heap{}
@@ -139,7 +104,7 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 		// Read first key
 		keyBuf := make([]byte, keyLength)
 		if n, err := io.ReadFull(readers[i], keyBuf); err == nil && n == keyLength {
-			heap.Push(h, HeapElem{keyBuf, i})
+			heap.Push(h, HeapElem{keyBuf, i, nil})
 		} else {
 			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
 		}

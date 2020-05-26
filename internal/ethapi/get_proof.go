@@ -173,7 +173,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	return &AccountResult{
 		Address:      address,
 		AccountProof: common.ToHexArray(accountProof),
-		Balance:      (*hexutil.Big)(&acc.Balance),
+		Balance:      (*hexutil.Big)(acc.Balance.ToBig()),
 		CodeHash:     acc.CodeHash,
 		Nonce:        hexutil.Uint64(acc.Nonce),
 		StorageHash:  acc.Root,

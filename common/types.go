@@ -120,13 +120,6 @@ func (h *Hash) SetBytes(b []byte) {
 	copy(h[HashLength-len(b):], b)
 }
 
-// Clear sets the hash to zero.
-func (h *Hash) Clear() {
-	for i := 0; i < HashLength; i++ {
-		h[i] = 0
-	}
-}
-
 // Generate implements testing/quick.Generator.
 func (h Hash) Generate(rand *rand.Rand, size int) reflect.Value {
 	m := rand.Intn(len(h))

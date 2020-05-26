@@ -19,14 +19,13 @@ import (
 
 var _ WriterWithChangeSets = (*DbStateWriter)(nil)
 
-func NewDbStateWriter(stateDb, changeDb ethdb.Database, blockNr uint64, incarnationMap map[common.Address]uint64) *DbStateWriter {
+func NewDbStateWriter(stateDb, changeDb ethdb.Database, blockNr uint64) *DbStateWriter {
 	return &DbStateWriter{
 		stateDb:        stateDb,
 		changeDb:       changeDb,
 		blockNr:        blockNr,
 		pw:             &PreimageWriter{db: stateDb, savePreimages: false},
 		csw:            NewChangeSetWriter(),
-		incarnationMap: incarnationMap,
 	}
 }
 
@@ -36,7 +35,6 @@ type DbStateWriter struct {
 	pw             *PreimageWriter
 	blockNr        uint64
 	csw            *ChangeSetWriter
-	incarnationMap map[common.Address]uint64
 	accountCache   *fastcache.Cache
 	storageCache   *fastcache.Cache
 	codeCache      *fastcache.Cache
@@ -109,7 +107,11 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		return err
 	}
 	if original.Incarnation > 0 {
-		dsw.incarnationMap[address] = original.Incarnation
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		if err := dsw.stateDb.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
+			return err
+		}
 	}
 	if dsw.accountCache != nil {
 		dsw.accountCache.Set(address[:], nil)
@@ -185,7 +187,13 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
-	return dsw.csw.CreateContract(address)
+	if err := dsw.csw.CreateContract(address); err != nil {
+		return err
+	}
+	if err := dsw.stateDb.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 // WriteChangeSets causes accumulated change sets to be written into

@@ -17,7 +17,6 @@
 package ethdb
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -68,54 +67,4 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		idx++
 	}
 	return accounts, nil
-}
-
-// GetCurrentAccountIncarnation reads the latest incarnation of a contract from the database.
-func GetCurrentAccountIncarnation(db Getter, addrHash common.Hash) (incarnation uint64, found bool, err error) {
-	return findIncarnation(db, dbutils.CurrentStateBucket, addrHash[:], common.HashLength)
-}
-
-// PlainGetCurrentAccountIncarnation reads the latest incarnation of a contract from the database (uses plain state).
-func PlainGetCurrentAccountIncarnation(db Getter, address common.Address) (incarnation uint64, found bool, err error) {
-	return findIncarnation(db, dbutils.PlainStateBucket, address[:], common.AddressLength)
-}
-
-// GetCurrentAccountIncarnation reads the latest incarnation of a contract from the database.
-func findIncarnation(db Getter, bucket []byte, criteria []byte, criteriaLength int) (incarnation uint64, found bool, err error) {
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, criteriaLength+common.IncarnationLength+common.HashLength)
-	var fixedbits int = 8 * criteriaLength
-	copy(startkey, criteria)
-	err = db.Walk(bucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
-		copy(incarnationBytes[:], k[common.HashLength:])
-		found = true
-		return false, nil
-	})
-	if err != nil {
-		return
-	}
-	if found {
-		incarnation = (^binary.BigEndian.Uint64(incarnationBytes[:]))
-	}
-	return
-}
-
-// GetHistoricalAccountIncarnation reads historical incarnation of a contract from the database.
-func GetHistoricalAccountIncarnation(db Getter, addrHash common.Hash, timestamp uint64) (incarnation uint64, found bool, err error) {
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits int = 8 * common.HashLength
-	copy(startkey, addrHash[:])
-	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, timestamp, func(k, v []byte) (bool, error) {
-		copy(incarnationBytes[:], k[common.HashLength:])
-		found = true
-		return false, nil
-	})
-	if err != nil {
-		return
-	}
-	if found {
-		incarnation = (^binary.BigEndian.Uint64(incarnationBytes[:]))
-	}
-	return
 }

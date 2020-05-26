@@ -21,8 +21,9 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -30,25 +31,25 @@ import (
 
 var debugTests = []struct {
 	aHexKeys   []string
-	aBalances  []int64
+	aBalances  []uint64
 	sHexKeys   []string
 	sHexValues []string
 }{
 	{
 		aHexKeys:   []string{"0x00000000"},
-		aBalances:  []int64{13},
+		aBalances:  []uint64{13},
 		sHexKeys:   []string{},
 		sHexValues: []string{},
 	},
 	{
 		aHexKeys:   []string{"0x0000000000000000"},
-		aBalances:  []int64{13},
+		aBalances:  []uint64{13},
 		sHexKeys:   []string{"0x00000000000000000100000000000001", "0x00000000000000000020000000000002"},
 		sHexValues: []string{"0x01", "0x02"},
 	},
 	{
 		aHexKeys:   []string{"0x0000000000000000", "0x000f000000000000"},
-		aBalances:  []int64{13, 567},
+		aBalances:  []uint64{13, 567},
 		sHexKeys:   []string{"0x00000000000000000100000000000001", "0x00000000000000000020000000000002"},
 		sHexValues: []string{"0x01", "0x02"},
 	},
@@ -62,7 +63,7 @@ func TestPrintLoad(t *testing.T) {
 		}
 		tr := New(common.Hash{})
 		for i, balance := range debugTest.aBalances {
-			account := &accounts.Account{Initialised: true, Balance: *big.NewInt(balance), CodeHash: emptyState}
+			account := &accounts.Account{Initialised: true, Balance: *uint256.NewInt().SetUint64(balance), CodeHash: emptyState}
 			tr.UpdateAccount(common.FromHex(debugTest.aHexKeys[i]), account)
 		}
 		for i, sHexKey := range debugTest.sHexKeys {

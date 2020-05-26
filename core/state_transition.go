@@ -21,6 +21,8 @@ import (
 	"math"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -50,7 +52,7 @@ type StateTransition struct {
 	gas        uint64
 	gasPrice   *big.Int
 	initialGas uint64
-	value      *big.Int
+	value      *uint256.Int
 	data       []byte
 	state      vm.IntraBlockState
 	evm        *vm.EVM
@@ -144,12 +146,16 @@ func IntrinsicGas(data []byte, contractCreation, isHomestead bool, isEIP2028 boo
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
+	msgVal, overflow := uint256.FromBig(msg.Value())
+	if overflow {
+		return nil
+	}
 	return &StateTransition{
 		gp:       gp,
 		evm:      evm,
 		msg:      msg,
 		gasPrice: msg.GasPrice(),
-		value:    msg.Value(),
+		value:    msgVal,
 		data:     msg.Data(),
 		state:    evm.IntraBlockState,
 	}
@@ -176,7 +182,8 @@ func (st *StateTransition) to() common.Address {
 
 func (st *StateTransition) buyGas() error {
 	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), st.gasPrice)
-	if st.state.GetBalance(st.msg.From()).Cmp(mgval) < 0 {
+	gasCost, overflow := uint256.FromBig(mgval)
+	if overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
 		return ErrInsufficientFunds
 	}
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
@@ -185,7 +192,7 @@ func (st *StateTransition) buyGas() error {
 	st.gas += st.msg.Gas()
 
 	st.initialGas = st.msg.Gas()
-	st.state.SubBalance(st.msg.From(), mgval)
+	st.state.SubBalance(st.msg.From(), gasCost)
 	return nil
 }
 
@@ -250,7 +257,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	st.gas -= gas
 
 	// Check clause 6
-	if msg.Value().Sign() > 0 && !st.evm.CanTransfer(st.state, msg.From(), msg.Value()) {
+	msgVal, overflow := uint256.FromBig(msg.Value())
+	if overflow || (msg.Value().Sign() > 0 && !st.evm.CanTransfer(st.state, msg.From(), msgVal)) {
 		return nil, ErrInsufficientFundsForTransfer
 	}
 	var (
@@ -269,7 +277,9 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value)
 	}
 	st.refundGas()
-	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
+	y := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice)
+	x, _ := uint256.FromBig(y)
+	st.state.AddBalance(st.evm.Coinbase, x)
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
@@ -288,7 +298,8 @@ func (st *StateTransition) refundGas() {
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gas), st.gasPrice)
-	st.state.AddBalance(st.msg.From(), remaining)
+	x, _ := uint256.FromBig(remaining)
+	st.state.AddBalance(st.msg.From(), x)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
