@@ -20,10 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 
 	"github.com/pkg/errors"
-	"github.com/ugorji/go/codec"
 )
-
-var cbor codec.CborHandle
 
 func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string) error {
 	hashProgress, err := GetStageProgress(stateDB, HashCheck)
@@ -155,7 +152,7 @@ func copyBucket(
 				log.Info("Plain -> Hashed / created a buffer file",
 					"bucket", string(sourceBucket),
 					"name", file,
-					"size", bufferSize,
+					"size", common.StorageSize(bufferSize),
 					"plainKey", fmt.Sprintf("%x...", k[:4]),
 					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 			}
@@ -181,7 +178,7 @@ func copyBucket(
 		log.Info("Plain -> Hashed / created a buffer file (final)",
 			"bucket", string(sourceBucket),
 			"name", file,
-			"size", bufferSize,
+			"size", common.StorageSize(bufferSize),
 			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	}
 	return mergeTempFilesIntoBucket(db, files, destBucket)
@@ -236,7 +233,6 @@ type sortableBuffer struct {
 	entries     []sortableBufferEntry
 	size        int
 	OptimalSize int
-	encoder     *codec.Encoder
 }
 
 func (b *sortableBuffer) Put(k, v []byte) {
@@ -274,12 +270,20 @@ func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
 	filename := bufferFile.Name()
 	w := bufio.NewWriter(bufferFile)
 	defer w.Flush() //nolint:errcheck
-	b.encoder.Reset(w)
 
 	for i := range b.entries {
-		err = writeToDisk(b.encoder, b.entries[i].key, b.entries[i].value)
-		if err != nil {
-			return "", fmt.Errorf("error writing entries to disk: %v", err)
+		k, v := b.entries[i].key, b.entries[i].value
+		if err := w.WriteByte(byte(len(k))); err != nil {
+			return filename, err
+		}
+		if _, err := w.Write(k); err != nil {
+			return filename, err
+		}
+		if err := w.WriteByte(byte(len(v))); err != nil {
+			return filename, err
+		}
+		if _, err := w.Write(v); err != nil {
+			return filename, err
 		}
 	}
 
@@ -293,23 +297,32 @@ func newSortableBuffer() *sortableBuffer {
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
 		OptimalSize: 256 * 1024 * 1024, /* 256 mb */
-		encoder:     codec.NewEncoder(nil, &cbor),
 	}
 }
 
-func writeToDisk(encoder *codec.Encoder, key []byte, value []byte) error {
-	toWrite := [][]byte{key, value}
-	return encoder.Encode(toWrite)
-}
-
-func readElementFromDisk(decoder *codec.Decoder) ([]byte, []byte, error) {
-	result := make([][]byte, 2)
-	err := decoder.Decode(&result)
-	return result[0], result[1], err
+func readElementFromDisk(r io.Reader) ([]byte, []byte, error) {
+	var b [1]byte
+	var k, v []byte
+	if n, err := io.ReadFull(r, b[:]); err == nil && n == 1 {
+		k = make([]byte, int(b[0]))
+	} else {
+		return nil, nil, err
+	}
+	if n, err := io.ReadFull(r, k); err != nil || n != len(k) {
+		return nil, nil, err
+	}	
+	if n, err := io.ReadFull(r, b[:]); err == nil && n == 1 {
+		v = make([]byte, int(b[0]))
+	} else {
+		return nil, nil, err
+	}
+	if n, err := io.ReadFull(r, v); err != nil || n != len(v) {
+		return nil, nil, err
+	}
+	return k, v, nil
 }
 
 func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) error {
-	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
 	heap.Init(h)
@@ -321,8 +334,7 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 		} else {
 			return err
 		}
-		decoder.Reset(readers[i])
-		if key, value, err := readElementFromDisk(decoder); err == nil {
+		if key, value, err := readElementFromDisk(readers[i]); err == nil {
 			he := HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
@@ -351,8 +363,7 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		var err error
-		decoder.Reset(reader)
-		if element.key, element.value, err = readElementFromDisk(decoder); err == nil {
+		if element.key, element.value, err = readElementFromDisk(reader); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			return fmt.Errorf("error while reading next element from disk: %v", err)

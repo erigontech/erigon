@@ -27,7 +27,7 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 	}
 
 	for i := range keys {
-		if err := writeToDisk(encoder, []byte(keys[i]), []byte(vals[i])); err != nil {
+		if err := writeToDisk(buffer, []byte(keys[i]), []byte(vals[i])); err != nil {
 			t.Error(err)
 		}
 	}
