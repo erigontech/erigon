@@ -223,10 +223,6 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 const changeSetBufSize = 256 * 1024 * 1024
 
 func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
-	if plainState {
-		log.Info("Skipped account index generation for plain state")
-		return nil
-	}
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
@@ -300,10 +296,6 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 }
 
 func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
-	if plainState {
-		log.Info("Skipped storage index generation for plain state")
-		return nil
-	}
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {

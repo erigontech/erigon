@@ -162,3 +162,25 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	}
 	return nil
 }
+
+func (dsw *PlainStateWriter) WriteHistory() error {
+	accountChanges, err := dsw.csw.GetAccountChanges()
+	if err != nil {
+		return err
+	}
+	err = writeIndex(dsw.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, dsw.changeDb)
+	if err != nil {
+		return err
+	}
+
+	storageChanges, err := dsw.csw.GetStorageChanges()
+	if err != nil {
+		return err
+	}
+	err = writeIndex(dsw.blockNumber, storageChanges, dbutils.StorageHistoryBucket, dsw.changeDb)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}

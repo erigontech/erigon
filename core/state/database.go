@@ -70,6 +70,7 @@ type StateWriter interface {
 type WriterWithChangeSets interface {
 	StateWriter
 	WriteChangeSets() error
+	WriteHistory() error
 }
 
 type NoopWriter struct {

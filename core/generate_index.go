@@ -184,7 +184,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte, i
 		if err := ig.db.Walk(indexBucket, startKey, 8*common.HashLength, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[common.HashLength:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
-			//fmt.Println("Truncate", common.Bytes2Hex(k), timestamp, timestampTo)
+
 			if timestamp > timestampTo {
 				accountHistoryEffects[kStr] = nil
 				// truncate the chunk
