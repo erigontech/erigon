@@ -278,7 +278,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		if filename, err := writeBufferMapToTempFile(datadir, "account-history-indx-", bufferMap); err == nil {
 			defer func() {
 				//nolint:errcheck
-				//os.Remove(filename)
+				os.Remove(filename)
 			}()
 			bufferFileNames = append(bufferFileNames, filename)
 			runtime.ReadMemStats(&m)
