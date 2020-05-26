@@ -83,11 +83,16 @@ type (
 var nilValueNode = valueNode(nil)
 
 func NewShortNode(key []byte, value node) *shortNode {
-	return &shortNode{
+	s := &shortNode{
 		Key: key,
 		Val: value,
 		iws: 1 + uint64(1)/2 + value.witnessSize(), //opcode + len(key)/2 + childrenWitnessSize
 	}
+	if CountWitnessSizeWithoutStructure {
+		s.iws = value.witnessSize()
+	}
+
+	return s
 }
 
 func EncodeAsValue(data []byte) ([]byte, error) {
@@ -255,7 +260,7 @@ func (n valueNode) witnessSize() uint64 {
 }
 func (n codeNode) witnessSize() uint64 {
 	if CountWitnessSizeWithoutStructure {
-		return uint64(len(n))
+		return 0
 	}
 	return uint64(len(n)) + 1
 }
@@ -275,9 +280,9 @@ func (an *accountNode) witnessSize() uint64 {
 	if an.storage != nil {
 		res += an.storage.witnessSize()
 	}
-	if an.code != nil {
-		res += an.code.witnessSize()
-	}
+	//if an.code != nil {
+	//	res += an.code.witnessSize()
+	//}
 	return res
 }
 

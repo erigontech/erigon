@@ -1516,10 +1516,10 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSizeFrom(from []byte, size uint
 	if size == 0 {
 		return from, nil
 	}
-	return tds.prefixByCumulativeWitnessSizeFromDBFrom(from, size)
+	return tds.prefixByCumulativeWitnessSizeFrom(from, size)
 }
 
-func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDBFrom(from []byte, size uint64) (prefix []byte, err error) {
+func (tds *TrieDbState) prefixByCumulativeWitnessSizeFrom(from []byte, size uint64) (prefix []byte, err error) {
 	var kv ethdb.KV
 	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
 		kv = hasBolt.AbstractKV()
