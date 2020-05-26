@@ -176,11 +176,10 @@ type BlockChain struct {
 	txLookupCache *lru.Cache // Cache for the most recent transaction lookup data.
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
-	quit    chan struct{} // blockchain quit channel
-	running int32         // running must be called atomically
-	// procInterrupt must be atomically called
-	procInterrupt int32          // interrupt signaler for block processing
+	quit          chan struct{}  // blockchain quit channel
 	wg            sync.WaitGroup // chain processing wait group for shutting down
+	running       int32          // 0 if chain is running, 1 when stopped (must be called atomically)
+	procInterrupt int32          // interrupt signaler for block processing
 	quitMu        sync.RWMutex
 
 	engine     consensus.Engine
@@ -257,7 +256,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
-	bc.hc, err = NewHeaderChain(cdb, chainConfig, engine, bc.getProcInterrupt)
+	bc.hc, err = NewHeaderChain(cdb, chainConfig, engine, bc.insertStopped)
 	if err != nil {
 		return nil, err
 	}
@@ -389,10 +388,6 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*
 		return tds, nil
 	}
 	return bc.trieDbState, nil
-}
-
-func (bc *BlockChain) getProcInterrupt() bool {
-	return atomic.LoadInt32(&bc.procInterrupt) == 1
 }
 
 // GetVMConfig returns the block chain VM config.
@@ -884,12 +879,27 @@ func (bc *BlockChain) Stop() {
 	bc.scope.Close()
 	close(bc.quit)
 
-	bc.waitJobs()
+	bc.quitMu.Lock()
+	bc.StopInsert()
+	bc.wg.Wait()
+	bc.quitMu.Unlock()
 
 	if bc.pruner != nil {
 		bc.pruner.Stop()
 	}
 	log.Info("Blockchain stopped")
+}
+
+// StopInsert interrupts all insertion methods, causing them to return
+// errInsertionInterrupted as soon as possible. Insertion is permanently disabled after
+// calling this method.
+func (bc *BlockChain) StopInsert() {
+	atomic.StoreInt32(&bc.procInterrupt, 1)
+}
+
+// insertStopped returns true after StopInsert has been called.
+func (bc *BlockChain) insertStopped() bool {
+	return atomic.LoadInt32(&bc.procInterrupt) == 1
 }
 
 func (bc *BlockChain) procFutureBlocks() {
@@ -1154,7 +1164,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		batch := bc.db.NewBatch()
 		for i, block := range blockChain {
 			// Short circuit insertion if shutting down or processing failed
-			if bc.getProcInterrupt() {
+			if bc.insertStopped() {
 				return 0, errInsertionInterrupted
 			}
 			// Short circuit if the owner header is unknown
@@ -1615,8 +1625,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 
 		// If the chain is terminating, stop processing blocks
-		if bc.getProcInterrupt() {
-			log.Debug("Premature abort during blocks processing")
+		if bc.insertStopped() {
+			log.Debug("Abort during block processing")
 			break
 		}
 
@@ -2364,13 +2374,6 @@ func (bc *BlockChain) addJob() error {
 
 func (bc *BlockChain) doneJob() {
 	bc.wg.Done()
-}
-
-func (bc *BlockChain) waitJobs() {
-	bc.quitMu.Lock()
-	atomic.StoreInt32(&bc.procInterrupt, 1)
-	bc.wg.Wait()
-	bc.quitMu.Unlock()
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
