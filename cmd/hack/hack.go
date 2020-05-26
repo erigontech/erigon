@@ -621,58 +621,6 @@ func trieChart() {
 	check(err)
 }
 
-func cpDB() {
-	defer func(t time.Time) { fmt.Println("cpDB", time.Since(t)) }(time.Now())
-
-	db, err := ethdb.NewBoltDatabase("statedb-no-struct-info")
-	check(err)
-	db2, err := ethdb.NewBoltDatabase("statedb-no-struct-info3")
-	check(err)
-	bb := db.KV()
-	bb2 := db2.KV()
-	i := 0
-	tx1, _ := bb.Begin(false)
-	tx2, _ := bb2.Begin(true)
-
-	multi := make([][]byte, 0, 1_000_000)
-	for _, name := range dbutils.Buckets {
-		name := name
-		b1 := tx1.Bucket(name)
-		b2 := tx2.Bucket(name)
-		b2.FillPercent = 0.9
-		b3 := tx2.Bucket(dbutils.IntermediateTrieHashBucket)
-		_ = b1.ForEach(func(k, v []byte) error {
-			if bytes.Equal(name, dbutils.IntermediateWitnessSizeBucket) {
-				if binary.BigEndian.Uint64(v) > 64 {
-					multi = append(multi, common.CopyBytes(k), common.CopyBytes(v))
-				} else {
-					_ = b3.Delete(k)
-				}
-			} else {
-				multi = append(multi, common.CopyBytes(k), common.CopyBytes(v))
-			}
-			i++
-			if i%500_000 == 0 {
-				_ = b2.MultiPut(multi...)
-				_ = tx2.Commit()
-				tx2, _ = bb2.Begin(true)
-				b2 = tx2.Bucket(name)
-				multi = multi[:0]
-			}
-			return nil
-		})
-		_ = b2.MultiPut(multi...)
-		_ = tx2.Commit()
-		tx2, _ = bb2.Begin(true)
-		_ = tx1.Rollback()
-		tx1, _ = bb.Begin(false)
-		multi = multi[:0]
-	}
-
-	_ = tx1.Rollback()
-	_ = tx2.Commit()
-}
-
 func mgrSchedule(chaindata string, block uint64) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
@@ -695,31 +643,45 @@ func mgrSchedule(chaindata string, block uint64) {
 	check(err)
 	fmt.Println("HookSubTries: ", time.Since(t4))
 
+	//Test2(db.KV())
+	//Test3(db.AbstractKV())
+	//Test5(db.AbstractKV())
+
+	//r1, _ := tds.PrefixByCumulativeWitnessSize(5_160_000)
+	//fmt.Println()
+	//fmt.Println()
+	//r2, _ := tds.PrefixByCumulativeWitnessSizeFrom([]byte{}, 5_160_000)
+	//fmt.Printf("R: %x %x\n", r1, r2)
+
+	t5 := time.Now()
 	//var buf bytes.Buffer
 	var witnessSizeAccumulator uint64
 	var witnessCount int64
 	var witnessEstimatedSizeAccumulator uint64
-	t5 := time.Now()
-
-	//Test2(db.KV())
-	//Test3(db.AbstractKV())
-	//Test4(db.AbstractKV())
-
-	//r1, _ := tds.PrefixByCumulativeWitnessSize(360_000)
-	//fmt.Println()
-	//fmt.Println()
-	//r2, _ := tds.PrefixByCumulativeWitnessSizeFrom([]byte{}, 360_000)
-	//fmt.Printf("R: %x %x\n", r1, r2)
-	//tds.PrefixByCumulativeWitnessSizeFrom(common.FromHex("0dc6840d3014a61a4de5fa48f87672539d42e0b70c32dbff933fbd6a8de3d26911eb"), 304966)
 	schedule := mgr.NewSchedule(tds)
+	schedule2 := mgr.NewSchedule(tds)
 	var toBlock = block + mgr.BlocksPerCycle + 100
-	for tick, err := schedule.Tick(block); block <= toBlock; tick, err = schedule.Tick(block) {
+	var minLcp, maxLcp, avgLcp int
+
+	for block <= toBlock {
+		tick, err := schedule.Tick(block)
+		if err != nil {
+			panic(err)
+		}
+		tick2, err := schedule2.Tick2(block)
 		if err != nil {
 			panic(err)
 		}
 
 		//fmt.Printf("BlocK: %d\n", block)
 		//fmt.Printf("Tick: %s\n", tick)
+
+		//fmt.Printf("%x %x\n", tick.StateSlices[0].From, tick2.StateSlices[0].From)
+		//fmt.Printf("%x %x\n", tick.StateSlices[0].To, tick2.StateSlices[0].To)
+		lcp := len(LCP(tick.StateSlices[0].From, tick2.StateSlices[0].From))
+		minLcp = min(minLcp, lcp)
+		maxLcp = max(maxLcp, lcp)
+		avgLcp = (avgLcp + lcp) / 2
 
 		for _, slice := range tick.StateSlices {
 			_ = slice
@@ -761,10 +723,185 @@ func mgrSchedule(chaindata string, block uint64) {
 	}
 
 	fmt.Println("MGR Get All Ticks: ", time.Since(t5))
+	fmt.Println("MinLCP: ", minLcp, "MaxLCP: ", maxLcp, "AvgLCP: ", avgLcp)
 
 	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
 	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
 	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
+}
+
+func genIH(chaindata string, delete bool) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	if delete {
+		err = db.KV().Update(func(tx *bolt.Tx) error {
+			if err = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket); err != nil {
+				return err
+			}
+			if _, err = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false); err != nil {
+				return err
+			}
+			if err = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket); err != nil {
+				return err
+			}
+			if _, err = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false); err != nil {
+				return err
+			}
+
+			return nil
+		})
+	}
+	var before int
+	err = db.KV().View(func(tx *bolt.Tx) error {
+		before = tx.Bucket(dbutils.IntermediateTrieHashBucket).Stats().KeyN
+		return nil
+	})
+	check(err)
+	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	check(err)
+	defer db.Close()
+	tds, err := bc.GetTrieDbState()
+	check(err)
+	//loader := trie.NewSubTrieLoader(0)
+	loader := trie.NewFlatDbSubTrieLoader()
+	tr := tds.Trie()
+	for i := 0; i < 16; i++ {
+		for j := 0; j < 16; j++ {
+			rl := trie.NewRetainList(0)
+			prefix := []byte{uint8(i), uint8(j)}
+			rl.AddHex(prefix)
+			dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
+			rl2 := trie.NewRetainRange(prefix, prefix)
+			t3 := time.Now()
+			err = loader.Reset(db, rl2, rl2, dbPrefixes, fixedbits, false)
+			check(err)
+			subTries, err2 := loader.LoadSubTries()
+			check(err2)
+			t3Duration := time.Since(t3)
+			t4 := time.Now()
+			err = tr.HookSubTries(subTries, hooks) // hook up to the root
+			check(err)
+			t4Duration := time.Since(t4)
+			tr.EvictNode(prefix)
+			_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
+			check(err)
+			fmt.Printf("%x: Load %s, Hook %s, \n", i*16+j, t3Duration, t4Duration)
+		}
+	}
+	var after int
+	err = db.KV().View(func(tx *bolt.Tx) error {
+		after = tx.Bucket(dbutils.IntermediateTrieHashBucket).Stats().KeyN
+		return nil
+	})
+	fmt.Printf("IH bucket changed from %d to %d records\n", before, after)
+	check(err)
+
+}
+
+func min(x, y int) int {
+	if x > y {
+		return y
+	}
+	return x
+}
+
+func max(x, y int) int {
+	if x < y {
+		return y
+	}
+	return x
+}
+
+func LCP(items ...[]byte) []byte {
+	switch len(items) {
+	case 0:
+		return nil
+	case 1:
+		return items[0]
+	}
+
+	min, max := items[0], items[0]
+	for _, item := range items[1:] {
+		switch {
+		case bytes.Compare(item, min) == -1:
+			min = item
+		case bytes.Compare(item, max) == +1:
+			max = item
+		}
+	}
+
+	for i := 0; i < len(min) && i < len(max); i++ {
+		if min[i] != max[i] {
+			if i == 0 {
+				return nil
+			}
+			return min[:i]
+		}
+	}
+
+	if len(min) == 0 {
+		return nil
+	}
+
+	return min
+
+}
+
+func Test2(kv *bolt.DB) {
+	defer func(t time.Time) { fmt.Println("database.go:1582", time.Since(t)) }(time.Now())
+
+	//next := make([]byte, 40)
+	j := 0
+	//var ok bool
+	_ = kv.View(func(tx *bolt.Tx) error {
+		fmt.Printf("b1: %#v\n", tx.Bucket(dbutils.CurrentStateBucket).Stats())
+		fmt.Printf("b2: %#v\n", tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Stats())
+		return nil
+	})
+
+	fmt.Printf("j: %d\n", j)
+}
+
+func Test3(kv ethdb.KV) {
+	_ = kv.View(context.Background(), func(tx ethdb.Tx) error {
+		var total uint64
+		var acc uint64
+		var acc2 uint64
+		var acc3 uint64
+		_, _ = state.CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+			total++
+			if bytes.HasPrefix(k, common.FromHex("00")) {
+				acc += binary.BigEndian.Uint64(v)
+			}
+			if bytes.HasPrefix(k, common.FromHex("01")) {
+				acc2 += binary.BigEndian.Uint64(v)
+			}
+			if bytes.HasPrefix(k, common.FromHex("02")) {
+				acc3 += binary.BigEndian.Uint64(v)
+			}
+			return false, nil
+		})
+		fmt.Printf("in bucket total: %d\n", total)
+		fmt.Printf("in bucket: %d %d %d\n", acc, acc2, acc3)
+		return nil
+	})
+}
+func Test5(kv ethdb.KV) {
+	accs := map[uint64]int{}
+	_ = kv.View(context.Background(), func(tx ethdb.Tx) error {
+		_, _ = state.CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+			i := binary.BigEndian.Uint64(v)
+			accs[i]++
+			return false, nil
+		})
+		return nil
+	})
+
+	accs2 := map[uint64]int{}
+	for k, v := range accs {
+		accs2[k/100] += v
+	}
+	fmt.Printf("%v\n", accs2)
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
@@ -775,16 +912,16 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	check(err)
 	defer blockDb.Close()
 	if fromScratch {
-		os.Remove("statedb-ih-greater-4k-only")
+		os.Remove("statedb")
 	}
-	stateDb, err := ethdb.NewBoltDatabase("statedb-ih-greater-4k-only")
+	stateDB, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
-	defer stateDb.Close()
+	defer stateDB.Close()
 
-	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlock(stateDb, nil, false /* history */)
+	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
+	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
@@ -2206,7 +2343,7 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	sort.Strings(unfurlList)
 	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
 	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
+	if err = loader.Reset(db, unfurl, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
 		panic(err)
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
@@ -2329,7 +2466,7 @@ func main() {
 	}
 	//printBranches(uint64(*block))
 	if *action == "execToBlock" {
-		execToBlock(*chaindata, uint64(*block), true)
+		execToBlock(*chaindata, uint64(*block), false)
 	}
 	//extractTrie(*block)
 	//repair()
@@ -2383,8 +2520,8 @@ func main() {
 	if *action == "mgrSchedule" {
 		mgrSchedule(*chaindata, uint64(*block))
 	}
-	if *action == "cpDB" {
-		cpDB()
+	if *action == "genIH" {
+		genIH(*chaindata, false)
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)

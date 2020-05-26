@@ -105,8 +105,8 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 }
 
 // Reset prepares the loader for reuse
-func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Getter, rl RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
-	fstl.defaultReceiver.Reset(NewRetainAll(rl), trace)
+func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Getter, rl RetainDecider, receiverDecider RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
+	fstl.defaultReceiver.Reset(receiverDecider, trace)
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
@@ -294,7 +294,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 			}
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], ^fstl.accountValue.Incarnation)
-			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
+			// Now we know the correct incarnation of the account, an
+			//d we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
 			fstl.k, fstl.v = c.SeekTo(fstl.accAddrHashWithInc[:])

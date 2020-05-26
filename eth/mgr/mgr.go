@@ -96,7 +96,22 @@ func NewSchedule(estimator WitnessEstimator) *Schedule {
 
 func (s *Schedule) Tick(block uint64) (*Tick, error) {
 	tick := newTick(block, s.estimator.CumulativeWitnessSize([]byte{}), s.lastTick)
-	tick.StateSlices = append(tick.StateSlices)
+	for i := range tick.StateSlices {
+		var err error
+		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].FromSize); err != nil {
+			return tick, err
+		}
+		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].ToSize); err != nil {
+			return tick, err
+		}
+	}
+
+	s.lastTick = tick
+	return tick, nil
+}
+
+func (s *Schedule) Tick2(block uint64) (*Tick, error) {
+	tick := newTick(block, s.estimator.CumulativeWitnessSize([]byte{}), s.lastTick)
 	for i := range tick.StateSlices {
 		var err error
 		if tick.StateSlices[i].From == nil {
@@ -104,12 +119,9 @@ func (s *Schedule) Tick(block uint64) (*Tick, error) {
 				return tick, err
 			}
 		}
-		//fmt.Printf("toSize: %d, %d\n", startFromSize, tick.StateSlices[i].ToSize)
-		//tick.StateSlices[i].From = startFrom
 		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSizeFrom(tick.StateSlices[i].From, tick.StateSlices[i].ToSize-tick.StateSlices[i].FromSize); err != nil {
 			return tick, err
 		}
-		//fmt.Printf("%d: %s\n", i, tick.StateSlices[i])
 	}
 
 	s.lastTick = tick
