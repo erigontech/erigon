@@ -830,10 +830,10 @@ func genIH(chaindata string) {
 
 	accs := map[uint64]int{}
 	err = db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
-		_, _ = state.CumulativeSearch(db.AbstractKV(), dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+		tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
 			i := binary.BigEndian.Uint64(v)
 			accs[i]++
-			return false, nil
+			return true, nil
 		})
 		return nil
 	})
@@ -843,7 +843,8 @@ func genIH(chaindata string) {
 	for k, v := range accs {
 		accs2[k/100] += v
 	}
-	fmt.Printf("Agg IWS Stats: %v\n", accs2)
+	fmt.Printf("Agg IWS Stats1: %v\n", accs)
+	fmt.Printf("Agg IWS Stats2: %v\n", accs2)
 }
 
 func min(x, y int) int {
