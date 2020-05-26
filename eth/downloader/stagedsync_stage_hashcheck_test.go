@@ -52,7 +52,7 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 }
 
 func getDataDir() string {
-	name, err := ioutil.TempDir("geth-tests", "staged-sync")
+	name, err := ioutil.TempDir("", "geth-tests-staged-sync")
 	if err != nil {
 		panic(err)
 	}
