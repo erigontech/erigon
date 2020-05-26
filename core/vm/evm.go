@@ -221,8 +221,8 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		if precompiles[addr] == nil && evm.chainRules.IsEIP158 && value.Sign() == 0 {
 			// Calling a non existing account, don't do anything, but ping the tracer
 			if evm.vmConfig.Debug {
-				evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value.ToBig())
-				evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, 0, 0, nil)
+				_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value.ToBig())
+				_ = evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, 0, 0, nil)
 			}
 			return nil, gas, nil
 		}
@@ -242,10 +242,10 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
-		evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value.ToBig())
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value.ToBig())
 
 		defer func() { // Lazy evaluation of the parameters
-			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
+			_ = evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
 		}()
 	}
 	ret, err = run(evm, contract, input, false)
@@ -422,7 +422,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	if evm.vmConfig.Debug {
-		evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, true, codeAndHash.code, gas, value.ToBig())
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, true, codeAndHash.code, gas, value.ToBig())
 	}
 	start := time.Now()
 
@@ -457,7 +457,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrMaxCodeSizeExceeded
 	}
 	if evm.vmConfig.Debug {
-		evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
+		_ = evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
 	}
 	return ret, address, contract.Gas, err
 
