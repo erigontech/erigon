@@ -1429,13 +1429,13 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) CumulativeWitnessSize() uint64 {
+func (tds *TrieDbState) TotalCumulativeWitnessSizeDeprecated() uint64 {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	return tds.t.CumulativeWitnessSize([]byte{})
 }
 
-func (tds *TrieDbState) CumulativeWitnessSizeDBOnly() (uint64, error) {
+func (tds *TrieDbState) TotalCumulativeWitnessSize() (uint64, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
@@ -1458,40 +1458,14 @@ func (tds *TrieDbState) CumulativeWitnessSizeDBOnly() (uint64, error) {
 	return accumulator, nil
 }
 
-func (tds *TrieDbState) CumulativeWitnessSizeDBOnly2() (uint64, error) {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-
-	var kv ethdb.KV
-	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
-		kv = hasBolt.AbstractKV()
-	} else {
-		return 0, fmt.Errorf("unexpected db type: %T", tds.db)
-	}
-
-	var accumulator uint64
-	_, err := CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
-		i := binary.BigEndian.Uint64(v)
-		if i > 64 {
-			accumulator += i
-		}
-		return false, nil
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	return accumulator, nil
-}
-
-// PrefixByCumulativeWitnessSize - returns maximal length prefix which cumulative witness len >= given len
+// PrefixByCumulativeWitnessSizeDeprecated - returns maximal length prefix which cumulative witness len >= given len
 // if len == 0 returns empty prefix - means possible to use output of this method to iterate over DB
-func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, err error) {
+func (tds *TrieDbState) PrefixByCumulativeWitnessSizeDeprecated(size uint64) (prefix []byte, err error) {
 	if size == 0 {
 		return []byte{}, nil
 	}
 
-	prefix, incarnation, accumulator, ok := tds.prefixByCumulativeWitnessSizeFromTrie(size)
+	prefix, incarnation, accumulator, ok := tds.prefixByCumulativeWitnessSizeTrieDeprecated(size)
 	if ok {
 		if len(prefix)%2 == 1 {
 			panic("why valueNode has even number of nibbles?")
@@ -1500,16 +1474,16 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size uint64) (prefix []byt
 		return prefix, nil
 	}
 
-	return tds.prefixByCumulativeWitnessSizeFromDB(prefix, incarnation, size-accumulator)
+	return tds.prefixByCumulativeWitnessSizeDBDeprecated(prefix, incarnation, size-accumulator)
 }
 
-func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromTrie(size uint64) (prefix []byte, incarnation uint64, accumulator uint64, ok bool) {
+func (tds *TrieDbState) prefixByCumulativeWitnessSizeTrieDeprecated(size uint64) (prefix []byte, incarnation uint64, accumulator uint64, ok bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	return tds.t.PrefixByCumulativeWitnessSize(size)
 }
 
-func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDB(prefixInTrie []byte, incarnation uint64, size uint64) (prefix []byte, err error) {
+func (tds *TrieDbState) prefixByCumulativeWitnessSizeDBDeprecated(prefixInTrie []byte, incarnation uint64, size uint64) (prefix []byte, err error) {
 	//fmt.Printf("FromTrie: %x\n", prefixInTrie)
 	seeks := int64(0)
 	defer cumulativeSearchTimer.UpdateSince(time.Now())
@@ -1536,7 +1510,6 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDB(prefixInTrie []byte,
 	var accumulator uint64
 	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, append(prefixInTrie, 0), prefixInTrie, fixedbits, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
 		prefixSize := binary.BigEndian.Uint64(v)
-		//fmt.Printf("loop %d+%d=%d <= %d, %x\n", accumulator, prefixSize, accumulator+prefixSize, size, k)
 		overflow := accumulator+prefixSize >= size
 		if !overflow {
 			accumulator += prefixSize
@@ -1546,29 +1519,17 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDB(prefixInTrie []byte,
 	if err != nil {
 		return nil, err
 	}
-
-	//if len(prefix) > common.HashLength {
-	//	dbutils.RemoveIncarnationFromKey(prefix, &prefix)
-	//}
-	//fmt.Printf("Result: %x\n", prefix)
 	return prefix, nil
 }
 
-func (tds *TrieDbState) PrefixByCumulativeWitnessSizeDBOnly(size uint64) (prefix []byte, err error) {
-	if size == 0 {
-		return []byte{}, nil
-	}
-	return tds.prefixByCumulativeWitnessSizeFromDB2(size)
-}
-
-func (tds *TrieDbState) PrefixByCumulativeWitnessSizeFrom(from []byte, size uint64) (prefix []byte, err error) {
+func (tds *TrieDbState) PrefixByCumulativeWitnessSize(from []byte, size uint64) (prefix []byte, err error) {
 	if size == 0 {
 		return from, nil
 	}
-	return tds.prefixByCumulativeWitnessSizeFrom(from, size)
+	return tds.prefixByCumulativeWitnessSize(from, size)
 }
 
-func (tds *TrieDbState) prefixByCumulativeWitnessSizeFrom(from []byte, size uint64) (prefix []byte, err error) {
+func (tds *TrieDbState) prefixByCumulativeWitnessSize(from []byte, size uint64) (prefix []byte, err error) {
 	var kv ethdb.KV
 	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
 		kv = hasBolt.AbstractKV()
@@ -1579,7 +1540,6 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFrom(from []byte, size uint
 	var accumulator uint64
 	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, from, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
 		prefixSize := binary.BigEndian.Uint64(v)
-		//fmt.Printf("loop %d+%d=%d <= %d, %x\n", accumulator, prefixSize, accumulator+prefixSize, size, k)
 		overflow := accumulator+prefixSize >= size
 		if !overflow {
 			accumulator += prefixSize
@@ -1589,39 +1549,6 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeFrom(from []byte, size uint
 	if err != nil {
 		return nil, err
 	}
-	//if len(prefix) > common.HashLength {
-	//	dbutils.RemoveIncarnationFromKey(prefix, &prefix)
-	//}
-
-	//fmt.Printf("Result from db2: %x\n", prefix)
-	return prefix, nil
-}
-func (tds *TrieDbState) prefixByCumulativeWitnessSizeFromDB2(size uint64) (prefix []byte, err error) {
-	var kv ethdb.KV
-	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
-		kv = hasBolt.AbstractKV()
-	} else {
-		return nil, fmt.Errorf("unexpected db type: %T", tds.db)
-	}
-
-	var accumulator uint64
-	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
-		prefixSize := binary.BigEndian.Uint64(v)
-		//fmt.Printf("loop %d+%d=%d <= %d, %x\n", accumulator, prefixSize, accumulator+prefixSize, size, k)
-		overflow := accumulator+prefixSize >= size
-		if !overflow {
-			accumulator += prefixSize
-		}
-		return overflow, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	//if len(prefix) > common.HashLength {
-	//	dbutils.RemoveIncarnationFromKey(prefix, &prefix)
-	//}
-
-	//fmt.Printf("Result from db2: %x\n", prefix)
 	return prefix, nil
 }
 

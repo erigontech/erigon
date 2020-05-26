@@ -649,10 +649,10 @@ func mgrSchedule(chaindata string, block uint64) {
 	_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
 	check(err)
 
-	//r1, _ := tds.PrefixByCumulativeWitnessSize(5_160_000)
+	//r1, _ := tds.PrefixByCumulativeWitnessSizeDeprecated(5_160_000)
 	//fmt.Println()
 	//fmt.Println()
-	//r2, _ := tds.PrefixByCumulativeWitnessSizeFrom([]byte{}, 5_160_000)
+	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 5_160_000)
 	//fmt.Printf("R: %x %x\n", r1, r2)
 
 	t5 := time.Now()
@@ -670,11 +670,11 @@ func mgrSchedule(chaindata string, block uint64) {
 	)
 
 	for block <= toBlock {
-		tick, err2 := schedule.Tick2(block)
+		tick, err2 := schedule.Tick(block)
 		if err2 != nil {
 			panic(err2)
 		}
-		tick2, err2 := schedule2.Tick3(block)
+		tick2, err2 := schedule2.Tick2(block)
 		if err2 != nil {
 			panic(err2)
 		}
@@ -829,17 +829,24 @@ func genIH(chaindata string) {
 	fmt.Printf("IH bucket changed from %d to %d records\n", before, after)
 
 	accs := map[uint64]int{}
+	accs2 := map[uint64]int{}
 	err = db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
 		return tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
 			i := binary.BigEndian.Uint64(v)
 			if i < 5000 {
 				accs[i/10]++
 			}
+			if len(k) > 32 {
+				if i < 5000 {
+					accs2[i/10]++
+				}
+			}
 			return true, nil
 		})
 	})
 	check(err)
-	fmt.Printf("Agg IWS Stats: %v\n", accs)
+	fmt.Printf("Agg IWS Stats1: %v\n", accs)
+	fmt.Printf("Agg IWS Stats2: %v\n", accs2)
 }
 
 func min(x, y int) int {

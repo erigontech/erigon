@@ -1394,7 +1394,7 @@ func (t *Trie) CumulativeWitnessSize(key []byte) uint64 {
 	return n.witnessSize()
 }
 
-// PrefixByCumulativeWitnessSize returns minimal prefix with accumulated size >= than given one.
+// PrefixByCumulativeWitnessSizeDeprecated returns minimal prefix with accumulated size >= than given one.
 // Returns (nil, true) if size > root.witnessSize()
 // Returns (nil, false) if faced nil node in trie
 func (t *Trie) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, incarnation uint64, accumulator uint64, found bool) {
