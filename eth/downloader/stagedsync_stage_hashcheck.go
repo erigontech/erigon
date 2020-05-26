@@ -3,10 +3,12 @@ package downloader
 import (
 	"bufio"
 	"bytes"
+	"container/heap"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -149,7 +151,7 @@ func copyBucket(
 		return err
 	}
 	files = append(files, file)
-	return mergeTempFilesIntoBucket(files, destBucket)
+	return mergeTempFilesIntoBucket(db, files, destBucket)
 }
 
 func transformPlainStateKey(key []byte) ([]byte, error) {
@@ -258,8 +260,53 @@ func writeToDisk(w io.Writer, entry sortableBufferEntry) error {
 	panic("implement me")
 }
 
-func mergeTempFilesIntoBucket(files []string, bucket []byte) error {
+func readElementFromDisk(r io.Reader) ([]byte, []byte, error) {
 	panic("implement me")
+}
+
+func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) error {
+	var m runtime.MemStats
+	h := &Heap{}
+	heap.Init(h)
+	readers := make([]io.Reader, len(files))
+	for i, filename := range files {
+		if f, err := os.Open(filename); err == nil {
+			readers[i] = bufio.NewReader(f)
+			defer f.Close() //nolint:errcheck
+		} else {
+			return err
+		}
+		if key, value, err := readElementFromDisk(readers[i]); err == nil {
+			he := &HeapElem{key, i, value}
+			heap.Push(h, he)
+		} else {
+			return err
+		}
+	}
+	batch := db.NewBatch()
+	for h.Len() > 0 {
+		element := (heap.Pop(h)).(HeapElem)
+		reader := readers[element.timeIdx]
+		if err := batch.Put(bucket, element.key, element.value); err != nil {
+			return err
+		}
+		batchSize := batch.BatchSize()
+		if batchSize > batch.IdealBatchSize() {
+			if _, err := batch.Commit(); err != nil {
+				return err
+			}
+			log.Info("Commited index batch", "bucket", string(bucket), "size", common.StorageSize(batchSize),
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		}
+		var err error
+		if element.key, element.value, err = readElementFromDisk(reader); err == nil {
+			heap.Push(h, element)
+		} else if err != io.EOF {
+			return fmt.Errorf("error while reading next element from disk: %v", err)
+		}
+	}
+	_, err := batch.Commit()
+	return err
 }
 
 func deleteFiles(files []string) {
