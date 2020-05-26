@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -13,7 +14,15 @@ import (
 type mutation struct {
 	puts *puts // Map buckets to map[key]value
 	mu   sync.RWMutex
-	db   KV
+	db   Database
+}
+
+type mutationTx struct {
+	m *mutation
+}
+
+func (m *mutation) Begin(ctx context.Context, writable bool) (Tx, error) {
+	return &mutationTx{m: m}, nil
 }
 
 func (m *mutation) KV() *bolt.DB {
