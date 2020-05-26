@@ -2254,7 +2254,7 @@ func testIndexFileCompress(chaindata string) {
 	saving := 0
 	for _, file := range files {
 		var reader io.Reader
-		if f, err := os.Open(file.Name()); err == nil {
+		if f, err := os.Open(path.Join(chaindata, file.Name())); err == nil {
 			reader = bufio.NewReader(f)
 			//nolint:errcheck
 			defer f.Close()
