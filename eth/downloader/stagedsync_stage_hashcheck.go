@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -107,17 +108,42 @@ func copyBucket(
 	sourceBucket,
 	destBucket []byte,
 	transformKeyFunc func([]byte) ([]byte, error)) error {
-	return db.Walk(sourceBucket, nil, 0, func(k, v []byte) (bool, error) {
+
+	buffer := newSortableBuffer()
+	files := []string{}
+
+	defer func() {
+		deleteFiles(files)
+	}()
+
+	err := db.Walk(sourceBucket, nil, 0, func(k, v []byte) (bool, error) {
 		newK, err := transformKeyFunc(k)
 		if err != nil {
 			return false, err
 		}
-		err = db.Put(destBucket, newK, v)
-		if err != nil {
-			return false, err
+		buffer.Put(newK, v)
+		if buffer.Size() >= buffer.OptimalSize {
+			sort.Sort(buffer)
+			file, err := buffer.FlushToDisk()
+			if err != nil {
+				return false, err
+			}
+			files = append(files, file)
 		}
 		return true, nil
 	})
+	if err != nil {
+		return err
+	}
+
+	sort.Sort(buffer)
+	var file string
+	file, err = buffer.FlushToDisk()
+	if err != nil {
+		return err
+	}
+	files = append(files, file)
+	return mergeTempFilesIntoBucket(files, destBucket)
 }
 
 func transformPlainStateKey(key []byte) ([]byte, error) {
@@ -158,4 +184,46 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 
 	compositeKey := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
 	return compositeKey, nil
+}
+
+type sortableBuffer struct {
+	OptimalSize int
+}
+
+func (b *sortableBuffer) Put(k, v []byte) {
+	panic("implement me")
+}
+
+func (b *sortableBuffer) Size() int {
+	panic("implement me")
+}
+
+func (b *sortableBuffer) Len() int {
+	panic("implement me")
+}
+
+func (b *sortableBuffer) Less(i, j int) bool {
+	panic("implement me")
+}
+
+func (b *sortableBuffer) Swap(i, j int) {
+	panic("implement me")
+}
+
+func (b *sortableBuffer) FlushToDisk() (string, error) {
+	panic("implement me")
+}
+
+func newSortableBuffer() *sortableBuffer {
+	return &sortableBuffer{
+		OptimalSize: 1024 * 1024,
+	}
+}
+
+func mergeTempFilesIntoBucket(files []string, bucket []byte) error {
+	panic("implement me")
+}
+
+func deleteFiles(files []string) {
+	panic("implement me")
 }
