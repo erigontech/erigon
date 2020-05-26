@@ -109,7 +109,6 @@ type MinDatabase interface {
 // Later they can either be committed to the database or rolled back.
 type DbWithPendingMutations interface {
 	Database
-	KV
 	Commit() (uint64, error)
 	Rollback()
 	BatchSize() int

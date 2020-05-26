@@ -5,8 +5,8 @@ import (
 )
 
 type KV interface {
-	View(ctx context.Context, f func(tx Tx) error) (err error)
-	Update(ctx context.Context, f func(tx Tx) error) (err error)
+	View(ctx context.Context, f func(tx Tx) error) error
+	Update(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
