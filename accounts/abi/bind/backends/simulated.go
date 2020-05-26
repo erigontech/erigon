@@ -205,7 +205,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 }
 
 // BalanceAt returns the wei balance of a certain account in the blockchain.
-func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (*big.Int, error) {
+func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -454,7 +454,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	// Recap the highest gas allowance with account's balance.
 	if call.GasPrice != nil && call.GasPrice.Uint64() != 0 {
 		balance := b.pendingState.GetBalance(call.From) // from can't be nil
-		available := new(big.Int).Set(balance)
+		available := balance.ToBig()
 		if call.Value != nil {
 			if call.Value.Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
@@ -548,7 +548,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	}
 	// Set infinite balance to the fake caller account.
 	from := statedb.GetOrNewStateObject(call.From)
-	from.SetBalance(math.MaxBig256)
+	from.SetBalance(uint256.NewInt().SetAllOne())
 	// Execute the call.
 	msg := callmsg{call}
 

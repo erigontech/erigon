@@ -2,7 +2,8 @@ package trie
 
 import (
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
@@ -54,7 +55,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
-			balance := big.NewInt(0)
+			balance := uint256.NewInt()
 			balance.SetBytes(op.Balance.Bytes())
 			nonce := op.Nonce
 

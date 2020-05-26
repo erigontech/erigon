@@ -2,28 +2,29 @@ package trie
 
 import (
 	"crypto/ecdsa"
-	"math/big"
 	"reflect"
 	"testing"
+
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"golang.org/x/crypto/sha3"
 )
 
 func TestGetAccount(t *testing.T) {
 	acc1 := &accounts.Account{
 		Nonce:       1,
 		Incarnation: 1,
-		Balance:     *big.NewInt(100),
+		Balance:     *uint256.NewInt().SetUint64(100),
 		Root:        EmptyRoot,
 	}
 	acc2 := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *big.NewInt(200),
+		Balance:     *uint256.NewInt().SetUint64(200),
 		Root:        common.BytesToHash([]byte("0x1")),
 		CodeHash:    common.BytesToHash([]byte("0x01")),
 	}
@@ -53,7 +54,7 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *big.NewInt(200),
+		Balance:     *uint256.NewInt().SetUint64(200),
 		Root:        EmptyRoot,
 		CodeHash:    emptyState,
 	}
@@ -99,7 +100,7 @@ func TestHash(t *testing.T) {
 	addr1 := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc1 := &accounts.Account{
 		Nonce:    1,
-		Balance:  *big.NewInt(209488),
+		Balance:  *uint256.NewInt().SetUint64(209488),
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}
@@ -107,7 +108,7 @@ func TestHash(t *testing.T) {
 	addr2 := common.HexToAddress("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc2 := &accounts.Account{
 		Nonce:    0,
-		Balance:  *big.NewInt(0),
+		Balance:  *uint256.NewInt(),
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}
@@ -115,7 +116,7 @@ func TestHash(t *testing.T) {
 	addr3 := common.HexToAddress("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc3 := &accounts.Account{
 		Nonce:    0,
-		Balance:  *big.NewInt(1010),
+		Balance:  *uint256.NewInt().SetUint64(1010),
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
 	}

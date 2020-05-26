@@ -186,7 +186,7 @@ func (host *hostContext) SetStorage(evmcAddr evmc.Address, evmcKey evmc.Hash, ev
 }
 
 func (host *hostContext) GetBalance(addr evmc.Address) evmc.Hash {
-	return evmc.Hash(common.BigToHash(host.env.IntraBlockState.GetBalance(common.Address(addr))))
+	return evmc.Hash(common.Hash(host.env.IntraBlockState.GetBalance(common.Address(addr)).Bytes32()))
 }
 
 func (host *hostContext) GetCodeSize(addr evmc.Address) int {
@@ -260,7 +260,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 	gasU := uint64(gas)
 	var gasLeftU uint64
 
-	value := big.NewInt(0)
+	value := uint256.NewInt()
 	value.SetBytes(valueBytes[:])
 
 	salt := big.NewInt(0)
@@ -371,7 +371,7 @@ func (evm *EVMC) Run(contract *Contract, input []byte, readOnly bool) (ret []byt
 		evmc.Address(contract.Address()),
 		evmc.Address(contract.Caller()),
 		input,
-		evmc.Hash(common.BigToHash(contract.value)),
+		evmc.Hash(contract.value.Bytes32()),
 		contract.Code,
 		evmc.Hash{})
 

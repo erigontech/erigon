@@ -63,7 +63,7 @@ func (a *Account) Balance(ctx context.Context) (hexutil.Big, error) {
 	if err != nil {
 		return hexutil.Big{}, err
 	}
-	return hexutil.Big(*state.GetBalance(a.address)), nil
+	return hexutil.Big(*state.GetBalance(a.address).ToBig()), nil
 }
 
 func (a *Account) TransactionCount(ctx context.Context) (hexutil.Uint64, error) {

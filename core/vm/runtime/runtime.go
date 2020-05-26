@@ -21,6 +21,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -40,7 +42,7 @@ type Config struct {
 	Time        *big.Int
 	GasLimit    uint64
 	GasPrice    *big.Int
-	Value       *big.Int
+	Value       *uint256.Int
 	Debug       bool
 	EVMConfig   vm.Config
 
@@ -76,7 +78,7 @@ func setDefaults(cfg *Config) {
 		cfg.GasPrice = new(big.Int)
 	}
 	if cfg.Value == nil {
-		cfg.Value = new(big.Int)
+		cfg.Value = new(uint256.Int)
 	}
 	if cfg.BlockNumber == nil {
 		cfg.BlockNumber = new(big.Int)

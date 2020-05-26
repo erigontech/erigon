@@ -21,6 +21,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -80,6 +82,6 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) {
 	// Move every DAO account and extra-balance account funds into the refund contract
 	for _, addr := range params.DAODrainList() {
 		statedb.AddBalance(params.DAORefundContract, statedb.GetBalance(addr))
-		statedb.SetBalance(addr, new(big.Int))
+		statedb.SetBalance(addr, new(uint256.Int))
 	}
 }

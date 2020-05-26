@@ -19,7 +19,6 @@ package vm
 import (
 	"context"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -97,12 +96,12 @@ func TestEIP2200(t *testing.T) {
 		state := state.New(state.NewDbStateReader(db))
 
 		vmctx := Context{
-			CanTransfer: func(IntraBlockState, common.Address, *big.Int) bool { return true },
-			Transfer:    func(IntraBlockState, common.Address, common.Address, *big.Int) {},
+			CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
+			Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int) {},
 		}
 		vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 
-		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(big.Int))
+		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int))
 		if err != tt.failure {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 		}
