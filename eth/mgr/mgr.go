@@ -86,6 +86,7 @@ type Schedule struct {
 type WitnessEstimator interface {
 	CumulativeWitnessSize() uint64
 	CumulativeWitnessSizeDBOnly() (uint64, error)
+	CumulativeWitnessSizeDBOnly2() (uint64, error)
 	PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, err error)
 	PrefixByCumulativeWitnessSizeDBOnly(size uint64) (prefix []byte, err error)
 	PrefixByCumulativeWitnessSizeFrom(from []byte, size uint64) (prefix []byte, err error)
@@ -113,6 +114,29 @@ func (s *Schedule) Tick(block uint64) (*Tick, error) {
 
 func (s *Schedule) Tick2(block uint64) (*Tick, error) {
 	total, err := s.estimator.CumulativeWitnessSizeDBOnly()
+	if err != nil {
+		return nil, err
+	}
+
+	tick := newTick(block, total, s.lastTick)
+	for i := range tick.StateSlices {
+		var err error
+		if tick.StateSlices[i].From == nil {
+			if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSizeFrom([]byte{}, tick.StateSlices[i].FromSize); err != nil {
+				return tick, err
+			}
+		}
+		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSizeFrom(tick.StateSlices[i].From, tick.StateSlices[i].ToSize-tick.StateSlices[i].FromSize); err != nil {
+			return tick, err
+		}
+	}
+
+	s.lastTick = tick
+	return tick, nil
+}
+
+func (s *Schedule) Tick3(block uint64) (*Tick, error) {
+	total, err := s.estimator.CumulativeWitnessSizeDBOnly2()
 	if err != nil {
 		return nil, err
 	}

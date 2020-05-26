@@ -670,11 +670,11 @@ func mgrSchedule(chaindata string, block uint64) {
 	)
 
 	for block <= toBlock {
-		tick, err2 := schedule.Tick(block)
+		tick, err2 := schedule.Tick2(block)
 		if err2 != nil {
 			panic(err2)
 		}
-		tick2, err2 := schedule2.Tick2(block)
+		tick2, err2 := schedule2.Tick3(block)
 		if err2 != nil {
 			panic(err2)
 		}
@@ -830,21 +830,16 @@ func genIH(chaindata string) {
 
 	accs := map[uint64]int{}
 	err = db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
-		tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
+		return tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
 			i := binary.BigEndian.Uint64(v)
-			accs[i]++
+			if i < 5000 {
+				accs[i/10]++
+			}
 			return true, nil
 		})
-		return nil
 	})
 	check(err)
-
-	accs2 := map[uint64]int{}
-	for k, v := range accs {
-		accs2[k/100] += v
-	}
-	fmt.Printf("Agg IWS Stats1: %v\n", accs)
-	fmt.Printf("Agg IWS Stats2: %v\n", accs2)
+	fmt.Printf("Agg IWS Stats: %v\n", accs)
 }
 
 func min(x, y int) int {

@@ -1458,6 +1458,32 @@ func (tds *TrieDbState) CumulativeWitnessSizeDBOnly() (uint64, error) {
 	return accumulator, nil
 }
 
+func (tds *TrieDbState) CumulativeWitnessSizeDBOnly2() (uint64, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	var kv ethdb.KV
+	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
+		kv = hasBolt.AbstractKV()
+	} else {
+		return 0, fmt.Errorf("unexpected db type: %T", tds.db)
+	}
+
+	var accumulator uint64
+	_, err := CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+		i := binary.BigEndian.Uint64(v)
+		if i > 64 {
+			accumulator += i
+		}
+		return false, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return accumulator, nil
+}
+
 // PrefixByCumulativeWitnessSize - returns maximal length prefix which cumulative witness len >= given len
 // if len == 0 returns empty prefix - means possible to use output of this method to iterate over DB
 func (tds *TrieDbState) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, err error) {
