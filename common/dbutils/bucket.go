@@ -61,6 +61,11 @@ var (
 	//value - code hash
 	ContractCodeBucket = []byte("contractCode")
 
+	// Incarnations for deleted accounts
+	//key - address
+	//value - incarnation of account when it was last deleted
+	IncarnationMapBucket = []byte("incarnationMap")
+
 	//AccountChangeSetBucket keeps changesets of accounts
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - addrHash v - account(encoded).
