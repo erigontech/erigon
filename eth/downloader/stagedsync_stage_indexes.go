@@ -6,17 +6,18 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"runtime"
+	"sort"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"io"
-	"io/ioutil"
-	"os"
-	"runtime"
-	"sort"
 )
 
 func fillChangeSetBuffer(db ethdb.Database, bucket []byte, blockNum uint64, changesets []byte, offsets []int, blockNums []uint64) (bool, uint64, []int, []uint64, error) {
@@ -87,8 +88,6 @@ func writeBufferMapToTempFile(datadir string, pattern string, bufferMap map[stri
 	return filename, nil
 }
 
-
-
 func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []byte, keyLength int) error {
 	var m runtime.MemStats
 	h := &Heap{}
@@ -105,7 +104,7 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 		// Read first key
 		keyBuf := make([]byte, keyLength)
 		if n, err := io.ReadFull(readers[i], keyBuf); err == nil && n == keyLength {
-			heap.Push(h, HeapElem{keyBuf, i})
+			heap.Push(h, HeapElem{keyBuf, i, nil})
 		} else {
 			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
 		}

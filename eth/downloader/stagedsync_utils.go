@@ -5,6 +5,7 @@ import "bytes"
 type HeapElem struct {
 	key     []byte
 	timeIdx int
+	value   []byte
 }
 
 type Heap []HeapElem
