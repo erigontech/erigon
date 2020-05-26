@@ -1,7 +1,12 @@
 package downloader
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -14,7 +19,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) error {
+func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string) error {
 	hashProgress, err := GetStageProgress(stateDB, HashCheck)
 	if err != nil {
 		return err
@@ -29,7 +34,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64) err
 	hashedStatePromotion := stateDB.NewBatch()
 
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(hashedStatePromotion, hashProgress)
+		err = promoteHashedState(hashedStatePromotion, hashProgress, datadir)
 		if err != nil {
 			return err
 		}
@@ -88,22 +93,23 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	return nil
 }
 
-func promoteHashedState(db ethdb.Database, progress uint64) error {
+func promoteHashedState(db ethdb.Database, progress uint64, datadir string) error {
 	if progress == 0 {
-		return promoteHashedStateCleanly(db)
+		return promoteHashedStateCleanly(db, datadir)
 	}
 	return errors.New("incremental state promotion not implemented")
 }
 
-func promoteHashedStateCleanly(db ethdb.Database) error {
-	err := copyBucket(db, dbutils.PlainStateBucket, dbutils.CurrentStateBucket, transformPlainStateKey)
+func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
+	err := copyBucket(datadir, db, dbutils.PlainStateBucket, dbutils.CurrentStateBucket, transformPlainStateKey)
 	if err != nil {
 		return err
 	}
-	return copyBucket(db, dbutils.PlainContractCodeBucket, dbutils.ContractCodeBucket, transformContractCodeKey)
+	return copyBucket(datadir, db, dbutils.PlainContractCodeBucket, dbutils.ContractCodeBucket, transformContractCodeKey)
 }
 
 func copyBucket(
+	datadir string,
 	db ethdb.Database,
 	sourceBucket,
 	destBucket []byte,
@@ -124,7 +130,7 @@ func copyBucket(
 		buffer.Put(newK, v)
 		if buffer.Size() >= buffer.OptimalSize {
 			sort.Sort(buffer)
-			file, err := buffer.FlushToDisk()
+			file, err := buffer.FlushToDisk(datadir)
 			if err != nil {
 				return false, err
 			}
@@ -138,7 +144,7 @@ func copyBucket(
 
 	sort.Sort(buffer)
 	var file string
-	file, err = buffer.FlushToDisk()
+	file, err = buffer.FlushToDisk(datadir)
 	if err != nil {
 		return err
 	}
@@ -186,38 +192,70 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 	return compositeKey, nil
 }
 
+type sortableBufferEntry struct {
+	key   []byte
+	value []byte
+}
+
 type sortableBuffer struct {
+	entries     []sortableBufferEntry
+	size        int
 	OptimalSize int
 }
 
 func (b *sortableBuffer) Put(k, v []byte) {
-	panic("implement me")
+	b.size += len(k)
+	b.size += len(v)
+	b.entries = append(b.entries, sortableBufferEntry{k, v})
 }
 
 func (b *sortableBuffer) Size() int {
-	panic("implement me")
+	return b.size
 }
 
 func (b *sortableBuffer) Len() int {
-	panic("implement me")
+	return len(b.entries)
 }
 
 func (b *sortableBuffer) Less(i, j int) bool {
-	panic("implement me")
+	return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
 }
 
 func (b *sortableBuffer) Swap(i, j int) {
-	panic("implement me")
+	b.entries[i], b.entries[j] = b.entries[j], b.entries[i]
 }
 
-func (b *sortableBuffer) FlushToDisk() (string, error) {
-	panic("implement me")
+func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
+	bufferFile, err := ioutil.TempFile(datadir, "tg-sync-sortable-buf")
+	if err != nil {
+		return "", err
+	}
+	defer bufferFile.Close() //nolint:errcheck
+
+	filename := bufferFile.Name()
+	w := bufio.NewWriter(bufferFile)
+
+	for i := range b.entries {
+		err = writeToDisk(w, b.entries[i])
+		if err != nil {
+			return "", err
+		}
+	}
+
+	b.entries = b.entries[:0] // keep the capacity
+	return filename, nil
 }
 
 func newSortableBuffer() *sortableBuffer {
 	return &sortableBuffer{
+		entries:     make([]sortableBufferEntry, 0),
+		size:        0,
 		OptimalSize: 1024 * 1024,
 	}
+}
+
+func writeToDisk(w io.Writer, entry sortableBufferEntry) error {
+	panic("implement me")
 }
 
 func mergeTempFilesIntoBucket(files []string, bucket []byte) error {
@@ -225,5 +263,12 @@ func mergeTempFilesIntoBucket(files []string, bucket []byte) error {
 }
 
 func deleteFiles(files []string) {
-	panic("implement me")
+	for _, filename := range files {
+		err := os.Remove(filename)
+		if err != nil {
+			log.Warn("promoting hashed state, error while removing temp file", "file", filename, "err", err)
+		} else {
+			log.Warn("promoting hashed state, removed temp", "file", filename)
+		}
+	}
 }
