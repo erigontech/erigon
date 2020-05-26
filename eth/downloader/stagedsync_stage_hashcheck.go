@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
+
 	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 )
@@ -240,6 +241,7 @@ func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
 
 	filename := bufferFile.Name()
 	w := bufio.NewWriter(bufferFile)
+	defer w.Flush() //nolint:errcheck
 	b.encoder.Reset(w)
 
 	for i := range b.entries {
@@ -288,9 +290,9 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 		}
 		decoder.Reset(readers[i])
 		if key, value, err := readElementFromDisk(decoder); err == nil {
-			he := &HeapElem{key, i, value}
+			he := HeapElem{key, i, value}
 			heap.Push(h, he)
-		} else {
+		} else /* we must have at least one entry per file */ {
 			return err
 		}
 	}
