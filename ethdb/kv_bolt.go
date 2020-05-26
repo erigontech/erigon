@@ -69,16 +69,18 @@ func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := boltDB.Update(func(tx *bolt.Tx) error {
-		for _, name := range dbutils.Buckets {
-			_, createErr := tx.CreateBucketIfNotExists(name, false)
-			if createErr != nil {
-				return createErr
+	if !opts.Bolt.ReadOnly {
+		if err := boltDB.Update(func(tx *bolt.Tx) error {
+			for _, name := range dbutils.Buckets {
+				_, createErr := tx.CreateBucketIfNotExists(name, false)
+				if createErr != nil {
+					return createErr
+				}
 			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 	return &BoltKV{
 		opts: opts,
