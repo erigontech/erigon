@@ -140,7 +140,9 @@ func copyBucket(
 			if err != nil {
 				return false, err
 			}
-			files = append(files, file)
+			if len(file) > 0 {
+				files = append(files, file)
+			}
 		}
 		return true, nil
 	})
@@ -154,7 +156,9 @@ func copyBucket(
 	if err != nil {
 		return err
 	}
-	files = append(files, file)
+	if len(file) > 0 {
+		files = append(files, file)
+	}
 	return mergeTempFilesIntoBucket(db, files, destBucket)
 }
 
@@ -233,6 +237,9 @@ func (b *sortableBuffer) Swap(i, j int) {
 }
 
 func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
+	if len(b.entries) == 0 {
+		return "", nil
+	}
 	bufferFile, err := ioutil.TempFile(datadir, "tg-sync-sortable-buf")
 	if err != nil {
 		return "", err
@@ -247,7 +254,7 @@ func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
 	for i := range b.entries {
 		err = writeToDisk(b.encoder, b.entries[i].key, b.entries[i].value)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("error writing entries to disk: %v", err)
 		}
 	}
 
@@ -293,7 +300,8 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 			he := HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
-			return err
+			return fmt.Errorf("error reading first readers: n=%d current=%d filename=%s err=%v",
+				len(files), i, filename, err)
 		}
 	}
 	batch := db.NewBatch()
