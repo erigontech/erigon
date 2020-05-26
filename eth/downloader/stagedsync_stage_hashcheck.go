@@ -151,15 +151,14 @@ func copyBucket(
 			}
 			if len(file) > 0 {
 				files = append(files, file)
+				runtime.ReadMemStats(&m)
 				log.Info("Plain -> Hashed / created a buffer file",
 					"bucket", string(sourceBucket),
 					"name", file,
 					"size", bufferSize,
 					"plainKey", fmt.Sprintf("%x...", k[:4]),
-					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 			}
-
-			runtime.ReadMemStats(&m)
 
 		}
 		return true, nil
@@ -178,11 +177,12 @@ func copyBucket(
 	if len(file) > 0 {
 		files = append(files, file)
 
+		runtime.ReadMemStats(&m)
 		log.Info("Plain -> Hashed / created a buffer file (final)",
 			"bucket", string(sourceBucket),
 			"name", file,
 			"size", bufferSize,
-			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	}
 	return mergeTempFilesIntoBucket(db, files, destBucket)
 }
@@ -342,12 +342,13 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 			if _, err := batch.Commit(); err != nil {
 				return err
 			}
+			runtime.ReadMemStats(&m)
 			log.Info(
 				"Commited index batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
 				"hashedKey", fmt.Sprintf("%x...", element.key[:4]),
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		var err error
 		decoder.Reset(reader)
