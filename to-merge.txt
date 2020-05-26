@@ -435,31 +435,3 @@ Author: ucwong <ucwong@126.com>
 Date:   Tue May 26 17:03:37 2020 +0800
 
     ethdb/leveldb: use timer instead of time.After (#21066)
-
-commit 2f66a8d614253f8f0d205b4ab8be37be9eced9a5
-Author: Richard Patel <me@terorie.dev>
-Date:   Tue May 26 11:00:09 2020 +0200
-
-    metrics/prometheus: define TYPE once, add tests (#21068)
-    
-    * metrics/prometheus: define type once for histograms
-    
-    * metrics/prometheus: test collector
-
-commit dbf6b8a7971f1a11b692a3d1bbcd5983b8af65a9
-Author: Felix Lange <fjl@twurst.com>
-Date:   Mon May 25 19:50:36 2020 +0200
-
-    cmd/utils: fix default DNS discovery configuration (#21124)
-
-commit befecc9fdf5d1222cb1cd03d975e47be1e9d00d8
-Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
-Date:   Mon May 25 11:01:03 2020 -0500
-
-    consensus/ethash: fix flaky test by reading seal results (#21085)
-
-commit e868adde30eee9001e60bcf17e5c4bec83b36090
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon May 25 16:12:48 2020 +0200
-
-    core/vm: improve jumpdest lookup (#21123)
