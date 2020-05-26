@@ -45,7 +45,10 @@ type RetraceResponse struct {
 }
 
 func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, error) {
-	chainConfig := ReadChainConfig(remoteDB, chain)
+	chainConfig, err := ReadChainConfig(remoteDB, chain)
+	if err != nil {
+		return RetraceResponse{}, err
+	}
 	noOpWriter := state.NewNoopWriter()
 	bn, err := strconv.Atoi(blockNumber)
 	if err != nil {
@@ -131,7 +134,7 @@ func GetBlockByNumber(db ethdb.KV, number uint64) (*types.Block, error) {
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db ethdb.KV, chain string) *params.ChainConfig {
+func ReadChainConfig(db ethdb.KV, chain string) (*params.ChainConfig, error) {
 	var k []byte
 	var data []byte
 	switch chain {
@@ -144,13 +147,17 @@ func ReadChainConfig(db ethdb.KV, chain string) *params.ChainConfig {
 	case "goerli":
 		k = params.GoerliGenesisHash[:]
 	}
-	_ = db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.ConfigPrefix)
 		d, _ := b.Get(k)
 		data = d
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
 	var config params.ChainConfig
-	_ = json.Unmarshal(data, &config)
-	return &config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }

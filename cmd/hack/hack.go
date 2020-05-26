@@ -2050,6 +2050,8 @@ func resetHistoryIndex(chaindata string) {
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.StorageHistoryIndex, 0)
 	check(err)
+	err = downloader.SaveStageProgress(db, downloader.HashCheck, 0)
+	check(err)
 	fmt.Printf("Reset history index done\n")
 }
 

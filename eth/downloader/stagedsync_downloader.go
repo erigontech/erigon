@@ -86,7 +86,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	* Stage 4. Execute block bodies w/o calculating trie roots
 	 */
 
-	_, err = spawnExecuteBlocksStage(d.stateDB, d.blockchain)
+	var syncHeadNumber uint64
+	syncHeadNumber, err = spawnExecuteBlocksStage(d.stateDB, d.blockchain)
 	if err != nil {
 		return err
 	}
@@ -96,9 +97,9 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
 	if !core.UsePlainStateExecution {
-		//if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
-		//	return err
-		//}
+		if err = d.spawnCheckFinalHashStage(syncHeadNumber); err != nil {
+			return err
+		}
 	}
 
 	log.Info("Sync stage 5/7. Validating final hash... Complete!")
