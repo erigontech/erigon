@@ -151,16 +151,17 @@ func copyBucket(
 			}
 			if len(file) > 0 {
 				files = append(files, file)
+				log.Info("Plain -> Hashed / created a buffer file",
+					"bucket", string(sourceBucket),
+					"name", file,
+					"size", bufferSize,
+					"plainKey", fmt.Sprintf("%x...", k[:4]),
+					"hashedKey", fmt.Sprintf("%x...", newK[:4]),
+					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 			}
 
 			runtime.ReadMemStats(&m)
 
-			log.Info("Plain -> Hashed / created a buffer file",
-				"bucket", string(sourceBucket),
-				"name", file,
-				"size", bufferSize,
-				"currentKey", k,
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		return true, nil
 	})
@@ -170,12 +171,19 @@ func copyBucket(
 
 	sort.Sort(buffer)
 	var file string
+	bufferSize := buffer.Size()
 	file, err = buffer.FlushToDisk(datadir)
 	if err != nil {
 		return err
 	}
 	if len(file) > 0 {
 		files = append(files, file)
+
+		log.Info("Plain -> Hashed / created a buffer file (final)",
+			"bucket", string(sourceBucket),
+			"name", file,
+			"size", bufferSize,
+			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	}
 	return mergeTempFilesIntoBucket(db, files, destBucket)
 }
@@ -193,11 +201,11 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		secretKey, err := common.HashData(key[:])
+		secKey, err := common.HashData(key[:])
 		if err != nil {
 			return nil, err
 		}
-		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secretKey)
+		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
 		return compositeKey, nil
 	default:
 		// no other keys are supported
@@ -334,7 +342,11 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 			if _, err := batch.Commit(); err != nil {
 				return err
 			}
-			log.Info("Commited index batch", "bucket", string(bucket), "size", common.StorageSize(batchSize),
+			log.Info(
+				"Commited index batch",
+				"bucket", string(bucket),
+				"size", common.StorageSize(batchSize),
+				"hashedKey", fmt.Sprintf("%x...", element.key[:4]),
 				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		var err error
