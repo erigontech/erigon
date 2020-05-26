@@ -417,21 +417,3 @@ Date:   Tue May 26 18:11:29 2020 +0800
     * trie: fix for range proof
     
     * trie: fix typo
-
-commit 81e9caed7d2759ec1da7f268b57c8de45297ea5e
-Author: Hao Duan <duanhao0814@gmail.com>
-Date:   Tue May 26 18:09:00 2020 +0800
-
-    ethstats: avoid blocking chan when received invalid stats request (#21073)
-    
-    * ethstats: avoid blocking chan when received invalid stats request
-    
-    * ethstats: minor code polishes
-    
-    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
-
-commit 7ddb40239bed22774c0341c572f22ed34ea78f99
-Author: ucwong <ucwong@126.com>
-Date:   Tue May 26 17:03:37 2020 +0800
-
-    ethdb/leveldb: use timer instead of time.After (#21066)
