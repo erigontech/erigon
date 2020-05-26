@@ -2269,28 +2269,29 @@ func testIndexFileCompress(chaindata string) {
 		}
 		keyBuf := make([]byte, keyLength)
 		for {
-		if n, err := io.ReadFull(reader, keyBuf); err != nil || n != keyLength {
-			if err == io.EOF {
-				break
+			if n, err := io.ReadFull(reader, keyBuf); err != nil || n != keyLength {
+				if err == io.EOF {
+					break
+				}
+				panic(fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err))
 			}
-			panic(fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err))
-		}
-		// Read number of items for this key
-		var count int
-		var nbytes [8]byte
-		if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
-			count = int(binary.BigEndian.Uint64(nbytes[:]))
-		} else {
-			panic(fmt.Errorf("reading from account buffer file: %d %v", n, err))
-		}
-		for i := 0; i < count; i++ {
-			var b uint64
+			// Read number of items for this key
+			var count int
+			var nbytes [8]byte
 			if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
-				b = binary.BigEndian.Uint64(nbytes[:])
+				count = int(binary.BigEndian.Uint64(nbytes[:]))
 			} else {
 				panic(fmt.Errorf("reading from account buffer file: %d %v", n, err))
 			}
-			saving += 4
+			for i := 0; i < count; i++ {
+				//var b uint64
+				if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
+					//b = binary.BigEndian.Uint64(nbytes[:])
+				} else {
+					panic(fmt.Errorf("reading from account buffer file: %d %v", n, err))
+				}
+				saving += 4
+			}
 		}
 	}
 	fmt.Printf("Total saving: %d\n", saving)
