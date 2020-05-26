@@ -37,18 +37,12 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return nil
 	}
 
-	hashedStatePromotion := stateDB.NewBatch()
 
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(hashedStatePromotion, hashProgress, datadir)
+		err = promoteHashedState(stateDB, hashProgress, datadir)
 		if err != nil {
 			return err
 		}
-	}
-
-	_, err = hashedStatePromotion.Commit()
-	if err != nil {
-		return err
 	}
 
 	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
