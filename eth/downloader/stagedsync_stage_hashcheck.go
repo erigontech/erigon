@@ -31,6 +31,11 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return err
 	}
 
+	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
+	if hashProgress == 0 {
+		return nil
+	}
+
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
@@ -121,6 +126,8 @@ func copyBucket(
 	destBucket []byte,
 	transformKeyFunc func([]byte) ([]byte, error)) error {
 
+	var m runtime.MemStats
+
 	buffer := newSortableBuffer()
 	files := []string{}
 
@@ -134,7 +141,9 @@ func copyBucket(
 			return false, err
 		}
 		buffer.Put(newK, v)
-		if buffer.Size() >= buffer.OptimalSize {
+
+		bufferSize := buffer.Size()
+		if bufferSize >= buffer.OptimalSize {
 			sort.Sort(buffer)
 			file, err := buffer.FlushToDisk(datadir)
 			if err != nil {
@@ -143,6 +152,15 @@ func copyBucket(
 			if len(file) > 0 {
 				files = append(files, file)
 			}
+
+			runtime.ReadMemStats(&m)
+
+			log.Info("Plain -> Hashed / created a buffer file",
+				"bucket", string(sourceBucket),
+				"name", file,
+				"size", bufferSize,
+				"currentKey", k,
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		return true, nil
 	})
@@ -266,7 +284,7 @@ func newSortableBuffer() *sortableBuffer {
 	return &sortableBuffer{
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
-		OptimalSize: 1024 * 1024,
+		OptimalSize: 256 * 1024 * 1024, /* 256 mb */
 		encoder:     codec.NewEncoder(nil, &cbor),
 	}
 }
