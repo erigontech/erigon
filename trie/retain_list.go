@@ -198,7 +198,7 @@ func NewRetainAll(decider RetainDecider) *RetainAll {
 }
 
 func (rr *RetainAll) Retain(prefix []byte) (retain bool) {
-	if len(prefix) > 4 {
+	if len(prefix) > 128 {
 		return rr.decider.Retain(prefix)
 	}
 
