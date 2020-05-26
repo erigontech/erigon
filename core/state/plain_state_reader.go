@@ -18,17 +18,15 @@ var _ StateReader = (*PlainStateReader)(nil)
 // as opposed to the "normal" state that uses hashes of merkle paths to store items.
 type PlainStateReader struct {
 	db                     ethdb.Getter
-	uncommitedIncarnations map[common.Address]uint64
 	accountCache           *fastcache.Cache
 	storageCache           *fastcache.Cache
 	codeCache              *fastcache.Cache
 	codeSizeCache          *fastcache.Cache
 }
 
-func NewPlainStateReader(db ethdb.Getter, incarnations map[common.Address]uint64) *PlainStateReader {
+func NewPlainStateReader(db ethdb.Getter) *PlainStateReader {
 	return &PlainStateReader{
 		db:                     db,
-		uncommitedIncarnations: incarnations,
 	}
 }
 
@@ -131,19 +129,13 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash 
 }
 
 func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	if inc, ok := r.uncommitedIncarnations[address]; ok {
-		return inc, nil
-	}
-
-	incarnation, found, err := ethdb.PlainGetCurrentAccountIncarnation(r.db, address)
-	if err != nil {
+	if b, err := r.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
+		return binary.BigEndian.Uint64(b), nil
+	} else if entryNotFound(err) {
+		return 0, nil
+	} else {
 		return 0, err
 	}
-	if found {
-		return incarnation, nil
-	}
-
-	return 0, nil
 }
 
 func entryNotFound(err error) bool {
