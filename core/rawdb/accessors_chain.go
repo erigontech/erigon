@@ -28,15 +28,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
-func ReadCanonicalHash(db ethdb.KV, number uint64) common.Hash {
-	data, _ := ethdb.Get(db, dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
+func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
+	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -77,8 +76,8 @@ func ReadAllHashes(db DatabaseReader, number uint64) []common.Hash {
 }
 
 // ReadHeaderNumber returns the header number assigned to a hash.
-func ReadHeaderNumber(db ethdb.KV, hash common.Hash) *uint64 {
-	data, _ := ethdb.Get(db, dbutils.HeaderNumberPrefix, hash.Bytes())
+func ReadHeaderNumber(db DatabaseReader, hash common.Hash) *uint64 {
+	data, _ := db.Get(dbutils.HeaderNumberPrefix, hash.Bytes())
 	if len(data) != 8 {
 		return nil
 	}
@@ -168,8 +167,8 @@ func WriteFastTrieProgress(db DatabaseWriter, count uint64) {
 }
 
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
-func ReadHeaderRLP(db ethdb.KV, hash common.Hash, number uint64) rlp.RawValue {
-	data, _ := ethdb.Get(db, dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash))
+func ReadHeaderRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
+	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash))
 	return data
 }
 
@@ -182,7 +181,7 @@ func HasHeader(db DatabaseReader, hash common.Hash, number uint64) bool {
 }
 
 // ReadHeader retrieves the block header corresponding to the hash.
-func ReadHeader(db ethdb.KV, hash common.Hash, number uint64) *types.Header {
+func ReadHeader(db DatabaseReader, hash common.Hash, number uint64) *types.Header {
 	data := ReadHeaderRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -241,8 +240,8 @@ func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db ethdb.KV, hash common.Hash, number uint64) rlp.RawValue {
-	data, _ := ethdb.Get(db, dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
+func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
+	data, _ := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
 	if debug.IsBlockCompressionEnabled() && len(data) > 0 {
 		var err error
 		data, err = snappy.Decode(nil, data)
@@ -275,7 +274,7 @@ func HasBody(db DatabaseReader, hash common.Hash, number uint64) bool {
 }
 
 // ReadBody retrieves the block body corresponding to the hash.
-func ReadBody(db ethdb.KV, hash common.Hash, number uint64) *types.Body {
+func ReadBody(db DatabaseReader, hash common.Hash, number uint64) *types.Body {
 	data := ReadBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -389,9 +388,9 @@ func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.Raw
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
-func ReadRawReceipts(db ethdb.KV, hash common.Hash, number uint64) types.Receipts {
+func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Receipts {
 	// Retrieve the flattened receipt slice
-	data, _ := ethdb.Get(db, dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
+	data, _ := db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
 	if len(data) == 0 {
 		return nil
 	}
@@ -415,7 +414,7 @@ func ReadRawReceipts(db ethdb.KV, hash common.Hash, number uint64) types.Receipt
 // The current implementation populates these metadata fields by reading the receipts'
 // corresponding block body, so if the block body is not found it will return nil even
 // if the receipt itself is stored.
-func ReadReceipts(db ethdb.KV, hash common.Hash, number uint64, config *params.ChainConfig) types.Receipts {
+func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64, config *params.ChainConfig) types.Receipts {
 	// We're deriving many fields from the block body, retrieve beside the receipt
 	receipts := ReadRawReceipts(db, hash, number)
 	if receipts == nil {
@@ -463,7 +462,7 @@ func DeleteReceipts(db DatabaseDeleter, hash common.Hash, number uint64) {
 //
 // Note, due to concurrent download of header and block body the header and thus
 // canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(db ethdb.KV, hash common.Hash, number uint64) *types.Block {
+func ReadBlock(db DatabaseReader, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
 		return nil
@@ -532,7 +531,7 @@ func DeleteBlockWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint6
 }
 
 // FindCommonAncestor returns the last common ancestor of two block headers
-func FindCommonAncestor(db ethdb.KV, a, b *types.Header) *types.Header {
+func FindCommonAncestor(db DatabaseReader, a, b *types.Header) *types.Header {
 	for bn := b.Number.Uint64(); a.Number.Uint64() > bn; {
 		a = ReadHeader(db, a.ParentHash, a.Number.Uint64()-1)
 		if a == nil {
@@ -558,7 +557,7 @@ func FindCommonAncestor(db ethdb.KV, a, b *types.Header) *types.Header {
 	return a
 }
 
-func ReadBlockByNumber(db ethdb.KV, number uint64) *types.Block {
+func ReadBlockByNumber(db DatabaseReader, number uint64) *types.Block {
 	hash := ReadCanonicalHash(db, number)
 	if hash == (common.Hash{}) {
 		return nil
@@ -567,7 +566,7 @@ func ReadBlockByNumber(db ethdb.KV, number uint64) *types.Block {
 	return ReadBlock(db, hash, number)
 }
 
-func ReadBlockByHash(db ethdb.KV, hash common.Hash) *types.Block {
+func ReadBlockByHash(db DatabaseReader, hash common.Hash) *types.Block {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil
