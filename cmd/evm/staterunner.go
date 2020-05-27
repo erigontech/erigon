@@ -109,7 +109,7 @@ func stateTestCmd(ctx *cli.Context) error {
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
 					if hasKV, ok := tds.Database().(ethdb.HasAbstractKV); ok {
 						dump := state.NewDumper(hasKV.AbstractKV(), tds.GetBlockNr()).DefaultRawDump()
-						result.State = &dump	
+						result.State = &dump
 					} else {
 						fmt.Fprintf(os.Stderr, "database does not implement AbstractKV: %T\n", tds.Database())
 					}

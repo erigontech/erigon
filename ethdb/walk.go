@@ -164,7 +164,7 @@ func walkAsOfThinAccounts(db KV, startkey []byte, fixedbits int, timestamp uint6
 // parts as well as the corresponding value
 type splitCursor struct {
 	c          Cursor // Unlerlying bolt cursor
-	startkey   []byte       // Starting key (also contains bits that need to be preserved)
+	startkey   []byte // Starting key (also contains bits that need to be preserved)
 	matchBytes int
 	mask       uint8
 	part1end   int // Position in the key where the first part ends
