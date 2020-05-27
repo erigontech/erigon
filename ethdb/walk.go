@@ -112,10 +112,11 @@ func walkAsOfThinAccounts(db KV, startkey []byte, fixedbits int, timestamp uint6
 						}
 						data, err2 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
 						if err2 != nil {
-							return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)",
+							return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d): %v",
 								hK,
 								changeSetBlock,
 								timestamp,
+								err2,
 							)
 						}
 						if len(data) > 0 { // Skip accounts did not exist
@@ -299,13 +300,13 @@ func walkAsOfThinStorage(db KV, startkey []byte, fixedbits int, timestamp uint64
 						if changeSetData == nil {
 							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 						}
-						data, err2 := changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(hAddrHash, hKeyHash)
-						if err2 != nil {
+						data, err3 := changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(hAddrHash, hKeyHash)
+						if err3 != nil {
 							return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
 								hAddrHash, hKeyHash,
 								changeSetBlock,
 								timestamp,
-								err1,
+								err3,
 							)
 						}
 						if len(data) > 0 { // Skip deleted entries
