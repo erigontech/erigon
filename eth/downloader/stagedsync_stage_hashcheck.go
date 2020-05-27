@@ -31,29 +31,23 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return err
 	}
 
-	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress == 0 {
-		return nil
-	}
-
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
 		return nil
 	}
 
-	hashedStatePromotion := stateDB.NewBatch()
 
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(hashedStatePromotion, hashProgress, datadir)
+		err = promoteHashedState(stateDB, hashProgress, datadir)
 		if err != nil {
 			return err
 		}
 	}
 
-	_, err = hashedStatePromotion.Commit()
-	if err != nil {
-		return err
+	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
+	if hashProgress == 0 {
+		return nil
 	}
 
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
@@ -151,15 +145,14 @@ func copyBucket(
 			}
 			if len(file) > 0 {
 				files = append(files, file)
+				runtime.ReadMemStats(&m)
 				log.Info("Plain -> Hashed / created a buffer file",
 					"bucket", string(sourceBucket),
 					"name", file,
 					"size", bufferSize,
 					"plainKey", fmt.Sprintf("%x...", k[:4]),
-					"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 			}
-
-			runtime.ReadMemStats(&m)
 
 		}
 		return true, nil
@@ -178,11 +171,12 @@ func copyBucket(
 	if len(file) > 0 {
 		files = append(files, file)
 
+		runtime.ReadMemStats(&m)
 		log.Info("Plain -> Hashed / created a buffer file (final)",
 			"bucket", string(sourceBucket),
 			"name", file,
 			"size", bufferSize,
-			"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	}
 	return mergeTempFilesIntoBucket(db, files, destBucket)
 }
@@ -342,12 +336,13 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 			if _, err := batch.Commit(); err != nil {
 				return err
 			}
+			runtime.ReadMemStats(&m)
 			log.Info(
-				"Commited index batch",
+				"Commited hashed state",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
 				"hashedKey", fmt.Sprintf("%x...", element.Key[:4]),
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+				"alloc", common.StorageSize((m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		var err error
 		decoder.Reset(reader)
@@ -366,8 +361,6 @@ func deleteFiles(files []string) {
 		err := os.Remove(filename)
 		if err != nil {
 			log.Warn("promoting hashed state, error while removing temp file", "file", filename, "err", err)
-		} else {
-			log.Warn("promoting hashed state, removed temp", "file", filename)
 		}
 	}
 }
