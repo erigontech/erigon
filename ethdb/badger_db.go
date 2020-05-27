@@ -101,6 +101,10 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 	}, nil
 }
 
+func (db *BadgerDatabase) AbstractKV() KV {
+	return &badgerDB{badger: db.db}
+}
+
 // Close closes the database.
 func (db *BadgerDatabase) Close() {
 	if db.gcTicker != nil {
