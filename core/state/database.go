@@ -1547,7 +1547,6 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize(from []byte, size uint64) 
 	if err != nil {
 		return nil, err
 	}
-
 	return prefix, nil
 }
 
@@ -1555,13 +1554,12 @@ type CumulativeSearchF func(k, v []byte) (itsTimeToVisitChild bool, err error)
 
 // CumulativeSearch - on each iteration jumps to next subtries (siblings) by default until not get command to go to child
 func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte, fixedbits int, f CumulativeSearchF) (lastVisitedParent []byte, seeks, accSeeks int64, err error) {
-	//trace := bytes.HasPrefix(startKey, common.FromHex("9409160bc4922120a08054b27d1ea9f6ef7b0e701dffac7c5186dc40e991232afffffffffffffffef0"))
 	trace := false
 	if trace {
 		fmt.Printf("\n\nStart FRoooom: %x, %x\n", startKey, parent)
 	}
 
-	const doCorrectIncarnation = true
+	const doCorrectIncarnation = false
 	defer cumulativeSearchTimer.UpdateSince(time.Now())
 	defer cumulativeSearchMeter.Mark(seeks)
 
@@ -1677,7 +1675,7 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 				}
 				if !bytes.HasPrefix(k, parent) {
 					if trace {
-						fmt.Printf("No Sibling: %x --> %x, %d\n", parent, k)
+						fmt.Printf("No Sibling: %x --> %x\n", parent, k)
 					}
 					k = nil
 				}

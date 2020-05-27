@@ -648,30 +648,47 @@ func mgrSchedule(chaindata string, block uint64) {
 	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
 	//check(err)
 
-	//tds.TotalCumulativeWitnessSize()
-	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 81352965)
-	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 82066586)
+	//err = db.KV().Update(func(tx *bolt.Tx) error {
+	//	defer func(t time.Time) { fmt.Println("Del", time.Since(t)) }(time.Now())
+	//	b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+	//	b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
+	//	c := b.Cursor()
+	//	c2 := b2.Cursor()
+	//	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+	//		if len(k) < 41 {
+	//			_ = b.Delete(k)
+	//		}
+	//	}
+	//	for k, _ := c2.First(); k != nil; k, _ = c2.Next() {
+	//		if len(k) < 41 {
+	//			_ = b2.Delete(k)
+	//		}
+	//	}
+	//
+	//	return nil
+	//})
+
+	//counterx := 0
+	//counterx2 := 0
+	//db.KV().View(func(tx *bolt.Tx) error {
+	//	c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+	//	from := common.FromHex("5c5870775fdedafc500d4d6cc797e65e4f4e3e04d3824ad6f3d929a165f1737affffffffffffffff")
+	//	to := common.FromHex("600f6575e12357d684d82b421d5c614e9af191a2669a65465a67c3d5cad18274fffffffffffffffe14")
+	//	for k, v := c.SeekTo(from); k != nil; k, v = c.Next() {
+	//		if bytes.Compare(k, to) > 0 && !bytes.HasPrefix(k, to) {
+	//			break
+	//		}
+	//		counterx += len(v)
+	//		counterx2++
+	//	}
+	//	return nil
+	//})
+	//check(err)
+	//fmt.Println("Alex", counterx, counterx2)
+	//
+	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 46814683)
+	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 47126779)
 	//fmt.Printf("R: %x %x\n", r1, r2)
-	//return
-
-	err = db.KV().Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
-		c := b.Cursor()
-		c2 := b2.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			if len(k) < 1 {
-				_ = b.Delete(k)
-			}
-		}
-		for k, _ := c2.First(); k != nil; k, _ = c2.Next() {
-			if len(k) < 1 {
-				_ = b2.Delete(k)
-			}
-		}
-
-		return nil
-	})
 
 	t5 := time.Now()
 	//var buf bytes.Buffer
@@ -683,14 +700,18 @@ func mgrSchedule(chaindata string, block uint64) {
 	var toBlock = block + mgr.BlocksPerCycle
 	var (
 		maxLcp float64
-		minLcp float64 = 10 ^ 10
+		minLcp float64 = 1_000_000_000_000_000
 		avgLcp float64
 	)
 
 	counters := []int{}
 	counters2 := []int{}
+	counters3 := []int{}
+	counters4 := []int{}
 	tx, _ := db.KV().Begin(false)
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	for block <= toBlock {
 		tick, err2 := schedule.Tick(block)
 		if err2 != nil {
@@ -704,10 +725,13 @@ func mgrSchedule(chaindata string, block uint64) {
 		//	panic(err2)
 		//}
 
+		//fmt.Printf("%x\n", tick.To[0])
+
 		//fmt.Printf("Tick: %s\n", tick)
 		//fmt.Printf("Tick2: %s\n", tick2)
 		counter := 0
 		counter2 := 0
+		counter3 := 0
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		for k, v := c.SeekTo(tick.From); k != nil; k, v = c.Next() {
 			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
@@ -715,37 +739,38 @@ func mgrSchedule(chaindata string, block uint64) {
 			}
 			counter += len(k) + len(v)
 			counter2 += len(v)
+			counter3++
 		}
 		check(err)
-		//if counter > 6_000_000 {
-		//fmt.Printf("tick: %s\n", tick)
-		//	fmt.Printf("%s\n", tick)
-		//	fmt.Printf("counter: %d %d %x\n", counter, counter2, tick.To[0])
-		//}
+
+		if counter2 > 1_100_000 {
+			//fmt.Printf("tick: %s\n", tick)
+			fmt.Printf("%s\n", tick)
+			fmt.Printf("counter: %dK %dK, number: %d %x\n", counter/1000, counter2/1000, tick.Number, tick.To[0])
+		}
 
 		counters = append(counters, counter)
 		counters2 = append(counters2, counter2)
+		counters3 = append(counters3, counter3)
 
-		//for _, slice := range tick.StateSlices {
-		//	_ = slice
-		//
-		//	retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
-		//	if tick.IsLastInCycle() {
-		//		fmt.Printf("\nretain: %s\n", retain)
-		//	}
-		//	witness, err2 := tds.Trie().ExtractWitness(false, retain)
-		//	if err2 != nil {
-		//		panic(err2)
-		//	}
-		//
-		//	buf.Reset()
-		//	_, err = witness.WriteTo(&buf)
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	witnessCount++
-		//	witnessSizeAccumulator += uint64(buf.Len())
+		//retain := trie.NewRetainRange(common.CopyBytes(tick.From), common.CopyBytes(tick.To))
+		//dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
+		//err = loader.Reset(db, retain, retain, dbPrefixes, fixedbits, false)
+		//check(err)
+		//subTries, err2 := loader.LoadSubTries()
+		//check(err2)
+		//err = tr.HookSubTries(subTries, hooks) // hook up to the root
+		//check(err)
+		//witness, err2 := tr.ExtractWitness(false, retain)
+		//if err2 != nil {
+		//	panic(err2)
 		//}
+		//buf.Reset()
+		//_, err = witness.WriteTo(&buf)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//counters4 = append(counters4, buf.Len())
 
 		minLcp = math.Min(minLcp, float64(counter))
 		maxLcp = math.Max(maxLcp, float64(counter))
@@ -769,6 +794,24 @@ func mgrSchedule(chaindata string, block uint64) {
 	}
 	fmt.Printf("Counter Aggs: %v\n", accs)
 
+	accs2 := map[int]int{}
+	for _, counter := range counters2 {
+		accs2[counter/100_000]++
+	}
+	fmt.Printf("Counter Aggs2: %v\n", accs2)
+
+	accs3 := map[int]int{}
+	for _, counter := range counters3 {
+		accs3[counter/1_000]++
+	}
+	fmt.Printf("Counter Aggs3: %v\n", accs3)
+
+	accs4 := map[int]int{}
+	for _, counter := range counters4 {
+		accs4[counter/1_000]++
+	}
+	fmt.Printf("Counter Aggs4: %v\n", accs4)
+
 	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
 	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
 	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
@@ -779,7 +822,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	//check(err)
 }
 
-func genIH(chaindata string) {
+func resetIH(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 
@@ -794,19 +837,8 @@ func genIH(chaindata string) {
 	defer db.Close()
 	tds, err := bc.GetTrieDbState()
 	check(err)
-	//loader := trie.NewSubTrieLoader(0)
 	loader := trie.NewFlatDbSubTrieLoader()
 	tr := tds.Trie()
-	//rl := trie.NewRetainList(0)
-	//rl.AddHex([]byte{})
-	//rs := trie.NewRetainLevels(rl, 1)
-	//dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
-	//err = loader.Reset(db, rs, rs, dbPrefixes, fixedbits, false)
-	//check(err)
-	//subTries, err2 := loader.LoadSubTries()
-	//check(err2)
-	//err = tr.HookSubTries(subTries, hooks) // hook up to the root
-	//check(err)
 	for i := 0; i < 16; i++ {
 		for j := 0; j < 16; j++ {
 			prefix := []byte{uint8(i), uint8(j)}
@@ -2507,8 +2539,8 @@ func main() {
 	if *action == "mgrSchedule" {
 		mgrSchedule(*chaindata, uint64(*block))
 	}
-	if *action == "genIH" {
-		genIH(*chaindata)
+	if *action == "resetIH" {
+		resetIH(*chaindata)
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)

@@ -56,6 +56,7 @@ func NewTick(blockNr, stateSize uint64, prevTick *Tick) *Tick {
 type Schedule struct {
 	estimator WitnessEstimator
 	prevTick  *Tick
+	stateSize uint64
 }
 
 type WitnessEstimator interface {
@@ -75,12 +76,15 @@ func NewSchedule(estimator WitnessEstimator) *Schedule {
 // Important: ticks are cycled. When `TicksPerCycle` reached - it starts from beginning of state.
 // Means tick.FromSize > prevTick.ToSize - only when tick.Number != 0
 func (s *Schedule) Tick(block uint64) (*Tick, error) {
-	total, err := s.estimator.TotalCumulativeWitnessSize()
-	if err != nil {
-		return nil, err
+	var err error
+	if s.prevTick == nil {
+		s.stateSize, err = s.estimator.TotalCumulativeWitnessSize()
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	tick := NewTick(block, total, s.prevTick)
+	tick := NewTick(block, s.stateSize, s.prevTick)
 	var prevKey []byte
 	if tick.Number != 0 && s.prevTick != nil {
 		prevKey = s.prevTick.To
@@ -89,7 +93,9 @@ func (s *Schedule) Tick(block uint64) (*Tick, error) {
 	if tick.To, err = s.estimator.PrefixByCumulativeWitnessSize(tick.From, tick.ToSize-tick.FromSize); err != nil {
 		return tick, err
 	}
-	prevKey = tick.To
+	if tick.From == nil {
+		tick.From = []byte{}
+	}
 	s.prevTick = tick
 	return tick, nil
 }

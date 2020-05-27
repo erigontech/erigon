@@ -17,7 +17,7 @@ import (
 )
 
 const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
-const CountWitnessSizeWithoutStructure = false
+const CountWitnessSizeWithoutStructure = true
 
 var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
