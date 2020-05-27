@@ -132,14 +132,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = vm.NewStructLogger(logconfig)
 	}
-	db, boltDb := ethdb.NewMemDatabase2()
-	{
-		var err error
-		kv, err = ethdb.NewBolt().WrapBoltDb(boltDb)
-		if err != nil {
-			return err
-		}
-	}
+	db := ethdb.NewMemDatabase()
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
@@ -284,7 +277,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(kv, 0).DefaultDump()))
+		fmt.Println(string(state.NewDumper(db.AbstractKV(), 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.GlobalString(MemProfileFlag.Name); memProfilePath != "" {

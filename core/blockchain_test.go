@@ -2857,7 +2857,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if n, err := chain.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
-	statedb := state.New(state.NewDbState(diskdb.AbstractKV(), blockchain.CurrentBlock().NumberU64()))
+	statedb := state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
 
 	// If all is correct, then both slots are zero
 	key1 := common.HexToHash("01")
