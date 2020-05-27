@@ -610,9 +610,12 @@ func containsTx(block *types.Block, hash common.Hash) bool {
 // attempted to be reexecuted to generate the desired state.
 func ComputeIntraBlockState(chainDb ethdb.Getter, block *types.Block) (*state.IntraBlockState, *state.DbState) {
 	// If we have the state fully available, use that
-	dbstate := state.NewDbState(chainDb, block.NumberU64())
-	statedb := state.New(dbstate)
-	return statedb, dbstate
+	if hasKV, ok := chainDb.(ethdb.HasAbstractKV); ok {
+		dbstate := state.NewDbState(hasKV.AbstractKV(), block.NumberU64())
+		statedb := state.New(dbstate)
+		return statedb, dbstate
+	}
+	panic(fmt.Errorf("database %T does not support AbstracKV", chainDb))
 }
 
 // TraceTransaction returns the structured logs created during the execution of EVM

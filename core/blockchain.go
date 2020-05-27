@@ -591,35 +591,6 @@ func (bc *BlockChain) Processor() Processor {
 	return bc.processor
 }
 
-// State returns a new mutable state based on the current HEAD block.
-func (bc *BlockChain) State() (*state.IntraBlockState, *state.DbState, error) {
-	return bc.StateAt(bc.CurrentBlock().NumberU64())
-}
-
-// StateAt returns a new mutable state based on a particular point in time.
-func (bc *BlockChain) StateAt(blockNr uint64) (*state.IntraBlockState, *state.DbState, error) {
-	dbstate := state.NewDbState(bc.db, blockNr)
-	return state.New(dbstate), dbstate, nil
-}
-
-// GetAddressFromItsHash returns the preimage of a given address hash.
-func (bc *BlockChain) GetAddressFromItsHash(hash common.Hash) (common.Address, error) {
-	var addr common.Address
-
-	_, dbstate, err := bc.State()
-	if err != nil {
-		return addr, err
-	}
-
-	key := dbstate.GetKey(hash.Bytes())
-	if len(key) != common.AddressLength {
-		return addr, ErrNotFound
-	}
-
-	addr.SetBytes(key)
-	return addr, nil
-}
-
 // Reset purges the entire blockchain, restoring it to its genesis state.
 func (bc *BlockChain) Reset() error {
 	return bc.ResetWithGenesisBlock(bc.genesisBlock)
@@ -900,14 +871,6 @@ func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.
 	return uncles
 }
 
-// ByteCode retrieves the runtime byte code associated with an account.
-func (bc *BlockChain) ByteCode(addr common.Address) ([]byte, error) {
-	stateDB, _, err := bc.State()
-	if err != nil {
-		return nil, err
-	}
-	return stateDB.GetCode(addr), nil
-}
 
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.

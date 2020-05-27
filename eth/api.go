@@ -298,11 +298,10 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 	if block == nil {
 		return state.Dump{}, fmt.Errorf("block #%d not found", blockNr)
 	}
-	_, tds, err := api.eth.BlockChain().StateAt(uint64(blockNr))
-	if err != nil {
-		return state.Dump{}, err
+	if hasKV, ok := api.eth.ChainDb().(ethdb.HasAbstractKV); ok {
+		return state.NewDumper(hasKV.AbstractKV(), block.NumberU64()).DefaultRawDump(), nil
 	}
-	return tds.Dumper().DefaultRawDump(), nil
+	return state.Dump{}, fmt.Errorf("database %T does not support AbstracKV", api.eth.ChainDb())
 }
 
 // PrivateDebugAPI is the collection of Ethereum full node APIs exposed over
@@ -382,8 +381,11 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
 		maxResults = AccountRangeMaxResults
 	}
-	dumper := state.NewDumper(api.eth.chainDb, blockNumber)
-	return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
+	if hasKV, ok := api.eth.ChainDb().(ethdb.HasAbstractKV); ok {
+		dumper := state.NewDumper(hasKV.AbstractKV(), blockNumber)
+		return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
+	}
+	return state.IteratorDump{}, fmt.Errorf("database %T does not support AbstracKV", api.eth.ChainDb())
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.

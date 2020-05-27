@@ -1163,7 +1163,7 @@ func loadAccount() {
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, len(accountBytes)*8, blockNr, func(k, v []byte) (bool, error) {
+	if err := ethdb.WalkAsOf(ethDb, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, len(accountBytes)*8, blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v)

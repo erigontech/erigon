@@ -126,8 +126,6 @@ const (
 type blockChain interface {
 	CurrentBlock() *types.Block
 	GetBlock(hash common.Hash, number uint64) *types.Block
-	StateAt(blockNr uint64) (*state.IntraBlockState, *state.DbState, error)
-
 	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
 	GetTrieDbState() (*state.TrieDbState, error)
 }

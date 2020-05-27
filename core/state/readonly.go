@@ -285,10 +285,6 @@ func (dbs *DbState) GetKey(shaKey []byte) []byte {
 	return key
 }
 
-func (dbs *DbState) Dumper() *Dumper {
-	return &Dumper{db: dbs.db, blockNumber: dbs.blockNr}
-}
-
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).

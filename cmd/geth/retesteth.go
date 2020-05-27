@@ -107,6 +107,7 @@ type RetestWeb3API interface {
 
 type RetestethAPI struct {
 	ethDb ethdb.Database
+	kv    ethdb.KV
 	//db            state.Database
 	chainConfig   *params.ChainConfig
 	author        common.Address
@@ -413,6 +414,9 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	api.author = chainParams.Genesis.Author
 	api.extraData = chainParams.Genesis.ExtraData
 	api.ethDb = ethDb
+	if hasKV, ok := api.ethDb.(ethdb.HasAbstractKV); ok {
+		api.kv = hasKV.AbstractKV()
+	}
 	api.engine = engine
 	api.blockchain = blockchain
 	//api.db = state.NewDatabase(api.ethDb)
@@ -670,19 +674,9 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 	}
 
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
-	var dbState *state.DbState
-	var err error
-	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
-		_, dbState, err = api.blockchain.StateAt(header.Number.Uint64())
-		if err != nil {
-			return AccountRangeResult{}, err
-		}
-	} else {
-		var statedb *state.IntraBlockState
-		statedb, dbState, err = api.blockchain.StateAt(parentHeader.Number.Uint64())
-		if err != nil {
-			return AccountRangeResult{}, err
-		}
+	dbState := state.NewDbState(api.kv, header.Number.Uint64())
+	if parentHeader != nil && int(txIndex) < len(block.Transactions()) {
+		statedb := state.New(dbState)
 		// Recompute transactions up to the target index.
 		signer := types.MakeSigner(api.blockchain.Config(), block.Number())
 		for idx, tx := range block.Transactions() {
@@ -691,13 +685,12 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			context := core.NewEVMContext(msg, block.Header(), api.blockchain, nil)
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{})
-			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				return AccountRangeResult{}, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
 			}
 			// Ensure any modifications are committed to the state
 			if idx == int(txIndex) {
-				err = statedb.CommitBlock(ctx, dbState)
-				if err != nil {
+				if err := statedb.CommitBlock(ctx, dbState); err != nil {
 					return AccountRangeResult{}, err
 				}
 				break
@@ -705,7 +698,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		}
 	}
 
-	iterator, err1 := dbState.Dumper().IteratorDump(false, false, false, common.BigToHash((*big.Int)(addressHash)).Bytes(), int(maxResults))
+	iterator, err1 := state.NewDumper(api.kv, header.Number.Uint64()).IteratorDump(false, false, false, common.BigToHash((*big.Int)(addressHash)).Bytes(), int(maxResults))
 	if err1 != nil {
 		return AccountRangeResult{}, err1
 	}
@@ -726,19 +719,13 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 func (api *RetestethAPI) GetBalance(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
 	//fmt.Printf("GetBalance %x, block %d\n", address, blockNr)
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
-	statedb, _, err := api.blockchain.StateAt(header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
+	statedb := state.New(state.NewDbState(api.kv, header.Number.Uint64()))
 	return (*math.HexOrDecimal256)(statedb.GetBalance(address)), nil
 }
 
 func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
-	statedb, _, err := api.blockchain.StateAt(header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
+	statedb := state.New(state.NewDbState(api.kv, header.Number.Uint64()))
 	return getCode(statedb.GetCode(address)), nil
 }
 
@@ -760,10 +747,7 @@ func getCode(c hexutil.Bytes) hexutil.Bytes {
 
 func (api *RetestethAPI) GetTransactionCount(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
-	statedb, _, err := api.blockchain.StateAt(header.Number.Uint64())
-	if err != nil {
-		return 0, err
-	}
+	statedb := state.New(state.NewDbState(api.kv, header.Number.Uint64()))
 	return statedb.GetNonce(address), nil
 }
 
@@ -796,58 +780,16 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var dbstate *state.DbState
-	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
-		_, dbstate, err = api.blockchain.StateAt(header.Number.Uint64())
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
+		dbstate = state.NewDbState(api.kv, header.Number.Uint64())
 	} else {
+		var err error
 		_, _, _, dbstate, err = eth.ComputeTxEnv(ctx, api.blockchain, api.blockchain.Config(), api.blockchain, api.blockchain.ChainDb(), block.Hash(), txIndex)
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
 	}
-	/*
-		storageTrie := statedb.StorageTrie(address)
-		it := trie.NewIterator(storageTrie.NodeIterator(common.BigToHash((*big.Int)(begin)).Bytes()))
-	*/
-
 	result := StorageRangeResult{Storage: make(map[common.Hash]SRItem)}
-
-	/*
-		for i := 0; i < int(maxResults) && it.Next(); i++ {
-			if preimage := storageTrie.GetKey(it.Key); preimage != nil {
-				key := (*math.HexOrDecimal256)(big.NewInt(0).SetBytes(preimage))
-				v, _, err := rlp.SplitString(it.Value)
-				if err != nil {
-					return StorageRangeResult{}, err
-				}
-				value := (*math.HexOrDecimal256)(big.NewInt(0).SetBytes(v))
-				ks, _ := key.MarshalText()
-				vs, _ := value.MarshalText()
-				if len(ks)%2 != 0 {
-					ks = append(append(append([]byte{}, ks[:2]...), byte('0')), ks[2:]...)
-				}
-				if len(vs)%2 != 0 {
-					vs = append(append(append([]byte{}, vs[:2]...), byte('0')), vs[2:]...)
-				}
-				result.Storage[common.BytesToHash(it.Key)] = SRItem{
-					Key:   string(ks),
-					Value: string(vs),
-				}
-				//fmt.Printf("Key: %s, Value: %s\n", ks, vs)
-			} else {
-				//fmt.Printf("Did not find preimage for %x\n", it.Key)
-			}
-		}
-		if it.Next() {
-			result.Complete = false
-		} else {
-			result.Complete = true
-		}
-	*/
-
 	beginHash := common.BigToHash((*big.Int)(begin))
 
 	rangeResults, err := eth.StorageRangeAt(dbstate, address, beginHash.Bytes(), int(maxResults))

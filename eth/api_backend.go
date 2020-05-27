@@ -155,9 +155,13 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	if header == nil {
 		return nil, nil, errors.New("header not found")
 	}
-	ds := state.NewDbState(b.eth.chainDb, bn)
-	stateDb := state.New(ds)
-	return stateDb, header, nil
+	if hasKV, ok := b.eth.ChainDb().(ethdb.HasAbstractKV); ok {
+		ds := state.NewDbState(hasKV.AbstractKV(), bn)
+		stateDb := state.New(ds)
+		return stateDb, header, nil
+	}
+	return nil, nil, fmt.Errorf("database %T does not support AbstracKV", b.eth.ChainDb())
+	
 }
 
 func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.IntraBlockState, *types.Header, error) {
@@ -175,8 +179,12 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 		if blockNrOrHash.RequireCanonical && b.eth.blockchain.GetCanonicalHash(header.Number.Uint64()) != hash {
 			return nil, nil, errors.New("hash is not currently canonical")
 		}
-		stateDb, _, err := b.eth.BlockChain().StateAt(header.Number.Uint64())
-		return stateDb, header, err
+		if hasKV, ok := b.eth.ChainDb().(ethdb.HasAbstractKV); ok {
+			ds := state.NewDbState(hasKV.AbstractKV(), header.Number.Uint64())
+			stateDb := state.New(ds)
+			return stateDb, header, nil
+		}
+		return nil, nil, fmt.Errorf("database %T does not support AbstracKV", b.eth.ChainDb())
 	}
 	return nil, nil, errors.New("invalid arguments; neither block nor hash specified")
 }
@@ -197,8 +205,14 @@ func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (type
 }
 
 func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
-	dbstate := state.NewDbState(b.eth.chainDb, number-1)
-	statedb := state.New(dbstate)
+	var dbstate *state.DbState
+	var statedb *state.IntraBlockState
+	if hasKV, ok := b.eth.ChainDb().(ethdb.HasAbstractKV); ok {
+		dbstate = state.NewDbState(hasKV.AbstractKV(), number-1)
+		statedb = state.New(dbstate)
+	} else {
+		return nil, fmt.Errorf("database %T does not support AbstracKV", b.eth.ChainDb())
+	}
 	header := block.Header()
 	var receipts types.Receipts
 	var usedGas = new(uint64)
