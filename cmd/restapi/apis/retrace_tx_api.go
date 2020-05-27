@@ -35,13 +35,17 @@ func (e *Env) GetWritesReads(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
-type WritesReads struct {
+type AccountWritesReads struct {
 	Reads  []string `json:"reads"`
 	Writes []string `json:"writes"`
 }
+type StorageWriteReads struct {
+	Reads  map[string][]string
+	Writes map[string][]string
+}
 type RetraceResponse struct {
-	Storage WritesReads `json:"storage"`
-	Account WritesReads `json:"accounts"`
+	Storage StorageWriteReads `json:"storage"`
+	Account AccountWritesReads `json:"accounts"`
 }
 
 func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, error) {
@@ -80,11 +84,19 @@ func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, err
 	}
 
 	storageChanges, _ := writer.GetStorageChanges()
+	output.Storage.Writes = make(map[string][]string)
 	for _, ch := range storageChanges.Changes {
-		output.Storage.Writes = append(output.Storage.Writes, common.Bytes2Hex(ch.Key))
+		addrKey := common.Bytes2Hex(ch.Key[:common.AddressLength])
+		l := output.Storage.Writes[addrKey]
+		l = append(l, common.Bytes2Hex(ch.Key[common.AddressLength+common.IncarnationLength:]))
+		output.Storage.Writes[addrKey] = l
 	}
-	for _, ch := range reader.GetStorageReads() {
-		output.Storage.Reads = append(output.Storage.Reads, common.Bytes2Hex(ch))
+	output.Storage.Reads = make(map[string][]string)
+	for _, key := range reader.GetStorageReads() {
+		addrKey := common.Bytes2Hex(key[:common.AddressLength])
+		l := output.Storage.Reads[addrKey]
+		l = append(l, common.Bytes2Hex(key[common.AddressLength+common.IncarnationLength:]))
+		output.Storage.Reads[addrKey] = l
 	}
 	return output, nil
 }
