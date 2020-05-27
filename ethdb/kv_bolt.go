@@ -84,7 +84,7 @@ func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-	}, nil	
+	}, nil
 }
 
 func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {

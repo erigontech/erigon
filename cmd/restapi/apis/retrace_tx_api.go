@@ -44,7 +44,7 @@ type StorageWriteReads struct {
 	Writes map[string][]string
 }
 type RetraceResponse struct {
-	Storage StorageWriteReads `json:"storage"`
+	Storage StorageWriteReads  `json:"storage"`
 	Account AccountWritesReads `json:"accounts"`
 }
 
