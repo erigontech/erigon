@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"bufio"
-	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"fmt"
@@ -90,7 +89,7 @@ func writeBufferMapToTempFile(datadir string, pattern string, bufferMap map[stri
 
 func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []byte, keyLength int) error {
 	var m runtime.MemStats
-	h := &Heap{}
+	h := &common.Heap{}
 	heap.Init(h)
 	readers := make([]io.Reader, len(bufferFileNames))
 	for i, fileName := range bufferFileNames {
@@ -104,7 +103,7 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 		// Read first key
 		keyBuf := make([]byte, keyLength)
 		if n, err := io.ReadFull(readers[i], keyBuf); err == nil && n == keyLength {
-			heap.Push(h, HeapElem{keyBuf, i, nil})
+			heap.Push(h, common.HeapElem{keyBuf, i, nil})
 		} else {
 			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
 		}
@@ -113,9 +112,9 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 	batch := db.NewBatch()
 	var nbytes [8]byte
 	for h.Len() > 0 {
-		element := (heap.Pop(h)).(HeapElem)
-		reader := readers[element.timeIdx]
-		k := element.key
+		element := (heap.Pop(h)).(common.HeapElem)
+		reader := readers[element.TimeIdx]
+		k := element.Key
 		// Read number of items for this key
 		var count int
 		if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
@@ -172,11 +171,11 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 			}
 		}
 		// Try to read the next key (reuse the element)
-		if n, err := io.ReadFull(reader, element.key); err == nil && n == keyLength {
+		if n, err := io.ReadFull(reader, element.Key); err == nil && n == keyLength {
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			// If it is EOF, we simply do not return anything into the heap
-			return fmt.Errorf("next reading from account buffer file: %d %x %v", n, element.key[:n], err)
+			return fmt.Errorf("next reading from account buffer file: %d %x %v", n, element.Key[:n], err)
 		}
 	}
 	if _, err := batch.Commit(); err != nil {
@@ -188,6 +187,63 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 const changeSetBufSize = 256 * 1024 * 1024
 
 func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+	var blockNum uint64
+	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
+		if lastProcessedBlockNumber > 0 {
+			blockNum = lastProcessedBlockNumber + 1
+		}
+	} else {
+		return fmt.Errorf("reading account history process: %v", err)
+	}
+	log.Info("Account history index generation started", "from", blockNum)
+
+	ig := core.NewIndexGenerator(db)
+	ig.TempDir = datadir
+	var err error
+	if plainState {
+		err = ig.GenerateIndex(blockNum, dbutils.PlainAccountChangeSetBucket)
+	} else {
+		err = ig.GenerateIndex(blockNum, dbutils.AccountChangeSetBucket)
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := SaveStageProgress(db, AccountHistoryIndex, blockNum); err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+	var blockNum uint64
+	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
+		if lastProcessedBlockNumber > 0 {
+			blockNum = lastProcessedBlockNumber + 1
+		}
+	} else {
+		return fmt.Errorf("reading storage history process: %v", err)
+	}
+	ig := core.NewIndexGenerator(db)
+	ig.TempDir = datadir
+	var err error
+	if plainState {
+		err = ig.GenerateIndex(blockNum, dbutils.PlainStorageChangeSetBucket)
+	} else {
+		err = ig.GenerateIndex(blockNum, dbutils.StorageChangeSetBucket)
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
+		return err
+	}
+
+	return nil
+}
+func spawnAccountHistoryIndexOld(db ethdb.Database, datadir string, plainState bool) error {
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
@@ -260,7 +316,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	return nil
 }
 
-func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnStorageHistoryIndexOld(db ethdb.Database, datadir string, plainState bool) error {
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
@@ -335,34 +391,16 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 
 func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool) error {
 	ig := core.NewIndexGenerator(db)
-	return ig.Truncate(unwindPoint, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, walkerFactory(dbutils.AccountChangeSetBucket, plainState))
+	if plainState {
+		return ig.Truncate(unwindPoint, dbutils.PlainAccountChangeSetBucket)
+	}
+	return ig.Truncate(unwindPoint, dbutils.AccountChangeSetBucket)
 }
 
 func unwindStorageHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool) error {
 	ig := core.NewIndexGenerator(db)
-	return ig.Truncate(unwindPoint, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, walkerFactory(dbutils.StorageChangeSetBucket, plainState))
-}
-
-func walkerFactory(csBucket []byte, plainState bool) func(bytes []byte) core.ChangesetWalker {
-	switch {
-	case bytes.Equal(csBucket, dbutils.AccountChangeSetBucket) && !plainState:
-		return func(bytes []byte) core.ChangesetWalker {
-			return changeset.AccountChangeSetBytes(bytes)
-		}
-	case bytes.Equal(csBucket, dbutils.AccountChangeSetBucket) && plainState:
-		return func(bytes []byte) core.ChangesetWalker {
-			return changeset.AccountChangeSetPlainBytes(bytes)
-		}
-	case bytes.Equal(csBucket, dbutils.StorageChangeSetBucket) && !plainState:
-		return func(bytes []byte) core.ChangesetWalker {
-			return changeset.StorageChangeSetBytes(bytes)
-		}
-	case bytes.Equal(csBucket, dbutils.StorageChangeSetBucket) && plainState:
-		return func(bytes []byte) core.ChangesetWalker {
-			return changeset.StorageChangeSetPlainBytes(bytes)
-		}
-	default:
-		log.Error("incorrect bucket", "bucket", string(csBucket), "plainState", plainState)
-		panic("incorrect bucket " + string(csBucket))
+	if plainState {
+		return ig.Truncate(unwindPoint, dbutils.PlainStorageChangeSetBucket)
 	}
+	return ig.Truncate(unwindPoint, dbutils.StorageChangeSetBucket)
 }

@@ -311,7 +311,7 @@ func readElementFromDisk(decoder *codec.Decoder) ([]byte, []byte, error) {
 func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
-	h := &Heap{}
+	h := &common.Heap{}
 	heap.Init(h)
 	readers := make([]io.Reader, len(files))
 	for i, filename := range files {
@@ -323,7 +323,7 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 		}
 		decoder.Reset(readers[i])
 		if key, value, err := readElementFromDisk(decoder); err == nil {
-			he := HeapElem{key, i, value}
+			he := common.HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
 			return fmt.Errorf("error reading first readers: n=%d current=%d filename=%s err=%v",
@@ -332,9 +332,9 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 	}
 	batch := db.NewBatch()
 	for h.Len() > 0 {
-		element := (heap.Pop(h)).(HeapElem)
-		reader := readers[element.timeIdx]
-		if err := batch.Put(bucket, element.key, element.value); err != nil {
+		element := (heap.Pop(h)).(common.HeapElem)
+		reader := readers[element.TimeIdx]
+		if err := batch.Put(bucket, element.Key, element.Value); err != nil {
 			return err
 		}
 		batchSize := batch.BatchSize()
@@ -346,12 +346,12 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 				"Commited index batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
-				"hashedKey", fmt.Sprintf("%x...", element.key[:4]),
+				"hashedKey", fmt.Sprintf("%x...", element.Key[:4]),
 				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		var err error
 		decoder.Reset(reader)
-		if element.key, element.value, err = readElementFromDisk(decoder); err == nil {
+		if element.Key, element.Value, err = readElementFromDisk(decoder); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			return fmt.Errorf("error while reading next element from disk: %v", err)
