@@ -361,8 +361,6 @@ func deleteFiles(files []string) {
 		err := os.Remove(filename)
 		if err != nil {
 			log.Warn("promoting hashed state, error while removing temp file", "file", filename, "err", err)
-		} else {
-			log.Warn("promoting hashed state, removed temp", "file", filename)
 		}
 	}
 }
