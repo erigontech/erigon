@@ -107,7 +107,7 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 	if err != nil {
 		return nil, err
 	}
-	enc, err := ethdb.GetAsOf(r.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], r.blockNr+1)
+	enc, err := ethdb.GetAsOf(r.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], r.blockNr)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -130,7 +130,7 @@ func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation ui
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := ethdb.GetAsOf(r.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, r.blockNr+1)
+	enc, err := ethdb.GetAsOf(r.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, r.blockNr)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
