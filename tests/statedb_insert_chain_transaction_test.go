@@ -27,7 +27,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -55,6 +55,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	// insert a correct block
+	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(data.addresses[1], to, big.NewInt(5000)),
@@ -91,7 +92,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -119,6 +120,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	// insert a correct block
+	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(5000)),
@@ -152,7 +154,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -177,6 +179,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 
 	// insert a correct block
+	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
@@ -210,7 +213,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -235,6 +238,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 
 	// insert a correct block
+	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
@@ -268,7 +272,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(3000)),
 			fromKey,
@@ -292,6 +296,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 
 	// insert a correct block
+	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
