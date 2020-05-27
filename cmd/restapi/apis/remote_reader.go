@@ -20,8 +20,9 @@ import (
 
 // ChangeSetReader is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type RemoteReader struct {
-	accountReads map[common.Address]bool
-	storageReads map[common.Hash]bool
+	accountReads map[common.Address]struct{}
+	storageReads map[common.Address]map[common.Hash]struct{}
+	codeReads    map[common.Address]struct{}
 	blockNr      uint64
 	db           ethdb.KV
 }
@@ -79,8 +80,9 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 
 func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 	return &RemoteReader{
-		accountReads: make(map[common.Address]bool),
-		storageReads: make(map[common.Hash]bool),
+		accountReads: make(map[common.Address]struct{}),
+		storageReads: make(map[common.Address]map[common.Hash]struct{}),
+		codeReads:    make(map[common.Address]struct{}),
 		db:           db,
 		blockNr:      blockNr,
 	}
@@ -88,21 +90,32 @@ func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 
 func (r *RemoteReader) GetAccountReads() [][]byte {
 	output := make([][]byte, 0)
-	for key := range r.accountReads {
-		output = append(output, key.Bytes())
+	for address := range r.accountReads {
+		output = append(output, address.Bytes())
 	}
 	return output
 }
 
 func (r *RemoteReader) GetStorageReads() [][]byte {
 	output := make([][]byte, 0)
-	for key := range r.storageReads {
+	for address, m := range r.storageReads {
+		for key := range m {
+			output = append(output, append(address.Bytes(), key.Bytes()...))
+		}
+	}
+	return output
+}
+
+func (r *RemoteReader) GetCodeReads() [][]byte {
+	output := make([][]byte, 0)
+	for key := range r.codeReads {
 		output = append(output, key.Bytes())
 	}
 	return output
 }
 
 func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	r.accountReads[address] = struct{}{}
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return nil, err
@@ -119,6 +132,12 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 }
 
 func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	m, ok := r.storageReads[address]
+	if !ok {
+		m = make(map[common.Hash]struct{})
+		r.storageReads[address] = m
+	}
+	m[*key] = struct{}{}
 	keyHash, err := common.HashData(key[:])
 	if err != nil {
 		return nil, err
@@ -138,6 +157,7 @@ func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation ui
 }
 
 func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+	r.codeReads[address] = struct{}{}
 	if bytes.Equal(codeHash[:], crypto.Keccak256(nil)) {
 		return nil, nil
 	}
