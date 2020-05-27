@@ -63,26 +63,22 @@ func (m *mgrBroadcast) Start() {
 		}
 		//witnessCache := map[string][]byte{}
 		for m.state.GetBlockNr() <= tick.ToBlock {
-			for _, slice := range tick.StateSlices {
-				_ = slice
+			// Produce and Broadcast witness of slice
 
-				// Produce and Broadcast witness of slice
-
-				//retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
-				//if tick.IsLastInCycle() {
-				//	fmt.Printf("\nretain: %s\n", retain)
-				//}
-				//witness, err2 := tds.Trie().ExtractWitness(false, retain)
-				//if err2 != nil {
-				//	panic(err2)
-				//}
-				//
-				//buf.Reset()
-				//_, err = witness.WriteTo(&buf)
-				//if err != nil {
-				//	panic(err)
-				//}
-			}
+			//retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
+			//if tick.IsLastInCycle() {
+			//	fmt.Printf("\nretain: %s\n", retain)
+			//}
+			//witness, err2 := tds.Trie().ExtractWitness(false, retain)
+			//if err2 != nil {
+			//	panic(err2)
+			//}
+			//
+			//buf.Reset()
+			//_, err = witness.WriteTo(&buf)
+			//if err != nil {
+			//	panic(err)
+			//}
 		}
 	}
 }

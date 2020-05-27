@@ -1260,15 +1260,6 @@ func (t *Trie) EvictNode(hex []byte) {
 }
 
 func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
-	//const (
-	//	dbPageSize          = 4096             // common OS page size is 4KB
-	//	minNodeSizeToNotify = dbPageSize / 128 // store in DB only IH which allowing do big jumps over state
-	//)
-	// Make a better experiment if make sense to enable it
-	//if nd.witnessSize() < minNodeSizeToNotify {
-	//	return
-	//}
-
 	switch n := nd.(type) {
 	case *shortNode:
 		hex = append(hex, n.Key...)

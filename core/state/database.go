@@ -1447,13 +1447,14 @@ func (tds *TrieDbState) TotalCumulativeWitnessSize() (uint64, error) {
 	}
 
 	var accumulator uint64
-	_, err := CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+	_, _, _, err := CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, []byte{}, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
 		accumulator += binary.BigEndian.Uint64(v)
 		return false, nil
 	})
 	if err != nil {
 		return 0, err
 	}
+	//fmt.Printf("Total Count: Seeks: %d, accSeek: %d\n", seeks, accSeeks)
 
 	return accumulator, nil
 }
@@ -1508,7 +1509,7 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSizeDBDeprecated(prefixInTrie [
 	}
 
 	var accumulator uint64
-	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, append(prefixInTrie, 0), prefixInTrie, fixedbits, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+	prefix, _, _, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, append(prefixInTrie, 0), prefixInTrie, fixedbits, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
 		prefixSize := binary.BigEndian.Uint64(v)
 		overflow := accumulator+prefixSize >= size
 		if !overflow {
@@ -1526,10 +1527,6 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize(from []byte, size uint64) 
 	if size == 0 {
 		return from, nil
 	}
-	return tds.prefixByCumulativeWitnessSize(from, size)
-}
-
-func (tds *TrieDbState) prefixByCumulativeWitnessSize(from []byte, size uint64) (prefix []byte, err error) {
 	var kv ethdb.KV
 	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
 		kv = hasBolt.AbstractKV()
@@ -1538,9 +1535,10 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSize(from []byte, size uint64) 
 	}
 
 	var accumulator uint64
-	prefix, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, from, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
+	prefix, _, _, err = CumulativeSearch(kv, dbutils.IntermediateWitnessSizeBucket, from, []byte{}, 0, func(k, v []byte) (itsTimeToVisitChild bool, err error) {
 		prefixSize := binary.BigEndian.Uint64(v)
 		overflow := accumulator+prefixSize >= size
+		//fmt.Printf("Loop: %x %d<%d=%t\n", k, accumulator+prefixSize, size, overflow)
 		if !overflow {
 			accumulator += prefixSize
 		}
@@ -1549,18 +1547,21 @@ func (tds *TrieDbState) prefixByCumulativeWitnessSize(from []byte, size uint64) 
 	if err != nil {
 		return nil, err
 	}
+
 	return prefix, nil
 }
 
 type CumulativeSearchF func(k, v []byte) (itsTimeToVisitChild bool, err error)
 
 // CumulativeSearch - on each iteration jumps to next subtries (siblings) by default until not get command to go to child
-func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte, fixedbits int, f CumulativeSearchF) (lastVisitedParent []byte, err error) {
-	//fmt.Printf("Start FRoooom: %x, %x\n", startKey, parent)
+func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte, fixedbits int, f CumulativeSearchF) (lastVisitedParent []byte, seeks, accSeeks int64, err error) {
+	//trace := bytes.HasPrefix(startKey, common.FromHex("9409160bc4922120a08054b27d1ea9f6ef7b0e701dffac7c5186dc40e991232afffffffffffffffef0"))
+	trace := false
+	if trace {
+		fmt.Printf("\n\nStart FRoooom: %x, %x\n", startKey, parent)
+	}
 
 	const doCorrectIncarnation = true
-	seeks := int64(0)
-	accountSeek := int64(0)
 	defer cumulativeSearchTimer.UpdateSince(time.Now())
 	defer cumulativeSearchMeter.Mark(seeks)
 
@@ -1581,17 +1582,19 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 			for !(bytes.Equal(csK, k[:32]) && a.Incarnation == dbutils.DecodeIncarnation(k[32:40])) {
 				counter++
 				next := k[:32]
-				accountSeek++
+				accSeeks++
 				var doSkip bool
 				csK, csV, err = cs.SeekTo(next)
-				//fmt.Printf("Adjust happened: parent=%x, k=%x\n", parent, k)
+				if trace {
+					fmt.Printf("Adjust happened: parent=%x, k=%x\n", parent, k)
+				}
 				for ; len(csK) != 32; csK, csV, err = cs.SeekTo(next) {
 					counter++
 					if err != nil {
 						return err
 					}
 					doSkip = true
-					accountSeek++
+					accSeeks++
 					next, ok = dbutils.NextSubtree(csK[:32])
 					if !ok {
 						k = nil
@@ -1605,7 +1608,9 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 						return err
 					}
 					if !bytes.HasPrefix(k, parent) || k == nil {
-						//fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+						if trace {
+							fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+						}
 						k = nil
 						return nil
 					}
@@ -1626,7 +1631,9 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 						return err
 					}
 					if !bytes.HasPrefix(k, parent) || k == nil {
-						//fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+						if trace {
+							fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+						}
 						k = nil
 						return nil
 					}
@@ -1635,12 +1642,14 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 					}
 				}
 			}
-			//fmt.Printf("After correction: k=%x, csK=%x\n", k, csK)
+			if trace {
+				fmt.Printf("After correction: k=%x, csK=%x\n", k, csK)
+			}
 			return nil
 		}
 
 		fixedbytes, mask := ethdb.Bytesmask(fixedbits)
-		next := startKey
+		next := common.CopyBytes(startKey)
 		seeks++
 		k, v, err = c.SeekTo(next)
 		if err != nil {
@@ -1660,11 +1669,16 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 				}
 				seeks++
 				k, v, err = c.SeekTo(next)
+				if trace && k != nil {
+					fmt.Printf("c.SeekTo(%x): %x %d\n", next, k, binary.BigEndian.Uint64(v))
+				}
 				if err != nil {
 					return err
 				}
 				if !bytes.HasPrefix(k, parent) {
-					//fmt.Printf("No Sibling: %x --> %x\n", parent, k)
+					if trace {
+						fmt.Printf("No Sibling: %x --> %x, %d\n", parent, k)
+					}
 					k = nil
 				}
 				err = skipIncorrectIncarnation()
@@ -1678,16 +1692,23 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 			}
 
 			parent = common.CopyBytes(k)
-			//fmt.Printf("New parent: %x\n", parent)
+			if trace {
+				fmt.Printf("New parent: %x\n", parent)
+			}
 			fixedbits = len(parent) * 8
 			fixedbytes, mask = ethdb.Bytesmask(fixedbits)
 			seeks++
 			k, v, err = c.Next() // go to child
+			if trace {
+				fmt.Printf("c.Next(): %x %d\n", k, binary.BigEndian.Uint64(v))
+			}
 			if err != nil {
 				return err
 			}
 			if !bytes.HasPrefix(k, parent) {
-				//fmt.Printf("No Child: %x --> %x\n", parent, k)
+				if trace {
+					fmt.Printf("No Child: %x --> %x\n", parent, k)
+				}
 				k = nil
 			}
 			err = skipIncorrectIncarnation()
@@ -1701,8 +1722,8 @@ func CumulativeSearch(kv ethdb.KV, bucket []byte, startKey []byte, parent []byte
 		}
 		return nil
 	}); err != nil {
-		return parent, err
+		return parent, seeks, accSeeks, err
 	}
-	//fmt.Printf("Seeks: %d, accountSeek: %d\n", seeks, accountSeek)
-	return parent, nil
+
+	return parent, seeks, accSeeks, nil
 }

@@ -631,29 +631,47 @@ func mgrSchedule(chaindata string, block uint64) {
 	defer db.Close()
 	tds, err := bc.GetTrieDbState()
 	check(err)
-	t3 := time.Now()
-	rl := trie.NewRetainList(0)
-	rl.AddHex([]byte{})
-	loader := trie.NewFlatDbSubTrieLoader()
-	tr := tds.Trie()
-	rs := trie.NewRetainLevels(rl, 1)
-	err = loader.Reset(db, rs, rs, [][]byte{nil}, []int{0}, false)
-	check(err)
-	subTries, err := loader.LoadSubTries()
-	check(err)
-	fmt.Println("LoadSubTries: ", time.Since(t3))
-	t4 := time.Now()
-	err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
-	check(err)
-	fmt.Println("HookSubTries: ", time.Since(t4))
-	_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
-	check(err)
+	//t3 := time.Now()
+	//rl := trie.NewRetainList(3)
+	//rl.AddHex([]byte{})
+	//loader := trie.NewFlatDbSubTrieLoader()
+	//tr := tds.Trie()
+	//err = loader.Reset(db, rl, rl, [][]byte{nil}, []int{0}, false)
+	//check(err)
+	//subTries, err := loader.LoadSubTries()
+	//check(err)
+	//fmt.Println("LoadSubTries: ", time.Since(t3))
+	//t4 := time.Now()
+	//err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
+	//check(err)
+	//fmt.Println("HookSubTries: ", time.Since(t4))
+	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
+	//check(err)
 
-	//r1, _ := tds.PrefixByCumulativeWitnessSizeDeprecated(5_160_000)
-	//fmt.Println()
-	//fmt.Println()
-	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 5_160_000)
+	//tds.TotalCumulativeWitnessSize()
+	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 81352965)
+	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 82066586)
 	//fmt.Printf("R: %x %x\n", r1, r2)
+	//return
+
+	err = db.KV().Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
+		c := b.Cursor()
+		c2 := b2.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if len(k) < 1 {
+				_ = b.Delete(k)
+			}
+		}
+		for k, _ := c2.First(); k != nil; k, _ = c2.Next() {
+			if len(k) < 1 {
+				_ = b2.Delete(k)
+			}
+		}
+
+		return nil
+	})
 
 	t5 := time.Now()
 	//var buf bytes.Buffer
@@ -661,91 +679,104 @@ func mgrSchedule(chaindata string, block uint64) {
 	var witnessCount int64
 	var witnessEstimatedSizeAccumulator uint64
 	schedule := mgr.NewSchedule(tds)
-	schedule2 := mgr.NewSchedule(tds)
+	//schedule2 := mgr.NewSchedule(tds)
 	var toBlock = block + mgr.BlocksPerCycle
 	var (
 		maxLcp float64
-		minLcp float64 = 999
+		minLcp float64 = 10 ^ 10
 		avgLcp float64
 	)
 
+	counters := []int{}
+	counters2 := []int{}
+	tx, _ := db.KV().Begin(false)
+	defer tx.Rollback()
 	for block <= toBlock {
 		tick, err2 := schedule.Tick(block)
 		if err2 != nil {
 			panic(err2)
 		}
-		tick2, err2 := schedule2.Tick2(block)
-		if err2 != nil {
-			panic(err2)
-		}
+		//if tick.Number > 50 {
+		//	break
+		//}
+		//tick2, err2 := schedule2.TickDeprecated(block)
+		//if err2 != nil {
+		//	panic(err2)
+		//}
 
 		//fmt.Printf("Tick: %s\n", tick)
 		//fmt.Printf("Tick2: %s\n", tick2)
-		fmt.Printf("T: %x %x\n", tick.StateSlices[0].To, tick2.StateSlices[0].To)
-
-		lcp := len(LCP(tick.StateSlices[0].To, tick2.StateSlices[0].To))
-		minLen := min(len(tick.StateSlices[0].To), len(tick2.StateSlices[0].To))
-		if minLen > 0 {
-			ratio := float64(lcp) / float64(minLen)
-			minLcp = math.Min(minLcp, ratio)
-			maxLcp = math.Max(maxLcp, ratio)
-			if avgLcp == 0 {
-				avgLcp = ratio
-			} else {
-				avgLcp = (avgLcp + ratio) / 2
+		counter := 0
+		counter2 := 0
+		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+		for k, v := c.SeekTo(tick.From); k != nil; k, v = c.Next() {
+			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
+				break
 			}
+			counter += len(k) + len(v)
+			counter2 += len(v)
+		}
+		check(err)
+		//if counter > 6_000_000 {
+		//fmt.Printf("tick: %s\n", tick)
+		//	fmt.Printf("%s\n", tick)
+		//	fmt.Printf("counter: %d %d %x\n", counter, counter2, tick.To[0])
+		//}
+
+		counters = append(counters, counter)
+		counters2 = append(counters2, counter2)
+
+		//for _, slice := range tick.StateSlices {
+		//	_ = slice
+		//
+		//	retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
+		//	if tick.IsLastInCycle() {
+		//		fmt.Printf("\nretain: %s\n", retain)
+		//	}
+		//	witness, err2 := tds.Trie().ExtractWitness(false, retain)
+		//	if err2 != nil {
+		//		panic(err2)
+		//	}
+		//
+		//	buf.Reset()
+		//	_, err = witness.WriteTo(&buf)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	witnessCount++
+		//	witnessSizeAccumulator += uint64(buf.Len())
+		//}
+
+		minLcp = math.Min(minLcp, float64(counter))
+		maxLcp = math.Max(maxLcp, float64(counter))
+		if avgLcp == 0 {
+			avgLcp = float64(counter)
+		} else {
+			avgLcp = (avgLcp + float64(counter)) / 2
 		}
 
-		for _, slice := range tick.StateSlices {
-			_ = slice
-			//from2, err := tds.PrefixByCumulativeWitnessSize2(slice.FromSize)
-			//check(err)
-			//to2, err := tds.PrefixByCumulativeWitnessSize2(slice.ToSize)
-			//check(err)
-			//_ = from2
-			//_ = to2
-			//
-			//if !bytes.Equal(from2, slice.From) {
-			//	fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.From, from2)
-			//	return
-			//}
-			//if !bytes.Equal(to2, slice.To) {
-			//	fmt.Printf("Alex: %d: %x!=%x\n", slice.FromSize, slice.To, to2)
-			//	return
-			//}
-
-			//retain := trie.NewRetainRange(common.CopyBytes(slice.From), common.CopyBytes(slice.To))
-			//if tick.IsLastInCycle() {
-			//	fmt.Printf("\nretain: %s\n", retain)
-			//}
-			//witness, err2 := tds.Trie().ExtractWitness(false, retain)
-			//if err2 != nil {
-			//	panic(err2)
-			//}
-			//
-			//buf.Reset()
-			//_, err = witness.WriteTo(&buf)
-			//if err != nil {
-			//	panic(err)
-			//}
-			//witnessCount++
-			//witnessSizeAccumulator += uint64(buf.Len())
-		}
 		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
 		block = tick.ToBlock + 1
 	}
 
-	fmt.Println("MGR Get All Ticks: ", time.Since(t5))
+	fmt.Println("MGR Time of All Ticks: ", time.Since(t5))
+	//fmt.Println("MinLCP: ", minLcp, "MaxLCP: ", maxLcp, "AvgLCP: ", avgLcp)
 	fmt.Println("MinLCP: ", minLcp, "MaxLCP: ", maxLcp, "AvgLCP: ", avgLcp)
+
+	accs := map[int]int{}
+	for _, counter := range counters {
+		accs[counter/100_000]++
+	}
+	fmt.Printf("Counter Aggs: %v\n", accs)
 
 	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
 	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
 	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
 
-	defer func(t time.Time) { fmt.Println("hack.go:746", time.Since(t)) }(time.Now())
-	tr.EvictNode([]byte{})
-	_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-	check(err)
+	//defer func(t time.Time) { fmt.Println("hack.go:746", time.Since(t)) }(time.Now())
+	//tr.EvictNode([]byte{})
+	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
+	//check(err)
 }
 
 func genIH(chaindata string) {
@@ -779,7 +810,7 @@ func genIH(chaindata string) {
 	for i := 0; i < 16; i++ {
 		for j := 0; j < 16; j++ {
 			prefix := []byte{uint8(i), uint8(j)}
-
+			t1 := time.Now()
 			err = db.KV().Update(func(tx *bolt.Tx) error {
 				b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 				b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
@@ -795,12 +826,12 @@ func genIH(chaindata string) {
 				return nil
 			})
 			check(err)
-
+			t1Duration := time.Since(t1)
 			rl := trie.NewRetainList(0)
 			rl.AddHex(prefix)
 			dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
-			rl2 := trie.NewRetainRange(prefix, prefix)
 			t3 := time.Now()
+			rl2 := trie.NewRetainRange(prefix, prefix)
 			err = loader.Reset(db, rl2, rl2, dbPrefixes, fixedbits, false)
 			check(err)
 			subTries, err2 := loader.LoadSubTries()
@@ -810,11 +841,15 @@ func genIH(chaindata string) {
 			err = tr.HookSubTries(subTries, hooks) // hook up to the root
 			check(err)
 			t4Duration := time.Since(t4)
+			t5 := time.Now()
 			tr.EvictNode(prefix)
-			fmt.Printf("%x: Load %s, Hook %s, \n", i*16+j, t3Duration, t4Duration)
+			t5Duration := time.Since(t5)
+			t6 := time.Now()
+			_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
+			check(err)
+			t6Duration := time.Since(t6)
+			fmt.Printf("%x: Delete %s Load %s, Hook %s, Evict %s, Commit %s\n", i*16+j, t1Duration, t3Duration, t4Duration, t5Duration, t6Duration)
 		}
-		_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-		check(err)
 	}
 	tr.EvictNode([]byte{})
 	_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
@@ -833,62 +868,27 @@ func genIH(chaindata string) {
 	err = db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
 		return tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
 			i := binary.BigEndian.Uint64(v)
-			if i < 5000 {
-				accs[i/10]++
-			}
+			accs[i/10]++
 			if len(k) > 32 {
-				if i < 5000 {
-					accs2[i/10]++
-				}
+				accs2[i/10]++
 			}
 			return true, nil
 		})
 	})
 	check(err)
+	for i := range accs {
+		if accs[i] < 1000 {
+			delete(accs, i)
+		}
+	}
+	for i := range accs2 {
+		if accs2[i] < 300 {
+			delete(accs2, i)
+		}
+	}
+
 	fmt.Printf("Agg IWS Stats1: %v\n", accs)
 	fmt.Printf("Agg IWS Stats2: %v\n", accs2)
-}
-
-func min(x, y int) int {
-	if x > y {
-		return y
-	}
-	return x
-}
-
-func LCP(items ...[]byte) []byte {
-	switch len(items) {
-	case 0:
-		return nil
-	case 1:
-		return items[0]
-	}
-
-	min, max := items[0], items[0]
-	for _, item := range items[1:] {
-		switch {
-		case bytes.Compare(item, min) == -1:
-			min = item
-		case bytes.Compare(item, max) == +1:
-			max = item
-		}
-	}
-
-	for i := 0; i < len(min) && i < len(max); i++ {
-		if min[i] != max[i] {
-			if i == 0 {
-				return nil
-			}
-			return min[:i]
-		}
-	}
-
-	if len(min) == 0 {
-		return nil
-	}
-
-	return min
-
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {

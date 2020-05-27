@@ -2,6 +2,8 @@ package mgr
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
@@ -13,33 +15,26 @@ const (
 )
 
 type Tick struct {
-	Number      uint64
-	FromSize    uint64
-	ToSize      uint64
-	FromBlock   uint64
-	ToBlock     uint64
-	StateSlices []StateSlice
-}
-
-type StateSlice struct {
-	FromSize uint64
-	ToSize   uint64
-	From     []byte
-	To       []byte
+	Number    uint64
+	FromSize  uint64
+	ToSize    uint64
+	From      []byte
+	To        []byte
+	FromBlock uint64
+	ToBlock   uint64
 }
 
 func (t Tick) String() string {
-	return fmt.Sprintf("Tick{%d,Blocks:%d-%d,Sizes:%d-%d,Slices:%s}", t.Number, t.FromBlock, t.ToBlock, t.FromSize, t.ToSize, t.StateSlices)
-}
-func (ss StateSlice) String() string {
-	return fmt.Sprintf("{Sizes:%d-%d,Prefixes:%x-%x}", ss.FromSize, ss.ToSize, ss.From, ss.To)
+	return fmt.Sprintf("Tick{%d,Blocks:%d-%d,Sizes:%d-%d,Prefixes:%x-%x}", t.Number, t.FromBlock, t.ToBlock, t.FromSize, t.ToSize, t.From, t.To)
 }
 
 func (t Tick) IsLastInCycle() bool {
 	return t.Number == TicksPerCycle-1
 }
 
-func newTick(blockNr, stateSize uint64, previousTick *Tick) *Tick {
+// NewTick constructor building Tick object and calculating all state-size-parameters
+// not filling exact keys: from, to
+func NewTick(blockNr, stateSize uint64, prevTick *Tick) *Tick {
 	number := blockNr / BlocksPerTick % TicksPerCycle
 	fromSize := number * stateSize / TicksPerCycle
 
@@ -51,36 +46,16 @@ func newTick(blockNr, stateSize uint64, previousTick *Tick) *Tick {
 		ToSize:    fromSize + stateSize/TicksPerCycle - 1,
 	}
 
-	for i := uint64(0); ; i++ {
-		ss := StateSlice{
-			FromSize: fromSize + i*BytesPerWitness,
-			ToSize:   min(fromSize+(i+1)*BytesPerWitness-1, tick.ToSize),
-		}
-
-		if i == 0 && previousTick != nil {
-			ss.From = previousTick.StateSlices[len(previousTick.StateSlices)-1].To
-			ss.FromSize = previousTick.StateSlices[len(previousTick.StateSlices)-1].ToSize
-		}
-
-		tick.StateSlices = append(tick.StateSlices, ss)
-		if ss.ToSize >= tick.ToSize {
-			break
-		}
+	if tick.Number != 0 && prevTick != nil {
+		prevTick.FromSize = prevTick.ToSize + 1
 	}
 
 	return tick
 }
 
-func min(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 type Schedule struct {
 	estimator WitnessEstimator
-	lastTick  *Tick
+	prevTick  *Tick
 }
 
 type WitnessEstimator interface {
@@ -95,54 +70,39 @@ func NewSchedule(estimator WitnessEstimator) *Schedule {
 	return &Schedule{estimator: estimator}
 }
 
+// Tick - next step of MGR Schedule. Calculating range of keys of valid size
+//
+// Important: ticks are cycled. When `TicksPerCycle` reached - it starts from beginning of state.
+// Means tick.FromSize > prevTick.ToSize - only when tick.Number != 0
 func (s *Schedule) Tick(block uint64) (*Tick, error) {
 	total, err := s.estimator.TotalCumulativeWitnessSize()
 	if err != nil {
 		return nil, err
 	}
 
-	tick := newTick(block, total, s.lastTick)
+	tick := NewTick(block, total, s.prevTick)
 	var prevKey []byte
-	var prevSize uint64 = tick.FromSize
-	for i := range tick.StateSlices {
-		if i != 0 {
-			prevKey = tick.StateSlices[i-1].From
-			prevSize = tick.StateSlices[i-1].FromSize
-		}
-
-		var err error
-		if tick.StateSlices[i].From == nil {
-			if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSize(prevKey, prevSize); err != nil {
-				return tick, err
-			}
-		}
-		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSize(tick.StateSlices[i].From, tick.StateSlices[i].ToSize-tick.StateSlices[i].FromSize); err != nil {
-			return tick, err
-		}
-
-		if s.lastTick != nil {
-			prevKey = s.lastTick.StateSlices[len(s.lastTick.StateSlices)-1].To
-			prevSize = s.lastTick.StateSlices[len(s.lastTick.StateSlices)-1].ToSize
-		}
-
+	if tick.Number != 0 && s.prevTick != nil {
+		prevKey = s.prevTick.To
 	}
-
-	s.lastTick = tick
+	tick.From, _ = dbutils.NextSubtree(prevKey)
+	if tick.To, err = s.estimator.PrefixByCumulativeWitnessSize(tick.From, tick.ToSize-tick.FromSize); err != nil {
+		return tick, err
+	}
+	prevKey = tick.To
+	s.prevTick = tick
 	return tick, nil
 }
 
 func (s *Schedule) TickDeprecated(block uint64) (*Tick, error) {
-	tick := newTick(block, s.estimator.TotalCumulativeWitnessSizeDeprecated(), s.lastTick)
-	for i := range tick.StateSlices {
-		var err error
-		if tick.StateSlices[i].From, err = s.estimator.PrefixByCumulativeWitnessSizeDeprecated(tick.StateSlices[i].FromSize); err != nil {
-			return tick, err
-		}
-		if tick.StateSlices[i].To, err = s.estimator.PrefixByCumulativeWitnessSizeDeprecated(tick.StateSlices[i].ToSize); err != nil {
-			return tick, err
-		}
+	tick := NewTick(block, s.estimator.TotalCumulativeWitnessSizeDeprecated(), s.prevTick)
+	var err error
+	if tick.From, err = s.estimator.PrefixByCumulativeWitnessSizeDeprecated(tick.FromSize); err != nil {
+		return tick, err
+	}
+	if tick.To, err = s.estimator.PrefixByCumulativeWitnessSizeDeprecated(tick.ToSize); err != nil {
+		return tick, err
 	}
 
-	s.lastTick = tick
 	return tick, nil
 }
