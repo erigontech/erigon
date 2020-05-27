@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -26,7 +27,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -54,7 +55,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	// insert a correct block
-	blockchain, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(data.addresses[1], to, big.NewInt(5000)),
 			data.keys[1],
@@ -68,7 +69,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -90,7 +91,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -118,7 +119,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	// insert a correct block
-	blockchain, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(5000)),
 			fromKey,
@@ -132,7 +133,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -151,7 +152,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -176,7 +177,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 
 	// insert a correct block
-	blockchain, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -190,7 +191,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -209,7 +210,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -234,7 +235,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 
 	// insert a correct block
-	blockchain, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -248,7 +249,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -267,7 +268,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(3000)),
 			fromKey,
@@ -291,7 +292,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 
 	// insert a correct block
-	blockchain, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(1000)),
 			fromKey,
@@ -305,7 +306,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -327,7 +328,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(10)),
 			fromKey,
@@ -346,7 +347,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -364,7 +365,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal("should fail")
 	}
 
-	st, _, _ = blockchain.State()
+	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -378,7 +379,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ = blockchain.State()
+	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -397,7 +398,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(10)),
 			fromKey,
@@ -420,7 +421,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -434,7 +435,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ = blockchain.State()
+	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -467,7 +468,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(10)),
 			fromKey,
@@ -494,7 +495,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -508,7 +509,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ = blockchain.State()
+	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -546,7 +547,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, big.NewInt(10)),
 			fromKey,
@@ -573,7 +574,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -587,7 +588,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _, _ = blockchain.State()
+	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -669,15 +670,15 @@ type tx struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.Block, []types.Receipts, error) {
+func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV, []*types.Block, []types.Receipts, error) {
 	engine := ethash.NewFaker()
-	db := ethdb.NewMemDatabase()
+	db, boltDb := ethdb.NewMemDatabase2()
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()
 
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	blockchain.EnableReceipts(true)
 
@@ -715,10 +716,14 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.
 	})
 
 	if err != nil {
-		err = fmt.Errorf("block %d, error %v", blockNumber, err)
+		return nil, nil, nil, nil, fmt.Errorf("block %d, error %v", blockNumber, err)
 	}
 
-	return blockchain, blocks, receipts, err
+	kv, err1 := ethdb.NewBolt().WrapBoltDb(boltDb)
+	if err1 != nil {
+		return nil, nil, nil, nil, err1
+	}
+	return blockchain, kv, blocks, receipts, err
 }
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)

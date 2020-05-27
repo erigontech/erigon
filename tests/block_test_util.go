@@ -102,7 +102,7 @@ func (t *BlockTest) Run(_ bool) error {
 	}
 
 	// import pre accounts & construct test genesis block & state root
-	db := ethdb.NewMemDatabase()
+	db, boltDb := ethdb.NewMemDatabase2()
 	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
 	if err != nil {
 		return err
@@ -133,10 +133,11 @@ func (t *BlockTest) Run(_ bool) error {
 	if common.Hash(t.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	newDB, _, err := chain.State()
-	if err != nil {
-		return err
+	kv, err1 := ethdb.NewBolt().WrapBoltDb(boltDb)
+	if err1 != nil {
+		return err1
 	}
+	newDB := state.New(state.NewDbState(kv, chain.CurrentBlock().NumberU64()))
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}

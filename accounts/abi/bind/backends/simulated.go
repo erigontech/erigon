@@ -123,9 +123,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		panic(err)
 	}
 	blockchain.EnableReceipts(true)
-	var kv ethdb.KV
-	var err1 error
-	kv, err1 = ethdb.NewBolt().WrapBoltDb(boltdb)
+	kv, err1 := ethdb.NewBolt().WrapBoltDb(boltdb)
 	if err1 != nil {
 		panic(err1)
 	}
