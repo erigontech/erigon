@@ -64,6 +64,7 @@ var (
 type SimulatedBackend struct {
 	prependDb  ethdb.Database
 	database   ethdb.Database // In memory database to store our testing data
+	kv         ethdb.KV       // Same as database, but different interface
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
@@ -92,10 +93,15 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 	}
 	blockchain.EnableReceipts(true)
 
+	var kv ethdb.KV
+	if hasKV, ok := database.(ethdb.HasAbstractKV); ok {
+		kv = hasKV.AbstractKV()
+	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		prependDb:    database.MemCopy(),
 		database:     database,
+		kv:           kv,
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
@@ -108,20 +114,26 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
-	database := ethdb.NewMemDatabase()
+	database, boltdb := ethdb.NewMemDatabase2()
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
-		panic(fmt.Sprintf("%v", err))
+		panic(err)
 	}
 	blockchain.EnableReceipts(true)
-
+	var kv ethdb.KV
+	var err1 error
+	kv, err1 = ethdb.NewBolt().WrapBoltDb(boltdb)
+	if err1 != nil {
+		panic(err1)
+	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		prependDb:    database.MemCopy(),
 		database:     database,
+		kv:           kv,
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
@@ -185,11 +197,9 @@ func (b *SimulatedBackend) prependingState() *state.IntraBlockState {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, blockNumber *big.Int) (*state.IntraBlockState, error) {
 	if blockNumber == nil || blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) == 0 {
-		s, _, err := b.blockchain.State()
-		return s, err
+		return state.New(state.NewDbState(b.kv, b.blockchain.CurrentBlock().NumberU64())), nil
 	}
-	state, _, err := b.blockchain.StateAt(uint64(blockNumber.Int64()))
-	return state, err
+	return state.New(state.NewDbState(b.kv, uint64(blockNumber.Int64()))), nil
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -395,11 +405,8 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	state, _, err := b.blockchain.State()
-	if err != nil {
-		return nil, err
-	}
-	res, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), state)
+	s := state.New(state.NewDbState(b.kv, b.blockchain.CurrentBlock().NumberU64()))
+	res, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), s)
 	if err != nil {
 		return nil, err
 	}
