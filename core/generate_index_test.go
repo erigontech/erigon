@@ -18,7 +18,7 @@ import (
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
-	test := func(blocksNum int, isPlain bool, csBucket []byte) func(t *testing.T) {
+	test := func(blocksNum int, csBucket []byte) func(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			ig := NewIndexGenerator(db)
@@ -27,9 +27,9 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			if !ok {
 				t.Fatal("incorrect cs bucket")
 			}
-			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum, isPlain)
+			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum)
 
-			ig.ChangeSetBufSize = 1024
+			ig.ChangeSetBufSize = 1024*1024
 			err := ig.GenerateIndex(0, csBucket)
 			if err != nil {
 				t.Fatal(err)
@@ -45,21 +45,23 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			checkIndex(t, db, csInfo.IndexBucket, addrs[2], 0, expecedIndexes[string(addrs[2])][0])
 
 			//check last chunk
-			lastChunkCheck(t, db, addrs[0], expecedIndexes[string(addrs[0])][2])
-			lastChunkCheck(t, db, addrs[1], expecedIndexes[string(addrs[1])][1])
-			lastChunkCheck(t, db, addrs[2], expecedIndexes[string(addrs[2])][0])
+			lastChunkCheck(t, db,csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])][2])
+			lastChunkCheck(t, db,csInfo.IndexBucket, addrs[1], expecedIndexes[string(addrs[1])][1])
+			lastChunkCheck(t, db,csInfo.IndexBucket, addrs[2], expecedIndexes[string(addrs[2])][0])
 		}
 	}
 
-	t.Run("hashed state", test(2100, false, dbutils.AccountChangeSetBucket))
-	t.Run("plain state", test(2100, true, dbutils.PlainAccountChangeSetBucket))
+	t.Run("account hashed state", test(2100,  dbutils.AccountChangeSetBucket))
+	t.Run("account plain state", test(2100,  dbutils.PlainAccountChangeSetBucket))
+	t.Run("storage hashed state", test(2100, dbutils.StorageChangeSetBucket))
+	t.Run("storage plain state", test(2100,  dbutils.PlainStorageChangeSetBucket))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
 	//don't run it parallel
 	db := ethdb.NewMemDatabase()
-	hashes, expected := generateTestData(t, db, dbutils.AccountChangeSetBucket, 2100, false)
+	hashes, expected := generateTestData(t, db, dbutils.AccountChangeSetBucket, 2100)
 	indexBucket := dbutils.AccountsHistoryBucket
 	ig := NewIndexGenerator(db)
 	err := ig.GenerateIndex(0, dbutils.AccountChangeSetBucket)
@@ -254,10 +256,14 @@ func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
 	check(compositeKey3, 0, expected3)
 }
 
-func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int, isPlain bool) ([][]byte, map[string][][]uint64) { //nolint
+func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
 	csInfo, ok := mapper[string(csBucket)]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
+	}
+	var isPlain bool
+	if bytes.Equal(dbutils.PlainStorageChangeSetBucket,csBucket)||bytes.Equal(dbutils.PlainAccountChangeSetBucket,csBucket) {
+		isPlain=true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	if err != nil {
@@ -338,7 +344,7 @@ func checkIndex(t *testing.T, db ethdb.Database, bucket, addrHash []byte, chunkB
 	t.Helper()
 	b, err := db.GetIndexChunk(bucket, addrHash, chunkBlock)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(err, common.Bytes2Hex(addrHash), chunkBlock)
 	}
 	val, _, err := dbutils.HistoryIndexBytes(b).Decode()
 	if err != nil {
@@ -352,11 +358,11 @@ func checkIndex(t *testing.T, db ethdb.Database, bucket, addrHash []byte, chunkB
 	}
 }
 
-func lastChunkCheck(t *testing.T, db ethdb.Database, key []byte, expected []uint64) {
+func lastChunkCheck(t *testing.T, db ethdb.Database, bucket, key []byte, expected []uint64) {
 	t.Helper()
-	v, err := db.Get(dbutils.AccountsHistoryBucket, dbutils.CurrentChunkKey(key))
+	v, err := db.Get(bucket, dbutils.CurrentChunkKey(key))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(err, dbutils.CurrentChunkKey(key))
 	}
 
 	val, _, err := dbutils.HistoryIndexBytes(v).Decode()

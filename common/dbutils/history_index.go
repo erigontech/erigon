@@ -133,7 +133,6 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool, bool) {
 func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
 	blockNum, ok := hi.LastElement()
 	if !ok {
-		fmt.Println(hi)
 		return nil, errors.New("empty index")
 	}
 	return IndexChunkKey(key, blockNum), nil
@@ -183,10 +182,11 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	//plain state storage
 	case common.AddressLength + common.HashLength + common.IncarnationLength:
 		//remove incarnation and add block number
-		blockNumBytes = make([]byte, common.HashLength*2+8)
-		copy(blockNumBytes, key[:common.HashLength])
-		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
-		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], blockNumber)
+		blockNumBytes = make([]byte, common.AddressLength+common.HashLength+8)
+		copy(blockNumBytes, key[:common.AddressLength])
+		copy(blockNumBytes[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
+		binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength+common.HashLength:], blockNumber)
+		fmt.Println(common.Bytes2Hex(blockNumBytes))
 	default:
 		panic("unexpected length " + strconv.Itoa(len(key)))
 	}
@@ -198,6 +198,12 @@ func CompositeKeyWithoutIncarnation(key []byte) []byte {
 		kk := make([]byte, common.HashLength*2)
 		copy(kk, key[:common.HashLength])
 		copy(kk[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		return kk
+	}
+	if len(key) == common.AddressLength+common.HashLength+common.IncarnationLength {
+		kk := make([]byte, common.AddressLength+common.HashLength)
+		copy(kk, key[:common.AddressLength])
+		copy(kk[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
 		return kk
 	}
 	return key
