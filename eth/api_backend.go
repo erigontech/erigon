@@ -158,7 +158,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	ds := state.NewDbState(b.eth.ChainKV(), bn)
 	stateDb := state.New(ds)
 	return stateDb, header, nil
-	
+
 }
 
 func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.IntraBlockState, *types.Header, error) {
