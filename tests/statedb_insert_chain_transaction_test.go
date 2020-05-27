@@ -672,7 +672,7 @@ type tx struct {
 
 func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV, []*types.Block, []types.Receipts, error) {
 	engine := ethash.NewFaker()
-	db, boltDb := ethdb.NewMemDatabase2()
+	db := ethdb.NewMemDatabase()
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()
 
@@ -719,11 +719,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 		return nil, nil, nil, nil, fmt.Errorf("block %d, error %v", blockNumber, err)
 	}
 
-	kv, err1 := ethdb.NewBolt().WrapBoltDb(boltDb)
-	if err1 != nil {
-		return nil, nil, nil, nil, err1
-	}
-	return blockchain, kv, blocks, receipts, err
+	return blockchain, db.AbstractKV(), blocks, receipts, err
 }
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)
