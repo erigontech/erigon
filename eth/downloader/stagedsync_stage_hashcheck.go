@@ -338,7 +338,7 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 			}
 			runtime.ReadMemStats(&m)
 			log.Info(
-				"Commited index batch",
+				"Commited hashed state",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
 				"hashedKey", fmt.Sprintf("%x...", element.key[:4]),
