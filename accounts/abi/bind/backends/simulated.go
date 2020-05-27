@@ -147,6 +147,10 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 	return NewSimulatedBackendWithDatabase(ethdb.NewMemDatabase(), alloc, gasLimit)
 }
 
+func (b *SimulatedBackend) KV() ethdb.KV {
+	return b.kv
+}
+
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() error {
 	b.blockchain.Stop()

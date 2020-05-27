@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -124,7 +125,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
 
-	statedb, _, _ := sim.blockchain.State()
+	statedb := state.New(state.NewDbState(sim.KV(), sim.blockchain.CurrentBlock().NumberU64()))
 	bal := statedb.GetBalance(testAddr)
 	if bal.Cmp(expectedBal) != 0 {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
