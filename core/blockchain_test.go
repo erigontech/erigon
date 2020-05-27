@@ -1669,7 +1669,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _, _ := blockchain.State(); !st.Exist(theAddr) {
+	if st := state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64())); !st.Exist(theAddr) {
 		t.Error("expected account to exist")
 	}
 
@@ -1677,7 +1677,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _, _ := blockchain.State(); st.Exist(theAddr) {
+	if st := state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64())); st.Exist(theAddr) {
 		t.Error("account should not exist")
 	}
 
@@ -1685,7 +1685,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _, _ := blockchain.State(); st.Exist(theAddr) {
+	if st := state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64())); st.Exist(theAddr) {
 		t.Error("account should not exist")
 	}
 }
@@ -1744,19 +1744,19 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	_, err = blockchain.db.Commit()
 	assert.NoError(t, err)
 
-	st, _, err := blockchain.State()
+	st := state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64()))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 
-	st, _, err = blockchain.StateAt(0)
+	st = state.New(state.NewDbState(db.AbstractKV(), 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st, _, err = blockchain.StateAt(1)
+	st = state.New(state.NewDbState(db.AbstractKV(), 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st, _, err = blockchain.StateAt(2)
+	st = state.New(state.NewDbState(db.AbstractKV(), 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -2760,7 +2760,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if n, err := chain.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
-	statedb, _, _ := chain.State()
+	statedb := state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
 
 	// If all is correct, then slot 1 and 2 are zero
 	key1 := common.HexToHash("01")
@@ -2857,7 +2857,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if n, err := chain.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
-	statedb, _, _ := chain.State()
+	statedb := state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
 
 	// If all is correct, then both slots are zero
 	key1 := common.HexToHash("01")
@@ -3051,7 +3051,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		if n, err := chain.InsertChain(context.Background(), []*types.Block{block}); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 		}
-		statedb, _, _ := chain.State()
+		statedb := state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
 		// If all is correct, then slot 1 and 2 are zero
 		key1 := common.HexToHash("01")
 		var got uint256.Int
@@ -3196,7 +3196,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
-	statedb, _, _ := chain.State()
+	statedb := state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
 	if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 		t.Fatalf("Genesis err, got %v exp %v", got, exp)
 	}
@@ -3206,7 +3206,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		if _, err := chain.InsertChain(context.Background(), []*types.Block{blocks[0]}); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
-		statedb, _, _ = chain.State()
+		statedb = state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 		}

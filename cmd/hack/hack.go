@@ -1145,67 +1145,6 @@ func addPreimage(chaindata string, image common.Hash, preimage []byte) {
 	check(err)
 }
 
-func loadAccount() {
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
-	check(err)
-	defer ethDb.Close()
-	blockNr := uint64(*block)
-	blockSuffix := dbutils.EncodeTimestamp(blockNr)
-	accountBytes := common.FromHex(*account)
-	secKey := crypto.Keccak256(accountBytes)
-	accountData, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
-	check(err)
-	fmt.Printf("Account data: %x\n", accountData)
-	startkey := make([]byte, len(accountBytes)+32)
-	copy(startkey, accountBytes)
-	t := trie.New(common.Hash{})
-	count := 0
-	if err := ethDb.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, len(accountBytes)*8, blockNr, func(k, v []byte) (bool, error) {
-		key := k[len(accountBytes):]
-		//fmt.Printf("%x: %x\n", key, v)
-		t.Update(key, v)
-		count++
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Printf("After %d updates, reconstructed storage root: %x\n", count, t.Hash())
-	var keys [][]byte
-	if err := ethDb.Walk(dbutils.StorageHistoryBucket, accountBytes, len(accountBytes)*8, func(k, v []byte) (bool, error) {
-		if !bytes.HasSuffix(k, blockSuffix) {
-			return true, nil
-		}
-		key := k[:len(k)-len(blockSuffix)]
-		keys = append(keys, common.CopyBytes(key))
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Printf("%d keys updated\n", len(keys))
-	for _, k := range keys {
-		v, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
-		if err != nil {
-			fmt.Printf("for key %x err %v\n", k, err)
-		}
-		vOrig, err := ethDb.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, k, blockNr)
-		if err != nil {
-			fmt.Printf("for key %x err %v\n", k, err)
-		}
-		key := ([]byte(k))[len(accountBytes):]
-		if len(v) > 0 {
-			fmt.Printf("Updated %x: %x from %x\n", key, v, vOrig)
-			t.Update(key, v)
-			check(err)
-		} else {
-			fmt.Printf("Deleted %x from %x\n", key, vOrig)
-			t.Delete(key)
-		}
-	}
-	fmt.Printf("Updated storage root: %x\n", t.Hash())
-}
-
 func printBranches(block uint64) {
 	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/testnet/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
@@ -1994,23 +1933,6 @@ func getModifiedAccounts(chaindata string) {
 	fmt.Printf("Len(addrs)=%d\n", len(addrs))
 }
 
-func walkOverStorage(chaindata string) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
-	var startkey [32 + 8 + 32]byte
-	h, err := common.HashData(common.FromHex("0x109c4f2ccc82c4d77bde15f306707320294aea3f"))
-	check(err)
-	copy(startkey[:], h[:])
-	binary.BigEndian.PutUint64(startkey[32:], ^uint64(1))
-	fmt.Printf("startkey %x\n", startkey)
-	err = db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey[:], 8*(32+8), 50796, func(k []byte, v []byte) (bool, error) {
-		fmt.Printf("%x: %x\n", k, v)
-		return true, nil
-	})
-	check(err)
-	fmt.Printf("Success\n")
-}
-
 func resetState(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
@@ -2048,6 +1970,8 @@ func resetHistoryIndex(chaindata string) {
 	err = downloader.SaveStageProgress(db, downloader.AccountHistoryIndex, 0)
 	check(err)
 	err = downloader.SaveStageProgress(db, downloader.StorageHistoryIndex, 0)
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.HashCheck, 0)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2371,9 +2295,6 @@ func main() {
 	}
 	if *action == "modiAccounts" {
 		getModifiedAccounts(*chaindata)
-	}
-	if *action == "storage" {
-		walkOverStorage(*chaindata)
 	}
 	if *action == "slice" {
 		dbSlice(*chaindata, common.FromHex(*hash))

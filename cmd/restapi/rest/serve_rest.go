@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -19,7 +20,7 @@ func printError(name string, err error) {
 	}
 }
 
-func ServeREST(ctx context.Context, localAddress, remoteDBAddress string) error {
+func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, boltPath string) error {
 	r := gin.Default()
 	root := r.Group("api/v1")
 	allowCORS(root)
@@ -30,7 +31,15 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string) error 
 		}
 	})
 
-	db, err := ethdb.NewRemote().Path(remoteDBAddress).Open(ctx)
+	var db ethdb.KV
+	var err error
+	if remoteDBAddress != "" {
+		db, err = ethdb.NewRemote().Path(remoteDBAddress).Open(ctx)
+	} else if boltPath != "" {
+		db, err = ethdb.NewBolt().Path(boltPath).ReadOnly().Open(ctx)
+	} else {
+		err = fmt.Errorf("either remote db or bolt db must be specified")
+	}
 	if err != nil {
 		return err
 	}
@@ -38,6 +47,7 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string) error 
 	e := &apis.Env{
 		DB:              db,
 		RemoteDBAddress: remoteDBAddress,
+		BoltPath:        boltPath,
 	}
 
 	if err = apis.RegisterRemoteDBAPI(root.Group("remote-db"), e); err != nil {

@@ -121,11 +121,6 @@ func (m *mutation) IdealBatchSize() int {
 	return m.db.IdealBatchSize()
 }
 
-func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	m.panicOnEmptyDB()
-	return m.db.GetAsOf(bucket, hBucket, key, timestamp)
-}
-
 // WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
@@ -136,11 +131,6 @@ func (m *mutation) Walk(bucket, startkey []byte, fixedbits int, walker func([]by
 func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.MultiWalk(bucket, startkeys, fixedbits, walker)
-}
-
-func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	m.panicOnEmptyDB()
-	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 
 func (m *mutation) Delete(bucket, key []byte) error {
@@ -271,10 +261,6 @@ func (d *RWCounterDecorator) Get(bucket, key []byte) ([]byte, error) {
 	return d.Database.Get(bucket, key)
 }
 
-func (d *RWCounterDecorator) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	atomic.AddUint64(&d.DBCounterStats.GetAsOf, 1)
-	return d.Database.GetAsOf(bucket, hBucket, key, timestamp)
-}
 func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
 	atomic.AddUint64(&d.DBCounterStats.Has, 1)
 	return d.Database.Has(bucket, key)
@@ -286,10 +272,6 @@ func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits int, walker
 func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
 	return d.Database.MultiWalk(bucket, startkeys, fixedbits, walker)
-}
-func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	atomic.AddUint64(&d.DBCounterStats.WalkAsOf, 1)
-	return d.Database.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 func (d *RWCounterDecorator) Delete(bucket, key []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Delete, 1)

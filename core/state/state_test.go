@@ -32,6 +32,7 @@ import (
 
 type StateSuite struct {
 	db    ethdb.Database
+	kv    ethdb.KV // Same as db, but with a different interface
 	state *IntraBlockState
 	tds   *TrieDbState
 }
@@ -68,7 +69,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(s.db, 1).DefaultDump())
+	got := string(NewDumper(s.kv, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -99,7 +100,9 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	s.db = ethdb.NewMemDatabase()
+	db := ethdb.NewMemDatabase()
+	s.db = db
+	s.kv = db.AbstractKV()
 	s.tds = NewTrieDbState(common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
@@ -343,7 +346,7 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(db, 2).DefaultDump())
+	got := string(NewDumper(db.AbstractKV(), 2).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

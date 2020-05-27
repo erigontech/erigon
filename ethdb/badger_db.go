@@ -101,6 +101,10 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 	}, nil
 }
 
+func (db *BadgerDatabase) AbstractKV() KV {
+	return &badgerDB{badger: db.db}
+}
+
 // Close closes the database.
 func (db *BadgerDatabase) Close() {
 	if db.gcTicker != nil {
@@ -372,7 +376,7 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BadgerDatabase) IdealBatchSize() int {
-	return 100 * 1024
+	return 50 * 1024 * 1024
 }
 
 // DiskSize returns the total disk size of the database in bytes.
