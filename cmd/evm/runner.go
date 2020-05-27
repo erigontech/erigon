@@ -118,7 +118,6 @@ func runCmd(ctx *cli.Context) error {
 		tracer        vm.Tracer
 		debugLogger   *vm.StructLogger
 		statedb       *state.IntraBlockState
-		kv            ethdb.KV
 		chainConfig   *params.ChainConfig
 		sender        = common.BytesToAddress([]byte("sender"))
 		receiver      = common.BytesToAddress([]byte("receiver"))
