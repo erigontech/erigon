@@ -14,7 +14,6 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
-	"path"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -2171,57 +2170,6 @@ func testSeek(chaindata string) {
 	}
 }
 
-func testIndexFileCompress(chaindata string) {
-	files, err := ioutil.ReadDir(chaindata)
-	if err != nil {
-		panic(err)
-	}
-	saving := 0
-	for _, file := range files {
-		var reader io.Reader
-		if f, err := os.Open(path.Join(chaindata, file.Name())); err == nil {
-			reader = bufio.NewReader(f)
-			//nolint:errcheck
-			defer f.Close()
-		} else {
-			panic(err)
-		}
-		var keyLength int
-		if strings.HasPrefix(file.Name(), "account") {
-			keyLength = 32
-		} else {
-			keyLength = 72
-		}
-		keyBuf := make([]byte, keyLength)
-		for {
-			if n, err := io.ReadFull(reader, keyBuf); err != nil || n != keyLength {
-				if err == io.EOF {
-					break
-				}
-				panic(fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err))
-			}
-			// Read number of items for this key
-			var count int
-			var nbytes [8]byte
-			if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
-				count = int(binary.BigEndian.Uint64(nbytes[:]))
-			} else {
-				panic(fmt.Errorf("reading from account buffer file: %d %v", n, err))
-			}
-			for i := 0; i < count; i++ {
-				//var b uint64
-				if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
-					//b = binary.BigEndian.Uint64(nbytes[:])
-				} else {
-					panic(fmt.Errorf("reading from account buffer file: %d %v", n, err))
-				}
-				saving += 4
-			}
-		}
-	}
-	fmt.Printf("Total saving: %d\n", saving)
-}
-
 func main() {
 	var (
 		ostream log.Handler
@@ -2365,8 +2313,5 @@ func main() {
 	}
 	if *action == "seek" {
 		testSeek(*chaindata)
-	}
-	if *action == "indexFileCompress" {
-		testIndexFileCompress(*chaindata)
 	}
 }
