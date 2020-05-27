@@ -198,7 +198,7 @@ func (dw *dbWrapper) pushObject(vm *duktape.Context) {
 
 	// Push the wrapper for statedb.GetBalance
 	vm.PushGoFunction(func(ctx *duktape.Context) int {
-		pushBigInt(dw.db.GetBalance(common.BytesToAddress(popSlice(ctx))), ctx)
+		pushBigInt(dw.db.GetBalance(common.BytesToAddress(popSlice(ctx))).ToBig(), ctx)
 		return 1
 	})
 	vm.PutPropString(obj, "getBalance")
@@ -271,7 +271,7 @@ func (cw *contractWrapper) pushObject(vm *duktape.Context) {
 
 	// Push the wrapper for contract.Value
 	vm.PushGoFunction(func(ctx *duktape.Context) int {
-		pushBigInt(cw.contract.Value(), ctx)
+		pushBigInt(cw.contract.Value().ToBig(), ctx)
 		return 1
 	})
 	vm.PutPropString(obj, "getValue")

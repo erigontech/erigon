@@ -251,37 +251,37 @@ func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) 
 
 // AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
-func (so *stateObject) AddBalance(amount *big.Int) {
+func (so *stateObject) AddBalance(amount *uint256.Int) {
 	// EIP158: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
-	if amount.Sign() == 0 {
+	if amount.IsZero() {
 		if so.empty() {
 			so.touch()
 		}
 
 		return
 	}
-	so.SetBalance(new(big.Int).Add(so.Balance(), amount))
+	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount))
 }
 
 // SubBalance removes amount from so's balance.
 // It is used to remove funds from the origin account of a transfer.
-func (so *stateObject) SubBalance(amount *big.Int) {
-	if amount.Sign() == 0 {
+func (so *stateObject) SubBalance(amount *uint256.Int) {
+	if amount.IsZero() {
 		return
 	}
-	so.SetBalance(new(big.Int).Sub(so.Balance(), amount))
+	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount))
 }
 
-func (so *stateObject) SetBalance(amount *big.Int) {
+func (so *stateObject) SetBalance(amount *uint256.Int) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
-		prev:    new(big.Int).Set(&so.data.Balance),
+		prev:    so.data.Balance,
 	})
 	so.setBalance(amount)
 }
 
-func (so *stateObject) setBalance(amount *big.Int) {
+func (so *stateObject) setBalance(amount *uint256.Int) {
 	so.data.Balance.Set(amount)
 	so.data.Initialised = true
 }
@@ -362,7 +362,7 @@ func (so *stateObject) CodeHash() []byte {
 	return so.data.CodeHash[:]
 }
 
-func (so *stateObject) Balance() *big.Int {
+func (so *stateObject) Balance() *uint256.Int {
 	return &so.data.Balance
 }
 

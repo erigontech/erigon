@@ -288,7 +288,7 @@ func opAddress(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 func opBalance(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	slot := callContext.stack.peek()
 	address := common.Address(slot.Bytes20())
-	slot.SetFromBig(interpreter.evm.IntraBlockState.GetBalance(address))
+	slot.Set(interpreter.evm.IntraBlockState.GetBalance(address))
 	return nil, nil
 }
 
@@ -303,8 +303,7 @@ func opCaller(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 }
 
 func opCallValue(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	v, _ := uint256.FromBig(callContext.contract.value)
-	callContext.stack.push(v)
+	callContext.stack.push(callContext.contract.value)
 	return nil, nil
 }
 
@@ -591,7 +590,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 	}
 
 	callContext.contract.UseGas(gas)
-	res, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, value.ToBig())
+	res, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, &value)
 
 	stackValue := size
 
@@ -626,7 +625,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	// Apply EIP150
 	gas -= gas / 64
 	callContext.contract.UseGas(gas)
-	res, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, endowment.ToBig(), salt.ToBig())
+	res, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, &endowment, salt.ToBig())
 
 	stackValue := salt
 
@@ -658,7 +657,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
-	ret, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, value.ToBig())
+	ret, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, &value)
 	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
@@ -686,7 +685,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	if value.Sign() != 0 {
 		gas += params.CallStipend
 	}
-	ret, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, value.ToBig())
+	ret, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, &value)
 	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}

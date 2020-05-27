@@ -48,7 +48,7 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 	tr := New(common.Hash{})
 
 	account := accounts.NewAccount()
-	account.Balance.SetInt64(1 * 1000 * 1000)
+	account.Balance.SetUint64(1 * 1000 * 1000)
 
 	tr.UpdateAccount([]byte("ABCD0001"), &account)
 

@@ -216,7 +216,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	// - the coinbase suicided, or
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
-	statedb.AddBalance(block.Coinbase(), new(big.Int))
+	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
@@ -245,7 +245,8 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		statedb.SetBalance(addr, a.Balance)
+		balance, _ := uint256.FromBig(a.Balance)
+		statedb.SetBalance(addr, balance)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt().SetBytes(v.Bytes())

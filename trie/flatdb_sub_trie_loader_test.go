@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -201,7 +202,7 @@ func TestTwoAccounts(t *testing.T) {
 	key1 := common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b")
 	acc := accounts.NewAccount()
 	acc.Initialised = true
-	acc.Balance.SetInt64(10000000000)
+	acc.Balance.SetUint64(10000000000)
 	acc.CodeHash.SetBytes(common.Hex2Bytes("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
 	err := writeAccount(db, common.BytesToHash(key1), acc)
 	require.NoError(err)
@@ -209,7 +210,7 @@ func TestTwoAccounts(t *testing.T) {
 	key2 := common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6")
 	acc2 := accounts.NewAccount()
 	acc2.Initialised = true
-	acc2.Balance.SetInt64(100)
+	acc2.Balance.SetUint64(100)
 	acc2.CodeHash.SetBytes(common.Hex2Bytes("4f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"))
 	err = writeAccount(db, common.BytesToHash(key2), acc2)
 	require.NoError(err)
@@ -288,7 +289,7 @@ func TestApiDetails(t *testing.T) {
 					Nonce:       uint64(i*10 + j),
 					Initialised: true,
 					CodeHash:    EmptyCodeHash,
-					Balance:     *big.NewInt(0),
+					Balance:     *uint256.NewInt(),
 					Incarnation: 2, // all acc have 2nd inc, but some storage are on 1st inc
 				}
 				require.NoError(writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a))
@@ -455,7 +456,7 @@ func TestStorageSubTrieLoader2(t *testing.T) {
 		Nonce:       uint64(1),
 		Initialised: true,
 		CodeHash:    EmptyCodeHash,
-		Balance:     *big.NewInt(0),
+		Balance:     *uint256.NewInt(),
 		Incarnation: 1,
 		Root:        EmptyRoot,
 	}
@@ -475,7 +476,7 @@ func TestStorageSubTrieLoader2(t *testing.T) {
 		Nonce:       uint64(1),
 		Initialised: true,
 		CodeHash:    EmptyCodeHash,
-		Balance:     *big.NewInt(0),
+		Balance:     *uint256.NewInt(),
 		Incarnation: 1,
 		Root:        common.HexToHash(expectedAccRoot2),
 	}
@@ -496,7 +497,7 @@ func TestStorageSubTrieLoader2(t *testing.T) {
 		Nonce:       uint64(1),
 		Initialised: true,
 		CodeHash:    EmptyCodeHash,
-		Balance:     *big.NewInt(0),
+		Balance:     *uint256.NewInt(),
 		Incarnation: 2,
 		Root:        common.HexToHash(expectedAccRoot3),
 	}
@@ -535,7 +536,7 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	ks1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	acc1 := accounts.NewAccount()
-	acc1.Balance.SetInt64(12345)
+	acc1.Balance.SetUint64(12345)
 	acc1.Incarnation = 1
 	acc1.Initialised = true
 	tr.UpdateAccount(kAcc1, &acc1)
@@ -545,7 +546,7 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	ks2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	ks22 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000002")
 	acc2 := accounts.NewAccount()
-	acc2.Balance.SetInt64(6789)
+	acc2.Balance.SetUint64(6789)
 	acc2.Incarnation = 1
 	acc2.Initialised = true
 	tr.UpdateAccount(kAcc2, &acc2)

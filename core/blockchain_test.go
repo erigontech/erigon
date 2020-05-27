@@ -3197,7 +3197,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
 	statedb := state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
-	if got, exp := statedb.GetBalance(aa), big.NewInt(100000); got.Cmp(exp) != 0 {
+	if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 		t.Fatalf("Genesis err, got %v exp %v", got, exp)
 	}
 	// First block tries to create, but fails
@@ -3207,7 +3207,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
 		statedb = state.New(state.NewDbState(diskdb.AbstractKV(), chain.CurrentBlock().NumberU64()))
-		if got, exp := statedb.GetBalance(aa), big.NewInt(100000); got.Cmp(exp) != 0 {
+		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 		}
 	}

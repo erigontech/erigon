@@ -145,7 +145,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
 		}
 		account := DumpAccount{
-			Balance:  acc.Balance.String(),
+			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
 			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
 			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),

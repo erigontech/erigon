@@ -29,6 +29,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+	cli "github.com/urfave/cli"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/evm/internal/compiler"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -39,7 +42,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	cli "github.com/urfave/cli"
 )
 
 var runCommand = cli.Command{
@@ -200,12 +202,13 @@ func runCmd(ctx *cli.Context) error {
 	if genesisConfig.GasLimit != 0 {
 		initialGas = genesisConfig.GasLimit
 	}
+	value, _ := uint256.FromBig(utils.GlobalBig(ctx, ValueFlag.Name))
 	runtimeConfig := runtime.Config{
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    initialGas,
 		GasPrice:    utils.GlobalBig(ctx, PriceFlag.Name),
-		Value:       utils.GlobalBig(ctx, ValueFlag.Name),
+		Value:       value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
 		Coinbase:    genesisConfig.Coinbase,

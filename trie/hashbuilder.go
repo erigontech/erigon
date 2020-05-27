@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
+
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
-	"golang.org/x/crypto/sha3"
 )
 
 const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
@@ -191,7 +192,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSeria
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -260,7 +261,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *big.Int, 
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}

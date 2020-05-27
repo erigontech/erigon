@@ -31,7 +31,7 @@ func (e *Env) GetAccount(c *gin.Context) {
 func jsonifyAccount(account *accounts.Account) map[string]interface{} {
 	result := map[string]interface{}{
 		"nonce":     account.Nonce,
-		"balance":   account.Balance.String(),
+		"balance":   account.Balance.ToBig().String(),
 		"root_hash": account.Root.Hex(),
 		"code_hash": account.CodeHash.Hex(),
 		"implementation": map[string]interface{}{

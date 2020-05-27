@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -605,7 +606,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	}
 }
 
-var frhsAmnt = big.NewInt(10000)
+var frhsAmnt = uint256.NewInt().SetUint64(10000)
 var addrHash = make([]common.Hash, 5)
 
 func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer) {
@@ -631,24 +632,24 @@ func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehos
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 1:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 2:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 3:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 4:
 			// top up account #3
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}

@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -109,10 +111,10 @@ var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
 func TestNewSimulatedBackend(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := big.NewInt(10000000000)
+	expectedBal := uint256.NewInt().SetUint64(10000000000)
 	sim := NewSimulatedBackend(
 		core.GenesisAlloc{
-			testAddr: {Balance: expectedBal},
+			testAddr: {Balance: expectedBal.ToBig()},
 		}, 10000000,
 	)
 	defer sim.Close()
@@ -127,7 +129,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 
 	statedb := state.New(state.NewDbState(sim.KV(), sim.blockchain.CurrentBlock().NumberU64()))
 	bal := statedb.GetBalance(testAddr)
-	if bal.Cmp(expectedBal) != 0 {
+	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
 	}
 }
@@ -152,10 +154,10 @@ func TestSimulatedBackend_AdjustTime(t *testing.T) {
 
 func TestSimulatedBackend_BalanceAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := big.NewInt(10000000000)
+	expectedBal := uint256.NewInt().SetUint64(10000000000)
 	sim := NewSimulatedBackend(
 		core.GenesisAlloc{
-			testAddr: {Balance: expectedBal},
+			testAddr: {Balance: expectedBal.ToBig()},
 		}, 10000000,
 	)
 	defer sim.Close()
@@ -166,7 +168,7 @@ func TestSimulatedBackend_BalanceAt(t *testing.T) {
 		t.Error(err)
 	}
 
-	if bal.Cmp(expectedBal) != 0 {
+	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
 	}
 }

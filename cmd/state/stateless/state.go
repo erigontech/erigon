@@ -18,16 +18,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/bolt"
+	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/drawing"
+	"github.com/wcharczuk/go-chart/util"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
-	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-
-	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -36,10 +35,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
+	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/drawing"
-	"github.com/wcharczuk/go-chart/util"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -1780,7 +1781,7 @@ func dustEOA() {
 	defer db.Close()
 	count := 0
 	eoas := 0
-	maxBalance := big.NewInt(1000000000000000000)
+	maxBalance := uint256.NewInt().SetUint64(1000000000000000000)
 	// Go through the current state
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account

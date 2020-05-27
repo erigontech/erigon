@@ -74,14 +74,14 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	if balance := st.GetBalance(from); balance.Cmp(big.NewInt(1000000000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(1000000000))
+	if balance := st.GetBalance(from); balance.Uint64() != 1000000000 {
+		t.Fatalf("got %v, expected %v", balance, 1000000000)
 	}
-	if balance := st.GetBalance(data.addresses[1]); balance.Cmp(big.NewInt(999995000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(5000))
+	if balance := st.GetBalance(data.addresses[1]); balance.Uint64() != 999995000 {
+		t.Fatalf("got %v, expected %v", balance, 999995000)
 	}
-	if balance := st.GetBalance(to); balance.Cmp(big.NewInt(5000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(5000))
+	if balance := st.GetBalance(to); balance.Uint64() != 5000 {
+		t.Fatalf("got %v, expected %v", balance, 5000)
 	}
 }
 
@@ -138,11 +138,11 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	if balance := st.GetBalance(from); balance.Cmp(big.NewInt(999995000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(999995000))
+	if balance := st.GetBalance(from); balance.Uint64() != 999995000 {
+		t.Fatalf("got %v, expected %v", balance, 999995000)
 	}
-	if balance := st.GetBalance(to); balance.Cmp(big.NewInt(5000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(5000))
+	if balance := st.GetBalance(to); balance.Uint64() != 5000 {
+		t.Fatalf("got %v, expected %v", balance, 5000)
 	}
 }
 
@@ -196,11 +196,11 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	if balance := st.GetBalance(from); balance.Cmp(big.NewInt(999999000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(999999000))
+	if balance := st.GetBalance(from); balance.Uint64() != 999999000 {
+		t.Fatalf("got %v, expected %v", balance, 999999000)
 	}
-	if balance := st.GetBalance(to); balance.Cmp(big.NewInt(1000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(1000))
+	if balance := st.GetBalance(to); balance.Uint64() != 1000 {
+		t.Fatalf("got %v, expected %v", balance, 1000)
 	}
 }
 
@@ -254,11 +254,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	if balance := st.GetBalance(from); balance.Cmp(big.NewInt(2000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(2000))
+	if balance := st.GetBalance(from); balance.Uint64() != 2000 {
+		t.Fatalf("got %v, expected %v", balance, 2000)
 	}
-	if balance := st.GetBalance(to); balance.Cmp(big.NewInt(1000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(1000))
+	if balance := st.GetBalance(to); balance.Uint64() != 1000 {
+		t.Fatalf("got %v, expected %v", balance, 1000)
 	}
 }
 
@@ -311,11 +311,11 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	if balance := st.GetBalance(from); balance.Cmp(big.NewInt(2000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(2000))
+	if balance := st.GetBalance(from); balance.Uint64() != 2000 {
+		t.Fatalf("got %v, expected %v", balance, 2000)
 	}
-	if balance := st.GetBalance(to); balance.Cmp(big.NewInt(1000)) != 0 {
-		t.Fatalf("got %v, expected %v", balance, big.NewInt(1000))
+	if balance := st.GetBalance(to); balance.Uint64() != 1000 {
+		t.Fatalf("got %v, expected %v", balance, 1000)
 	}
 }
 

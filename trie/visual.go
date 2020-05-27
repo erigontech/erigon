@@ -100,7 +100,7 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 	`, hex, concat(hex, n.Key...))
 			}
 		} else if a, ok := n.Val.(*accountNode); ok {
-			balance := float64(big.NewInt(0).Div(&a.Balance, big.NewInt(1000000000000000)).Uint64()) / 1000.0
+			balance := float64(big.NewInt(0).Div(a.Balance.ToBig(), big.NewInt(1000000000000000)).Uint64()) / 1000.0
 			visual.Circle(w, fmt.Sprintf("e_%x", concat(hex, n.Key...)), fmt.Sprintf("%d \u039E%.3f", a.Nonce, balance), true)
 			accountHex := concat(hex, n.Key...)
 			fmt.Fprintf(w,

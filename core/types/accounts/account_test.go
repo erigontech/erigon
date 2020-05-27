@@ -1,8 +1,9 @@
 package accounts
 
 import (
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
@@ -13,7 +14,7 @@ func TestEmptyAccount(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       100,
-		Balance:     *new(big.Int),
+		Balance:     *new(uint256.Int),
 		Root:        emptyRoot,     // extAccount doesn't have Root value
 		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 5,
@@ -62,7 +63,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(big.Int).SetInt64(1000),
+		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		Incarnation: 4,
@@ -82,12 +83,12 @@ func TestAccountEncodeWithCode(t *testing.T) {
 
 func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	a := Account{
-		Initialised:    true,
-		Nonce:          2,
-		Balance:        *new(big.Int).SetInt64(1000),
-		Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-		Incarnation:    5,
+		Initialised: true,
+		Nonce:       2,
+		Balance:     *new(uint256.Int).SetUint64(1000),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Incarnation: 5,
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -106,7 +107,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(big.Int).SetInt64(1000),
+		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        emptyRoot,     // extAccount doesn't have Root value
 		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 5,
@@ -124,15 +125,14 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	isAccountsEqual(t, a, decodedAccount)
 }
 
-
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
-		Initialised:    true,
-		Nonce:          0,
-		Balance:        *big.NewInt(0),
-		Root:           common.HexToHash("123"),
-		CodeHash:       common.HexToHash("123"),
-		Incarnation:    1,
+		Initialised: true,
+		Nonce:       0,
+		Balance:     *uint256.NewInt(),
+		Root:        common.HexToHash("123"),
+		CodeHash:    common.HexToHash("123"),
+		Incarnation: 1,
 	}
 	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
@@ -147,10 +147,10 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 }
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
-		Initialised:    true,
-		Nonce:          0,
-		Balance:        *big.NewInt(0),
-		Incarnation:    1,
+		Initialised: true,
+		Nonce:       0,
+		Balance:     *uint256.NewInt(),
+		Incarnation: 1,
 	}
 	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
@@ -192,4 +192,3 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
 	}
 }
-

@@ -262,7 +262,7 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		if !bytes.Equal(code2, acct.Code) {
 			return fmt.Errorf("account code mismatch for addr: %s want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
 		}
-		if balance2.Cmp(acct.Balance) != 0 {
+		if balance2.ToBig().Cmp(acct.Balance) != 0 {
 			return fmt.Errorf("account balance mismatch for addr: %s, want: %d, have: %d", addr, acct.Balance, balance2)
 		}
 		if nonce2 != acct.Nonce {

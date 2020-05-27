@@ -27,6 +27,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -48,9 +53,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
-	"github.com/urfave/cli"
 )
 
 var (
@@ -226,7 +228,7 @@ func (e *NoRewardEngine) Prepare(chain consensus.ChainReader, header *types.Head
 
 func (e *NoRewardEngine) accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
 	// Simply touch miner and uncle coinbase accounts
-	reward := big.NewInt(0)
+	reward := uint256.NewInt()
 	for _, uncle := range uncles {
 		state.AddBalance(uncle.Coinbase, reward)
 	}
@@ -720,7 +722,7 @@ func (api *RetestethAPI) GetBalance(_ context.Context, address common.Address, b
 	//fmt.Printf("GetBalance %x, block %d\n", address, blockNr)
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb := state.New(state.NewDbState(api.kv, header.Number.Uint64()))
-	return (*math.HexOrDecimal256)(statedb.GetBalance(address)), nil
+	return (*math.HexOrDecimal256)(statedb.GetBalance(address).ToBig()), nil
 }
 
 func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {

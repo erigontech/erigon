@@ -134,19 +134,20 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 func (t *VMTest) exec(state vm.IntraBlockState, vmconfig vm.Config) ([]byte, uint64, error) {
 	evm := t.newEVM(state, vmconfig)
 	e := t.json.Exec
-	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, e.Value)
+	value, _ := uint256.FromBig(e.Value)
+	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, value)
 }
 
 func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 	initialCall := true
-	canTransfer := func(db vm.IntraBlockState, address common.Address, amount *big.Int) bool {
+	canTransfer := func(db vm.IntraBlockState, address common.Address, amount *uint256.Int) bool {
 		if initialCall {
 			initialCall = false
 			return true
 		}
 		return core.CanTransfer(db, address, amount)
 	}
-	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *big.Int) {}
+	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int) {}
 	context := vm.Context{
 		CanTransfer: canTransfer,
 		Transfer:    transfer,

@@ -790,14 +790,14 @@ func TestReproduceCrash(t *testing.T) {
 	}
 	// Start the 3rd transaction
 	tds.StartNewBuffer()
-	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	tds.StartNewBuffer()
-	intraBlockState.SubBalance(contract, big.NewInt(1000000000))
+	intraBlockState.SubBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
@@ -896,7 +896,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 	balanceAfter := st.GetBalance(address)
-	gasSpent := big.NewInt(0).Sub(balanceBefore, balanceAfter)
+	gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
 	expectedGasSpent := big.NewInt(192245) // In the incorrect version, it is 179645
 	if gasSpent.Cmp(expectedGasSpent) != 0 {
 		t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
@@ -1186,7 +1186,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, oldCode)
-	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1234,7 +1234,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1291,7 +1291,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
