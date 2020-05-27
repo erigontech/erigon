@@ -114,7 +114,7 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
-	database, boltdb := ethdb.NewMemDatabase2()
+	database := ethdb.NewMemDatabase()
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
@@ -123,15 +123,11 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		panic(err)
 	}
 	blockchain.EnableReceipts(true)
-	kv, err1 := ethdb.NewBolt().WrapBoltDb(boltdb)
-	if err1 != nil {
-		panic(err1)
-	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		prependDb:    database.MemCopy(),
 		database:     database,
-		kv:           kv,
+		kv:           database.AbstractKV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
