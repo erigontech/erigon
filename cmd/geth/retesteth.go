@@ -784,7 +784,7 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 		dbstate = state.NewDbState(api.kv, header.Number.Uint64())
 	} else {
 		var err error
-		_, _, _, dbstate, err = eth.ComputeTxEnv(ctx, api.blockchain, api.blockchain.Config(), api.blockchain, api.blockchain.ChainDb(), block.Hash(), txIndex)
+		_, _, _, dbstate, err = eth.ComputeTxEnv(ctx, api.blockchain, api.blockchain.Config(), api.blockchain, api.kv, block.Hash(), txIndex)
 		if err != nil {
 			return StorageRangeResult{}, err
 		}

@@ -433,7 +433,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 	if parent == nil {
 		return nil, fmt.Errorf("parent %#x not found", block.ParentHash())
 	}
-	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainDb(), parent)
+	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainKV(), parent)
 	// Execute all the transaction contained within the block concurrently
 	var (
 		signer = types.MakeSigner(api.eth.blockchain.Config(), block.Number())
@@ -520,7 +520,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 			reexec = *config.Reexec
 		}
 	*/
-	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainDb(), parent)
+	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainKV(), parent)
 	// Retrieve the tracing configurations, or use default values
 	var (
 		logConfig vm.LogConfig
@@ -608,14 +608,11 @@ func containsTx(block *types.Block, hash common.Hash) bool {
 // computeIntraBlockState retrieves the state database associated with a certain block.
 // If no state is locally available for the given block, a number of blocks are
 // attempted to be reexecuted to generate the desired state.
-func ComputeIntraBlockState(chainDb ethdb.Getter, block *types.Block) (*state.IntraBlockState, *state.DbState) {
+func ComputeIntraBlockState(chainKV ethdb.KV, block *types.Block) (*state.IntraBlockState, *state.DbState) {
 	// If we have the state fully available, use that
-	if hasKV, ok := chainDb.(ethdb.HasAbstractKV); ok {
-		dbstate := state.NewDbState(hasKV.AbstractKV(), block.NumberU64())
-		statedb := state.New(dbstate)
-		return statedb, dbstate
-	}
-	panic(fmt.Errorf("database %T does not support AbstracKV", chainDb))
+	dbstate := state.NewDbState(chainKV, block.NumberU64())
+	statedb := state.New(dbstate)
+	return statedb, dbstate
 }
 
 // TraceTransaction returns the structured logs created during the execution of EVM
@@ -626,7 +623,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainDb(), blockHash, index)
+	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainKV(), blockHash, index)
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +702,7 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainDb ethdb.Getter, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainKV ethdb.KV, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
 	// Create the parent state database
 	block := blockGetter.GetBlockByHash(blockHash)
 	if block == nil {
@@ -716,7 +713,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 
-	statedb, dbstate := ComputeIntraBlockState(chainDb, parent)
+	statedb, dbstate := ComputeIntraBlockState(chainKV, parent)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, vm.Context{}, statedb, dbstate, nil

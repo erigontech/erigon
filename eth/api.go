@@ -298,10 +298,7 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 	if block == nil {
 		return state.Dump{}, fmt.Errorf("block #%d not found", blockNr)
 	}
-	if hasKV, ok := api.eth.ChainDb().(ethdb.HasAbstractKV); ok {
-		return state.NewDumper(hasKV.AbstractKV(), block.NumberU64()).DefaultRawDump(), nil
-	}
-	return state.Dump{}, fmt.Errorf("database %T does not support AbstracKV", api.eth.ChainDb())
+	return state.NewDumper(api.eth.ChainKV(), block.NumberU64()).DefaultRawDump(), nil
 }
 
 // PrivateDebugAPI is the collection of Ethereum full node APIs exposed over
@@ -381,11 +378,8 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
 		maxResults = AccountRangeMaxResults
 	}
-	if hasKV, ok := api.eth.ChainDb().(ethdb.HasAbstractKV); ok {
-		dumper := state.NewDumper(hasKV.AbstractKV(), blockNumber)
-		return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
-	}
-	return state.IteratorDump{}, fmt.Errorf("database %T does not support AbstracKV", api.eth.ChainDb())
+	dumper := state.NewDumper(api.eth.ChainKV(), blockNumber)
+	return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -403,7 +397,7 @@ type StorageEntry struct {
 
 // StorageRangeAt returns the storage at the given block height and transaction index.
 func (api *PrivateDebugAPI) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, dbstate, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainDb(), blockHash, txIndex)
+	_, _, _, dbstate, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainKV(), blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
