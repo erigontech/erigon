@@ -235,7 +235,7 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 
 func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
 	// Initiate Debug protocol
-	log.Info("Initialising Debug protocol", "versions", FirehoseVersions)
+	log.Info("Initialising Debug protocol", "versions", DebugVersions)
 	return p2p.Protocol{
 		Name:    DebugName,
 		Version: DebugVersions[0],
@@ -264,8 +264,7 @@ func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
 }
 
 func (pm *ProtocolManager) makeMgrProtocol() p2p.Protocol {
-	// Initiate Debug protocol
-	log.Info("Initialising Debug protocol", "versions", FirehoseVersions)
+	log.Info("Initialising Merry-Go-Round protocol", "versions", MGRVersions)
 	return p2p.Protocol{
 		Name:    MGRName,
 		Version: MGRVersions[0],
