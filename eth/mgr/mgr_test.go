@@ -33,5 +33,6 @@ func TestScheduleProperties(t *testing.T) {
 		}
 
 		prevTick = tick
+		block = tick.ToBlock + 1
 	}
 }
