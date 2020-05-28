@@ -134,7 +134,7 @@ func TestTrieSubTrieLoader(t *testing.T) {
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	_, err := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */,
+	_, err := resolver.LoadSubTries(db, 0, rs, nil, /* HashCollector */
 		[][]byte{common.Hex2Bytes("aaaaa"), common.Hex2Bytes("bb")}, []int{40, 8}, false)
 	require.NoError(err, "resolve error")
 }

@@ -43,7 +43,7 @@ type structInfoReceiver interface {
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
 type HashCollector interface {
-	 Collect(keyHex []byte, hash []byte) error
+	Collect(keyHex []byte, hash []byte) error
 }
 
 func calcPrecLen(groups []uint16) int {

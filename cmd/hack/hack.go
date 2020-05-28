@@ -2340,7 +2340,7 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	rl := trie.NewRetainList(0)
-	r.defaultReceiver.Reset(rl, nil /* HashCollector */,  false)
+	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
 	subTries, err := loader.LoadSubTries()
 	if err != nil {
