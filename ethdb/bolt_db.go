@@ -197,6 +197,25 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
+
+func (db *BoltDatabase) GetLastKey(bucket []byte) ([]byte, error) {
+	var last []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b!=nil {
+			l,_:=b.Cursor().Last()
+			last = common.CopyBytes(l)
+		}
+
+		return nil
+	})
+	if last == nil {
+		return nil, ErrKeyNotFound
+	}
+	return last, err
+}
+
+
 // GetIndexChunk returns proper index chunk or return error if index is not created.
 // key must contain inverted block number in the end
 func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {

@@ -29,7 +29,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			}
 			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum)
 
-			ig.ChangeSetBufSize = 1024*1024
+			ig.ChangeSetBufSize = 1024
 			err := ig.GenerateIndex(0, csBucket)
 			if err != nil {
 				t.Fatal(err)
@@ -151,7 +151,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 func TestName(t *testing.T) {
 	db:=ethdb.NewMemDatabase()
 	_,_=generateTestData(t,db,dbutils.AccountChangeSetBucket,3000)
-	db.GetChangeSetByBlock()
+	//db.GetChangeSetByBlock()
 }
 
 func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
@@ -358,8 +358,8 @@ func checkIndex(t *testing.T, db ethdb.Database, bucket, addrHash []byte, chunkB
 	}
 
 	if !reflect.DeepEqual(val, expected) {
-		fmt.Println(val)
-		fmt.Println(expected)
+		fmt.Println("get",val)
+		fmt.Println("expected", expected)
 		t.Fatal()
 	}
 }

@@ -3,15 +3,20 @@ package core
 import (
 	"bufio"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"io/ioutil"
 	"os"
 	"runtime"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -93,71 +98,128 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 	log.Info("Index generation started", "from", blockNum, "csbucket", string(changeSetBucket))
 
 	var m runtime.MemStats
-	var bufferFileNames []string
-	changesets := make([]byte, ig.ChangeSetBufSize) // 256 Mb buffer by default
-	var offsets []int
-	var blockNums []uint64
-	var done = false
+	var mtx sync.Mutex
+	var bufferFileNames []struct{
+		name string
+		id uint64
+	}
+	defer func() {
+		mtx.Lock()
+		for _,filename:=range bufferFileNames {
+			//nolint:errcheck
+			os.Remove(filename.name)
+		}
+		mtx.Unlock()
+	}()
+
 	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
-	var fill, walk, wri time.Duration
-	for !done {
-		cycle := time.Now()
-		if newDone, newBlockNum, newOffsets, newBlockNums, err := ig.fillChangeSetBuffer(changeSetBucket, blockNum, changesets, offsets, blockNums); err == nil {
-			done = newDone
-			blockNum = newBlockNum
-			offsets = newOffsets
-			blockNums = newBlockNums
-		} else {
-			return err
-		}
-		if len(offsets) == 0 {
-			break
-		}
-		//fmt.Println("fill", time.Since(cycle))
-		fill += time.Since(cycle)
-		t2 := time.Now()
-		bufferMap := make(map[string][]uint64)
-		prevOffset := 0
-		for i, offset := range offsets {
-			blockNr := blockNums[i]
-			if err := v.WalkerAdapter(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
-				sKey := string(k)
-				list := bufferMap[sKey]
-				b := blockNr
-				if len(v) == 0 {
-					b |= emptyValBit
-				}
-				list = append(list, b)
-				bufferMap[sKey] = list
-				return nil
-			}); err != nil {
-				return err
-			}
-			prevOffset = offset
-		}
-		//fmt.Println("walk", time.Since(t2))
-		walk += time.Since(t2)
-		t3 := time.Now()
-		if filename, err := ig.writeBufferMapToTempFile(ig.TempDir, v.Template, bufferMap); err == nil {
-			defer func() {
-				//nolint:errcheck
-				os.Remove(filename)
-			}()
-			bufferFileNames = append(bufferFileNames, filename)
-			runtime.ReadMemStats(&m)
-			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		} else {
-			return err
-		}
-		//fmt.Println("save map", time.Since(t3))
-		wri += time.Since(t3)
-		//fmt.Println("cycle", time.Since(cycle))
-	}
-	if len(offsets) > 0 {
-		t := time.Now()
+	var fill, walk, wri int64
+	var fillp, walkp, wrip *int64
+	fillp = &fill
+	walkp = &walk
+	wrip = &wri
 
+	wg,_:=errgroup.WithContext(context.Background())
+	f:= func(start, end uint64) func() error {
+		blockNum := start
+		return func() error {
+			startTime:=time.Now()
+			fmt.Println("start thread ", start, end)
+			defer fmt.Println("end thread ", start, end, time.Since(startTime))
+			changesets := make([]byte, ig.ChangeSetBufSize) // 256 Mb buffer by default
+			var offsets []int
+			var blockNums []uint64
+			var done = false
+
+			oldBlocknum := start
+			for !done {
+				cycle := time.Now()
+				if newDone, newBlockNum, newOffsets, newBlockNums, err := ig.fillChangeSetBuffer(changeSetBucket, blockNum, end, changesets, offsets, blockNums); err == nil {
+					done = newDone
+					oldBlocknum = blockNum
+					blockNum = newBlockNum
+					offsets = newOffsets
+					blockNums = newBlockNums
+				} else {
+					return err
+				}
+				if len(offsets) == 0 {
+					break
+				}
+				//fmt.Println("fill", time.Since(cycle))
+				atomic.AddInt64(fillp,int64(time.Since(cycle)))
+				t2 := time.Now()
+				bufferMap := make(map[string][]uint64)
+				prevOffset := 0
+				for i, offset := range offsets {
+					blockNr := blockNums[i]
+					if err := v.WalkerAdapter(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
+						sKey := string(k)
+						list := bufferMap[sKey]
+						b := blockNr
+						if len(v) == 0 {
+							b |= emptyValBit
+						}
+						list = append(list, b)
+						bufferMap[sKey] = list
+						return nil
+					}); err != nil {
+						return err
+					}
+					prevOffset = offset
+				}
+				//fmt.Println("walk", time.Since(t2))
+				atomic.AddInt64(walkp, int64(time.Since(t2)))
+				t3 := time.Now()
+				if filename, err := ig.writeBufferMapToTempFile(ig.TempDir, v.Template, bufferMap); err == nil {
+					mtx.Lock()
+					bufferFileNames = append(bufferFileNames, struct {
+						name string
+						id   uint64
+					}{name: filename, id:oldBlocknum })
+					runtime.ReadMemStats(&m)
+					log.Info("Created a buffer file", "name", filename, "from block", oldBlocknum, "up to block", blockNum,
+						"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+					mtx.Unlock()
+				} else {
+					return err
+				}
+				//fmt.Println("save map", time.Since(t3))
+				atomic.AddInt64(wrip, int64(time.Since(t3)))
+				//fmt.Println("cycle", time.Since(cycle))
+			}
+			return nil
+		}
+	}
+
+	var lastBlock uint64
+	lastKey,err:=ig.db.(*ethdb.BoltDatabase).GetLastKey(changeSetBucket)
+	if err==nil {
+		lastBlock,_ = dbutils.DecodeTimestamp(lastKey)
+	}
+	numOfWorkers:=runtime.NumGoroutine()
+	var startBlock, endBlock uint64
+	stepSize:=lastBlock/uint64(numOfWorkers)
+	for i:=0;i<numOfWorkers; i++ {
+		if i+1==numOfWorkers {
+			endBlock = math.MaxUint64
+		} else {
+			endBlock=startBlock+stepSize
+		}
+		log.Info("start", "worker", i, "from", startBlock, "to", endBlock)
+		wg.Go(f(startBlock, endBlock))
+		startBlock+=stepSize
+	}
+
+	fnc:=time.Now()
+	err=wg.Wait()
+	if err!=nil {
+		return err
+	}
+	fmt.Println("caltime", time.Since(fnc))
+	if len(bufferFileNames)>0 {
+		t := time.Now()
 		if err := ig.mergeFilesIntoBucket(bufferFileNames, v.IndexBucket, v.KeySize); err != nil {
 			return err
 		}
@@ -259,14 +321,19 @@ type ChangesetWalker interface {
 	Walk(func([]byte, []byte) error) error
 }
 
-func (ig *IndexGenerator) fillChangeSetBuffer(bucket []byte, blockNum uint64, changesets []byte, offsets []int, blockNums []uint64) (bool, uint64, []int, []uint64, error) {
+func (ig *IndexGenerator) fillChangeSetBuffer(bucket []byte, startBlock uint64,endBlock uint64, changesets []byte, offsets []int, blockNums []uint64) (bool, uint64, []int, []uint64, error) {
 	offset := 0
 	offsets = offsets[:0]
 	blockNums = blockNums[:0]
-	startKey := dbutils.EncodeTimestamp(blockNum)
+	startKey := dbutils.EncodeTimestamp(startBlock)
 	done := true
 	if err := ig.db.Walk(bucket, startKey, 0, func(k, v []byte) (bool, error) {
-		blockNum, _ = dbutils.DecodeTimestamp(k)
+		startBlock, _ = dbutils.DecodeTimestamp(k)
+		if startBlock >=endBlock {
+			fmt.Println("endBlock exit", startBlock, endBlock )
+			return false, nil
+		}
+
 		if offset+len(v) > len(changesets) { // Adding the current changeset would overflow the buffer
 			done = false
 			return false, nil
@@ -274,12 +341,12 @@ func (ig *IndexGenerator) fillChangeSetBuffer(bucket []byte, blockNum uint64, ch
 		copy(changesets[offset:], v)
 		offset += len(v)
 		offsets = append(offsets, offset)
-		blockNums = append(blockNums, blockNum)
+		blockNums = append(blockNums, startBlock)
 		return true, nil
 	}); err != nil {
-		return true, blockNum, offsets, blockNums, fmt.Errorf("walking over account changeset for block %d: %v", blockNum, err)
+		return true, startBlock, offsets, blockNums, fmt.Errorf("walking over account changeset for block %d: %v", startBlock, err)
 	}
-	return done, blockNum, offsets, blockNums, nil
+	return done, startBlock, offsets, blockNums, nil
 }
 
 const emptyValBit uint64 = 0x8000000000000000
@@ -327,13 +394,19 @@ func (ig *IndexGenerator) writeBufferMapToTempFile(datadir string, pattern strin
 	return filename, nil
 }
 
-func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket []byte, keyLength int) error {
+func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []struct{
+	name string
+	id uint64
+}, bucket []byte, keyLength int) error {
 	var m runtime.MemStats
+	sort.Slice(bufferFileNames, func(i, j int) bool {
+		return bufferFileNames[i].id<bufferFileNames[j].id
+	})
 	h := &common.Heap{}
 	heap.Init(h)
 	readers := make([]io.Reader, len(bufferFileNames))
 	for i, fileName := range bufferFileNames {
-		if f, err := os.Open(fileName); err == nil {
+		if f, err := os.Open(fileName.name); err == nil {
 			readers[i] = bufio.NewReader(f)
 			//nolint:errcheck
 			defer f.Close()
@@ -357,25 +430,26 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 		k := element.Key
 		// Read number of items for this key
 		var count int
-		if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
-			count = int(binary.BigEndian.Uint64(nbytes[:]))
-		} else {
+		if n, err := io.ReadFull(reader, nbytes[:]); err != nil || n != 8 {
 			return fmt.Errorf("reading from account buffer file: %d %v", n, err)
 		}
+
+		count = int(binary.BigEndian.Uint64(nbytes[:]))
 		for i := 0; i < count; i++ {
 			var b uint64
-			if n, err := io.ReadFull(reader, nbytes[:]); err == nil && n == 8 {
-				b = binary.BigEndian.Uint64(nbytes[:])
-			} else {
+			if n, err := io.ReadFull(reader, nbytes[:]); err != nil || n != 8 {
 				return fmt.Errorf("reading from account buffer file: %d %v", n, err)
 			}
+			b = binary.BigEndian.Uint64(nbytes[:])
 			vzero := (b & emptyValBit) != 0
 			blockNr := b &^ emptyValBit
+
 			currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 			indexBytes, err1 := batch.Get(bucket, currentChunkKey)
 			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
 				return fmt.Errorf("find chunk failed: %w", err1)
 			}
+
 			var index dbutils.HistoryIndexBytes
 			if len(indexBytes) == 0 {
 				index = dbutils.NewHistoryIndex()
