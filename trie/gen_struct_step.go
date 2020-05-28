@@ -38,6 +38,12 @@ type structInfoReceiver interface {
 	branch(set uint16) error
 	branchHash(set uint16) error
 	hash(hash []byte, dataLen uint64) error
+	topHash() []byte
+}
+
+// hashCollector gets called whenever there might be a need to create intermediate hash record
+type hashCollector interface {
+	collect(keyHex []byte, hash []byte) error
 }
 
 func calcPrecLen(groups []uint16) int {
@@ -81,6 +87,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
+// `h` parameter is the hash collector, which is notified whenever branch node is constructed.
 // `data` parameter specified if a hash or a binary string or an account should be emitted.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
@@ -90,6 +97,7 @@ func GenStructStep(
 	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
+	h hashCollector,
 	data GenStructStepData,
 	groups []uint16,
 	trace bool,
@@ -187,6 +195,11 @@ func GenStructStep(
 				}
 			} else {
 				if err := e.branchHash(groups[maxLen]); err != nil {
+					return nil, err
+				}
+			}
+			if h != nil {
+				if err := h.collect(curr[:maxLen], e.topHash()); err != nil {
 					return nil, err
 				}
 			}

@@ -762,7 +762,7 @@ func (dr *DefaultReceiver) genStructStorage() error {
 		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
 		data = &dr.leafData
 	}
-	dr.groups, err = GenStructStep(dr.rl.Retain, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, data, dr.groups, false)
+	dr.groups, err = GenStructStep(dr.rl.Retain, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, nil /* hashCollector */, data, dr.groups, false)
 	if err != nil {
 		return err
 	}
@@ -826,7 +826,7 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	dr.currStorage.Reset()
 	dr.succStorage.Reset()
 	var err error
-	if dr.groups, err = GenStructStep(dr.rl.Retain, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, data, dr.groups, false); err != nil {
+	if dr.groups, err = GenStructStep(dr.rl.Retain, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, nil /* hashCollector */, data, dr.groups, false); err != nil {
 		return err
 	}
 	dr.accData.FieldSet = 0

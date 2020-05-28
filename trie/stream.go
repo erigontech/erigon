@@ -633,7 +633,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				if currStorage.Len() > 0 {
 					isAccount = false
 					var err error
-					sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, witnessSizeStorage), sGroups, trace)
+					sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil /* hashCollector */, makeData(0, hashRefStorage, witnessSizeStorage), sGroups, trace)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -653,7 +653,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			if curr.Len() > 0 {
 				isAccount = true
 				var err error
-				groups, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef, witnessSizeAcc), groups, trace)
+				groups, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, makeData(fieldSet, hashRef, witnessSizeAcc), groups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -699,7 +699,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			if currStorage.Len() > 0 {
 				isAccount = false
 				var err error
-				sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, witnessSizeStorage), sGroups, trace)
+				sGroups, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil /* hashCollector */, makeData(0, hashRefStorage, witnessSizeStorage), sGroups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -725,7 +725,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		if currStorage.Len() > 0 {
 			isAccount = false
 			var err error
-			_, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(0, hashRefStorage, witnessSizeStorage), sGroups, trace)
+			_, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil /* hashCollector */, makeData(0, hashRefStorage, witnessSizeStorage), sGroups, trace)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -744,7 +744,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	if curr.Len() > 0 {
 		isAccount = true
 		var err error
-		_, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef, witnessSizeAcc), groups, trace)
+		_, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, makeData(fieldSet, hashRef, witnessSizeAcc), groups, trace)
 		if err != nil {
 			return common.Hash{}, err
 		}
