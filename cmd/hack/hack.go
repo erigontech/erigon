@@ -822,9 +822,19 @@ func mgrSchedule(chaindata string, block uint64) {
 	//check(err)
 }
 
-func resetIH(chaindata string) {
+func resetIH(chaindata string, fromScratch bool) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
+	if fromScratch {
+		err = db.KV().Update(func(tx *bolt.Tx) error {
+			_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+			_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
+			return nil
+		})
+		check(err)
+	}
 
 	var before int
 	err = db.KV().View(func(tx *bolt.Tx) error {
@@ -2540,7 +2550,7 @@ func main() {
 		mgrSchedule(*chaindata, uint64(*block))
 	}
 	if *action == "resetIH" {
-		resetIH(*chaindata)
+		resetIH(*chaindata, false)
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)
