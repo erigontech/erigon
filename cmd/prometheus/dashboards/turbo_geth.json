@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1589512709712,
+  "iteration": 1590638066544,
   "links": [],
   "panels": [
     {
@@ -39,6 +39,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -140,6 +146,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -176,13 +188,13 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(trie_subtrieloader_flatdb_count{instance=~\"$instance\"}[15m])",
+          "expr": "increase(trie_subtrieloader_flatdb_count{instance=~\"$instance\"}[10m])",
           "interval": "",
           "legendFormat": "trie_resolve_stateful_count: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(trie_subtrieloader_witnessdb_count{instance=~\"$instance\"}[15m])",
+          "expr": "increase(trie_subtrieloader_witnessdb_count{instance=~\"$instance\"}[10m])",
           "interval": "",
           "legendFormat": "trie_resolve_stateless_count: {{instance}}",
           "refId": "B"
@@ -192,7 +204,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Trie Resolve Amounts",
+      "title": "Trie Load Amounts (per 10min)",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -235,6 +247,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -270,13 +288,13 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(db_ih_insert{instance=~\"$instance\"}[15m])",
+          "expr": "increase(db_ih_insert{instance=~\"$instance\"}[10m])",
           "interval": "",
           "legendFormat": "db/ih/insert: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(db_ih_delete{instance=~\"$instance\"}[15m])",
+          "expr": "increase(db_ih_delete{instance=~\"$instance\"}[10m])",
           "interval": "",
           "legendFormat": "db/ih/delete: {{instance}}",
           "refId": "B"
@@ -286,7 +304,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "IH Insert/Delete RPS",
+      "title": "IH Insert/Delete RPS (per 10min)",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -343,6 +361,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -452,6 +476,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -490,11 +520,11 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_memory_allocs{instance=~\"$instance\"}[1m])",
+          "expr": "increase(system_memory_allocs{instance=~\"$instance\"}[10m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "alloc: {{instance}}",
+          "legendFormat": "alloc per 10min: {{instance}}",
           "refId": "A"
         },
         {
@@ -561,6 +591,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -662,6 +698,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -751,6 +793,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -861,6 +909,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -962,6 +1016,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -1089,6 +1149,12 @@
         "#d44a3a"
       ],
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -1137,7 +1203,7 @@
         "lineColor": "rgb(31, 120, 193)",
         "show": false
       },
-      "tableColumn": "",
+      "tableColumn": "chain_head_header{instance=\"host.docker.internal:6060\", job=\"turbo-geth\"}",
       "targets": [
         {
           "expr": "chain_head_header",
@@ -1170,6 +1236,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -1281,6 +1353,12 @@
         "#d44a3a"
       ],
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -1329,7 +1407,7 @@
         "lineColor": "rgb(31, 120, 193)",
         "show": false
       },
-      "tableColumn": "",
+      "tableColumn": "txpool_pending{instance=\"host.docker.internal:6060\", job=\"turbo-geth\"}",
       "targets": [
         {
           "expr": "txpool_pending",
@@ -1362,6 +1440,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -1473,6 +1557,12 @@
         "#d44a3a"
       ],
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -1521,7 +1611,7 @@
         "lineColor": "rgb(31, 120, 193)",
         "show": false
       },
-      "tableColumn": "",
+      "tableColumn": "chain_head_receipt{instance=\"host.docker.internal:6060\", job=\"turbo-geth\"}",
       "targets": [
         {
           "expr": "chain_head_receipt",
@@ -1557,6 +1647,12 @@
         "#d44a3a"
       ],
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -1605,7 +1701,7 @@
         "lineColor": "rgb(31, 120, 193)",
         "show": false
       },
-      "tableColumn": "",
+      "tableColumn": "txpool_queued{instance=\"host.docker.internal:6060\", job=\"turbo-geth\"}",
       "targets": [
         {
           "expr": "txpool_queued",
@@ -1639,6 +1735,12 @@
         "#d44a3a"
       ],
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -1687,7 +1789,7 @@
         "lineColor": "rgb(31, 120, 193)",
         "show": false
       },
-      "tableColumn": "",
+      "tableColumn": "chain_head_block{instance=\"host.docker.internal:6060\", job=\"turbo-geth\"}",
       "targets": [
         {
           "expr": "chain_head_block",
@@ -1721,6 +1823,12 @@
         "#d44a3a"
       ],
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -1769,7 +1877,7 @@
         "lineColor": "rgb(31, 120, 193)",
         "show": false
       },
-      "tableColumn": "",
+      "tableColumn": "txpool_local{instance=\"host.docker.internal:6060\", job=\"turbo-geth\"}",
       "targets": [
         {
           "expr": "txpool_local",
@@ -1800,6 +1908,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -1976,6 +2090,12 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -2168,14 +2288,373 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
+      "datasource": null,
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 54
+      },
+      "hiddenSeries": false,
+      "id": 132,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "bolt_pages_free{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "pages_free: {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "bolt_pages_pending{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "pages_pending: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "increase(bolt_tx_total{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "tx_total: {{instance}}",
+          "refId": "E"
+        },
+        {
+          "expr": "increase(bolt_tx_open{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "tx_open: {{instance}}",
+          "refId": "F"
+        },
+        {
+          "expr": "increase(bolt_tx_cursors_total{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "cursors_total: {{instance}}",
+          "refId": "G"
+        },
+        {
+          "expr": "increase(bolt_rebalance_total{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "rebalance: {{instance}}",
+          "refId": "I"
+        },
+        {
+          "expr": "increase(bolt_split_total{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "split: {{instance}}",
+          "refId": "J"
+        },
+        {
+          "expr": "increase(bolt_spill_total{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "spill: {{instance}}",
+          "refId": "H"
+        },
+        {
+          "expr": "increase(bolt_write_total{instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "write: {{instance}}",
+          "refId": "K"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Bolt Counters (per 10min)",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 54
+      },
+      "hiddenSeries": false,
+      "id": 134,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "delta(bolt_rebalance_time{quantile=\"$quantile\",instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "expr": "delta(bolt_spill_time{quantile=\"$quantile\",instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "B"
+        },
+        {
+          "expr": "delta(bolt_write_time{quantile=\"$quantile\",instance=~\"$instance\"}[10m])",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Bolt Timers (per 10min)",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 54
+      },
+      "hiddenSeries": false,
+      "id": 136,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "increase(bolt_pages_alloc_bytes{instance=~\"$instance\"}[10m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "alloc: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(bolt_freelist_inuse{instance=~\"$instance\"}[10m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "inuse: {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Bolt Freelist Bytes (per 10min)",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 54
+        "y": 62
       },
       "hiddenSeries": false,
       "id": 35,
@@ -2281,13 +2760,19 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 54
+        "y": 62
       },
       "hiddenSeries": false,
       "id": 118,
@@ -2393,13 +2878,19 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 54
+        "y": 62
       },
       "hiddenSeries": false,
       "id": 119,
@@ -2494,7 +2985,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "id": 37,
       "panels": [],
@@ -2507,13 +2998,19 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 69
       },
       "hiddenSeries": false,
       "id": 120,
@@ -2608,13 +3105,19 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 69
       },
       "hiddenSeries": false,
       "id": 56,
@@ -2712,7 +3215,7 @@
     }
   ],
   "refresh": "10s",
-  "schemaVersion": 22,
+  "schemaVersion": 25,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -2720,6 +3223,7 @@
       {
         "allValue": "txpool_invalid",
         "current": {
+          "selected": true,
           "text": "All",
           "value": [
             "$__all"
@@ -2729,7 +3233,6 @@
         "definition": "{job=\"geth\"}",
         "hide": 2,
         "includeAll": true,
-        "index": -1,
         "label": "TxPoolCounters",
         "multi": true,
         "name": "tx_pool_counters",
@@ -2770,9 +3273,9 @@
       {
         "allValue": null,
         "current": {
-          "tags": [],
-          "text": "0.75",
-          "value": "0.75"
+          "selected": true,
+          "text": "0.5",
+          "value": "0.5"
         },
         "hide": 0,
         "includeAll": false,
@@ -2781,12 +3284,12 @@
         "name": "quantile",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "0.5",
             "value": "0.5"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "0.75",
             "value": "0.75"
           },
@@ -2812,12 +3315,14 @@
           }
         ],
         "query": "0.5, 0.75, 0.95, 0.99, 0.999, 0.9999",
+        "queryValue": "",
         "skipUrlSync": false,
         "type": "custom"
       },
       {
         "allValue": null,
         "current": {
+          "selected": true,
           "text": "All",
           "value": [
             "$__all"
@@ -2827,7 +3332,6 @@
         "definition": "trie_subtrieloader_flatdb",
         "hide": 0,
         "includeAll": true,
-        "index": -1,
         "label": "instance",
         "multi": true,
         "name": "instance",
@@ -2851,7 +3355,6 @@
   },
   "timepicker": {
     "refresh_intervals": [
-      "5s",
       "10s",
       "30s",
       "1m",
@@ -2877,8 +3380,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "variables": {
-    "list": []
-  },
-  "version": 23
+  "version": 9
 }
