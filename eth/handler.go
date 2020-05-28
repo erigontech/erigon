@@ -394,22 +394,31 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 }
 
 func (pm *ProtocolManager) Stop() {
+	log.Error("PM 1")
 	if pm.txsSub != nil {
+		log.Error("PM 1.1")
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
+		log.Error("PM 1.2")
 	}
+	log.Error("PM 2")
 	pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	log.Error("PM 3")
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
 	close(pm.quitSync)
+	log.Error("PM 4")
 	pm.wg.Wait()
+	log.Error("PM 5")
 
 	// Disconnect existing sessions.
 	// This also closes the gate for any new registrations on the peer set.
 	// sessions which are already established but not added to pm.peers yet
 	// will exit when they try to register.
 	pm.peers.Close()
+	log.Error("PM 6")
 	pm.peerWG.Wait()
+	log.Error("PM 7")
 
 	log.Info("Ethereum protocol stopped")
 }

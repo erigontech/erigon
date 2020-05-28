@@ -457,6 +457,7 @@ func (n *Node) stopWS() {
 // Stop terminates a running node along with all it's services. In the node was
 // not started, an error is returned.
 func (n *Node) Stop() error {
+	log.Error("### Node.Stop 1")
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -467,18 +468,27 @@ func (n *Node) Stop() error {
 
 	// Terminate the API, services and the p2p server.
 	n.stopWS()
+	log.Error("### Node.Stop 2")
 	n.stopHTTP()
+	log.Error("### Node.Stop 3")
 	n.stopIPC()
+	log.Error("### Node.Stop 4")
 	n.rpcAPIs = nil
 	failure := &StopError{
 		Services: make(map[reflect.Type]error),
 	}
+
+	i:=0
 	for kind, service := range n.services {
+		log.Error("### Node.Stop 5.1", "i", i, "kind", kind)
 		if err := service.Stop(); err != nil {
 			failure.Services[kind] = err
 		}
+		log.Error("### Node.Stop 5.2", "i", i, "kind", kind)
 	}
+	log.Error("### Node.Stop 6")
 	n.server.Stop()
+	log.Error("### Node.Stop 7")
 	n.services = nil
 	n.server = nil
 
@@ -489,9 +499,11 @@ func (n *Node) Stop() error {
 		}
 		n.instanceDirLock = nil
 	}
+	log.Error("### Node.Stop 9")
 
 	// unblock n.Wait
 	close(n.stop)
+	log.Error("### Node.Stop 10")
 
 	// Remove the keystore if it was created ephemerally.
 	type closer interface {
@@ -503,7 +515,7 @@ func (n *Node) Stop() error {
 			closeAPI.Close()
 		}
 	}
-
+	log.Error("### Node.Stop 11")
 	var keystoreErr error
 	if n.ephemeralKeystore != "" {
 		keystoreErr = os.RemoveAll(n.ephemeralKeystore)

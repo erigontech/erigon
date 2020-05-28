@@ -2,9 +2,9 @@ package downloader
 
 import (
 	"fmt"
-	//"os"
+	// "os"
 	"runtime"
-	//"runtime/pprof"
+	// "runtime/pprof"
 	"sync/atomic"
 	"time"
 
@@ -194,6 +194,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
 	}
+
 	if unwindPoint >= lastProcessedBlockNumber {
 		err = SaveStageUnwind(stateDB, Execution, 0)
 		if err != nil {
@@ -212,6 +213,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	deleteAccountFunc := deleteAccountHashed
 	writeAccountFunc := writeAccountHashed
 	recoverCodeHashFunc := recoverCodeHashHashed
+
 	if core.UsePlainStateExecution {
 		rewindFunc = ethdb.RewindDataPlain
 		stateBucket = dbutils.PlainStateBucket
@@ -223,16 +225,18 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		recoverCodeHashFunc = recoverCodeHashPlain
 	}
 
-	accountMap, storageMap, err2 := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
-	if err2 != nil {
+	accountMap, storageMap, err := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
+	if err != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
+
 	for key, value := range accountMap {
 		if len(value) > 0 {
 			var acc accounts.Account
 			if err = acc.DecodeForStorage(value); err != nil {
 				return err
 			}
+
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, stateDB, key)
 			if err = writeAccountFunc(mutation, key, acc); err != nil {
@@ -261,14 +265,17 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 			return err
 		}
 	}
+
 	err = SaveStageUnwind(mutation, Execution, 0)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
+
 	_, err = mutation.Commit()
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
+
 	return nil
 }
 

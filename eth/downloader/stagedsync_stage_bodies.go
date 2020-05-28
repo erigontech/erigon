@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -12,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
+func (d *Downloader) spawnBodyDownloadStage(ctx context.Context, id string) (bool, error) {
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -86,13 +87,16 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	select {
 	case d.bodyWakeCh <- true:
 	case <-d.cancelCh:
+	case <-ctx.Done():
 	}
 	// Now fetch all the bodies
 	fetchers := []func() error{
 		func() error { return d.fetchBodies(from) },
 		func() error { return d.processBodiesStage(to) },
 	}
-	return true, d.spawnSync(fetchers)
+
+	withCancel(ctx, &err, func() { err = d.spawnSync(fetchers) })
+	return true, err
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.

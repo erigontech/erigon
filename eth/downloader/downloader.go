@@ -144,6 +144,7 @@ type Downloader struct {
 	// Cancellation and termination
 	cancelPeer string         // Identifier of the peer currently being used as the master (cancel on drop)
 	cancelCh   chan struct{}  // Channel to cancel mid-flight syncs
+	cancelCtx context.CancelFunc
 	cancelLock sync.RWMutex   // Lock to protect the cancel channel and peer in delivers
 	cancelWg   sync.WaitGroup // Make sure all fetcher goroutines have exited.
 
@@ -417,8 +418,10 @@ func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode 
 		}
 	}
 	// Create cancel channel for aborting mid-flight and mark the master peer
+	ctx, cancel := context.WithCancel(context.Background())
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
+	d.cancelCtx = cancel
 	d.cancelPeer = id
 	d.cancelLock.Unlock()
 
@@ -432,12 +435,12 @@ func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode 
 	if p == nil {
 		return errUnknownPeer
 	}
-	return d.syncWithPeer(p, hash, td)
+	return d.syncWithPeer(ctx, p, hash, td)
 }
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.
-func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.Int) (err error) {
+func (d *Downloader) syncWithPeer(ctx context.Context, p *peerConnection, hash common.Hash, td *big.Int) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -543,7 +546,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 
 	// Turbo-Geth's staged sync goes here
 	if d.mode == StagedSync {
-		return d.doStagedSyncWithFetchers(p, fetchers)
+		return d.doStagedSyncWithFetchers(ctx, p, fetchers)
 	}
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
@@ -563,6 +566,7 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 		fn := fn
 		go func() { defer d.cancelWg.Done(); errc <- fn() }()
 	}
+
 	// Wait for the first error, then terminate the others.
 	var err error
 	for i := 0; i < len(fetchers); i++ {
@@ -576,8 +580,10 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 			break
 		}
 	}
+
 	d.queue.Close()
 	d.Cancel()
+
 	return err
 }
 
@@ -603,6 +609,7 @@ func (d *Downloader) cancel() {
 // finish before returning.
 func (d *Downloader) Cancel() {
 	d.cancel()
+	d.cancelCtx()
 	d.cancelWg.Wait()
 
 	d.ancientLimit = 0
@@ -612,18 +619,26 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
+	log.Error(">>>> 1")
 	d.blockchain.Stop()
+	log.Error(">>>> 2")
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
+	log.Error(">>>> 3")
 	select {
 	case <-d.quitCh:
+		log.Error(">>>> 3.1")
 	default:
+		log.Error(">>>> 3.2")
 		close(d.quitCh)
+		log.Error(">>>> 3.3.")
 	}
+	log.Error(">>>> 4")
 	d.quitLock.Unlock()
-
+	log.Error(">>>> 5")
 	// Cancel any pending download requests
 	d.Cancel()
+	log.Error(">>>> 6")
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating

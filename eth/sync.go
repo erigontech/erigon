@@ -196,14 +196,29 @@ func (cs *chainSyncer) loop() {
 
 	cs.pm.blockFetcher.Start()
 	cs.pm.txFetcher.Start()
-	defer cs.pm.blockFetcher.Stop()
-	defer cs.pm.txFetcher.Stop()
-	defer cs.pm.downloader.Terminate()
-
+	defer func() {
+		log.Error("!!! 1")
+		cs.pm.blockFetcher.Stop()
+		log.Error("!!! 2")
+	}()
+	defer func() {
+		log.Error("!!! 3")
+		cs.pm.txFetcher.Stop()
+		log.Error("!!! 4")
+	}()
+	defer func() {
+		log.Error("!!! 5")
+		cs.pm.downloader.Terminate()
+		log.Error("!!! 6")
+	}()
 	// The force timer lowers the peer count threshold down to one when it fires.
 	// This ensures we'll always start sync even if there aren't enough peers.
 	cs.force = time.NewTimer(forceSyncCycle)
-	defer cs.force.Stop()
+	defer func() {
+		log.Error("!!! 7")
+		cs.force.Stop()
+		log.Error("!!! 8")
+	}()
 
 	for {
 		if op := cs.nextSyncOp(); op != nil {
