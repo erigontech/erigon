@@ -168,10 +168,10 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	return manager, nil
 }
 
-func (manager *ProtocolManager) SetDataDir(datadir string) {
-	manager.datadir = datadir
-	if manager.downloader != nil {
-		manager.downloader.SetDataDir(datadir)
+func (pm *ProtocolManager) SetDataDir(datadir string) {
+	pm.datadir = datadir
+	if pm.downloader != nil {
+		pm.downloader.SetDataDir(datadir)
 	}
 }
 
@@ -1008,7 +1008,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		pm.blockchain.ChainDb().Close()
 		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil)
 		if err != nil {
-			return fmt.Errorf("NewBlockChain: %w", err)
+			return fmt.Errorf("fail in NewBlockChain: %w", err)
 		}
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
