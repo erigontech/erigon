@@ -319,7 +319,6 @@ func (c *lmdbCursor) First() ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		panic(c.err)
 		return []byte{}, nil, c.err
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
@@ -345,7 +344,6 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		panic(c.err)
 		return []byte{}, nil, c.err
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
@@ -371,7 +369,6 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		panic(c.err)
 		return []byte{}, nil, c.err
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {

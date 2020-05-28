@@ -233,7 +233,7 @@ func (c *boltCursor) First() ([]byte, []byte, error) {
 func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
@@ -247,7 +247,7 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
@@ -261,7 +261,7 @@ func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 func (c *boltCursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
@@ -273,7 +273,7 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -289,7 +289,7 @@ func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 }
 
 func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
+	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -320,7 +320,7 @@ func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
 func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err() // on error key should be != nil
 	default:
 	}
 
@@ -334,7 +334,7 @@ func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
