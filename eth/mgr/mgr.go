@@ -62,9 +62,6 @@ type Schedule struct {
 type WitnessEstimator interface {
 	TotalCumulativeWitnessSize() (uint64, error)
 	PrefixByCumulativeWitnessSize(from []byte, size uint64) (prefix []byte, err error)
-
-	TotalCumulativeWitnessSizeDeprecated() uint64
-	PrefixByCumulativeWitnessSizeDeprecated(size uint64) (prefix []byte, err error)
 }
 
 func NewSchedule(estimator WitnessEstimator) *Schedule {
@@ -97,18 +94,5 @@ func (s *Schedule) Tick(block uint64) (*Tick, error) {
 		tick.From = []byte{}
 	}
 	s.prevTick = tick
-	return tick, nil
-}
-
-func (s *Schedule) TickDeprecated(block uint64) (*Tick, error) {
-	tick := NewTick(block, s.estimator.TotalCumulativeWitnessSizeDeprecated(), s.prevTick)
-	var err error
-	if tick.From, err = s.estimator.PrefixByCumulativeWitnessSizeDeprecated(tick.FromSize); err != nil {
-		return tick, err
-	}
-	if tick.To, err = s.estimator.PrefixByCumulativeWitnessSizeDeprecated(tick.ToSize); err != nil {
-		return tick, err
-	}
-
 	return tick, nil
 }

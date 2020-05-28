@@ -648,44 +648,6 @@ func mgrSchedule(chaindata string, block uint64) {
 	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
 	//check(err)
 
-	//err = db.KV().Update(func(tx *bolt.Tx) error {
-	//	defer func(t time.Time) { fmt.Println("Del", time.Since(t)) }(time.Now())
-	//	b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-	//	b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
-	//	c := b.Cursor()
-	//	c2 := b2.Cursor()
-	//	for k, _ := c.First(); k != nil; k, _ = c.Next() {
-	//		if len(k) < 41 {
-	//			_ = b.Delete(k)
-	//		}
-	//	}
-	//	for k, _ := c2.First(); k != nil; k, _ = c2.Next() {
-	//		if len(k) < 41 {
-	//			_ = b2.Delete(k)
-	//		}
-	//	}
-	//
-	//	return nil
-	//})
-
-	//counterx := 0
-	//counterx2 := 0
-	//db.KV().View(func(tx *bolt.Tx) error {
-	//	c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-	//	from := common.FromHex("5c5870775fdedafc500d4d6cc797e65e4f4e3e04d3824ad6f3d929a165f1737affffffffffffffff")
-	//	to := common.FromHex("600f6575e12357d684d82b421d5c614e9af191a2669a65465a67c3d5cad18274fffffffffffffffe14")
-	//	for k, v := c.SeekTo(from); k != nil; k, v = c.Next() {
-	//		if bytes.Compare(k, to) > 0 && !bytes.HasPrefix(k, to) {
-	//			break
-	//		}
-	//		counterx += len(v)
-	//		counterx2++
-	//	}
-	//	return nil
-	//})
-	//check(err)
-	//fmt.Println("Alex", counterx, counterx2)
-	//
 	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 46814683)
 	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 47126779)
 	//fmt.Printf("R: %x %x\n", r1, r2)
@@ -696,12 +658,11 @@ func mgrSchedule(chaindata string, block uint64) {
 	var witnessCount int64
 	var witnessEstimatedSizeAccumulator uint64
 	schedule := mgr.NewSchedule(tds)
-	//schedule2 := mgr.NewSchedule(tds)
 	var toBlock = block + mgr.BlocksPerCycle
 	var (
-		maxLcp float64
-		minLcp float64 = 1_000_000_000_000_000
-		avgLcp float64
+		max float64
+		min float64 = 1_000_000_000_000_000
+		avg float64
 	)
 
 	counters := []int{}
@@ -717,18 +678,6 @@ func mgrSchedule(chaindata string, block uint64) {
 		if err2 != nil {
 			panic(err2)
 		}
-		//if tick.Number > 50 {
-		//	break
-		//}
-		//tick2, err2 := schedule2.TickDeprecated(block)
-		//if err2 != nil {
-		//	panic(err2)
-		//}
-
-		//fmt.Printf("%x\n", tick.To[0])
-
-		//fmt.Printf("Tick: %s\n", tick)
-		//fmt.Printf("Tick2: %s\n", tick2)
 		counter := 0
 		counter2 := 0
 		counter3 := 0
@@ -742,12 +691,6 @@ func mgrSchedule(chaindata string, block uint64) {
 			counter3++
 		}
 		check(err)
-
-		if counter2 > 1_100_000 {
-			//fmt.Printf("tick: %s\n", tick)
-			fmt.Printf("%s\n", tick)
-			fmt.Printf("counter: %dK %dK, number: %d %x\n", counter/1000, counter2/1000, tick.Number, tick.To[0])
-		}
 
 		counters = append(counters, counter)
 		counters2 = append(counters2, counter2)
@@ -772,12 +715,12 @@ func mgrSchedule(chaindata string, block uint64) {
 		//}
 		//counters4 = append(counters4, buf.Len())
 
-		minLcp = math.Min(minLcp, float64(counter))
-		maxLcp = math.Max(maxLcp, float64(counter))
-		if avgLcp == 0 {
-			avgLcp = float64(counter)
+		min = math.Min(min, float64(counter))
+		max = math.Max(max, float64(counter))
+		if avg == 0 {
+			avg = float64(counter)
 		} else {
-			avgLcp = (avgLcp + float64(counter)) / 2
+			avg = (avg + float64(counter)) / 2
 		}
 
 		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
@@ -785,8 +728,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	}
 
 	fmt.Println("MGR Time of All Ticks: ", time.Since(t5))
-	//fmt.Println("MinLCP: ", minLcp, "MaxLCP: ", maxLcp, "AvgLCP: ", avgLcp)
-	fmt.Println("MinLCP: ", minLcp, "MaxLCP: ", maxLcp, "AvgLCP: ", avgLcp)
+	fmt.Println("Min: ", min, "Max: ", max, "Avg: ", avg)
 
 	accs := map[int]int{}
 	for _, counter := range counters {
@@ -931,6 +873,27 @@ func resetIH(chaindata string, fromScratch bool) {
 
 	fmt.Printf("Agg IWS Stats1: %v\n", accs)
 	fmt.Printf("Agg IWS Stats2: %v\n", accs2)
+
+	// now can delete some IH
+	//err = db.KV().Update(func(tx *bolt.Tx) error {
+	//	defer func(t time.Time) { fmt.Println("Del", time.Since(t)) }(time.Now())
+	//	b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+	//	b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
+	//	c := b.Cursor()
+	//	c2 := b2.Cursor()
+	//	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+	//		if len(k) < 2 {
+	//			_ = b.Delete(k)
+	//		}
+	//	}
+	//	for k, _ := c2.First(); k != nil; k, _ = c2.Next() {
+	//		if len(k) < 2 {
+	//			_ = b2.Delete(k)
+	//		}
+	//	}
+	//
+	//	return nil
+	//})
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
