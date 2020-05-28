@@ -11,31 +11,16 @@ func TestScheduleProperties(t *testing.T) {
 	require := require.New(t)
 	stateSize := uint64(123456)
 	block := uint64(11)
+	toBlock := block + mgr.BlocksPerCycle + 100
+	var prevTick *mgr.Tick
 
-	var prevTick mgr.Tick
-	var prevSlice mgr.StateSizeSlice
-
-	var sizeFromSlicesAccumulator uint64
 	var sizeFromTicksAccumulator uint64
-	schedule := mgr.NewStateSchedule(stateSize, block, block+mgr.BlocksPerCycle+100)
-	for i := range schedule.Ticks {
-		tick := schedule.Ticks[i]
-		for j := range tick.StateSizeSlices {
-			ss := tick.StateSizeSlices[j]
-			sizeFromSlicesAccumulator += ss.ToSize - ss.FromSize
+	for block <= toBlock {
+		tick := mgr.NewTick(block, stateSize, prevTick)
 
-			// props
-			if prevTick.Number < tick.Number { // because cycles are... cycled
-				require.Less(ss.FromSize, ss.ToSize)
-				require.LessOrEqual(prevSlice.ToSize, ss.FromSize)
-			}
-
-			prevSlice = ss
-		}
 		sizeFromTicksAccumulator += tick.ToSize - tick.FromSize
-
 		// props
-		if prevTick.Number < tick.Number {
+		if prevTick != nil && prevTick.Number < tick.Number {
 			require.LessOrEqual(block, tick.FromBlock)
 			require.Less(tick.FromBlock, tick.ToBlock)
 			require.Less(prevTick.ToBlock, tick.FromBlock)
@@ -46,6 +31,6 @@ func TestScheduleProperties(t *testing.T) {
 		}
 
 		prevTick = tick
+		block = tick.ToBlock + 1
 	}
-
 }

@@ -276,23 +276,21 @@ func Setup(ctx *cli.Context) error {
 	}
 
 	// pprof server
-	if ctx.GlobalBool(pprofFlag.Name) {
-		listenHost := ctx.GlobalString(pprofAddrFlag.Name)
-		if ctx.GlobalIsSet(legacyPprofAddrFlag.Name) && !ctx.GlobalIsSet(pprofAddrFlag.Name) {
-			listenHost = ctx.GlobalString(legacyPprofAddrFlag.Name)
-			log.Warn("The flag --pprofaddr is deprecated and will be removed in the future, please use --pprof.addr")
-		}
-
-		port := ctx.GlobalInt(pprofPortFlag.Name)
-		if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
-			port = ctx.GlobalInt(legacyPprofPortFlag.Name)
-			log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
-			Exit()
-		}
-
-		address := fmt.Sprintf("%s:%d", listenHost, port)
-		StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
+	listenHost := ctx.GlobalString(pprofAddrFlag.Name)
+	if ctx.GlobalIsSet(legacyPprofAddrFlag.Name) && !ctx.GlobalIsSet(pprofAddrFlag.Name) {
+		listenHost = ctx.GlobalString(legacyPprofAddrFlag.Name)
+		log.Warn("The flag --pprofaddr is deprecated and will be removed in the future, please use --pprof.addr")
 	}
+
+	port := ctx.GlobalInt(pprofPortFlag.Name)
+	if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
+		port = ctx.GlobalInt(legacyPprofPortFlag.Name)
+		log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
+		Exit()
+	}
+
+	address := fmt.Sprintf("%s:%d", listenHost, port)
+	StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
 	return nil
 }
 

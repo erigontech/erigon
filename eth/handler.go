@@ -33,11 +33,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
+	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -104,8 +106,9 @@ type ProtocolManager struct {
 	// Test fields or hooks
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
-	mode downloader.SyncMode // Sync mode passed from the command line
+	mode    downloader.SyncMode // Sync mode passed from the command line
 	datadir string
+	mgr     *mgrBroadcast
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
@@ -156,19 +159,23 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		manager.checkpointHash = checkpoint.SectionHead
 	}
 
-	initPm(manager, txpool, engine, blockchain, chaindb)
+	tds, err := blockchain.GetTrieDbState()
+	if err != nil {
+		return nil, err
+	}
+	initPm(manager, txpool, engine, blockchain, tds, chaindb)
 
 	return manager, nil
 }
 
-func (manager *ProtocolManager) SetDataDir(datadir string) {
-	manager.datadir = datadir
-	if manager.downloader != nil {
-		manager.downloader.SetDataDir(datadir)
+func (pm *ProtocolManager) SetDataDir(datadir string) {
+	pm.datadir = datadir
+	if pm.downloader != nil {
+		pm.downloader.SetDataDir(datadir)
 	}
 }
 
-func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
 	sm, err := GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
@@ -223,6 +230,7 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 		manager.txFetcher = fetcher.NewTxFetcher(txpool.Has, txpool.AddRemotes, fetchTx)
 	}
 	manager.chainSync = newChainSyncer(manager)
+	manager.mgr = NewMgr(mgr.NewSchedule(tds), tds)
 }
 
 func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
@@ -1000,13 +1008,19 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		pm.blockchain.ChainDb().Close()
 		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil)
 		if err != nil {
-			return fmt.Errorf("NewBlockChain: %w", err)
+			return fmt.Errorf("fail in NewBlockChain: %w", err)
 		}
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
 		pm.forkFilter = forkid.NewFilter(pm.blockchain)
-		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, pm.blockchain.ChainDb())
+
+		tds, err := pm.blockchain.GetTrieDbState()
+		if err != nil {
+			return fmt.Errorf("fail in GetTrieDbState: %w", err)
+		}
+		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, tds, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
+
 		remotedbserver.StartDeprecated(ethDb.AbstractKV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync

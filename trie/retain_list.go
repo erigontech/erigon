@@ -185,3 +185,67 @@ func (rr *RetainRange) String() string {
 	return fmt.Sprintf("%x-%x", rr.from, rr.to)
 }
 
+// RetainAll - returns true to any prefix
+type RetainAll struct {
+	codeTouches map[common.Hash]struct{}
+	decider     RetainDecider
+}
+
+// NewRetainAll creates new NewRetainRange
+// to=nil - means no upper bound
+func NewRetainAll(decider RetainDecider) *RetainAll {
+	return &RetainAll{decider: decider, codeTouches: make(map[common.Hash]struct{})}
+}
+
+func (rr *RetainAll) Retain(prefix []byte) (retain bool) {
+	return true
+}
+
+// AddCodeTouch adds a new code touch into the resolve set
+func (rr *RetainAll) AddCodeTouch(codeHash common.Hash) {
+	rr.codeTouches[codeHash] = struct{}{}
+}
+
+func (rr *RetainAll) IsCodeTouched(codeHash common.Hash) bool {
+	_, ok := rr.codeTouches[codeHash]
+	return ok
+}
+
+func (rr *RetainAll) String() string {
+	return ""
+}
+
+// RetainLevels - returns true to any prefix shorter than `levels`
+type RetainLevels struct {
+	codeTouches map[common.Hash]struct{}
+	decider     RetainDecider
+	levels      int
+}
+
+// NewRetainLevels creates new NewRetainRange
+// to=nil - means no upper bound
+func NewRetainLevels(decider RetainDecider, levels int) *RetainLevels {
+	return &RetainLevels{decider: decider, codeTouches: make(map[common.Hash]struct{}), levels: levels}
+}
+
+func (rr *RetainLevels) Retain(prefix []byte) (retain bool) {
+	if len(prefix) > rr.levels {
+		return rr.decider.Retain(prefix)
+	}
+
+	return true
+}
+
+// AddCodeTouch adds a new code touch into the resolve set
+func (rr *RetainLevels) AddCodeTouch(codeHash common.Hash) {
+	rr.codeTouches[codeHash] = struct{}{}
+}
+
+func (rr *RetainLevels) IsCodeTouched(codeHash common.Hash) bool {
+	_, ok := rr.codeTouches[codeHash]
+	return ok
+}
+
+func (rr *RetainLevels) String() string {
+	return ""
+}

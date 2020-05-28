@@ -261,7 +261,7 @@ func TestApiDetails(t *testing.T) {
 	putIDataLen := func(k string, v uint64) {
 		lenBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(lenBytes, v)
-		require.NoError(db.Put(dbutils.IntermediateTrieWitnessLenBucket, common.Hex2Bytes(k), lenBytes))
+		require.NoError(db.Put(dbutils.IntermediateWitnessSizeBucket, common.Hex2Bytes(k), lenBytes))
 	}
 
 	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached SubTrieLoaders
@@ -333,8 +333,8 @@ func TestApiDetails(t *testing.T) {
 
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].reference())
 		//fmt.Printf("%x\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].reference())
-		//fmt.Printf("%d\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessLen())
-		//fmt.Printf("%d\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessLen())
+		//fmt.Printf("%d\n", tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessSize())
+		//fmt.Printf("%d\n", tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessSize())
 
 		_, found := tr.GetAccount(hexf("000%061x", 0))
 		assert.False(found) // exists in DB but resolved, there is hashNode
@@ -425,10 +425,10 @@ func TestApiDetails(t *testing.T) {
 		err = tr.HookSubTries(subTries, hooks) // hook up to the root
 		assert.NoError(err)
 
-		assert.Equal(uint64(2050), tr.root.witnessLen())
-		assert.Equal(uint64(1024), tr.root.(*fullNode).Children[0].witnessLen())
-		assert.Equal(uint64(254), tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessLen())
-		assert.Equal(uint64(256), tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessLen())
+		assert.Equal(uint64(2050), tr.root.witnessSize())
+		assert.Equal(uint64(1024), tr.root.(*fullNode).Children[0].witnessSize())
+		assert.Equal(uint64(254), tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessSize())
+		assert.Equal(uint64(256), tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessSize())
 
 		witness, err := tr.ExtractWitness(false, rs)
 		if err != nil {
@@ -440,7 +440,7 @@ func TestApiDetails(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("WitnessLen. Real: %d, Estimate: %d\n", buf.Len(), tr.root.witnessLen())
+		fmt.Printf("WitnessSize. Real: %d, Estimate: %d\n", buf.Len(), tr.root.witnessSize())
 	}
 }
 

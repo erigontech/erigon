@@ -663,7 +663,6 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 	var (
 		err error
 	)
-
 	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
 	if err != nil {
 		return err
