@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
@@ -16,43 +17,10 @@ import (
 )
 
 func TestManagedTx(t *testing.T) {
+	writeDBs, readDBs, closeAll := setupDatabases()
+	defer closeAll()
+
 	ctx := context.Background()
-
-	writeDBs := []ethdb.KV{
-		ethdb.NewBolt().InMem().MustOpen(ctx),
-		ethdb.NewBolt().InMem().MustOpen(ctx), // for remote db
-		ethdb.NewBadger().InMem().MustOpen(ctx),
-	}
-
-	serverIn, clientOut := io.Pipe()
-	clientIn, serverOut := io.Pipe()
-
-	readDBs := []ethdb.KV{
-		writeDBs[0],
-		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
-		writeDBs[2],
-	}
-
-	serverCtx, serverCancel := context.WithCancel(ctx)
-	go func() {
-		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
-	}()
-
-	defer func() {
-		for _, db := range writeDBs {
-			db.Close()
-		}
-		for _, db := range readDBs {
-			db.Close()
-		}
-
-		serverIn.Close()
-		serverOut.Close()
-		clientIn.Close()
-		clientOut.Close()
-
-		serverCancel()
-	}()
 
 	for _, db := range writeDBs {
 		db := db
@@ -83,6 +51,48 @@ func TestManagedTx(t *testing.T) {
 		t.Run("filter "+msg, func(t *testing.T) {
 			testPrefixFilter(t, db)
 		})
+	}
+}
+
+func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
+	ctx := context.Background()
+
+	writeDBs = []ethdb.KV{
+		ethdb.NewBolt().InMem().MustOpen(ctx),
+		ethdb.NewBolt().InMem().MustOpen(ctx), // for remote db
+		ethdb.NewBadger().InMem().MustOpen(ctx),
+		ethdb.NewLMDB().InMem().MustOpen(ctx),
+	}
+
+	serverIn, clientOut := io.Pipe()
+	clientIn, serverOut := io.Pipe()
+
+	readDBs = []ethdb.KV{
+		writeDBs[0],
+		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
+		writeDBs[2],
+		writeDBs[3],
+	}
+
+	serverCtx, serverCancel := context.WithCancel(ctx)
+	go func() {
+		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
+	}()
+
+	return writeDBs, readDBs, func() {
+		for _, db := range writeDBs {
+			db.Close()
+		}
+		for _, db := range readDBs {
+			db.Close()
+		}
+
+		serverIn.Close()
+		serverOut.Close()
+		clientIn.Close()
+		clientOut.Close()
+
+		serverCancel()
 	}
 }
 
@@ -220,5 +230,70 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 		return nil
 	}); err != nil {
 		assert.NoError(err)
+	}
+}
+
+func TestMultipleBuckets(t *testing.T) {
+	writeDBs, readDBs, closeAll := setupDatabases()
+	defer closeAll()
+
+	ctx := context.Background()
+
+	for _, db := range writeDBs {
+		db := db
+		if err := db.Update(ctx, func(tx ethdb.Tx) error {
+			b := tx.Bucket(dbutils.CurrentStateBucket)
+			for i := uint8(0); i < 10; i++ {
+				require.NoError(t, b.Put([]byte{i}, []byte{i}))
+			}
+			b2 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+			for i := uint8(0); i < 12; i++ {
+				require.NoError(t, b2.Put([]byte{i}, []byte{i}))
+			}
+			return b.Delete([]byte{5}) // delete from first bucket key 5, then will seek on it and expect to see key 6
+		}); err != nil {
+			require.NoError(t, err)
+		}
+	}
+
+	for _, db := range readDBs {
+		db := db
+		msg := fmt.Sprintf("%T", db)
+		t.Run("MultipleBuckets "+msg, func(t *testing.T) {
+			counter2, counter := 0, 0
+			var key, value []byte
+			err := db.View(ctx, func(tx ethdb.Tx) error {
+				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+					if err != nil {
+						return err
+					}
+					counter++
+				}
+
+				c2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+				for k, _, err := c2.First(); k != nil; k, _, err = c2.Next() {
+					if err != nil {
+						return err
+					}
+					counter2++
+				}
+
+				c3 := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+				k, v, err := c3.Seek([]byte{5})
+				if err != nil {
+					return err
+				}
+				key = common.CopyBytes(k)
+				value = common.CopyBytes(v)
+
+				return nil
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 9, counter)
+			assert.Equal(t, 12, counter2)
+			assert.Equal(t, []byte{6}, key)
+			assert.Equal(t, []byte{6}, value)
+		})
 	}
 }

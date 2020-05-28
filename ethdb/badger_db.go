@@ -197,7 +197,7 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *badger.Txn) error {
-		{ // first look in the historical bucket
+		{ // first look in the historical dbi
 			it := tx.NewIterator(badger.DefaultIteratorOptions)
 			defer it.Close()
 			it.Seek(bucketKey(hBucket, composite))
@@ -209,7 +209,7 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 			}
 		}
 
-		{ // fall back to the current bucket
+		{ // fall back to the current dbi
 			item, err2 := tx.Get(bucketKey(bucket, key))
 			if err2 != nil {
 				return err2

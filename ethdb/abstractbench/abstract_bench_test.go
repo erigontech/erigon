@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 	os.RemoveAll("test2")
 	os.Remove("test3")
 	os.RemoveAll("test4")
+	os.RemoveAll("test5")
 	os.Exit(result)
 }
 func setupDatabases() {
@@ -34,6 +35,7 @@ func setupDatabases() {
 	ctx := context.Background()
 	boltDb = ethdb.NewBolt().Path("test").MustOpen(ctx)
 	badgerDb = ethdb.NewBadger().Path("test2").MustOpen(ctx)
+	badgerDb = ethdb.NewLMDB().Path("test4").MustOpen(ctx)
 	var errOpen error
 	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{})
 	if errOpen != nil {
@@ -50,9 +52,8 @@ func setupDatabases() {
 		return nil
 	})
 
-	now := time.Now()
 	if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
-		defer fmt.Println("origin bolt filled: ", time.Since(now))
+		defer func(t time.Time) { fmt.Println("origin bolt filled:", time.Since(t)) }(time.Now())
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
@@ -65,10 +66,9 @@ func setupDatabases() {
 	}); err != nil {
 		panic(err)
 	}
-	now = time.Now()
 
 	if err := boltDb.Update(ctx, func(tx ethdb.Tx) error {
-		defer fmt.Println("abstract bolt filled: ", time.Since(now))
+		defer func(t time.Time) { fmt.Println("abstract bolt filled:", time.Since(t)) }(time.Now())
 
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
@@ -83,10 +83,9 @@ func setupDatabases() {
 	}); err != nil {
 		panic(err)
 	}
-	now = time.Now()
 
 	if err := badgerDb.Update(ctx, func(tx ethdb.Tx) error {
-		defer fmt.Println("abstract badger filled: ", time.Since(now))
+		defer func(t time.Time) { fmt.Println("abstract badger filled:", time.Since(t)) }(time.Now())
 
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
@@ -101,10 +100,9 @@ func setupDatabases() {
 	}); err != nil {
 		panic(err)
 	}
-	now = time.Now()
 
 	if err := badgerOriginDb.Update(func(tx *badger.Txn) error {
-		defer fmt.Println("pure badger filled: ", time.Since(now))
+		defer func(t time.Time) { fmt.Println("pure badger filled:", time.Since(t)) }(time.Now())
 
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
@@ -116,6 +114,24 @@ func setupDatabases() {
 	}); err != nil {
 		panic(err)
 	}
+
+	if err := lmdbKV.Update(ctx, func(tx ethdb.Tx) error {
+		defer func(t time.Time) { fmt.Println("abstract lmdb filled:", time.Since(t)) }(time.Now())
+
+		v := make([]byte, vsize)
+		for i := 0; i < keysAmount; i++ {
+			k := common.FromHex(fmt.Sprintf("%064x", i))
+			bucket := tx.Bucket(dbutils.CurrentStateBucket)
+			if err := bucket.Put(k, v); err != nil {
+				panic(err)
+			}
+		}
+
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 }
 
 func BenchmarkCursor(b *testing.B) {

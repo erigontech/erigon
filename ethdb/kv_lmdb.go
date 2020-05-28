@@ -1,10 +1,15 @@
 package ethdb
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -20,6 +25,7 @@ func (opts lmdbOpts) Path(path string) lmdbOpts {
 }
 
 func (opts lmdbOpts) InMem() lmdbOpts {
+	opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
 	opts.inMem = true
 	return opts
 }
@@ -36,7 +42,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	}
 	//defer env.Close()
 
-	err = env.SetMaxDBs(1)
+	err = env.SetMaxDBs(100)
 	if err != nil {
 		return nil, err
 	}
@@ -73,29 +79,36 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	if opts.readOnly {
 		flags |= lmdb.Readonly
 	}
-	err = env.Open(opts.path, 0, 0644)
+	if opts.inMem {
+		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
+	}
+	err = env.Open(opts.path, flags, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	// Open a database handle that will be used for the entire lifetime of this
-	// application.  Because the database may not have existed before, and the
-	// database may need to be created, we need to get the database handle in
-	// an update transacation.
-	var dbi lmdb.DBI
-	err = env.Update(func(txn *lmdb.Txn) (err error) {
-		dbi, err = txn.OpenDBI("turbo-geth", lmdb.Create)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	buckets := map[string]lmdb.DBI{}
+	if !opts.readOnly {
+		if err := env.Update(func(tx *lmdb.Txn) error {
+			for _, name := range dbutils.Buckets {
+				dbi, createErr := tx.OpenDBI(string(name), lmdb.Create)
+				if createErr != nil {
+					return createErr
+				}
+				buckets[string(name)] = dbi
+				// TODO: store in db object map with DBI's - to speedup bucket opening at runtime
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	return &lmdbKV{
-		opts: opts,
-		env:  env,
-		db:   dbi,
-		log:  logger,
+		opts:    opts,
+		env:     env,
+		log:     logger,
+		buckets: buckets,
 	}, nil
 }
 
@@ -108,10 +121,10 @@ func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 }
 
 type lmdbKV struct {
-	opts lmdbOpts
-	db   lmdb.DBI
-	env  *lmdb.Env
-	log  log.Logger
+	opts    lmdbOpts
+	env     *lmdb.Env
+	log     log.Logger
+	buckets map[string]lmdb.DBI
 }
 
 func NewLMDB() lmdbOpts {
@@ -154,9 +167,9 @@ type lmdbTx struct {
 }
 
 type lmdbBucket struct {
-	tx *lmdbTx
+	tx  *lmdbTx
+	dbi lmdb.DBI
 
-	prefix  []byte
 	nameLen uint
 }
 
@@ -191,10 +204,7 @@ func (db *lmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
-	b := lmdbBucket{tx: tx, nameLen: uint(len())}
-
-	b.prefix = name
-	return b
+	return lmdbBucket{tx: tx, dbi: tx.db.buckets[string(name)]}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -215,7 +225,7 @@ func (tx *lmdbTx) cleanup() {
 }
 
 func (c *lmdbCursor) Prefix(v []byte) Cursor {
-	c.prefix = append(c.bucket.prefix[:c.bucket.nameLen], v...)
+	c.prefix = v
 	return c
 }
 
@@ -240,9 +250,7 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 	default:
 	}
 
-	b.prefix = append(b.prefix[:b.nameLen], key...)
-
-	val, err = b.tx.tx.Get(b.tx.db.db, b.prefix)
+	val, err = b.tx.tx.Get(b.dbi, key)
 	if lmdb.IsNotFound(err) {
 		return nil, err
 	}
@@ -256,8 +264,7 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 	default:
 	}
 
-	b.prefix = append(b.prefix[:b.nameLen], key...)
-	return b.tx.tx.Put(b.tx.db.db, b.prefix, value, 0)
+	return b.tx.tx.Put(b.dbi, key, value, 0)
 }
 
 func (b lmdbBucket) Delete(key []byte) error {
@@ -267,8 +274,7 @@ func (b lmdbBucket) Delete(key []byte) error {
 	default:
 	}
 
-	b.prefix = append(b.prefix[:b.nameLen], key...)
-	err := b.tx.tx.Del(b.tx.db.db, b.prefix, nil)
+	err := b.tx.tx.Del(b.dbi, key, nil)
 	if lmdb.IsNotFound(err) {
 		return nil
 	}
@@ -277,7 +283,6 @@ func (b lmdbBucket) Delete(key []byte) error {
 
 func (b lmdbBucket) Cursor() Cursor {
 	c := &lmdbCursor{bucket: b, ctx: b.tx.ctx}
-	c.prefix = append(c.prefix, b.prefix[:b.nameLen]...) // set bucket
 	return c
 }
 
@@ -287,7 +292,7 @@ func (c *lmdbCursor) initCursor() error {
 	}
 
 	var err error
-	c.cursor, err = c.bucket.tx.tx.OpenCursor(c.bucket.tx.db.db)
+	c.cursor, err = c.bucket.tx.tx.OpenCursor(c.bucket.dbi)
 	if err != nil {
 		return err
 	}
@@ -302,15 +307,23 @@ func (c *lmdbCursor) initCursor() error {
 
 func (c *lmdbCursor) First() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
-		return nil, nil, err
+		return []byte{}, nil, err
 	}
 
-	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+	if c.prefix == nil {
+		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+	} else {
+		c.k, c.v, c.err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
+	}
 	if lmdb.IsNotFound(c.err) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
+		panic(c.err)
 		return []byte{}, nil, c.err
+	}
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
 	}
 
 	return c.k, c.v, nil
@@ -319,7 +332,7 @@ func (c *lmdbCursor) First() ([]byte, []byte, error) {
 func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
@@ -327,12 +340,16 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 
-	c.k, c.v, c.err = c.cursor.Get(append(c.bucket.prefix[:c.bucket.nameLen], seek...), nil, lmdb.SetKey)
+	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
 	if lmdb.IsNotFound(c.err) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
+		panic(c.err)
 		return []byte{}, nil, c.err
+	}
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
 	}
 
 	return c.k, c.v, nil
@@ -345,22 +362,23 @@ func (c *lmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
-	c.cursor.Next()
-	if !c.cursor.Valid() {
-		c.k = nil
-		return c.k, c.v, c.err
+	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.Next)
+	if lmdb.IsNotFound(c.err) {
+		return nil, c.v, nil
 	}
-	item := c.cursor.Item()
-	c.k = item.Key()[c.bucket.nameLen:]
-	if c.cursorOpts.PrefetchValues {
-		c.v, c.err = item.ValueCopy(c.v)
+	if c.err != nil {
+		panic(c.err)
+		return []byte{}, nil, c.err
+	}
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
 	}
 
-	return c.k, c.v, c.err
+	return c.k, c.v, nil
 }
 
 func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
@@ -379,12 +397,12 @@ func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-type badgerNoValuesCursor struct {
+type lmdbNoValuesCursor struct {
 	lmdbCursor
 }
 
-func (c *badgerNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
+func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
+	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -399,55 +417,75 @@ func (c *badgerNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, e
 	return nil
 }
 
-func (c *badgerNoValuesCursor) First() ([]byte, uint32, error) {
-	c.initCursor()
-	c.cursor.Rewind()
-	if !c.cursor.Valid() {
-		c.k = nil
-		return c.k, 0, c.err
+func (c *lmdbNoValuesCursor) First() ([]byte, uint32, error) {
+	if err := c.initCursor(); err != nil {
+		return []byte{}, 0, err
 	}
-	item := c.cursor.Item()
-	c.k = item.Key()[c.bucket.nameLen:]
-	return c.k, uint32(item.ValueSize()), c.err
+	if c.prefix == nil {
+		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+	} else {
+		c.k, c.v, c.err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
+	}
+	if lmdb.IsNotFound(c.err) {
+		return []byte{}, uint32(len(c.v)), nil
+	}
+	if c.err != nil {
+		return []byte{}, 0, c.err
+	}
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+	return c.k, uint32(len(c.v)), c.err
 }
 
-func (c *badgerNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
+func (c *lmdbNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
-	c.initCursor()
-
-	c.cursor.Seek(append(c.bucket.prefix[:c.bucket.nameLen], seek...))
-	if !c.cursor.Valid() {
-		c.k = nil
-		return c.k, 0, c.err
+	if err := c.initCursor(); err != nil {
+		return []byte{}, 0, err
 	}
-	item := c.cursor.Item()
-	c.k = item.Key()[c.bucket.nameLen:]
 
-	return c.k, uint32(item.ValueSize()), c.err
+	fmt.Printf("!!!!!!!!!!!!!seek: %x %x %x\n", seek, c.k, c.v)
+	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetKey)
+	fmt.Printf("!!!!!!!!!!!!!seek: %x %x %x\n", seek, c.k, c.v)
+	if lmdb.IsNotFound(c.err) {
+		return nil, uint32(len(c.v)), nil
+	}
+	if c.err != nil {
+		return []byte{}, 0, c.err
+	}
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+
+	return c.k, uint32(len(c.v)), c.err
 }
 
-func (c *badgerNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
+func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
 	return c.Seek(seek)
 }
 
-func (c *badgerNoValuesCursor) Next() ([]byte, uint32, error) {
+func (c *lmdbNoValuesCursor) Next() ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
-	c.cursor.Next()
-	if !c.cursor.Valid() {
-		c.k = nil
-		return c.k, 0, c.err
+	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.Next)
+	if lmdb.IsNotFound(c.err) {
+		return nil, uint32(len(c.v)), nil
 	}
-	item := c.cursor.Item()
-	c.k = item.Key()[c.bucket.nameLen:]
-	return c.k, uint32(item.ValueSize()), c.err
+	if c.err != nil {
+		return []byte{}, 0, c.err
+	}
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+
+	return c.k, uint32(len(c.v)), c.err
 }

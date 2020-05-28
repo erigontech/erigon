@@ -232,7 +232,7 @@ func (b badgerBucket) Delete(key []byte) error {
 
 func (b badgerBucket) Cursor() Cursor {
 	c := &badgerCursor{bucket: b, ctx: b.tx.ctx, badgerOpts: badger.DefaultIteratorOptions}
-	c.prefix = append(c.prefix, b.prefix[:b.nameLen]...) // set bucket
+	c.prefix = append(c.prefix, b.prefix[:b.nameLen]...) // set dbi
 	c.badgerOpts.Prefix = c.prefix
 	return c
 }

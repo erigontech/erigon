@@ -180,8 +180,8 @@ func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	return uint64(savedTx.Stats().Write), nil
 }
 
-// Type which expecting sequence of triplets: bucket, key, value, ....
-// It sorts entries by bucket name, then inside bucket clusters sort by keys
+// Type which expecting sequence of triplets: dbi, key, value, ....
+// It sorts entries by dbi name, then inside dbi clusters sort by keys
 type MultiPutTuples [][]byte
 
 func (t MultiPutTuples) Len() int { return len(t) / 3 }
@@ -286,7 +286,7 @@ func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]b
 	return dat, err
 }
 
-// getChangeSetByBlockNoLock returns changeset by block and bucket
+// getChangeSetByBlockNoLock returns changeset by block and dbi
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
 
