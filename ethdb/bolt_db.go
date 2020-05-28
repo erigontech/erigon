@@ -22,12 +22,31 @@ import (
 	"context"
 	"os"
 	"path"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+)
+
+var (
+	boltPagesAllocGauge    = metrics.NewRegisteredGauge("bolt/pages/alloc_bytes", nil)
+	boltPagesFreeGauge     = metrics.NewRegisteredGauge("bolt/pages/free", nil)
+	boltPagesPendingGauge  = metrics.NewRegisteredGauge("bolt/pages/pending", nil)
+	boltFreelistInuseGauge = metrics.NewRegisteredGauge("bolt/freelist/inuse", nil)
+	boltTxGauge            = metrics.NewRegisteredGauge("bolt/tx/total", nil)
+	boltTxOpenGauge        = metrics.NewRegisteredGauge("bolt/tx/open", nil)
+	boltTxCursorGauge      = metrics.NewRegisteredGauge("bolt/tx/cursors_total", nil)
+	boltRebalanceGauge     = metrics.NewRegisteredGauge("bolt/rebalance/total", nil)
+	boltRebalanceTimer     = metrics.NewRegisteredTimer("bolt/rebalance/time", nil)
+	boltSplitGauge         = metrics.NewRegisteredGauge("bolt/split/total", nil)
+	boltSpillGauge         = metrics.NewRegisteredGauge("bolt/spill/total", nil)
+	boltSpillTimer         = metrics.NewRegisteredTimer("bolt/spill/time", nil)
+	boltWriteGauge         = metrics.NewRegisteredGauge("bolt/write/total", nil)
+	boltWriteTimer         = metrics.NewRegisteredTimer("bolt/write/time", nil)
 )
 
 // BoltDatabase is a wrapper over BoltDb,
@@ -77,11 +96,41 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		return nil, err
 	}
 
+	if metrics.Enabled {
+		go CollectBoltMetrics(db, 3*time.Second)
+	}
+
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
 		id:  id(),
 	}, nil
+}
+
+func CollectBoltMetrics(db *bolt.DB, refresh time.Duration) {
+	for {
+		time.Sleep(refresh)
+
+		stats := db.Stats()
+		boltPagesFreeGauge.Update(int64(stats.FreePageN))
+		boltPagesPendingGauge.Update(int64(stats.PendingPageN))
+		boltPagesAllocGauge.Update(int64(stats.FreeAlloc))
+		boltFreelistInuseGauge.Update(int64(stats.FreelistInuse))
+
+		boltTxGauge.Update(int64(stats.TxN))
+		boltTxOpenGauge.Update(int64(stats.OpenTxN))
+		boltTxCursorGauge.Update(int64(stats.TxStats.CursorCount))
+
+		boltRebalanceGauge.Update(int64(stats.TxStats.Rebalance))
+		boltRebalanceTimer.Update(stats.TxStats.RebalanceTime)
+
+		boltSplitGauge.Update(int64(stats.TxStats.Split))
+		boltSpillGauge.Update(int64(stats.TxStats.Spill))
+		boltSpillTimer.Update(stats.TxStats.SpillTime)
+
+		boltWriteGauge.Update(int64(stats.TxStats.Write))
+		boltWriteTimer.Update(stats.TxStats.WriteTime)
+	}
 }
 
 // Put inserts or updates a single entry.
