@@ -58,7 +58,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 	loader := trie.NewSubTrieLoader(blockNr)
 	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
 		return errors.Wrap(err1, "checking root hash failed")
 	}

@@ -75,6 +75,7 @@ type FlatDbSubTrieLoader struct {
 type DefaultReceiver struct {
 	trace        bool
 	rl           RetainDecider
+	hc           HashCollector
 	subTries     SubTries
 	currStorage  bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succStorage  bytes.Buffer
@@ -105,8 +106,8 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 }
 
 // Reset prepares the loader for reuse
-func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, receiverDecider RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
-	fstl.defaultReceiver.Reset(receiverDecider, trace)
+func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, receiverDecider RetainDecider, hc HashCollector, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
+	fstl.defaultReceiver.Reset(receiverDecider, hc, trace)
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
@@ -447,8 +448,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	return nil
 }
 
-func (dr *DefaultReceiver) Reset(rl RetainDecider, trace bool) {
+func (dr *DefaultReceiver) Reset(rl RetainDecider, hc HashCollector, trace bool) {
 	dr.rl = rl
+	dr.hc = hc
 	dr.curr.Reset()
 	dr.succ.Reset()
 	dr.value.Reset()
@@ -762,7 +764,7 @@ func (dr *DefaultReceiver) genStructStorage() error {
 		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
 		data = &dr.leafData
 	}
-	dr.groups, err = GenStructStep(dr.rl.Retain, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, nil /* hashCollector */, data, dr.groups, false)
+	dr.groups, err = GenStructStep(dr.rl.Retain, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, dr.hc, data, dr.groups, false)
 	if err != nil {
 		return err
 	}
@@ -826,7 +828,7 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	dr.currStorage.Reset()
 	dr.succStorage.Reset()
 	var err error
-	if dr.groups, err = GenStructStep(dr.rl.Retain, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, nil /* hashCollector */, data, dr.groups, false); err != nil {
+	if dr.groups, err = GenStructStep(dr.rl.Retain, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, dr.hc, data, dr.groups, false); err != nil {
 		return err
 	}
 	dr.accData.FieldSet = 0

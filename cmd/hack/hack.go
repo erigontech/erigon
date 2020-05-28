@@ -816,7 +816,7 @@ func resetIH(chaindata string, fromScratch bool) {
 			dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
 			t3 := time.Now()
 			rl2 := trie.NewRetainRange(prefix, prefix)
-			err = loader.Reset(db, rl2, rl2, dbPrefixes, fixedbits, false)
+			err = loader.Reset(db, rl2, rl2, nil /* HashCollector */, dbPrefixes, fixedbits, false)
 			check(err)
 			subTries, err2 := loader.LoadSubTries()
 			check(err2)
@@ -1057,7 +1057,7 @@ func testStartup() {
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	l := trie.NewSubTrieLoader(currentBlockNr)
 	rl := trie.NewRetainList(0)
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
 		fmt.Printf("%v\n", err1)
 	}
@@ -1106,7 +1106,7 @@ func testResolve(chaindata string) {
 	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
 	rl := trie.NewRetainList(0)
 	rl.AddHex(key[:3])
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
+	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
 	if err1 != nil {
 		fmt.Printf("Resolve error: %v\n", err1)
 	}
@@ -2335,12 +2335,12 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 	sort.Strings(unfurlList)
 	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
 	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
+	if err = loader.Reset(db, unfurl, unfurl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		panic(err)
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	rl := trie.NewRetainList(0)
-	r.defaultReceiver.Reset(rl, false)
+	r.defaultReceiver.Reset(rl, nil /* HashCollector */,  false)
 	loader.SetStreamReceiver(r)
 	subTries, err := loader.LoadSubTries()
 	if err != nil {
