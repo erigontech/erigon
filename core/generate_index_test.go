@@ -148,6 +148,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	})
 }
 
+func TestName(t *testing.T) {
+	db:=ethdb.NewMemDatabase()
+	_,_=generateTestData(t,db,dbutils.AccountChangeSetBucket,3000)
+	db.GetChangeSetByBlock()
+}
+
 func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	key1, err := crypto.GenerateKey()

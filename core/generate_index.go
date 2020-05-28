@@ -49,6 +49,7 @@ var mapper = map[string]struct {
 			return changeset.AccountChangeSetBytes(v)
 		},
 		KeySize: common.HashLength,
+		Template: "acc-ind-",
 		New:     changeset.NewAccountChangeSet,
 		Encode:  changeset.EncodeAccounts,
 	},
@@ -58,6 +59,7 @@ var mapper = map[string]struct {
 			return changeset.StorageChangeSetBytes(v)
 		},
 		KeySize: common.HashLength*2 + common.IncarnationLength,
+		Template: "st-ind-",
 		New:     changeset.NewStorageChangeSet,
 		Encode:  changeset.EncodeStorage,
 	},
@@ -67,6 +69,7 @@ var mapper = map[string]struct {
 			return changeset.AccountChangeSetPlainBytes(v)
 		},
 		KeySize: common.AddressLength,
+		Template: "acc-ind-",
 		New:     changeset.NewAccountChangeSetPlain,
 		Encode:  changeset.EncodeAccountsPlain,
 	},
@@ -76,6 +79,7 @@ var mapper = map[string]struct {
 			return changeset.StorageChangeSetPlainBytes(v)
 		},
 		KeySize: common.AddressLength + common.IncarnationLength + common.HashLength,
+		Template: "st-ind-",
 		New:     changeset.NewStorageChangeSetPlain,
 		Encode:  changeset.EncodeStoragePlain,
 	},
@@ -110,7 +114,7 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		if len(offsets) == 0 {
 			break
 		}
-		fmt.Println("fill", time.Since(cycle))
+		//fmt.Println("fill", time.Since(cycle))
 		fill += time.Since(cycle)
 		t2 := time.Now()
 		bufferMap := make(map[string][]uint64)
@@ -132,7 +136,7 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 			}
 			prevOffset = offset
 		}
-		fmt.Println("walk", time.Since(t2))
+		//fmt.Println("walk", time.Since(t2))
 		walk += time.Since(t2)
 		t3 := time.Now()
 		if filename, err := ig.writeBufferMapToTempFile(ig.TempDir, v.Template, bufferMap); err == nil {
@@ -147,9 +151,9 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		} else {
 			return err
 		}
-		fmt.Println("save map", time.Since(t3))
+		//fmt.Println("save map", time.Since(t3))
 		wri += time.Since(t3)
-		fmt.Println("cycle", time.Since(cycle))
+		//fmt.Println("cycle", time.Since(cycle))
 	}
 	if len(offsets) > 0 {
 		t := time.Now()
@@ -246,6 +250,7 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 		if err != nil {
 			return err
 		}
+		return nil
 	}
 	return errors.New("imposible to drop")
 }

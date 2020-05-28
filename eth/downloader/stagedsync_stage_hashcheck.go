@@ -342,7 +342,7 @@ func mergeTempFilesIntoBucket(db ethdb.Database, files []string, bucket []byte) 
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
 				"hashedKey", fmt.Sprintf("%x...", element.Key[:4]),
-				"alloc", common.StorageSize((m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		var err error
 		decoder.Reset(reader)

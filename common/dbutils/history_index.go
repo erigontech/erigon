@@ -186,7 +186,6 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 		copy(blockNumBytes, key[:common.AddressLength])
 		copy(blockNumBytes[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
 		binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength+common.HashLength:], blockNumber)
-		fmt.Println(common.Bytes2Hex(blockNumBytes))
 	default:
 		panic("unexpected length " + strconv.Itoa(len(key)))
 	}
