@@ -2169,6 +2169,31 @@ func resetState(chaindata string) {
 	fmt.Printf("Reset state done\n")
 }
 
+func resetHashedState(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.AccountChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.StorageChangeSetBucket)
+	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+	check(err)
+	err = db.KV().Update(func(tx *bolt.Tx) error {
+		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
+		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
+		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
+		return nil
+	})
+	check(err)
+	err = downloader.SaveStageProgress(db, downloader.HashCheck, 0)
+	check(err)
+	fmt.Printf("Reset hashed state done\n")
+}
+
 func resetHistoryIndex(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
@@ -2255,22 +2280,45 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
-func testGetProof(chaindata string, block uint64, account common.Address) {
-	fmt.Printf("testGetProof %s, %d, %x\n", chaindata, block, account)
-	// Find all changesets larger than given blocks
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
-	defer db.Close()
+func testGetProof(chaindata string, address common.Address) error {
+	storageKeys := []string{}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	db, dberr := ethdb.NewBoltDatabase(chaindata)
+	check(dberr)
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	block := *headNumber - 100
+	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+
+	loader := trie.NewFlatDbSubTrieLoader()
+	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(6), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+		return err
+	}
+	var initialTrie *trie.Trie
+	if subTries, err := loader.LoadSubTries(); err == nil {
+		initialTrie = trie.New(subTries.Hashes[0])
+		if err1 := initialTrie.HookSubTries(subTries, [][]byte{nil}); err1 != nil {
+			return err1
+		}
+		runtime.ReadMemStats(&m)
+		log.Info("Loaded initial trie", "size", initialTrie.NumberOfAccounts(), "root", fmt.Sprintf("%x", initialTrie.Hash()),
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	} else {
+		return err
+	}
 	ts := dbutils.EncodeTimestamp(block)
-	accountCs := 0
 	accountMap := make(map[string]*accounts.Account)
-	if err = db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := accountMap[string(kk)]; !ok {
 					if len(vv) > 0 {
 						var a accounts.Account
-						check(a.DecodeForStorage(vv))
+						if innerErr := a.DecodeForStorage(vv); innerErr != nil {
+							return innerErr
+						}
 						accountMap[string(kk)] = &a
 					} else {
 						accountMap[string(kk)] = nil
@@ -2283,14 +2331,15 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 				return false, innerErr
 			}
 		}
-		accountCs++
 		return true, nil
 	}); err != nil {
-		panic(err)
+		return err
 	}
-	storageCs := 0
+	runtime.ReadMemStats(&m)
+	log.Info("Constructed account map", "size", len(accountMap),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
-	if err = db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := storageMap[string(kk)]; !ok {
@@ -2303,11 +2352,13 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 				return false, innerErr
 			}
 		}
-		storageCs++
 		return true, nil
 	}); err != nil {
-		panic(err)
+		return err
 	}
+	runtime.ReadMemStats(&m)
+	log.Info("Constructed storage map", "size", len(storageMap),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
@@ -2320,6 +2371,8 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
 					copy(acc.CodeHash[:], codeHash)
+				} else {
+					return err1
 				}
 			}
 		}
@@ -2332,28 +2385,52 @@ func testGetProof(chaindata string, block uint64, account common.Address) {
 		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
 		unfurl.AddKey(sk[:])
 	}
+	rl := trie.NewRetainList(0)
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
+	rl.AddKey(addrHash[:])
+	unfurl.AddKey(addrHash[:])
+	for _, key := range storageKeys {
+		keyAsHash := common.HexToHash(key)
+		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
+			trieKey := append(addrHash[:], keyHash[:]...)
+			rl.AddKey(trieKey)
+			unfurl.AddKey(trieKey)
+		} else {
+			return err1
+		}
+	}
 	sort.Strings(unfurlList)
-	fmt.Printf("Account changesets: %d, storage changesets: %d, unfurlList: %d\n", accountCs, storageCs, len(unfurlList))
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, unfurl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
-		panic(err)
+	runtime.ReadMemStats(&m)
+	log.Info("Constructed account unfurl lists",
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	prefixes, fixedbits, hooks := initialTrie.FindSubTriesToLoad(unfurl)
+	log.Info("Found db prefixes", "len(prefixes)", len(prefixes),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	unfurl.Rewind()
+	loader = trie.NewFlatDbSubTrieLoader()
+	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, prefixes, fixedbits, false); err != nil {
+		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	rl := trie.NewRetainList(0)
 	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
-	subTries, err := loader.LoadSubTries()
-	if err != nil {
-		panic(err)
+	subTries, err1 := loader.LoadSubTries()
+	if err1 != nil {
+		return err1
 	}
-	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
-	fmt.Printf("Head block number: %d, root hash: %x\n", *headNumber, headHeader.Root)
-	fmt.Printf("Root hash: %x\n", subTries.Hashes[0])
+	runtime.ReadMemStats(&m)
+	log.Info("Loaded subtries",
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	hash := rawdb.ReadCanonicalHash(db, block-1)
 	header := rawdb.ReadHeader(db, hash, block-1)
-	fmt.Printf("Block state root: %x\n", header.Root)
+	if err = initialTrie.HookSubTries(subTries, hooks); err != nil {
+		fmt.Printf("Error hooking: %v\n", err)
+	}
+	fmt.Printf("Resulting root: %x, expected root: %x\n", initialTrie.Hash(), header.Root)
+	return nil
 }
 
 func testSeek(chaindata string) {
@@ -2518,11 +2595,16 @@ func main() {
 	if *action == "resetState" {
 		resetState(*chaindata)
 	}
+	if *action == "resetHashed" {
+		resetHashedState(*chaindata)
+	}
 	if *action == "resetHistoryIndex" {
 		resetHistoryIndex(*chaindata)
 	}
 	if *action == "getProof" {
-		testGetProof(*chaindata, uint64(*block), common.HexToAddress(*account))
+		if err := testGetProof(*chaindata, common.HexToAddress(*account)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "seek" {
 		testSeek(*chaindata)
