@@ -200,6 +200,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	} else {
 		return fmt.Errorf("reading account history process: %v", err)
 	}
+	
 	log.Info("Account history index generation started", "from", blockNum)
 	var m runtime.MemStats
 	var bufferFileNames []string
