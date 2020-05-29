@@ -637,33 +637,21 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 // Stop implements node.Service, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
-	log.Error("$$$ 1")
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
-	log.Error("$$$ 2")
 	if s.lesServer != nil {
-		log.Error("$$$ 2.1")
 		s.lesServer.Stop()
-		log.Error("$$$ 2.1")
 	}
 
 	// Then stop everything else.
 	s.bloomIndexer.Close()
-	log.Error("$$$ 3")
 	close(s.closeBloomHandler)
-	log.Error("$$$ 4")
 	s.txPool.Stop()
-	log.Error("$$$ 5")
 	s.miner.Stop()
-	log.Error("$$$ 6")
 	s.blockchain.Stop()
-	log.Error("$$$ 7")
 	s.engine.Close()
-	log.Error("$$$ 8")
 	s.chainDb.Close()
-	log.Error("$$$ 9")
 	s.eventMux.Stop()
-	log.Error("$$$ 10")
 	return nil
 }
 

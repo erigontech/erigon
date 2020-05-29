@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -13,7 +12,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func (d *Downloader) spawnBodyDownloadStage(ctx context.Context, id string) (bool, error) {
+func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
+	*cont = false
+
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -24,7 +25,7 @@ func (d *Downloader) spawnBodyDownloadStage(ctx context.Context, id string) (boo
 	// Figure out how many blocks have already been downloaded
 	origin, err := GetStageProgress(d.stateDB, Bodies)
 	if err != nil {
-		return false, fmt.Errorf("getting Bodies stage progress: %v", err)
+		return fmt.Errorf("getting Bodies stage progress: %w", err)
 	}
 	// Figure out how many headers we have
 	currentNumber := origin + 1
@@ -35,6 +36,12 @@ func (d *Downloader) spawnBodyDownloadStage(ctx context.Context, id string) (boo
 	var headers = make(map[common.Hash]*types.Header) // We use map because there might be more than one header by block number
 	var hashCount = 0
 	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
+		select {
+		case <-d.quitCh:
+			return false, errCanceled
+		default:
+		}
+
 		// Skip non relevant records
 		if len(k) == 8+len(dbutils.HeaderHashSuffix) && bytes.Equal(k[8:], dbutils.HeaderHashSuffix) {
 			// This is how we learn about canonical chain
@@ -66,59 +73,83 @@ func (d *Downloader) spawnBodyDownloadStage(ctx context.Context, id string) (boo
 		return true, nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("walking over canonical hashes: %v", err)
+		return fmt.Errorf("walking over canonical hashes: %w", err)
 	}
 	if missingHeader != 0 {
 		if err1 := SaveStageProgress(d.stateDB, Headers, missingHeader); err1 != nil {
-			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %v", err1)
+			return fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
 		}
 		// This will cause the sync return to the header stage
-		return false, nil
+		return nil
 	}
 	d.queue.Reset()
 	if hashCount <= 1 {
 		// No more bodies to download
-		return false, nil
+		return nil
 	}
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
 	d.queue.ScheduleBodies(from, hashes[:hashCount-1], headers)
 	to := from + uint64(hashCount-1)
+
 	select {
 	case d.bodyWakeCh <- true:
 	case <-d.cancelCh:
-	case <-ctx.Done():
+	case <-d.quitCh:
+		return errCanceled
 	}
+
 	// Now fetch all the bodies
 	fetchers := []func() error{
 		func() error { return d.fetchBodies(from) },
 		func() error { return d.processBodiesStage(to) },
 	}
 
-	withCancel(ctx, &err, func() { err = d.spawnSync(fetchers) })
-	return true, err
+	*cont = true
+	err = withQuit(d.quitCh, func() error { return d.spawnSync(fetchers) })
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
+	var err error
+	var done bool
+
 	for {
-		results := d.queue.Results(true)
-		if len(results) == 0 {
-			return nil
-		}
-		lastNumber, err := d.importBlockResults(results, false /* execute */)
-		if err != nil {
+		err = withQuit(d.quitCh, func() error {
+			return d.processBodies(to, &done)
+		})
+		if done {
 			return err
 		}
-		if lastNumber == to {
-			select {
-			case d.bodyWakeCh <- false:
-			case <-d.cancelCh:
-			}
-			return nil
-		}
 	}
+}
+
+func (d *Downloader) processBodies(to uint64, done *bool) error {
+	*done = true
+
+	results := d.queue.Results(true)
+	if len(results) == 0 {
+		return nil
+	}
+	lastNumber, err := d.importBlockResults(results, false /* execute */)
+	if err != nil {
+		return err
+	}
+	if lastNumber == to {
+		select {
+		case d.bodyWakeCh <- false:
+		case <-d.cancelCh:
+		}
+		return nil
+	}
+
+	*done = false
+	return nil
 }
 
 func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
@@ -127,7 +158,7 @@ func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
 	if err != nil {
 		return fmt.Errorf("unwind Bodies: get stage progress: %v", err)
 	}
-	unwindPoint, err1 := GetStageUnwind(d.stateDB, Bodies)
+	err1 := GetStageUnwind(d.stateDB, Bodies, &unwindPoint)
 	if err1 != nil {
 		return err1
 	}

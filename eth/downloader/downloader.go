@@ -69,6 +69,7 @@ var (
 	reorgProtHeaderDelay = 2  // Number of headers to delay delivering to cover mini reorgs
 
 	fsHeaderCheckFrequency = 100             // Verification frequency of the downloaded headers during fast sync
+	fsHeaderCheckFrequencyStaged = 0             // Verification frequency of the downloaded headers during fast sync
 	fsHeaderSafetyNet      = 2048            // Number of headers to discard in case a chain violation is detected
 	fsHeaderForceVerify    = 24              // Number of headers to verify before and after the pivot to accept it
 	fsHeaderContCheck      = 3 * time.Second // Time interval to check for header continuations during state download
@@ -142,9 +143,8 @@ type Downloader struct {
 	headerProcCh  chan []*types.Header // [eth/62] Channel to feed the header processor new tasks
 
 	// Cancellation and termination
-	cancelPeer string         // Identifier of the peer currently being used as the master (cancel on drop)
-	cancelCh   chan struct{}  // Channel to cancel mid-flight syncs
-	cancelCtx context.CancelFunc
+	cancelPeer string        // Identifier of the peer currently being used as the master (cancel on drop)
+	cancelCh   chan struct{} // Channel to cancel mid-flight syncs
 	cancelLock sync.RWMutex   // Lock to protect the cancel channel and peer in delivers
 	cancelWg   sync.WaitGroup // Make sure all fetcher goroutines have exited.
 
@@ -418,10 +418,8 @@ func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode 
 		}
 	}
 	// Create cancel channel for aborting mid-flight and mark the master peer
-	ctx, cancel := context.WithCancel(context.Background())
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
-	d.cancelCtx = cancel
 	d.cancelPeer = id
 	d.cancelLock.Unlock()
 
@@ -435,12 +433,12 @@ func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode 
 	if p == nil {
 		return errUnknownPeer
 	}
-	return d.syncWithPeer(ctx, p, hash, td)
+	return d.syncWithPeer(p, hash, td)
 }
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.
-func (d *Downloader) syncWithPeer(ctx context.Context, p *peerConnection, hash common.Hash, td *big.Int) (err error) {
+func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.Int) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -546,7 +544,7 @@ func (d *Downloader) syncWithPeer(ctx context.Context, p *peerConnection, hash c
 
 	// Turbo-Geth's staged sync goes here
 	if d.mode == StagedSync {
-		return d.doStagedSyncWithFetchers(ctx, p, fetchers)
+		return d.doStagedSyncWithFetchers(p, fetchers)
 	}
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
@@ -609,7 +607,6 @@ func (d *Downloader) cancel() {
 // finish before returning.
 func (d *Downloader) Cancel() {
 	d.cancel()
-	d.cancelCtx()
 	d.cancelWg.Wait()
 
 	d.ancientLimit = 0
@@ -619,26 +616,18 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
-	log.Error(">>>> 1")
 	d.blockchain.Stop()
-	log.Error(">>>> 2")
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
-	log.Error(">>>> 3")
 	select {
 	case <-d.quitCh:
-		log.Error(">>>> 3.1")
 	default:
-		log.Error(">>>> 3.2")
 		close(d.quitCh)
-		log.Error(">>>> 3.3.")
 	}
-	log.Error(">>>> 4")
 	d.quitLock.Unlock()
-	log.Error(">>>> 5")
+
 	// Cancel any pending download requests
 	d.Cancel()
-	log.Error(">>>> 6")
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
@@ -1535,7 +1524,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
 						if newCanonical {
 							// Need to unwind further stages
-							if err1 := UnwindAllStages(d.stateDB, lowestCanonicalNumber); err1 != nil {
+							if err1 := UnwindAllStages(d.stateDB, lowestCanonicalNumber, d.quitCh); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
 						}

@@ -72,10 +72,11 @@ func (l *progressLogger) Stop() {
 const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 
-func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uint64, error) {
+func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, syncHeadNumber *uint64) error {
+	*syncHeadNumber = 0
 	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	nextBlockNumber := uint64(0)
@@ -150,11 +151,11 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		// where the magic happens
 		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		if err = SaveStageProgress(stateBatch, Execution, blockNum); err != nil {
-			return 0, err
+			return err
 		}
 
 		atomic.AddUint64(&nextBlockNumber, 1)
@@ -162,13 +163,13 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 		if stateBatch.BatchSize() >= StateBatchSize {
 			start := time.Now()
 			if _, err = stateBatch.Commit(); err != nil {
-				return 0, err
+				return err
 			}
 			log.Info("State batch committed", "in", time.Since(start))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {
 			if _, err = changeBatch.Commit(); err != nil {
-				return 0, err
+				return err
 			}
 		}
 		/*
@@ -178,15 +179,19 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			}
 		*/
 	}
+
+	// the last processed block
+	*syncHeadNumber = atomic.LoadUint64(&nextBlockNumber) - 1
+
 	_, err = stateBatch.Commit()
 	if err != nil {
-		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
+		return fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
 	}
 	_, err = changeBatch.Commit()
 	if err != nil {
-		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
+		return fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
-	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
+	return nil
 }
 
 func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {

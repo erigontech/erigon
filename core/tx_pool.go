@@ -477,7 +477,9 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 // Stop terminates the transaction pool.
 func (pool *TxPool) Stop() {
 	// Unsubscribe all subscriptions registered from txpool
-	pool.scope.Close()
+	if pool == nil {
+		return
+	}
 
 	// Unsubscribe subscriptions registered from blockchain
 	pool.chainHeadSub.Unsubscribe()

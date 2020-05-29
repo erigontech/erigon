@@ -28,14 +28,14 @@ import (
 type SyncStage byte
 
 const (
-	Headers   SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	Bodies                     // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders                    // "From" recovered from signatures, bodies re-written
-	Execution                  // Executing each block w/o buildinf a trie
-	HashCheck                  // Checking the root hash
-	AccountHistoryIndex        // Generating history index for accounts
-	StorageHistoryIndex        // Generating history index for storage
-	Finish                     // Nominal stage after all other stages
+	Headers             SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders                              // "From" recovered from signatures, bodies re-written
+	Execution                            // Executing each block w/o buildinf a trie
+	HashCheck                            // Checking the root hash
+	AccountHistoryIndex                  // Generating history index for accounts
+	StorageHistoryIndex                  // Generating history index for storage
+	Finish                               // Nominal stage after all other stages
 )
 
 // GetStageProcess retrieves saved progress of given sync stage from the database
@@ -60,16 +60,23 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 
 // UnwindAllStages marks all the stages after the Headers stage (where unwinding is initiated) to be unwound
 // unwinding needs to have in the reverse order of stages
-func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
+func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64, quitCh chan struct{}) error {
+	var existingUnwindPoint uint64
+	var err error
+	shellQuit := newWithQuit(quitCh)
 	for stage := Headers + 1; stage < Finish; stage++ {
-		existingUnwindPoint, err := GetStageUnwind(db, stage)
+		err = shellQuit(func() error {
+			return GetStageUnwind(db, stage, &existingUnwindPoint)
+		})
 		if err != nil {
 			return err
 		}
-		progress, err1 := GetStageProgress(db, stage)
-		if err1 != nil {
-			return err1
+
+		progress, err := GetStageProgress(db, stage)
+		if err != nil {
+			return err
 		}
+
 		if (existingUnwindPoint == 0 || existingUnwindPoint > unwindPoint) && unwindPoint < progress {
 			// Only lower, not higher
 			err = SaveStageUnwind(db, stage, unwindPoint)
@@ -84,20 +91,23 @@ func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
 // GetStageInvalidation retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
-func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
+func GetStageUnwind(db ethdb.Getter, stage SyncStage, unwindPoint *uint64) error {
+	*unwindPoint = 0
+
 	v, err := db.Get(dbutils.SyncStageUnwind, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
-		return 0, err
+		return err
 	}
 	switch len(v) {
 	case 0:
-		return 0, nil
+		return nil
 	case 8:
 		// continue
 	default:
-		return 0, fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
+		return fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
 	}
-	return binary.BigEndian.Uint64(v), nil
+	*unwindPoint = binary.BigEndian.Uint64(v)
+	return nil
 }
 
 // SaveStageInvalidation saves the progress of the given stage in the database
