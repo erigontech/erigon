@@ -50,8 +50,9 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
+		fmt.Printf("db.opts.path: %s\n", opts.path)
 		logger = log.New("lmdb", "inMem")
-		err = env.SetMapSize(1 << 27) // 128MB
+		err = env.SetMapSize(1 << 26) // 64MB
 		if err != nil {
 			return nil, err
 		}
@@ -151,6 +152,9 @@ func (db *lmdbKV) Close() {
 		db.log.Warn("failed to close DB", "err", err)
 	} else {
 		db.log.Info("database closed")
+	}
+	if db.opts.inMem {
+		os.RemoveAll(db.opts.path) // lmdb creates file in this mode, just doesn't fsync in it
 	}
 }
 func (db *lmdbKV) Size() uint64 {
