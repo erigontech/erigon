@@ -4,8 +4,8 @@
  * file COPYING or http://www.opensource.org/licenses/mit-license.php.*
  **********************************************************************/
 
-#ifndef _SECP256K1_NUM_
-#define _SECP256K1_NUM_
+#ifndef SECP256K1_NUM_H
+#define SECP256K1_NUM_H
 
 #ifndef USE_NUM_NONE
 
@@ -54,7 +54,7 @@ static void secp256k1_num_mul(secp256k1_num *r, const secp256k1_num *a, const se
     even if r was negative. */
 static void secp256k1_num_mod(secp256k1_num *r, const secp256k1_num *m);
 
-/** Right-shift the passed number by bits. */
+/** Right-shift the passed number by bits bits. */
 static void secp256k1_num_shift(secp256k1_num *r, int bits);
 
 /** Check whether a number is zero. */
@@ -71,4 +71,4 @@ static void secp256k1_num_negate(secp256k1_num *r);
 
 #endif
 
-#endif
+#endif /* SECP256K1_NUM_H */

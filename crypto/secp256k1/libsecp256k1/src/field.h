@@ -4,8 +4,8 @@
  * file COPYING or http://www.opensource.org/licenses/mit-license.php.*
  **********************************************************************/
 
-#ifndef _SECP256K1_FIELD_
-#define _SECP256K1_FIELD_
+#ifndef SECP256K1_FIELD_H
+#define SECP256K1_FIELD_H
 
 /** Field element module.
  *
@@ -32,10 +32,12 @@
 
 #include "util.h"
 
-/** Normalize a field element. */
+/** Normalize a field element. This brings the field element to a canonical representation, reduces
+ *  its magnitude to 1, and reduces it modulo field size `p`.
+ */
 static void secp256k1_fe_normalize(secp256k1_fe *r);
 
-/** Weakly normalize a field element: reduce it magnitude to 1, but don't fully normalize. */
+/** Weakly normalize a field element: reduce its magnitude to 1, but don't fully normalize. */
 static void secp256k1_fe_normalize_weak(secp256k1_fe *r);
 
 /** Normalize a field element, without constant-time guarantee. */
@@ -129,4 +131,4 @@ static void secp256k1_fe_storage_cmov(secp256k1_fe_storage *r, const secp256k1_f
 /** If flag is true, set *r equal to *a; otherwise leave it. Constant-time. */
 static void secp256k1_fe_cmov(secp256k1_fe *r, const secp256k1_fe *a, int flag);
 
-#endif
+#endif /* SECP256K1_FIELD_H */

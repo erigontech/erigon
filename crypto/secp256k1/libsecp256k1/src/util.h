@@ -4,8 +4,8 @@
  * file COPYING or http://www.opensource.org/licenses/mit-license.php.*
  **********************************************************************/
 
-#ifndef _SECP256K1_UTIL_H_
-#define _SECP256K1_UTIL_H_
+#ifndef SECP256K1_UTIL_H
+#define SECP256K1_UTIL_H
 
 #if defined HAVE_CONFIG_H
 #include "libsecp256k1-config.h"
@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <limits.h>
 
 typedef struct {
     void (*fn)(const char *text, void* data);
@@ -36,7 +37,7 @@ static SECP256K1_INLINE void secp256k1_callback_call(const secp256k1_callback * 
 } while(0)
 #endif
 
-#ifdef HAVE_BUILTIN_EXPECT
+#if SECP256K1_GNUC_PREREQ(3, 0)
 #define EXPECT(x,c) __builtin_expect((x),(c))
 #else
 #define EXPECT(x,c) (x)
@@ -76,6 +77,55 @@ static SECP256K1_INLINE void *checked_malloc(const secp256k1_callback* cb, size_
     return ret;
 }
 
+static SECP256K1_INLINE void *checked_realloc(const secp256k1_callback* cb, void *ptr, size_t size) {
+    void *ret = realloc(ptr, size);
+    if (ret == NULL) {
+        secp256k1_callback_call(cb, "Out of memory");
+    }
+    return ret;
+}
+
+#if defined(__BIGGEST_ALIGNMENT__)
+#define ALIGNMENT __BIGGEST_ALIGNMENT__
+#else
+/* Using 16 bytes alignment because common architectures never have alignment
+ * requirements above 8 for any of the types we care about. In addition we
+ * leave some room because currently we don't care about a few bytes. */
+#define ALIGNMENT 16
+#endif
+
+#define ROUND_TO_ALIGN(size) (((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT)
+
+/* Assume there is a contiguous memory object with bounds [base, base + max_size)
+ * of which the memory range [base, *prealloc_ptr) is already allocated for usage,
+ * where *prealloc_ptr is an aligned pointer. In that setting, this functions
+ * reserves the subobject [*prealloc_ptr, *prealloc_ptr + alloc_size) of
+ * alloc_size bytes by increasing *prealloc_ptr accordingly, taking into account
+ * alignment requirements.
+ *
+ * The function returns an aligned pointer to the newly allocated subobject.
+ *
+ * This is useful for manual memory management: if we're simply given a block
+ * [base, base + max_size), the caller can use this function to allocate memory
+ * in this block and keep track of the current allocation state with *prealloc_ptr.
+ *
+ * It is VERIFY_CHECKed that there is enough space left in the memory object and
+ * *prealloc_ptr is aligned relative to base.
+ */
+static SECP256K1_INLINE void *manual_alloc(void** prealloc_ptr, size_t alloc_size, void* base, size_t max_size) {
+    size_t aligned_alloc_size = ROUND_TO_ALIGN(alloc_size);
+    void* ret;
+    VERIFY_CHECK(prealloc_ptr != NULL);
+    VERIFY_CHECK(*prealloc_ptr != NULL);
+    VERIFY_CHECK(base != NULL);
+    VERIFY_CHECK((unsigned char*)*prealloc_ptr >= (unsigned char*)base);
+    VERIFY_CHECK(((unsigned char*)*prealloc_ptr - (unsigned char*)base) % ALIGNMENT == 0);
+    VERIFY_CHECK((unsigned char*)*prealloc_ptr - (unsigned char*)base + aligned_alloc_size <= max_size);
+    ret = *prealloc_ptr;
+    *((unsigned char**)prealloc_ptr) += aligned_alloc_size;
+    return ret;
+}
+
 /* Macro for restrict, when available and not in a VERIFY build. */
 #if defined(SECP256K1_BUILD) && defined(VERIFY)
 # define SECP256K1_RESTRICT
@@ -110,4 +160,19 @@ static SECP256K1_INLINE void *checked_malloc(const secp256k1_callback* cb, size_
 SECP256K1_GNUC_EXT typedef unsigned __int128 uint128_t;
 #endif
 
-#endif
+/* Zero memory if flag == 1. Flag must be 0 or 1. Constant time. */
+static SECP256K1_INLINE void memczero(void *s, size_t len, int flag) {
+    unsigned char *p = (unsigned char *)s;
+    /* Access flag with a volatile-qualified lvalue.
+       This prevents clang from figuring out (after inlining) that flag can
+       take only be 0 or 1, which leads to variable time code. */
+    volatile int vflag = flag;
+    unsigned char mask = -(unsigned char) vflag;
+    while (len) {
+        *p &= ~mask;
+        p++;
+        len--;
+    }
+}
+
+#endif /* SECP256K1_UTIL_H */
