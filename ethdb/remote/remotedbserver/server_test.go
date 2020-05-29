@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
@@ -380,9 +379,7 @@ func TestCursorOperations(t *testing.T) {
 }
 
 func TestTxYield(t *testing.T) {
-	assert := assert.New(t)
-	db, errOpen := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true, KeysPrefixCompressionDisable: true})
-	assert.NoError(errOpen)
+	assert, db := assert.New(t), ethdb.NewMemDatabase()
 
 	errors := make(chan error, 10)
 	writeDoneNotify := make(chan struct{}, 1)
@@ -396,7 +393,7 @@ func TestTxYield(t *testing.T) {
 		}()
 
 		// Long read-only transaction
-		if err := db.View(func(tx *bolt.Tx) error {
+		if err := db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.CurrentStateBucket)
 			var keyBuf [8]byte
 			var i uint64
@@ -409,8 +406,16 @@ func TestTxYield(t *testing.T) {
 
 				i++
 				binary.BigEndian.PutUint64(keyBuf[:], i)
-				b.Get(keyBuf[:])
-				tx.Yield()
+				_, err2 := b.Get(keyBuf[:])
+				if err2 != nil {
+					return err2
+				}
+				type Yieldable interface {
+					Yield()
+				}
+				if casted, ok := tx.(Yieldable); ok {
+					casted.Yield()
+				}
 			}
 		}); err != nil {
 			errors <- err
@@ -418,7 +423,7 @@ func TestTxYield(t *testing.T) {
 	}()
 
 	// Expand the database
-	err := db.Update(func(tx *bolt.Tx) error {
+	err := db.AbstractKV().Update(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		var keyBuf, valBuf [8]byte
 		for i := uint64(0); i < 10000; i++ {
@@ -430,7 +435,7 @@ func TestTxYield(t *testing.T) {
 		}
 		return nil
 	})
-	assert.Nil(err, "Could not execute update")
+	assert.NoError(err, "Could not execute update")
 
 	// write must finish before read
 	assert.Equal(0, len(readDoneNotify), "Read should not finished here, if it did, it means the writes were blocked by it")
