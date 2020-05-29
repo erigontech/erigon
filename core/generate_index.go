@@ -102,7 +102,6 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 	// write each batch into a file
 	var fill, walk, wri time.Duration
 	for !done {
-		cycle := time.Now()
 		if newDone, newBlockNum, newOffsets, newBlockNums, err := ig.fillChangeSetBuffer(changeSetBucket, blockNum, changesets, offsets, blockNums); err == nil {
 			done = newDone
 			blockNum = newBlockNum
@@ -114,9 +113,7 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		if len(offsets) == 0 {
 			break
 		}
-		//fmt.Println("fill", time.Since(cycle))
-		fill += time.Since(cycle)
-		t2 := time.Now()
+
 		bufferMap := make(map[string][]uint64)
 		prevOffset := 0
 		for i, offset := range offsets {
@@ -136,9 +133,7 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 			}
 			prevOffset = offset
 		}
-		//fmt.Println("walk", time.Since(t2))
-		walk += time.Since(t2)
-		t3 := time.Now()
+
 		if filename, err := ig.writeBufferMapToTempFile(ig.TempDir, v.Template, bufferMap); err == nil {
 			defer func() {
 				//nolint:errcheck
@@ -151,21 +146,13 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		} else {
 			return err
 		}
-		//fmt.Println("save map", time.Since(t3))
-		wri += time.Since(t3)
-		//fmt.Println("cycle", time.Since(cycle))
 	}
+
 	if len(offsets) > 0 {
-		t := time.Now()
 		if err := ig.mergeFilesIntoBucket(bufferFileNames, v.IndexBucket, v.KeySize); err != nil {
 			return err
 		}
-		fmt.Println("merge", time.Since(t))
 	}
-
-	fmt.Println("fill", fill)
-	fmt.Println("walk", walk)
-	fmt.Println("wri", wri)
 
 	return nil
 }
