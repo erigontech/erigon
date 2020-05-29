@@ -2174,14 +2174,14 @@ func resetHashedState(chaindata string) {
 	check(err)
 	defer db.Close()
 	/*
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.CurrentStateBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.AccountChangeSetBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.StorageChangeSetBucket)
-	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
-	check(err)
+		//nolint:errcheck
+		db.DeleteBucket(dbutils.CurrentStateBucket)
+		//nolint:errcheck
+		db.DeleteBucket(dbutils.AccountChangeSetBucket)
+		//nolint:errcheck
+		db.DeleteBucket(dbutils.StorageChangeSetBucket)
+		_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+		check(err)
 	*/
 	err = db.KV().Update(func(tx *bolt.Tx) error {
 		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
