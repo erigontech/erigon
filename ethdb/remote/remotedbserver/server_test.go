@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -130,10 +131,10 @@ func TestCmdBucket(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket
-	var name = []byte("testbucket")
+	var name = dbutils.CurrentStateBucket
 	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		_, err1 := tx.CreateBucket(name, false)
-		return err1
+		_ = tx.Bucket(name)
+		return nil
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
@@ -173,12 +174,10 @@ func TestCmdGet(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = []byte("testbucket")
+	var name = dbutils.CurrentStateBucket
 	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		b, err1 := tx.CreateBucket(name, false)
-		if err1 != nil {
-			return err1
-		}
+		b := tx.Bucket(name)
+		var err1 error
 		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
 			return err1
 		}
@@ -248,12 +247,10 @@ func TestCmdSeek(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = []byte("testbucket")
+	var name = dbutils.CurrentStateBucket
 	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		b, err1 := tx.CreateBucket(name, false)
-		if err1 != nil {
-			return err1
-		}
+		b := tx.Bucket(name)
+		var err1 error
 		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
 			return err1
 		}
@@ -324,11 +321,10 @@ func TestCursorOperations(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = []byte("testbucket")
+	var name = dbutils.CurrentStateBucket
 	err := db.KV().Update(func(tx *bolt.Tx) error {
-		b, err1 := tx.CreateBucket(name, false)
-		require.NoError(err1)
-		err1 = b.Put([]byte(key1), []byte(value1))
+		b := tx.Bucket(name)
+		err1 := b.Put([]byte(key1), []byte(value1))
 		require.NoError(err1)
 		err1 = b.Put([]byte(key2), []byte(value2))
 		require.NoError(err1)
@@ -423,8 +419,8 @@ func TestTxYield(t *testing.T) {
 
 	// Create bucket
 	err := db.KV().Update(func(tx *bolt.Tx) error {
-		_, err1 := tx.CreateBucket([]byte("bucket"), false)
-		return err1
+		_ = tx.Bucket(dbutils.CurrentStateBucket)
+		return nil
 	})
 	assert.Nil(err, "Could not create bucket")
 
@@ -441,7 +437,7 @@ func TestTxYield(t *testing.T) {
 
 		// Long read-only transaction
 		if err = db.KV().View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte("bucket"))
+			b := tx.Bucket(dbutils.CurrentStateBucket)
 			var keyBuf [8]byte
 			var i uint64
 			for {
@@ -463,7 +459,7 @@ func TestTxYield(t *testing.T) {
 
 	// Expand the database
 	err = db.KV().Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("bucket"))
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		var keyBuf, valBuf [8]byte
 		for i := uint64(0); i < 10000; i++ {
 			binary.BigEndian.PutUint64(keyBuf[:], i)
@@ -501,14 +497,12 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = []byte("testbucket")
+	var name = dbutils.CurrentStateBucket
 
 	err := db.KV().Update(func(tx *bolt.Tx) error {
-		bucket, err1 := tx.CreateBucket(name, false)
-		if err1 != nil {
-			return err1
-		}
+		bucket := tx.Bucket(name)
 
+		var err1 error
 		if err1 = bucket.Put([]byte(key1), []byte(value1)); err1 != nil {
 			return err1
 		}
@@ -585,11 +579,10 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 
 	// ---------- Start of boilerplate code
 	// Create a bucket and populate some values
-	var name = []byte("testbucket")
+	var name = dbutils.CurrentStateBucket
 
 	err := db.KV().Update(func(tx *bolt.Tx) error {
-		bucket, err1 := tx.CreateBucket(name, false)
-		require.NoError(err1)
+		bucket := tx.Bucket(name)
 
 		require.NoError(bucket.Put([]byte(key1), []byte(value1)))
 		require.NoError(bucket.Put([]byte(key2), []byte(value2)))

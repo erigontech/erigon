@@ -18,7 +18,6 @@ package ethdb
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"runtime"
 	"time"
@@ -82,22 +81,16 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 
 // NewEphemeralBadger returns a new BadgerDB in a temporary directory.
 func NewEphemeralBadger() (*BadgerDatabase, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
-	if err != nil {
-		return nil, err
-	}
+	logger := log.New("db", "badgerInMem")
 
-	logger := log.New("database", dir)
-
-	db, err := badger.Open(badger.DefaultOptions(dir))
+	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
 	if err != nil {
 		return nil, err
 	}
 
 	return &BadgerDatabase{
-		db:     db,
-		log:    logger,
-		tmpDir: dir,
+		db:  db,
+		log: logger,
 	}, nil
 }
 

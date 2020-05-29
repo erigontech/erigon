@@ -47,18 +47,25 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		return nil, err
 	}
 
-	err = env.SetMapSize(1 << 45) // 35TB
-	if err != nil {
-		return nil, err
-	}
+	var logger log.Logger
 
-	if !opts.inMem {
+	if opts.inMem {
+		logger = log.New("lmdb", "inMem")
+		err = env.SetMapSize(1 << 27) // 128MB
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		logger = log.New("lmdb", path.Base(opts.path))
+
+		err = env.SetMapSize(1 << 45) // 1TB
+		if err != nil {
+			return nil, err
+		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, err
 		}
 	}
-
-	logger := log.New("lmdb", path.Base(opts.path))
 
 	go func() {
 		for {
@@ -274,9 +281,6 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 }
 
 func (b lmdbBucket) Put(key []byte, value []byte) error {
-	if value == nil {
-		return b.Delete(key)
-	}
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()

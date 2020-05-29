@@ -120,9 +120,9 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		}
 		assert.Equal(1, counter)
 
-		k, _, err2 := c.Seek([]byte{2})
+		k2, _, err2 := c.Seek([]byte{2})
 		assert.NoError(err2)
-		assert.Equal([]byte{2}, k)
+		assert.Equal([]byte{2}, k2)
 
 		c = b.Cursor()
 		counter = 0
@@ -143,9 +143,9 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		}
 		assert.Equal(12, counter)
 
-		k, _, err2 = c.Seek([]byte{2})
+		k2, _, err2 = c.Seek([]byte{2})
 		assert.NoError(err2)
-		assert.Equal([]byte{2}, k)
+		assert.Equal([]byte{2}, k2)
 		return nil
 	}); err != nil {
 		assert.NoError(err)

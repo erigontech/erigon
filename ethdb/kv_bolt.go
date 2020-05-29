@@ -3,7 +3,6 @@ package ethdb
 import (
 	"bytes"
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -191,7 +190,6 @@ func (b boltBucket) Get(key []byte) (val []byte, err error) {
 	}
 
 	val, _ = b.bolt.Get(key)
-	fmt.Printf("Bolt Get: %x -> %x %s\n", key, val, err)
 	return val, err
 }
 
