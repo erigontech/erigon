@@ -170,7 +170,6 @@ func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {
 	return addrHash, inc
 }
 
-
 // Key + blockNum
 func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []byte) {
 	encodedTS = EncodeTimestamp(timestamp)
@@ -179,4 +178,3 @@ func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []by
 	copy(composite[len(key):], encodedTS)
 	return composite, encodedTS
 }
-
