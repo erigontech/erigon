@@ -117,6 +117,10 @@ func (db *BoltKV) Close() {
 	}
 }
 
+func (db *BoltKV) Size() uint64 {
+	return uint64(db.bolt.Size())
+}
+
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	var err error
 	t := &boltTx{db: db, ctx: ctx}

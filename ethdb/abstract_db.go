@@ -92,9 +92,8 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize() int64 {
-	panic("not implemented")
-	//return int64(db.kv.Size())
+func (db *ObjectDatabase) DiskSize() uint64 {
+	return db.kv.Size()
 }
 
 // Get returns the value for a given key if it's present.

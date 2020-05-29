@@ -114,6 +114,10 @@ func (db *remoteDB) Close() {
 	}
 }
 
+func (db *remoteDB) Size() uint64 {
+	return 0
+}
+
 func (db *remoteDB) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }

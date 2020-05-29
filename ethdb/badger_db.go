@@ -380,9 +380,9 @@ func (db *BadgerDatabase) IdealBatchSize() int {
 }
 
 // DiskSize returns the total disk size of the database in bytes.
-func (db *BadgerDatabase) DiskSize() int64 {
+func (db *BadgerDatabase) DiskSize() uint64 {
 	lsm, vlog := db.db.Size()
-	return lsm + vlog
+	return uint64(lsm + vlog)
 }
 
 // MemCopy creates a copy of the database in a temporary directory.

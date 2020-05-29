@@ -94,6 +94,11 @@ func (db *badgerDB) Close() {
 	}
 }
 
+func (db *badgerDB) Size() uint64 {
+	lsm, vlog := db.badger.Size()
+	return uint64(lsm + vlog)
+}
+
 func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {
 	return &badgerTx{
 		db:     db,

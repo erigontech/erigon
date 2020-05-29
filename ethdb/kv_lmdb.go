@@ -142,6 +142,14 @@ func (db *lmdbKV) Close() {
 		db.log.Info("database closed")
 	}
 }
+func (db *lmdbKV) Size() uint64 {
+	stats, err := db.env.Stat()
+	if err != nil {
+		log.Error("could not read database size", "err", err)
+		return 0
+	}
+	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages)
+}
 
 func (db *lmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	flags := uint(0)
