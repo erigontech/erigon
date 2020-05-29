@@ -218,7 +218,7 @@ func (db *lmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
 	b, ok := tx.db.buckets[string(name)]
 	if !ok {
-		panic(fmt.Errorf("unknown bucket: %s", string(name)))
+		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
 	}
 	return lmdbBucket{tx: tx, dbi: b}
 }
