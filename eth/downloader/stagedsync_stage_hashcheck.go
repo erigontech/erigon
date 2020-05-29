@@ -46,7 +46,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	}
 
 	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress == 0 {
+	if hashProgress > 0 {
 		return nil
 	}
 
