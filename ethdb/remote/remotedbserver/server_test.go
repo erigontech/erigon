@@ -130,14 +130,7 @@ func TestCmdBucket(t *testing.T) {
 	decoder := codecpool.Decoder(&outBuf)
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
-	// Create a bucket
 	var name = dbutils.CurrentStateBucket
-	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		_ = tx.Bucket(name)
-		return nil
-	}); err != nil {
-		t.Errorf("Could not create and populate a bucket: %v", err)
-	}
 	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBegin")
 
 	assert.Nil(encoder.Encode(remote.CmdBucket), "Could not encode CmdBucket")
@@ -175,19 +168,9 @@ func TestCmdGet(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = dbutils.CurrentStateBucket
-	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(name)
-		var err1 error
-		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
-			return err1
-		}
-		if err1 = b.Put([]byte(key2), []byte(value2)); err1 != nil {
-			return err1
-		}
-		return nil
-	}); err != nil {
-		t.Errorf("Could not create and populate a bucket: %v", err)
-	}
+	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
+	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
+
 	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(encoder.Encode(remote.CmdBucket), "Could not encode CmdBucket")
@@ -248,19 +231,8 @@ func TestCmdSeek(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = dbutils.CurrentStateBucket
-	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(name)
-		var err1 error
-		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
-			return err1
-		}
-		if err1 = b.Put([]byte(key2), []byte(value2)); err1 != nil {
-			return err1
-		}
-		return nil
-	}); err != nil {
-		t.Errorf("Could not create and populate a bucket: %v", err)
-	}
+	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
+	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(encoder.Encode(remote.CmdBucket), "Could not encode CmdBucket")
@@ -322,15 +294,8 @@ func TestCursorOperations(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = dbutils.CurrentStateBucket
-	err := db.KV().Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(name)
-		err1 := b.Put([]byte(key1), []byte(value1))
-		require.NoError(err1)
-		err1 = b.Put([]byte(key2), []byte(value2))
-		require.NoError(err1)
-		return nil
-	})
-	require.NoError(err)
+	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
+	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 
 	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBeginTx")
 
@@ -369,7 +334,7 @@ func TestCursorOperations(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err = Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -415,14 +380,9 @@ func TestCursorOperations(t *testing.T) {
 }
 
 func TestTxYield(t *testing.T) {
-	assert, db := assert.New(t), ethdb.NewMemDatabase()
-
-	// Create bucket
-	err := db.KV().Update(func(tx *bolt.Tx) error {
-		_ = tx.Bucket(dbutils.CurrentStateBucket)
-		return nil
-	})
-	assert.Nil(err, "Could not create bucket")
+	assert := assert.New(t)
+	db, errOpen := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true, KeysPrefixCompressionDisable: true})
+	assert.NoError(errOpen)
 
 	errors := make(chan error, 10)
 	writeDoneNotify := make(chan struct{}, 1)
@@ -436,7 +396,7 @@ func TestTxYield(t *testing.T) {
 		}()
 
 		// Long read-only transaction
-		if err = db.KV().View(func(tx *bolt.Tx) error {
+		if err := db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket(dbutils.CurrentStateBucket)
 			var keyBuf [8]byte
 			var i uint64
@@ -458,7 +418,7 @@ func TestTxYield(t *testing.T) {
 	}()
 
 	// Expand the database
-	err = db.KV().Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		var keyBuf, valBuf [8]byte
 		for i := uint64(0); i < 10000; i++ {
@@ -478,7 +438,7 @@ func TestTxYield(t *testing.T) {
 	<-readDoneNotify
 
 	for err := range errors {
-		assert.Nil(err)
+		assert.NoError(err)
 	}
 }
 
@@ -499,22 +459,9 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// Create a bucket and populate some values
 	var name = dbutils.CurrentStateBucket
 
-	err := db.KV().Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(name)
-
-		var err1 error
-		if err1 = bucket.Put([]byte(key1), []byte(value1)); err1 != nil {
-			return err1
-		}
-		if err1 = bucket.Put([]byte(key2), []byte(value2)); err1 != nil {
-			return err1
-		}
-		if err1 = bucket.Put([]byte(key3), []byte(value3)); err1 != nil {
-			return err1
-		}
-		return nil
-	})
-	require.NoError(err, "Could not create and populate a bucket")
+	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
+	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
+	require.NoError(db.Put(name, []byte(key3), []byte(value3)))
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -574,27 +521,19 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	}
 }
 
-func BenchmarkBoltCursorFirst(b *testing.B) {
+func BenchmarkKVCursorFirst(b *testing.B) {
 	assert, require, db := assert.New(b), require.New(b), ethdb.NewMemDatabase()
 
 	// ---------- Start of boilerplate code
-	// Create a bucket and populate some values
 	var name = dbutils.CurrentStateBucket
-
-	err := db.KV().Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(name)
-
-		require.NoError(bucket.Put([]byte(key1), []byte(value1)))
-		require.NoError(bucket.Put([]byte(key2), []byte(value2)))
-		require.NoError(bucket.Put([]byte(key3), []byte(value3)))
-		return nil
-	})
-	require.NoError(err, "Could not create and populate a bucket")
+	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
+	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
+	require.NoError(db.Put(name, []byte(key3), []byte(value3)))
 
 	var k, v []byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tx, err := db.KV().Begin(false)
+		tx, err := db.AbstractKV().Begin(context.Background(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -602,7 +541,8 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 		bucket := tx.Bucket(name)
 		cursor := bucket.Cursor()
 		i := 0
-		for k, v = cursor.First(); k != nil; k, v = cursor.Next() {
+		for k, v, err = cursor.First(); k != nil; k, v, err = cursor.Next() {
+			require.NoError(err)
 			i++
 			if i == 3 {
 				break
