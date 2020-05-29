@@ -271,7 +271,6 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 	}
 
 	val, err = b.tx.tx.Get(b.dbi, key)
-	fmt.Printf("Res: %x -> %x %s\n", key, val, err)
 	if lmdb.IsNotFound(err) {
 		return nil, nil
 	}
@@ -279,6 +278,9 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 }
 
 func (b lmdbBucket) Put(key []byte, value []byte) error {
+	if value == nil {
+		return b.Delete(key)
+	}
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()

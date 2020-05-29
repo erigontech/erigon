@@ -659,6 +659,9 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 			if !bytes.Equal(k, prefix) {
 				panic(fmt.Sprintf("IH and WitnessSize buckets must have same keys set: %x, %x", k, prefix))
 			}
+			if k != nil && len(v) == 0 {
+				panic(fmt.Errorf("k != nil && v == nil: %x %x %x\n", prefix, k, v))
+			}
 			return binary.BigEndian.Uint64(v)
 		}
 		if err := fstl.iteration(c, ih, true /* first */); err != nil {
