@@ -287,7 +287,8 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 	default:
 	}
 
-	if err := b.tx.tx.Put(b.dbi, key, value, 0); err != nil {
+	err := b.tx.tx.Put(b.dbi, key, value, 0)
+	if err != nil {
 		return fmt.Errorf("failed lmdbKV.Put: %w", err)
 	}
 	return nil
@@ -462,9 +463,7 @@ func (c *lmdbNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 		return []byte{}, 0, err
 	}
 
-	fmt.Printf("!!!!!!!!!!!!!seek: %x %x %x\n", seek, c.k, c.v)
 	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetKey)
-	fmt.Printf("!!!!!!!!!!!!!seek: %x %x %x\n", seek, c.k, c.v)
 	if lmdb.IsNotFound(c.err) {
 		return nil, uint32(len(c.v)), nil
 	}
