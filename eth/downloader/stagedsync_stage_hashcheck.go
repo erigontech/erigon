@@ -122,13 +122,13 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
 	)
 }
 
-func identityLoadFunc(k []byte, v interface{}, next etl.LoadNextFunc) error {
-	fmt.Println("identityLoadFunc", k, v)
-	b, ok := v.([]byte)
-	if !ok {
-		return fmt.Errorf("unexpected type of value (expected []byte, got %T)", v)
+func identityLoadFunc(k []byte, valueDecoder etl.Decoder, next etl.LoadNextFunc) error {
+	var v []byte
+	err := valueDecoder.Decode(&v)
+	if err != nil {
+		return err
 	}
-	return next(k, b)
+	return next(k, v)
 }
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {

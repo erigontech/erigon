@@ -18,11 +18,15 @@ import (
 
 var cbor codec.CborHandle
 
+type Decoder interface {
+	Decode(interface{}) error
+}
+
 type ExtractNextFunc func(k []byte, v interface{}) error
 type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 
 type LoadNextFunc func(k []byte, v []byte) error
-type LoadFunc func(k []byte, v interface{}, next LoadNextFunc) error
+type LoadFunc func(k []byte, valueDecoder Decoder, next LoadNextFunc) error
 
 func Transform(
 	db ethdb.Database,
@@ -32,25 +36,13 @@ func Transform(
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
 ) error {
-	buffer := bytes.NewBuffer(make([]byte, 0))
-	encoder := codec.NewEncoder(nil, &cbor)
-	filenames := make([]string, 0)
 
-	extractNextFunc, finalize, filenames := makeExtractNextFunc(encoder, buffer, datadir, filenames)
+	filenames, err := extractBucketIntoFiles(db, fromBucket, datadir, extractFunc)
 
 	defer func() {
 		deleteFiles(filenames)
 	}()
 
-	err := db.Walk(fromBucket, nil, 0, func(k, v []byte) (bool, error) {
-		err := extractFunc(k, v, extractNextFunc)
-		return true, err
-	})
-	if err != nil {
-		return err
-	}
-
-	err = finalize()
 	if err != nil {
 		return err
 	}
@@ -58,8 +50,63 @@ func Transform(
 	return loadFilesIntoBucket(db, toBucket, filenames, loadFunc)
 }
 
+func extractBucketIntoFiles(
+	db ethdb.Database,
+	bucket []byte,
+	datadir string,
+	extractFunc ExtractFunc,
+) ([]string, error) {
+	buffer := bytes.NewBuffer(make([]byte, 0))
+	encoder := codec.NewEncoder(nil, &cbor)
+	filenames := make([]string, 0)
+
+	sortableBuffer := newSortableBuffer()
+
+	flushBuffer := func() error {
+		filename, err := sortableBuffer.FlushToDisk(datadir)
+		if err != nil {
+			return err
+		}
+		if len(filename) > 0 {
+			filenames = append(filenames, filename)
+		}
+		return nil
+	}
+
+	extractNextFunc := func(k []byte, v interface{}) error {
+		buffer.Reset()
+		encoder.Reset(buffer)
+		err := encoder.Encode(v)
+		if err != nil {
+			return err
+		}
+		encodedValue := buffer.Bytes()
+		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
+		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
+			err = flushBuffer()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	err := db.Walk(bucket, nil, 0, func(k, v []byte) (bool, error) {
+		err := extractFunc(k, v, extractNextFunc)
+		return true, err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = flushBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return filenames, nil
+}
+
 func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadFunc LoadFunc) error {
-	fmt.Printf("files = %v\n", files)
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
@@ -84,7 +131,6 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 	batch := db.NewBatch()
 
 	loadNextFunc := func(k, v []byte) error {
-		fmt.Printf("loadNextFunc: %x -> %x\n", k, v)
 		if err := batch.Put(bucket, k, v); err != nil {
 			return err
 		}
@@ -107,13 +153,8 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 	for h.Len() > 0 {
 		element := (heap.Pop(h)).(HeapElem)
 		reader := readers[element.timeIdx]
-		var unmarshalledValue interface{}
 		decoder.ResetBytes(element.value)
-		err := decoder.Decode(unmarshalledValue)
-		if err != nil {
-			return err
-		}
-		err = loadFunc(element.key, unmarshalledValue, loadNextFunc)
+		err := loadFunc(element.key, decoder, loadNextFunc)
 		if err != nil {
 			return err
 		}
@@ -126,48 +167,6 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 	}
 	_, err := batch.Commit()
 	return err
-}
-
-func makeExtractNextFunc(
-	encoder *codec.Encoder,
-	buffer *bytes.Buffer,
-	datadir string,
-	filenames []string,
-) (ExtractNextFunc, func() error, []string) {
-
-	sortableBuffer := newSortableBuffer()
-
-	flushBuffer := func() error {
-		filename, err := sortableBuffer.FlushToDisk(datadir)
-		if err != nil {
-			return err
-		}
-		if len(filename) > 0 {
-			fmt.Println("append filenames", filename)
-			filenames = append(filenames, filename)
-		}
-		return nil
-	}
-
-	extractNextFunc := func(k []byte, v interface{}) error {
-		buffer.Reset()
-		encoder.Reset(buffer)
-		err := encoder.Encode(v)
-		if err != nil {
-			return err
-		}
-		encodedValue := buffer.Bytes()
-		sortableBuffer.Put(k, encodedValue)
-		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			err = flushBuffer()
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	return extractNextFunc, flushBuffer, filenames
 }
 
 func deleteFiles(files []string) {
