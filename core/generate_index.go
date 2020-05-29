@@ -48,40 +48,40 @@ var mapper = map[string]struct {
 		WalkerAdapter: func(v []byte) ChangesetWalker {
 			return changeset.AccountChangeSetBytes(v)
 		},
-		KeySize: common.HashLength,
+		KeySize:  common.HashLength,
 		Template: "acc-ind-",
-		New:     changeset.NewAccountChangeSet,
-		Encode:  changeset.EncodeAccounts,
+		New:      changeset.NewAccountChangeSet,
+		Encode:   changeset.EncodeAccounts,
 	},
 	string(dbutils.StorageChangeSetBucket): {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(v []byte) ChangesetWalker {
 			return changeset.StorageChangeSetBytes(v)
 		},
-		KeySize: common.HashLength*2 + common.IncarnationLength,
+		KeySize:  common.HashLength*2 + common.IncarnationLength,
 		Template: "st-ind-",
-		New:     changeset.NewStorageChangeSet,
-		Encode:  changeset.EncodeStorage,
+		New:      changeset.NewStorageChangeSet,
+		Encode:   changeset.EncodeStorage,
 	},
 	string(dbutils.PlainAccountChangeSetBucket): {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(v []byte) ChangesetWalker {
 			return changeset.AccountChangeSetPlainBytes(v)
 		},
-		KeySize: common.AddressLength,
+		KeySize:  common.AddressLength,
 		Template: "acc-ind-",
-		New:     changeset.NewAccountChangeSetPlain,
-		Encode:  changeset.EncodeAccountsPlain,
+		New:      changeset.NewAccountChangeSetPlain,
+		Encode:   changeset.EncodeAccountsPlain,
 	},
 	string(dbutils.PlainStorageChangeSetBucket): {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(v []byte) ChangesetWalker {
 			return changeset.StorageChangeSetPlainBytes(v)
 		},
-		KeySize: common.AddressLength + common.IncarnationLength + common.HashLength,
+		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
 		Template: "st-ind-",
-		New:     changeset.NewStorageChangeSetPlain,
-		Encode:  changeset.EncodeStoragePlain,
+		New:      changeset.NewStorageChangeSetPlain,
+		Encode:   changeset.EncodeStoragePlain,
 	},
 }
 
@@ -155,7 +155,8 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		wri += time.Since(t3)
 		//fmt.Println("cycle", time.Since(cycle))
 	}
-	if len(offsets) > 0 {		t := time.Now()
+	if len(offsets) > 0 {
+		t := time.Now()
 		if err := ig.mergeFilesIntoBucket(bufferFileNames, v.IndexBucket, v.KeySize); err != nil {
 			return err
 		}

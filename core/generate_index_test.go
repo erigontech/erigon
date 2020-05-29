@@ -45,16 +45,16 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			checkIndex(t, db, csInfo.IndexBucket, addrs[2], 0, expecedIndexes[string(addrs[2])][0])
 
 			//check last chunk
-			lastChunkCheck(t, db,csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])][2])
-			lastChunkCheck(t, db,csInfo.IndexBucket, addrs[1], expecedIndexes[string(addrs[1])][1])
-			lastChunkCheck(t, db,csInfo.IndexBucket, addrs[2], expecedIndexes[string(addrs[2])][0])
+			lastChunkCheck(t, db, csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])][2])
+			lastChunkCheck(t, db, csInfo.IndexBucket, addrs[1], expecedIndexes[string(addrs[1])][1])
+			lastChunkCheck(t, db, csInfo.IndexBucket, addrs[2], expecedIndexes[string(addrs[2])][0])
 		}
 	}
 
-	t.Run("account hashed state", test(2100,  dbutils.AccountChangeSetBucket))
-	t.Run("account plain state", test(2100,  dbutils.PlainAccountChangeSetBucket))
+	t.Run("account hashed state", test(2100, dbutils.AccountChangeSetBucket))
+	t.Run("account plain state", test(2100, dbutils.PlainAccountChangeSetBucket))
 	t.Run("storage hashed state", test(2100, dbutils.StorageChangeSetBucket))
-	t.Run("storage plain state", test(2100,  dbutils.PlainStorageChangeSetBucket))
+	t.Run("storage plain state", test(2100, dbutils.PlainStorageChangeSetBucket))
 
 }
 
@@ -149,8 +149,8 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 }
 
 func TestName(t *testing.T) {
-	db:=ethdb.NewMemDatabase()
-	_,_=generateTestData(t,db,dbutils.AccountChangeSetBucket,3000)
+	db := ethdb.NewMemDatabase()
+	_, _ = generateTestData(t, db, dbutils.AccountChangeSetBucket, 3000)
 	//db.GetChangeSetByBlock()
 }
 
@@ -268,17 +268,17 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if bytes.Equal(dbutils.PlainStorageChangeSetBucket,csBucket)||bytes.Equal(dbutils.PlainAccountChangeSetBucket,csBucket) {
-		isPlain=true
+	if bytes.Equal(dbutils.PlainStorageChangeSetBucket, csBucket) || bytes.Equal(dbutils.PlainAccountChangeSetBucket, csBucket) {
+		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(dbutils.StorageChangeSetBucket, csBucket) || bytes.Equal(dbutils.PlainStorageChangeSetBucket, csBucket) {
-		keys, err := generateAddrs(3, false)
-		if err != nil {
-			t.Fatal(err)
+		keys, innerErr := generateAddrs(3, false)
+		if innerErr != nil {
+			t.Fatal(innerErr)
 		}
 
 		defaultIncarnation := make([]byte, 8)
@@ -358,7 +358,7 @@ func checkIndex(t *testing.T, db ethdb.Database, bucket, addrHash []byte, chunkB
 	}
 
 	if !reflect.DeepEqual(val, expected) {
-		fmt.Println("get",val)
+		fmt.Println("get", val)
 		fmt.Println("expected", expected)
 		t.Fatal()
 	}
