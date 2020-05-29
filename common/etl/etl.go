@@ -37,11 +37,12 @@ func Transform(
 	fromBucket []byte,
 	toBucket []byte,
 	datadir string,
+	startkey []byte,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
 ) error {
 
-	filenames, err := extractBucketIntoFiles(db, fromBucket, datadir, extractFunc)
+	filenames, err := extractBucketIntoFiles(db, fromBucket, startkey, datadir, extractFunc)
 
 	defer func() {
 		deleteFiles(filenames)
@@ -57,6 +58,7 @@ func Transform(
 func extractBucketIntoFiles(
 	db ethdb.Database,
 	bucket []byte,
+	startkey []byte,
 	datadir string,
 	extractFunc ExtractFunc,
 ) ([]string, error) {
@@ -95,7 +97,7 @@ func extractBucketIntoFiles(
 		return nil
 	}
 
-	err := db.Walk(bucket, nil, 0, func(k, v []byte) (bool, error) {
+	err := db.Walk(bucket, startkey, len(startkey)*8, func(k, v []byte) (bool, error) {
 		err := extractFunc(k, v, extractNextFunc)
 		return true, err
 	})

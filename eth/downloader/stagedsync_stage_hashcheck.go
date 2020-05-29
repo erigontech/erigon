@@ -104,6 +104,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
 		dbutils.PlainStateBucket,
 		dbutils.CurrentStateBucket,
 		datadir,
+		nil,
 		keyTransformExtractFunc(transformPlainStateKey),
 		identityLoadFunc,
 	)
@@ -117,6 +118,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
 		dbutils.PlainContractCodeBucket,
 		dbutils.ContractCodeBucket,
 		datadir,
+		nil,
 		keyTransformExtractFunc(transformContractCodeKey),
 		identityLoadFunc,
 	)

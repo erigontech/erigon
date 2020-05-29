@@ -34,11 +34,14 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return changeset.AccountChangeSetBytes(b)
 	}
 
+	startkey := dbutils.EncodeTimestamp(blockNum)
+
 	err := etl.Transform(
 		db,
 		dbutils.AccountChangeSetBucket,
 		dbutils.AccountsHistoryBucket,
 		datadir,
+		startkey,
 		getExtractFunc(bytes2walker),
 		loadFunc,
 	)
@@ -46,7 +49,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return err
 	}
 
-	if err := SaveStageProgress(db, AccountHistoryIndex, blockNum); err != nil {
+	if err = SaveStageProgress(db, AccountHistoryIndex, blockNum); err != nil {
 		return err
 	}
 	return nil
@@ -66,6 +69,8 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return fmt.Errorf("reading storage history process: %v", err)
 	}
 
+	startkey := dbutils.EncodeTimestamp(blockNum)
+
 	bytes2walker := func(b []byte) changeset.Walker {
 		return changeset.StorageChangeSetBytes(b)
 	}
@@ -75,13 +80,14 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		dbutils.StorageChangeSetBucket,
 		dbutils.StorageHistoryBucket,
 		datadir,
+		startkey,
 		getExtractFunc(bytes2walker),
 		loadFunc)
 	if err != nil {
 		return err
 	}
 
-	if err := SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
+	if err = SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
 		return err
 	}
 	return nil
