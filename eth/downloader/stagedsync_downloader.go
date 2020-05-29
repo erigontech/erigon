@@ -15,7 +15,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	* Stage 1. Download Headers
 	 */
 	log.Info("Sync stage 1/7. Downloading headers...")
-	err = d.shallQuit(func() error {
+	err = d.runStep(func() error {
 		return d.DownloadHeaders(headersFetchers)
 	})
 	if err != nil {
@@ -29,7 +29,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	cont := true
 
 	for cont && err == nil {
-		err = d.shallQuit(func() error {
+		err = d.runStep(func() error {
 			return d.spawnBodyDownloadStage(p.id, &cont)
 		})
 		if err != nil {
@@ -44,7 +44,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 3/7. Recovering senders from tx signatures...")
 
-	err = d.shallQuit(func() error {
+	err = d.runStep(func() error {
 		return d.spawnRecoverSendersStage()
 	})
 	if err != nil {
@@ -57,7 +57,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
 	var syncHeadNumber uint64
-	err = d.shallQuit(func() error {
+	err = d.runStep(func() error {
 		return spawnExecuteBlocksStage(d.stateDB, d.blockchain, &syncHeadNumber, d.quitCh)
 	})
 	if err != nil {
@@ -68,7 +68,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
-	err = d.shallQuit(func() error {
+	err = d.runStep(func() error {
 		return spawnCheckFinalHashStage(d.stateDB, syncHeadNumber, d.datadir)
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 6/7. Generating account history index")
-		err = d.shallQuit(func() error {
+		err = d.runStep(func() error {
 			return spawnAccountHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
 		})
 		if err != nil {
@@ -92,7 +92,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 7/7. Generating storage history index")
-		err = d.shallQuit(func() error {
+		err = d.runStep(func() error {
 			return spawnStorageHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
 		})
 		if err != nil {
@@ -107,7 +107,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 }
 
 func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
-	err := d.shallQuit(func() error {
+	err := d.runStep(func() error {
 		return d.spawnSync(headersFetchers)
 	})
 	if err != nil {
@@ -119,8 +119,9 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
 	for stage := Finish - 1; stage > Headers; stage-- {
 		var unwindPoint uint64
-		err = d.shallQuit(func() error {
-			return GetStageUnwind(d.stateDB, stage, &unwindPoint)
+		err = d.runStep(func() error {
+			unwindPoint, err = GetStageUnwind(d.stateDB, stage)
+			return err
 		})
 		if err != nil {
 			return err
@@ -148,7 +149,7 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
 
-		if err = d.shallQuit(stageFn); err != nil {
+		if err = d.runStep(stageFn); err != nil {
 			return fmt.Errorf("error unwinding stage: %d: %v", stage, err)
 		}
 	}
@@ -156,9 +157,13 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 	return nil
 }
 
-func (d *Downloader) shallQuit(fn func() error) error {
+func (d *Downloader) runStep(fn func() error) error {
+	return run(d.quitCh, fn)
+}
+
+func run(quitCh chan struct{}, fn func() error) error {
 	select {
-	case <-d.quitCh:
+	case <-quitCh:
 		return errCanceled
 	default:
 	}

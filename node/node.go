@@ -457,14 +457,8 @@ func (n *Node) stopWS() {
 // Stop terminates a running node along with all it's services. In the node was
 // not started, an error is returned.
 func (n *Node) Stop() error {
-	fmt.Println("### 1")
-
 	n.lock.Lock()
-	fmt.Println("### 2")
-	defer func() {
-		n.lock.Unlock()
-		fmt.Println("### 999")
-	}()
+	defer n.lock.Unlock()
 
 	// Short circuit if the node's not running
 	if n.server == nil {
@@ -472,67 +466,47 @@ func (n *Node) Stop() error {
 	}
 
 	// Terminate the API, services and the p2p server.
-	fmt.Println("### 3")
 	n.stopWS()
-	fmt.Println("### 4")
 	n.stopHTTP()
-	fmt.Println("### 5")
 	n.stopIPC()
-	fmt.Println("### 6")
 	n.rpcAPIs = nil
 	failure := &StopError{
 		Services: make(map[reflect.Type]error),
 	}
-	fmt.Println("### 7")
-	i := 0
 	for kind, service := range n.services {
-		fmt.Println("### 7.1", i, kind)
 		if err := service.Stop(); err != nil {
 			failure.Services[kind] = err
-			fmt.Println("### 7.3 ERR", i, kind, err)
 		}
-		fmt.Println("### 7.2", i, kind)
 	}
-	fmt.Println("### 8")
 	n.server.Stop()
-	fmt.Println("### 9")
 	n.services = nil
 	n.server = nil
 
 	// Release instance directory lock.
 	if n.instanceDirLock != nil {
-		fmt.Println("### 9.1")
 		if err := n.instanceDirLock.Release(); err != nil {
 			n.log.Error("Can't release datadir lock", "err", err)
 		}
-		fmt.Println("### 9.2")
 		n.instanceDirLock = nil
 	}
 
 	// unblock n.Wait
-	fmt.Println("### 10", n.stop == nil)
 	close(n.stop)
-	fmt.Println("### 11")
 
 	// Remove the keystore if it was created ephemerally.
 	type closer interface {
 		Close()
 	}
 
-	fmt.Println("### 12")
-	for i, api := range n.rpcAPIs {
+	for _, api := range n.rpcAPIs {
 		if closeAPI, ok := api.Service.(closer); ok {
-			fmt.Println("### 12.1", i, api.Namespace)
 			closeAPI.Close()
-			fmt.Println("### 12.2", i, api.Namespace)
 		}
 	}
 
 	var keystoreErr error
-	fmt.Println("### 13")
 	if n.ephemeralKeystore != "" {
 		keystoreErr = os.RemoveAll(n.ephemeralKeystore)
-		fmt.Println("### 13.1")
 	}
 
 	if len(failure.Services) > 0 {

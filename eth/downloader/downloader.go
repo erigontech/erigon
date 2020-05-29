@@ -69,7 +69,6 @@ var (
 	reorgProtHeaderDelay = 2  // Number of headers to delay delivering to cover mini reorgs
 
 	fsHeaderCheckFrequency = 100             // Verification frequency of the downloaded headers during fast sync
-	fsHeaderCheckFrequencyStaged = 0             // Verification frequency of the downloaded headers during fast sync
 	fsHeaderSafetyNet      = 2048            // Number of headers to discard in case a chain violation is detected
 	fsHeaderForceVerify    = 24              // Number of headers to verify before and after the pivot to accept it
 	fsHeaderContCheck      = 3 * time.Second // Time interval to check for header continuations during state download
@@ -93,7 +92,7 @@ var (
 	errCancelStateFetch        = errors.New("state data download canceled (requested)")
 	errCancelContentProcessing = errors.New("content processing canceled (requested)")
 	errCanceled                = errors.New("syncing canceled (requested)")
-	errDone                = errors.New("syncing done")
+	errDone                    = errors.New("syncing done")
 	errNoSyncActive            = errors.New("no sync active")
 	errTooOld                  = errors.New("peer doesn't speak recent enough protocol version (need version >= 62)")
 )
@@ -144,8 +143,8 @@ type Downloader struct {
 	headerProcCh  chan []*types.Header // [eth/62] Channel to feed the header processor new tasks
 
 	// Cancellation and termination
-	cancelPeer string        // Identifier of the peer currently being used as the master (cancel on drop)
-	cancelCh   chan struct{} // Channel to cancel mid-flight syncs
+	cancelPeer string         // Identifier of the peer currently being used as the master (cancel on drop)
+	cancelCh   chan struct{}  // Channel to cancel mid-flight syncs
 	cancelLock sync.RWMutex   // Lock to protect the cancel channel and peer in delivers
 	cancelWg   sync.WaitGroup // Make sure all fetcher goroutines have exited.
 
@@ -590,22 +589,16 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 // not wait for the running download goroutines to finish. This method should be
 // used when cancelling the downloads from inside the downloader.
 func (d *Downloader) cancel() {
-	fmt.Println("Downloader.cancel 1")
 	// Close the current cancel channel
 	d.cancelLock.Lock()
-	fmt.Println("Downloader.cancel 2")
 	defer d.cancelLock.Unlock()
 
-	fmt.Println("Downloader.cancel 3")
 	if d.cancelCh != nil {
 		select {
 		case <-d.cancelCh:
-			fmt.Println("Downloader.cancel 3.1")
 			// Channel was already closed
 		default:
-			fmt.Println("Downloader.cancel 3.2")
 			close(d.cancelCh)
-			fmt.Println("Downloader.cancel 3.3")
 		}
 	}
 }
@@ -613,11 +606,8 @@ func (d *Downloader) cancel() {
 // Cancel aborts all of the operations and waits for all download goroutines to
 // finish before returning.
 func (d *Downloader) Cancel() {
-	fmt.Println("Downloader.Cancel 1")
 	d.cancel()
-	fmt.Println("Downloader.Cancel 2")
 	d.cancelWg.Wait()
-	fmt.Println("Downloader.Cancel 3")
 
 	d.ancientLimit = 0
 	log.Debug("Reset ancient limit to zero")
@@ -626,27 +616,18 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
-	fmt.Println("Downloader.Terminate 1")
 	d.blockchain.Stop()
-	fmt.Println("Downloader.Terminate 2")
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
-	fmt.Println("Downloader.Terminate 3")
 	select {
 	case <-d.quitCh:
-		fmt.Println("Downloader.Terminate 3.1")
 	default:
-		fmt.Println("Downloader.Terminate 3.3")
 		close(d.quitCh)
-		fmt.Println("Downloader.Terminate 3.3")
 	}
-	fmt.Println("Downloader.Terminate 4")
 	d.quitLock.Unlock()
-	fmt.Println("Downloader.Terminate 5")
 
 	// Cancel any pending download requests
 	d.Cancel()
-	fmt.Println("Downloader.Terminate 6")
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating

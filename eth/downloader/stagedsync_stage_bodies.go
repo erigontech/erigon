@@ -106,7 +106,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
 	}
 
 	*cont = true
-	err = withQuit(d.quitCh, func() error { return d.spawnSync(fetchers) })
+	err = d.runStep(func() error { return d.spawnSync(fetchers) })
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 	var err error
 
 	for {
-		err = withQuit(d.quitCh, func() error {
+		err = d.runStep(func() error {
 			return d.processBodies(to)
 		})
 		if err == errDone {
@@ -159,7 +159,7 @@ func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
 	if err != nil {
 		return fmt.Errorf("unwind Bodies: get stage progress: %v", err)
 	}
-	err1 := GetStageUnwind(d.stateDB, Bodies, &unwindPoint)
+	unwindPoint, err1 := GetStageUnwind(d.stateDB, Bodies)
 	if err1 != nil {
 		return err1
 	}

@@ -163,7 +163,7 @@ func (d *Downloader) unwindSendersStage(unwindPoint uint64) error {
 	if err != nil {
 		return fmt.Errorf("unwind Senders: get stage progress: %v", err)
 	}
-	err1 := GetStageUnwind(d.stateDB, Senders, &unwindPoint)
+	unwindPoint, err1 := GetStageUnwind(d.stateDB, Senders)
 	if err1 != nil {
 		return err1
 	}

@@ -638,33 +638,20 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
-	fmt.Println("E 1")
 	s.protocolManager.Stop()
-	fmt.Println("E 2")
 	if s.lesServer != nil {
-		fmt.Println("E 2.1")
 		s.lesServer.Stop()
-		fmt.Println("E 2.2")
 	}
 
 	// Then stop everything else.
-	fmt.Println("E 3")
 	s.bloomIndexer.Close()
-	fmt.Println("E 4")
 	close(s.closeBloomHandler)
-	fmt.Println("E 5")
 	s.txPool.Stop()
-	fmt.Println("E 6")
 	s.miner.Stop()
-	fmt.Println("E 7")
 	s.blockchain.Stop()
-	fmt.Println("E 8")
 	s.engine.Close()
-	fmt.Println("E 9")
 	s.chainDb.Close()
-	fmt.Println("E 10")
 	s.eventMux.Stop()
-	fmt.Println("E 11")
 	return nil
 }
 

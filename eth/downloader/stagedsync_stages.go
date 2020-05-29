@@ -63,11 +63,14 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64, quitCh chan struct{}) error {
 	var existingUnwindPoint uint64
 	var err error
-	shellQuit := newWithQuit(quitCh)
 	for stage := Headers + 1; stage < Finish; stage++ {
-		err = shellQuit(func() error {
-			return GetStageUnwind(db, stage, &existingUnwindPoint)
-		})
+		select {
+		case <-quitCh:
+			return errCanceled
+		default:
+		}
+
+		existingUnwindPoint, err = GetStageUnwind(db, stage)
 		if err != nil {
 			return err
 		}
@@ -91,23 +94,18 @@ func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64, quitCh chan stru
 // GetStageInvalidation retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
-func GetStageUnwind(db ethdb.Getter, stage SyncStage, unwindPoint *uint64) error {
-	*unwindPoint = 0
-
+func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.Get(dbutils.SyncStageUnwind, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
-		return err
+		return 0, err
 	}
-	switch len(v) {
-	case 0:
-		return nil
-	case 8:
-		// continue
-	default:
-		return fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
+	if len(v) == 0 {
+		return 0, nil
 	}
-	*unwindPoint = binary.BigEndian.Uint64(v)
-	return nil
+	if len(v) != 8 {
+		return 0, fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
+	}
+	return binary.BigEndian.Uint64(v), nil
 }
 
 // SaveStageInvalidation saves the progress of the given stage in the database
