@@ -231,7 +231,7 @@ func (db *ObjectDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 				}
 			}
 			if len(v) > 0 {
-				if err := walker(rangeIdx, k, v); err != nil {
+				if err = walker(rangeIdx, k, v); err != nil {
 					return err
 				}
 			}

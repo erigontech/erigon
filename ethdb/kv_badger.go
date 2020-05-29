@@ -340,7 +340,7 @@ func (c *badgerCursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}

@@ -55,7 +55,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	}
 
 	if !opts.inMem {
-		if err := os.MkdirAll(opts.path, 0744); err != nil {
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, err
 		}
 	}
@@ -73,9 +73,9 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 				// In any real application it is important to check for readers that were
 				// never closed by their owning process, and for which the owning process
 				// has exited.  See the documentation on transactions for more information.
-				staleReaders, err := env.ReaderCheck()
-				if err != nil {
-					logger.Error("failed ReaderCheck", "err", err)
+				staleReaders, err2 := env.ReaderCheck()
+				if err2 != nil {
+					logger.Error("failed ReaderCheck", "err", err2)
 				}
 				if staleReaders > 0 {
 					logger.Info("cleared reader slots from dead processes", "amount", staleReaders)
@@ -185,8 +185,6 @@ type lmdbTx struct {
 type lmdbBucket struct {
 	tx  *lmdbTx
 	dbi lmdb.DBI
-
-	nameLen uint
 }
 
 type lmdbCursor struct {
@@ -288,7 +286,7 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 	}
 
 	if err := b.tx.tx.Put(b.dbi, key, value, 0); err != nil {
-		return fmt.Errorf("failed lmdb put: %w, key=%x, val=%x\n", err, key, value)
+		return fmt.Errorf("failed lmdbKV.Put: %w", err)
 	}
 	return nil
 }
@@ -360,7 +358,7 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		return []byte{}, nil, fmt.Errorf("failed lmdlb cursor.Seek(): %w, key: %x", c.err, seek)
+		return []byte{}, nil, fmt.Errorf("failed lmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
@@ -385,7 +383,7 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		return []byte{}, nil, fmt.Errorf("failed lmdlb cursor.Next(): %w", c.err)
+		return []byte{}, nil, fmt.Errorf("failed lmdbKV cursor.Next(): %w", c.err)
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
@@ -395,7 +393,7 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -434,7 +432,7 @@ func (c *lmdbNoValuesCursor) First() ([]byte, uint32, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, 0, err
 	}
-	if c.prefix == nil {
+	if len(c.prefix) == 0 {
 		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
 		c.k, c.v, c.err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)

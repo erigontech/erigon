@@ -105,7 +105,9 @@ func (opts boltOpts) MustOpen(ctx context.Context) KV {
 }
 
 func NewBolt() boltOpts {
-	return boltOpts{Bolt: bolt.DefaultOptions}
+	o := boltOpts{Bolt: bolt.DefaultOptions}
+	o.Bolt.KeysPrefixCompressionDisable = true
+	return o
 }
 
 // Close closes BoltKV
@@ -200,7 +202,6 @@ func (b boltBucket) Put(key []byte, value []byte) error {
 	default:
 	}
 	err := b.bolt.Put(key, value)
-	fmt.Printf("Bolt Put: %x -> %x %s\n", key, value, err)
 	return err
 }
 
@@ -228,10 +229,10 @@ func (c *boltCursor) initCursor() {
 func (c *boltCursor) First() ([]byte, []byte, error) {
 	if len(c.prefix) == 0 {
 		c.k, c.v = c.bolt.First()
-		return c.k, c.v, nil
+	} else {
+		c.k, c.v = c.bolt.Seek(c.prefix)
 	}
 
-	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
@@ -246,7 +247,7 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
+	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
@@ -260,7 +261,7 @@ func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.SeekTo(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
+	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
@@ -274,8 +275,8 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, nil, nil
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
 }

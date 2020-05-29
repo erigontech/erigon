@@ -18,6 +18,7 @@ var boltOriginDb *bolt.DB
 var badgerOriginDb *badger.DB
 var boltDb ethdb.KV
 var badgerDb ethdb.KV
+var lmdbKV ethdb.KV
 
 func TestMain(m *testing.M) {
 	setupDatabases()
@@ -30,14 +31,14 @@ func TestMain(m *testing.M) {
 	os.Exit(result)
 }
 func setupDatabases() {
-	vsize := 100
-	keysAmount := 1_000
+	vsize := 10
+	keysAmount := 100_000
 	ctx := context.Background()
 	boltDb = ethdb.NewBolt().Path("test").MustOpen(ctx)
 	badgerDb = ethdb.NewBadger().Path("test2").MustOpen(ctx)
-	badgerDb = ethdb.NewLMDB().Path("test4").MustOpen(ctx)
+	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen(ctx)
 	var errOpen error
-	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{})
+	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{KeysPrefixCompressionDisable: true})
 	if errOpen != nil {
 		panic(errOpen)
 	}
@@ -58,7 +59,7 @@ func setupDatabases() {
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, v); err != nil {
+			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				return err
 			}
 		}
@@ -74,7 +75,7 @@ func setupDatabases() {
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, v); err != nil {
+			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				panic(err)
 			}
 		}
@@ -91,7 +92,7 @@ func setupDatabases() {
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, v); err != nil {
+			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				panic(err)
 			}
 		}
@@ -107,7 +108,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			_ = tx.Set(append(dbutils.CurrentStateBucket, k...), v)
+			_ = tx.Set(append(dbutils.CurrentStateBucket, k...), common.CopyBytes(v))
 		}
 
 		return nil
@@ -122,7 +123,7 @@ func setupDatabases() {
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, v); err != nil {
+			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				panic(err)
 			}
 		}
@@ -142,7 +143,24 @@ func BenchmarkCursor(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
 				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-				for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+				for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+					if err != nil {
+						return err
+					}
+					_ = v
+				}
+
+				return nil
+			}); err != nil {
+				panic(err)
+			}
+		}
+	})
+	b.Run("abstract lmdb", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
+				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+				for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 					if err != nil {
 						return err
 					}
@@ -168,7 +186,7 @@ func BenchmarkCursor(b *testing.B) {
 	//				return err
 	//			}
 	//
-	//			for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	//			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 	//				if err != nil {
 	//					return err
 	//				}

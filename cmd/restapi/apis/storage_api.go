@@ -36,7 +36,7 @@ func findStorageByPrefix(prefixS string, remoteDB ethdb.KV) ([]*StorageResponse,
 	if err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefix(prefix).Prefetch(200)
 
-		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if len(k) == 32 {
 				continue
 			}

@@ -103,7 +103,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor().Prefix([]byte{2})
 		counter := 0
-		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -120,13 +120,13 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		}
 		assert.Equal(1, counter)
 
-		k, _, err := c.Seek([]byte{2})
-		assert.NoError(err)
+		k, _, err2 := c.Seek([]byte{2})
+		assert.NoError(err2)
 		assert.Equal([]byte{2}, k)
 
 		c = b.Cursor()
 		counter = 0
-		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -160,7 +160,7 @@ func testCtxCancel(t *testing.T, db ethdb.KV) {
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		for {
-			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 				if err != nil {
 					return err
 				}
