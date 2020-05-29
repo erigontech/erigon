@@ -73,6 +73,15 @@ type NoValuesCursor interface {
 - `cursor.Prefetch(1000)` - useful for Badger and Remote
 - Badger iterator require i.Close() call - abstraction automated it.
 - Badger iterator has AllVersions=true by default - why?
+- Methods .First, .Next, .Seek - can return error. If err!=nil then key SHOULD be !=nil (can be []byte{} for example). Then looping code will look as: 
+```go
+for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+    if err != nil {
+        return err
+    }
+    // logic
+}
+``` 
 
 #### Concept of Item:
 - Badger's concept of Item adding complexity, need hide it: `k,v,err := curor.First()`
