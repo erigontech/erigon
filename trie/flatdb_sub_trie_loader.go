@@ -158,7 +158,6 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
 func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error {
 	var isIH bool
-	var err error
 	var minKey []byte
 	var err error
 	if !first {

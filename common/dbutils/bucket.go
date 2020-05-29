@@ -174,4 +174,5 @@ var Buckets = [][]byte{
 	ConfigPrefix,
 	BloomBitsIndexPrefix,
 	LastPrunedBlockKey,
+	DatabaseInfoBucket,
 }

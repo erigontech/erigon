@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"time"
 
 	"github.com/bmatsuo/lmdb-go/lmdb"
@@ -46,12 +47,14 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	if err != nil {
 		return nil, err
 	}
-	//err = env.SetMapSize(1 << 30)
-	//if err != nil {
-	//	// ..
-	//}
 
-	logger := log.New("lmdb", opts.path)
+	// set the memory map size (maximum database size) to 1GB.
+	err = env.SetMapSize(1 << 30)
+	if err != nil {
+		// ..
+	}
+
+	logger := log.New("lmdb", path.Base(opts.path))
 
 	go func() {
 		for {
@@ -96,7 +99,6 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 					return createErr
 				}
 				buckets[string(name)] = dbi
-				// TODO: store in db object map with DBI's - to speedup bucket opening at runtime
 			}
 			return nil
 		}); err != nil {
@@ -204,7 +206,11 @@ func (db *lmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
-	return lmdbBucket{tx: tx, dbi: tx.db.buckets[string(name)]}
+	b, ok := tx.db.buckets[string(name)]
+	if !ok {
+		panic(fmt.Errorf("unknown bucket: %s", string(name)))
+	}
+	return lmdbBucket{tx: tx, dbi: b}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -264,7 +270,10 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 	default:
 	}
 
-	return b.tx.tx.Put(b.dbi, key, value, 0)
+	if err := b.tx.tx.Put(b.dbi, key, value, 0); err != nil {
+		return fmt.Errorf("failed lmdb put: %w, key=%x, val=%x\n", err, key, value)
+	}
+	return nil
 }
 
 func (b lmdbBucket) Delete(key []byte) error {
@@ -310,22 +319,7 @@ func (c *lmdbCursor) First() ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 
-	if c.prefix == nil {
-		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
-	} else {
-		c.k, c.v, c.err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
-	}
-	if lmdb.IsNotFound(c.err) {
-		return nil, c.v, nil
-	}
-	if c.err != nil {
-		return []byte{}, nil, c.err
-	}
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
-	}
-
-	return c.k, c.v, nil
+	return c.Seek(c.prefix)
 }
 
 func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
@@ -339,12 +333,17 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 
-	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
+	if seek == nil {
+		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+	} else {
+		c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
+
+	}
 	if lmdb.IsNotFound(c.err) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		return []byte{}, nil, c.err
+		return []byte{}, nil, fmt.Errorf("failed lmdlb cursor.Seek(): %w, key: %x", c.err, seek)
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
@@ -369,7 +368,7 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		return []byte{}, nil, c.err
+		return []byte{}, nil, fmt.Errorf("failed lmdlb cursor.Next(): %w", c.err)
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil

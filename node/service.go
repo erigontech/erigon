@@ -17,6 +17,9 @@
 package node
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"reflect"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -54,6 +57,20 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 	if ctx.Config.BadgerDB {
 		log.Info("Opening Database (Badger)")
 		return ethdb.NewBadgerDatabase(ctx.Config.ResolvePath(name + "_badger"))
+	}
+
+	if ctx.Config.LMDB {
+		log.Info("Opening Database (LMDB)")
+		dir := ctx.Config.ResolvePath(name + "_lmdb")
+		if err := os.MkdirAll(dir, 0744); err != nil {
+			return nil, err
+		}
+		fmt.Printf("Alex3: %s\n", dir)
+		kv, err := ethdb.NewLMDB().Path(dir).Open(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return ethdb.NewObjectDatabase(kv), nil
 	}
 
 	log.Info("Opening Database (Bolt)")
