@@ -2173,6 +2173,7 @@ func resetHashedState(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer db.Close()
+	/*
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.CurrentStateBucket)
 	//nolint:errcheck
@@ -2181,6 +2182,7 @@ func resetHashedState(chaindata string) {
 	db.DeleteBucket(dbutils.StorageChangeSetBucket)
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
+	*/
 	err = db.KV().Update(func(tx *bolt.Tx) error {
 		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
 		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
