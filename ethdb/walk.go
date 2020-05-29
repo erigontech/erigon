@@ -27,7 +27,6 @@ import (
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
 	keys := make(map[common.Hash]struct{})
 	startCode := dbutils.EncodeTimestamp(startTimestamp)
