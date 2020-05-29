@@ -93,6 +93,7 @@ var (
 	errCancelStateFetch        = errors.New("state data download canceled (requested)")
 	errCancelContentProcessing = errors.New("content processing canceled (requested)")
 	errCanceled                = errors.New("syncing canceled (requested)")
+	errDone                = errors.New("syncing done")
 	errNoSyncActive            = errors.New("no sync active")
 	errTooOld                  = errors.New("peer doesn't speak recent enough protocol version (need version >= 62)")
 )
@@ -589,16 +590,22 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 // not wait for the running download goroutines to finish. This method should be
 // used when cancelling the downloads from inside the downloader.
 func (d *Downloader) cancel() {
+	fmt.Println("Downloader.cancel 1")
 	// Close the current cancel channel
 	d.cancelLock.Lock()
+	fmt.Println("Downloader.cancel 2")
 	defer d.cancelLock.Unlock()
 
+	fmt.Println("Downloader.cancel 3")
 	if d.cancelCh != nil {
 		select {
 		case <-d.cancelCh:
+			fmt.Println("Downloader.cancel 3.1")
 			// Channel was already closed
 		default:
+			fmt.Println("Downloader.cancel 3.2")
 			close(d.cancelCh)
+			fmt.Println("Downloader.cancel 3.3")
 		}
 	}
 }
@@ -606,8 +613,11 @@ func (d *Downloader) cancel() {
 // Cancel aborts all of the operations and waits for all download goroutines to
 // finish before returning.
 func (d *Downloader) Cancel() {
+	fmt.Println("Downloader.Cancel 1")
 	d.cancel()
+	fmt.Println("Downloader.Cancel 2")
 	d.cancelWg.Wait()
+	fmt.Println("Downloader.Cancel 3")
 
 	d.ancientLimit = 0
 	log.Debug("Reset ancient limit to zero")
@@ -616,18 +626,27 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
+	fmt.Println("Downloader.Terminate 1")
 	d.blockchain.Stop()
+	fmt.Println("Downloader.Terminate 2")
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
+	fmt.Println("Downloader.Terminate 3")
 	select {
 	case <-d.quitCh:
+		fmt.Println("Downloader.Terminate 3.1")
 	default:
+		fmt.Println("Downloader.Terminate 3.3")
 		close(d.quitCh)
+		fmt.Println("Downloader.Terminate 3.3")
 	}
+	fmt.Println("Downloader.Terminate 4")
 	d.quitLock.Unlock()
+	fmt.Println("Downloader.Terminate 5")
 
 	// Cancel any pending download requests
 	d.Cancel()
+	fmt.Println("Downloader.Terminate 6")
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
@@ -1245,6 +1264,8 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 	finished := false
 	for {
 		select {
+		case <-d.quitCh:
+			return errCanceled
 		case <-d.cancelCh:
 			return errCanceled
 
@@ -1304,6 +1325,12 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 			}
 			// Check for fetch request timeouts and demote the responsible peers
 			for pid, fails := range expire() {
+				select {
+				case <-d.quitCh:
+					return errCanceled
+				default:
+				}
+
 				if peer := d.peers.Peer(pid); peer != nil {
 					// If a lot of retrieval elements expired, we might have overestimated the remote peer or perhaps
 					// ourselves. Only reset to minimal throughput but don't drop just yet. If even the minimal times
@@ -1351,6 +1378,12 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 			idles, total := idle()
 
 			for _, peer := range idles {
+				select {
+				case <-d.quitCh:
+					return errCanceled
+				default:
+				}
+
 				// Short circuit if throttling activated
 				if throttle() {
 					throttled = true

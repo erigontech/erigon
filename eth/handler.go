@@ -375,43 +375,57 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.maxPeers = maxPeers
 
 	// broadcast transactions
-	pm.wg.Add(1)
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
 	if pm.txsSub != nil {
+		pm.wg.Add(1)
 		go pm.txBroadcastLoop()
-	} else {
-		pm.wg.Done()
 	}
 
 	// broadcast mined blocks
-	pm.wg.Add(1)
 	pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
-	go pm.minedBroadcastLoop()
+	if pm.minedBlockSub != nil {
+		pm.wg.Add(1)
+		go pm.minedBroadcastLoop()
+	}
 
 	// start sync handlers
-	pm.wg.Add(2)
-	go pm.chainSync.loop()
+	if pm.chainSync != nil {
+		pm.wg.Add(1)
+		go pm.chainSync.loop()
+	}
+
+	pm.wg.Add(1)
 	go pm.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
 }
 
 func (pm *ProtocolManager) Stop() {
+	fmt.Println("P 0")
 	if pm.txsSub != nil {
+		fmt.Println("P 0.1")
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
+		fmt.Println("P 0.2")
 	}
+	fmt.Println("P 1")
 	pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	fmt.Println("P 2")
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
+	fmt.Println("P 3")
 	close(pm.quitSync)
+	fmt.Println("P 4")
 	pm.wg.Wait()
+	fmt.Println("P 5")
 
 	// Disconnect existing sessions.
 	// This also closes the gate for any new registrations on the peer set.
 	// sessions which are already established but not added to pm.peers yet
 	// will exit when they try to register.
 	pm.peers.Close()
+	fmt.Println("P 6")
 	pm.peerWG.Wait()
+	fmt.Println("P 7")
 
 	log.Info("Ethereum protocol stopped")
 }
@@ -1504,6 +1518,8 @@ func (pm *ProtocolManager) BroadcastTransactions(txs types.Transactions, propaga
 
 // minedBroadcastLoop sends mined blocks to connected peers.
 func (pm *ProtocolManager) minedBroadcastLoop() {
+	fmt.Println("P Start minedBroadcastLoop")
+	defer fmt.Println("P Done minedBroadcastLoop")
 	defer pm.wg.Done()
 
 	for obj := range pm.minedBlockSub.Chan() {
@@ -1516,6 +1532,8 @@ func (pm *ProtocolManager) minedBroadcastLoop() {
 
 // txBroadcastLoop announces new transactions to connected peers.
 func (pm *ProtocolManager) txBroadcastLoop() {
+	fmt.Println("P Start txBroadcastLoop")
+	defer fmt.Println("P Done txBroadcastLoop")
 	defer pm.wg.Done()
 
 	for {

@@ -63,12 +63,18 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 
 	for i := 0; i < numOfGoroutines; i++ {
 		// each goroutine gets it's own crypto context to make sure they are really parallel
-		go recoverSenders(cryptoContexts[i], jobs, out)
+		go recoverSenders(cryptoContexts[i], jobs, out, d.quitCh)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
 	needExit := false
 	for !needExit {
+		select {
+		case <-d.quitCh:
+			return errCanceled
+		default:
+		}
+
 		written := 0
 		for i := 0; i < batchSize; i++ {
 			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
@@ -122,9 +128,15 @@ type senderRecoveryJob struct {
 	err             error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob) {
+func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}) {
 	var job *senderRecoveryJob
 	for {
+		select {
+		case <-quit:
+			return
+		default:
+		}
+
 		job = <-in
 		if job == nil {
 			return

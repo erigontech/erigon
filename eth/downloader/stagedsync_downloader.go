@@ -9,15 +9,13 @@ import (
 
 func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers []func() error) error {
 	var err error
-	shallQuit := newWithQuit(d.quitCh)
-
 	defer log.Info("Staged sync finished")
 
 	/*
 	* Stage 1. Download Headers
 	 */
 	log.Info("Sync stage 1/7. Downloading headers...")
-	err = shallQuit(func() error {
+	err = d.shallQuit(func() error {
 		return d.DownloadHeaders(headersFetchers)
 	})
 	if err != nil {
@@ -31,7 +29,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	cont := true
 
 	for cont && err == nil {
-		err = shallQuit(func() error {
+		err = d.shallQuit(func() error {
 			return d.spawnBodyDownloadStage(p.id, &cont)
 		})
 		if err != nil {
@@ -46,7 +44,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 3/7. Recovering senders from tx signatures...")
 
-	err = shallQuit(func() error {
+	err = d.shallQuit(func() error {
 		return d.spawnRecoverSendersStage()
 	})
 	if err != nil {
@@ -59,8 +57,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
 	var syncHeadNumber uint64
-	err = shallQuit(func() error {
-		return spawnExecuteBlocksStage(d.stateDB, d.blockchain, &syncHeadNumber)
+	err = d.shallQuit(func() error {
+		return spawnExecuteBlocksStage(d.stateDB, d.blockchain, &syncHeadNumber, d.quitCh)
 	})
 	if err != nil {
 		return err
@@ -70,7 +68,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
-	err = shallQuit(func() error {
+	err = d.shallQuit(func() error {
 		return spawnCheckFinalHashStage(d.stateDB, syncHeadNumber, d.datadir)
 	})
 	if err != nil {
@@ -81,8 +79,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 6/7. Generating account history index")
-		err = shallQuit(func() error {
-			return spawnAccountHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution)
+		err = d.shallQuit(func() error {
+			return spawnAccountHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
 		})
 		if err != nil {
 			return err
@@ -94,8 +92,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 7/7. Generating storage history index")
-		err = shallQuit(func() error {
-			return spawnStorageHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution)
+		err = d.shallQuit(func() error {
+			return spawnStorageHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
 		})
 		if err != nil {
 			return err
@@ -109,8 +107,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 }
 
 func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
-	shallQuit := newWithQuit(d.quitCh)
-	err := shallQuit(func() error {
+	err := d.shallQuit(func() error {
 		return d.spawnSync(headersFetchers)
 	})
 	if err != nil {
@@ -122,7 +119,7 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
 	for stage := Finish - 1; stage > Headers; stage-- {
 		var unwindPoint uint64
-		err = shallQuit(func() error {
+		err = d.shallQuit(func() error {
 			return GetStageUnwind(d.stateDB, stage, &unwindPoint)
 		})
 		if err != nil {
@@ -151,7 +148,7 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
 
-		if err = shallQuit(stageFn); err != nil {
+		if err = d.shallQuit(stageFn); err != nil {
 			return fmt.Errorf("error unwinding stage: %d: %v", stage, err)
 		}
 	}
@@ -159,17 +156,11 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 	return nil
 }
 
-func withQuit(quitCh chan struct{}, run func() error) error {
+func (d *Downloader) shallQuit(fn func() error) error {
 	select {
-	case <-quitCh:
+	case <-d.quitCh:
 		return errCanceled
 	default:
 	}
-	return run()
-}
-
-func newWithQuit(quitCh chan struct{}) func(func() error) error {
-	return func(run func() error) error {
-		return withQuit(quitCh, run)
-	}
+	return fn()
 }

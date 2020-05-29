@@ -117,24 +117,25 @@ func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
 	var err error
-	var done bool
 
 	for {
 		err = withQuit(d.quitCh, func() error {
-			return d.processBodies(to, &done)
+			return d.processBodies(to)
 		})
-		if done {
+		if err == errDone {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 	}
+	return nil
 }
 
-func (d *Downloader) processBodies(to uint64, done *bool) error {
-	*done = true
-
+func (d *Downloader) processBodies(to uint64) error {
 	results := d.queue.Results(true)
 	if len(results) == 0 {
-		return nil
+		return errDone
 	}
 	lastNumber, err := d.importBlockResults(results, false /* execute */)
 	if err != nil {
@@ -143,12 +144,12 @@ func (d *Downloader) processBodies(to uint64, done *bool) error {
 	if lastNumber == to {
 		select {
 		case d.bodyWakeCh <- false:
+		case <-d.quitCh:
 		case <-d.cancelCh:
 		}
-		return nil
+		return errDone
 	}
 
-	*done = false
 	return nil
 }
 

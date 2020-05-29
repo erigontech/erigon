@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"fmt"
 	"math/big"
 	"math/rand"
 	"sync/atomic"
@@ -82,6 +83,8 @@ func (pm *ProtocolManager) syncTransactions(p *peer) {
 // transactions. In order to minimise egress bandwidth usage, we send
 // the transactions in small packs to one peer at a time.
 func (pm *ProtocolManager) txsyncLoop64() {
+	fmt.Println("P Start txsyncLoop64")
+	defer fmt.Println("P Done txsyncLoop64")
 	defer pm.wg.Done()
 
 	var (
@@ -192,13 +195,28 @@ func (cs *chainSyncer) handlePeerEvent(p *peer) bool {
 
 // loop runs in its own goroutine and launches the sync when necessary.
 func (cs *chainSyncer) loop() {
+	fmt.Println("P Start chainSyncer")
+	defer fmt.Println("P Done chainSyncer")
 	defer cs.pm.wg.Done()
 
 	cs.pm.blockFetcher.Start()
 	cs.pm.txFetcher.Start()
-	defer cs.pm.blockFetcher.Stop()
-	defer cs.pm.txFetcher.Stop()
-	defer cs.pm.downloader.Terminate()
+
+	defer func() {
+		fmt.Println("PC 5")
+		cs.pm.blockFetcher.Stop()
+		fmt.Println("PC 6")
+	}()
+	defer func() {
+		fmt.Println("PC 3")
+		cs.pm.txFetcher.Stop()
+		fmt.Println("PC 4")
+	}()
+	defer func() {
+		fmt.Println("PC 1")
+		cs.pm.downloader.Terminate()
+		fmt.Println("PC 2")
+	}()
 
 	// The force timer lowers the peer count threshold down to one when it fires.
 	// This ensures we'll always start sync even if there aren't enough peers.
@@ -214,16 +232,22 @@ func (cs *chainSyncer) loop() {
 		case <-cs.peerEventCh:
 			// Peer information changed, recheck.
 		case <-cs.doneCh:
+			fmt.Println("PC loop DoneCh 2.1")
 			cs.doneCh = nil
 			cs.force.Reset(forceSyncCycle)
 			cs.forced = false
+			fmt.Println("PC loop DoneCh 2.2")
 		case <-cs.force.C:
 			cs.forced = true
 
 		case <-cs.pm.quitSync:
+			fmt.Println("PC loop quitSync 3.1")
 			if cs.doneCh != nil {
+				fmt.Println("PC loop quitSync 3.2")
 				cs.pm.downloader.Terminate() // Double term is fine, Cancel would block until queue is emptied
+				fmt.Println("PC loop quitSync 3.3")
 				<-cs.doneCh
+				fmt.Println("PC loop quitSync 3.4")
 			}
 			return
 		}

@@ -187,7 +187,7 @@ func mergeFilesIntoBucket(bufferFileNames []string, db ethdb.Database, bucket []
 
 const changeSetBufSize = 256 * 1024 * 1024
 
-func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool, quit chan struct{}) error {
 	if plainState {
 		log.Info("Skipped account index generation for plain state")
 		return nil
@@ -210,6 +210,12 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
 	for !done {
+		select {
+		case <-quit:
+			return errCanceled
+		default:
+		}
+
 		if newDone, newBlockNum, newOffsets, newBlockNums, err := fillChangeSetBuffer(db, dbutils.AccountChangeSetBucket, blockNum, changesets, offsets, blockNums); err == nil {
 			done = newDone
 			blockNum = newBlockNum
@@ -264,7 +270,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	return nil
 }
 
-func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool, quit chan struct{}) error {
 	if plainState {
 		log.Info("Skipped storage index generation for plain state")
 		return nil
@@ -287,6 +293,12 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
 	for !done {
+		select {
+		case <-quit:
+			return errCanceled
+		default:
+		}
+
 		if newDone, newBlockNum, newOffsets, newBlockNums, err := fillChangeSetBuffer(db, dbutils.StorageChangeSetBucket, blockNum, changesets, offsets, blockNums); err == nil {
 			done = newDone
 			blockNum = newBlockNum

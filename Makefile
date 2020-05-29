@@ -17,7 +17,6 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
-
 geth:
 	$(GORUN) build/ci.go install ./cmd/geth
 	@echo "Done building."
