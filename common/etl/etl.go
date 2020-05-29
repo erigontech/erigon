@@ -22,11 +22,15 @@ type Decoder interface {
 	Decode(interface{}) error
 }
 
+type State interface {
+	Get([]byte) ([]byte, error)
+}
+
 type ExtractNextFunc func(k []byte, v interface{}) error
 type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 
 type LoadNextFunc func(k []byte, v []byte) error
-type LoadFunc func(k []byte, valueDecoder Decoder, next LoadNextFunc) error
+type LoadFunc func(k []byte, valueDecoder Decoder, state State, next LoadNextFunc) error
 
 func Transform(
 	db ethdb.Database,
@@ -129,6 +133,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 		}
 	}
 	batch := db.NewBatch()
+	state := &bucketState{batch, bucket}
 
 	loadNextFunc := func(k, v []byte) error {
 		if err := batch.Put(bucket, k, v); err != nil {
@@ -154,7 +159,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 		element := (heap.Pop(h)).(HeapElem)
 		reader := readers[element.timeIdx]
 		decoder.ResetBytes(element.value)
-		err := loadFunc(element.key, decoder, loadNextFunc)
+		err := loadFunc(element.key, decoder, state, loadNextFunc)
 		if err != nil {
 			return err
 		}
@@ -257,4 +262,13 @@ func readElementFromDisk(decoder *codec.Decoder) ([]byte, []byte, error) {
 	result := make([][]byte, 2)
 	err := decoder.Decode(&result)
 	return result[0], result[1], err
+}
+
+type bucketState struct {
+	getter ethdb.Getter
+	bucket []byte
+}
+
+func (s *bucketState) Get(key []byte) ([]byte, error) {
+	return s.getter.Get(s.bucket, key)
 }

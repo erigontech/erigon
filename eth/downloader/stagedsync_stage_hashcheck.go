@@ -122,7 +122,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
 	)
 }
 
-func identityLoadFunc(k []byte, valueDecoder etl.Decoder, next etl.LoadNextFunc) error {
+func identityLoadFunc(k []byte, valueDecoder etl.Decoder, _ etl.State, next etl.LoadNextFunc) error {
 	var v []byte
 	err := valueDecoder.Decode(&v)
 	if err != nil {
