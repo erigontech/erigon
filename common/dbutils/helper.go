@@ -1,6 +1,8 @@
 package dbutils
 
-import "bytes"
+import (
+	"bytes"
+)
 
 // EncodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
 func EncodeTimestamp(timestamp uint64) []byte {
@@ -42,27 +44,36 @@ func ChangeSetByIndexBucket(b []byte) []byte {
 	panic("wrong bucket")
 }
 
-// Cmp - like bytes.Compare, but nil - means "bucket over" and has highest order.
-func Cmp(k1, k2 []byte) int {
-	if k1 == nil && k2 == nil {
-		return 0
-	}
-	if k1 == nil {
-		return 1
-	}
-	if k2 == nil {
-		return -1
-	}
+// NextSubtree does []byte++. Returns false if overflow.
+func NextSubtree(in []byte) ([]byte, bool) {
+	r := make([]byte, len(in))
+	copy(r, in)
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] != 255 {
+			r[i]++
+			return r, true
+		}
 
-	return bytes.Compare(k1, k2)
+		r[i] = 0
+	}
+	return nil, false
 }
 
-// IsBefore - kind of bytes.Compare, but nil is the last key. And return
-func IsBefore(k1, k2 []byte) (bool, []byte) {
-	switch Cmp(k1, k2) {
-	case -1, 0:
-		return true, k1
-	default:
-		return false, k2
+func NextS(in []byte, out *[]byte) bool {
+	tmp := *out
+	if cap(tmp) < len(in) {
+		tmp = make([]byte, len(in))
 	}
+	tmp = tmp[:len(in)]
+	copy(tmp, in)
+	for i := len(tmp) - 1; i >= 0; i-- {
+		if tmp[i] != 255 {
+			tmp[i]++
+			*out = tmp
+			return true
+		}
+		tmp[i] = 0
+	}
+	*out = tmp
+	return false
 }

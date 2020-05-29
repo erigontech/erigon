@@ -80,6 +80,7 @@ type Ethereum struct {
 
 	// DB interfaces
 	chainDb ethdb.Database // Block chain database
+	chainKV ethdb.KV       // Same as chainDb, but different interface
 
 	eventMux       *event.TypeMux
 	engine         consensus.Engine
@@ -144,10 +145,14 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+	var chainKV ethdb.KV
+	if hasKV, ok := chainDb.(ethdb.HasAbstractKV); ok {
+		chainKV = hasKV.AbstractKV()
+	} else {
+		return nil, fmt.Errorf("database %T does not implement AbstractKV", chainDb)
+	}
 	if ctx.Config.RemoteDbListenAddress != "" {
-		if casted, ok := chainDb.(ethdb.HasAbstractKV); ok {
-			remotedbserver.StartDeprecated(casted.AbstractKV(), ctx.Config.RemoteDbListenAddress)
-		}
+		remotedbserver.StartDeprecated(chainKV, ctx.Config.RemoteDbListenAddress)
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
@@ -160,6 +165,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	eth := &Ethereum{
 		config:            config,
 		chainDb:           chainDb,
+		chainKV:           chainKV,
 		eventMux:          ctx.EventMux,
 		accountManager:    ctx.AccountManager,
 		engine:            CreateConsensusEngine(ctx, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
@@ -575,6 +581,7 @@ func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
 func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
 func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
 func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
+func (s *Ethereum) ChainKV() ethdb.KV                  { return s.chainKV }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) EthVersion() int                    { return int(ProtocolVersions[0]) }
 func (s *Ethereum) NetVersion() uint64                 { return s.networkID }
@@ -592,11 +599,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		protos[i].DialCandidates = s.dialCandiates
 	}
 
-	// Firehose
-	protos = append(protos, s.protocolManager.makeFirehoseProtocol())
-
-	// Debug
-	protos = append(protos, s.protocolManager.makeDebugProtocol())
+	if s.config.EnableDebugProtocol {
+		// Debug
+		protos = append(protos, s.protocolManager.makeDebugProtocol())
+	}
 
 	// MGR
 	protos = append(protos, s.protocolManager.makeMgrProtocol())
@@ -659,7 +665,6 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 	var (
 		err error
 	)
-
 	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
 	if err != nil {
 		return err

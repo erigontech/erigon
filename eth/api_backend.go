@@ -155,9 +155,10 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	if header == nil {
 		return nil, nil, errors.New("header not found")
 	}
-	ds := state.NewDbState(b.eth.chainDb, bn)
+	ds := state.NewDbState(b.eth.ChainKV(), bn)
 	stateDb := state.New(ds)
 	return stateDb, header, nil
+
 }
 
 func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.IntraBlockState, *types.Header, error) {
@@ -175,8 +176,9 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 		if blockNrOrHash.RequireCanonical && b.eth.blockchain.GetCanonicalHash(header.Number.Uint64()) != hash {
 			return nil, nil, errors.New("hash is not currently canonical")
 		}
-		stateDb, _, err := b.eth.BlockChain().StateAt(header.Number.Uint64())
-		return stateDb, header, err
+		ds := state.NewDbState(b.eth.ChainKV(), header.Number.Uint64())
+		stateDb := state.New(ds)
+		return stateDb, header, nil
 	}
 	return nil, nil, errors.New("invalid arguments; neither block nor hash specified")
 }
@@ -197,7 +199,7 @@ func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (type
 }
 
 func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
-	dbstate := state.NewDbState(b.eth.chainDb, number-1)
+	dbstate := state.NewDbState(b.eth.ChainKV(), number-1)
 	statedb := state.New(dbstate)
 	header := block.Header()
 	var receipts types.Receipts

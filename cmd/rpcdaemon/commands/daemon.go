@@ -226,7 +226,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error) {
-	_, _, _, dbstate, err := eth.ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.dbReader, blockHash, txIndex)
+	_, _, _, dbstate, err := eth.ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex)
 	if err != nil {
 		return eth.StorageRangeResult{}, err
 	}
@@ -241,7 +241,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 // attempted to be reexecuted to generate the desired state.
 func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
 	// If we have the state fully available, use that
-	dbstate := state.NewDbState(api.dbReader, block.NumberU64())
+	dbstate := state.NewDbState(api.db, block.NumberU64())
 	statedb := state.New(dbstate)
 	return statedb, dbstate
 }

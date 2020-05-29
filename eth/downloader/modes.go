@@ -26,6 +26,7 @@ const (
 	FastSync                   // Quickly download the headers, full sync only at the chain head
 	LightSync                  // Download only the headers and terminate afterwards
 	StagedSync                 // Full sync but done in stages
+	MgrSync                    // MarryGoRound sync
 )
 
 const (
@@ -33,6 +34,7 @@ const (
 	FastSyncName   = "fast"
 	LightSyncName  = "light"
 	StagedSyncName = "staged"
+	MgrSyncName    = "mgr"
 )
 
 func (mode SyncMode) IsValid() bool {
@@ -50,6 +52,8 @@ func (mode SyncMode) String() string {
 		return LightSyncName
 	case StagedSync:
 		return StagedSyncName
+	case MgrSync:
+		return MgrSyncName
 	default:
 		return "unknown"
 	}
@@ -65,6 +69,8 @@ func (mode SyncMode) MarshalText() ([]byte, error) {
 		return []byte(LightSyncName), nil
 	case StagedSync:
 		return []byte(StagedSyncName), nil
+	case MgrSync:
+		return []byte(MgrSyncName), nil
 	default:
 		return nil, fmt.Errorf("unknown sync mode %d", mode)
 	}
@@ -80,9 +86,11 @@ func (mode *SyncMode) UnmarshalText(text []byte) error {
 		*mode = LightSync
 	case StagedSyncName:
 		*mode = StagedSync
+	case MgrSyncName:
+		*mode = MgrSync
 	default:
-		return fmt.Errorf(`unknown sync mode %q, want "%s", "%s", "%s" or "%s"`,
-			FullSyncName, FastSyncName, LightSyncName, StagedSyncName, text)
+		return fmt.Errorf(`unknown sync mode %q, want "%s", "%s", "%s" or "%s" or "%s"`,
+			FullSyncName, FastSyncName, LightSyncName, StagedSyncName, MgrSyncName, text)
 	}
 	return nil
 }

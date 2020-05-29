@@ -10,5 +10,6 @@ var ErrEntityNotFound = errors.New("entity not found")
 
 type Env struct {
 	DB              ethdb.KV
+	BoltPath        string
 	RemoteDBAddress string
 }

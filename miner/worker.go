@@ -1179,10 +1179,7 @@ func GetState(blockchain *core.BlockChain, parent *types.Block) (*state.IntraBlo
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 
-	statedb, _, err := blockchain.StateAt(parent.NumberU64())
-	if err != nil {
-		return nil, nil, err
-	}
+	statedb := state.New(tds)
 
 	return statedb, tds, nil
 }

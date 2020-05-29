@@ -230,7 +230,7 @@ func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <
 		case <-pm.quitSync:
 			errc <- p2p.DiscQuitting
 		default:
-			errc <- pm.handleFirehose(peer)
+			//errc <- pm.handleFirehose(peer)
 		}
 	}()
 

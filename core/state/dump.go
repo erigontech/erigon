@@ -35,7 +35,7 @@ type trieHasher interface {
 
 type Dumper struct {
 	blockNumber uint64
-	db          ethdb.Getter
+	db          ethdb.KV
 }
 
 // DumpAccount represents an account in the state.
@@ -114,7 +114,7 @@ func (d iterativeDump) onRoot(root common.Hash) {
 	}{root})
 }
 
-func NewDumper(db ethdb.Getter, blockNumber uint64) *Dumper {
+func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
 	return &Dumper{db: db, blockNumber: blockNumber}
 }
 
@@ -128,7 +128,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err = d.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
+	err = ethdb.WalkAsOf(d.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -167,14 +167,14 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		account := accountList[i]
 		incarnation := incarnationList[i]
 		var addr []byte
-		addr, err = d.db.Get(dbutils.PreimagePrefix, addrHash[:])
+		addr, err = ethdb.Get(d.db, dbutils.PreimagePrefix, addrHash[:])
 		if err != nil {
 			return nil, fmt.Errorf("getting preimage of %x: %v", addrHash, err)
 		}
 		storagePrefix := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
 		if incarnation > 0 {
 			var codeHash []byte
-			codeHash, err = d.db.Get(dbutils.ContractCodeBucket, storagePrefix)
+			codeHash, err = ethdb.Get(d.db, dbutils.ContractCodeBucket, storagePrefix)
 			if err != nil && err != ethdb.ErrKeyNotFound {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
 			}
@@ -185,7 +185,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			}
 			if !excludeCode && codeHash != nil && !bytes.Equal(emptyCodeHash[:], codeHash) {
 				var code []byte
-				if code, err = d.db.Get(dbutils.CodeBucket, codeHash); err != nil {
+				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
 					return nil, err
 				}
 				account.Code = common.Bytes2Hex(code)
@@ -193,7 +193,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		}
 		if !excludeStorage {
 			storageMap := make(map[common.Hash][]byte)
-			err = d.db.WalkAsOf(
+			err = ethdb.WalkAsOf(d.db,
 				dbutils.CurrentStateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
@@ -208,7 +208,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			}
 			for keyHash, vs := range storageMap {
 				var key []byte
-				key, err = d.db.Get(dbutils.PreimagePrefix, keyHash[:]) //remove account address and version from composite key
+				key, err = ethdb.Get(d.db, dbutils.PreimagePrefix, keyHash[:]) //remove account address and version from composite key
 				if err != nil {
 					return nil, fmt.Errorf("getting preimage for storage %x %x: %v", addrHash, keyHash, err)
 				}

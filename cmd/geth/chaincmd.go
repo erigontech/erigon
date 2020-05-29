@@ -523,7 +523,10 @@ func dump(ctx *cli.Context) error {
 			excludeCode := ctx.Bool(utils.ExcludeCodeFlag.Name)
 			excludeStorage := ctx.Bool(utils.ExcludeStorageFlag.Name)
 			includeMissing := ctx.Bool(utils.IncludeIncompletesFlag.Name)
-			fmt.Printf("%s\n", state.NewDumper(chainDb, block.NumberU64()).Dump(excludeCode, excludeStorage, !includeMissing))
+			if hasKV, ok := chainDb.(ethdb.HasAbstractKV); ok {
+				fmt.Printf("%s\n", state.NewDumper(hasKV.AbstractKV(), block.NumberU64()).Dump(excludeCode, excludeStorage, !includeMissing))
+			}
+			fmt.Printf("database %T does not support AbstracKV\n", chainDb)
 		}
 	}
 	return nil

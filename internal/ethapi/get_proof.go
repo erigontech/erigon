@@ -129,7 +129,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	}
 	sort.Strings(unfurlList)
 	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
+	if err = loader.Reset(db, unfurl, unfurl, [][]byte{nil}, []int{0}, false); err != nil {
 		return nil, err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}

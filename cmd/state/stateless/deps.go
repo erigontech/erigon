@@ -140,7 +140,7 @@ func dataDependencies(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		dbstate := state.NewDbState(ethDb.AbstractKV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		statedb.SetTracer(dt)
 		signer := types.MakeSigner(chainConfig, block.Number())

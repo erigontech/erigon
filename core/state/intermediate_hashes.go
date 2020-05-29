@@ -30,7 +30,7 @@ func NewIntermediateHashes(putter ethdb.Putter, deleter ethdb.Deleter) *Intermed
 	return &IntermediateHashes{putter: putter, deleter: deleter}
 }
 
-func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeHash common.Hash, incarnation uint64, witnessLen uint64) {
+func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeHash common.Hash, incarnation uint64, witnessSize uint64) {
 	// only put to bucket prefixes with even number of nibbles
 	if len(prefixAsNibbles) == 0 || len(prefixAsNibbles)%2 == 1 {
 		return
@@ -49,14 +49,14 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 		key = common.CopyBytes(buf.B)
 	}
 
-	lenBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(lenBytes, witnessLen)
-
 	if err := ih.putter.Put(dbutils.IntermediateTrieHashBucket, key, common.CopyBytes(nodeHash[:])); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
+
 	if debug.IsTrackWitnessSizeEnabled() {
-		if err := ih.putter.Put(dbutils.IntermediateTrieWitnessLenBucket, key, lenBytes); err != nil {
+		lenBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(lenBytes, witnessSize)
+		if err := ih.putter.Put(dbutils.IntermediateWitnessSizeBucket, common.CopyBytes(key), lenBytes); err != nil {
 			log.Warn("could not put intermediate trie data len", "err", err)
 		}
 	}
@@ -84,9 +84,8 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 		log.Warn("could not delete intermediate trie hash", "err", err)
 	}
 	if debug.IsTrackWitnessSizeEnabled() {
-		if err := ih.deleter.Delete(dbutils.IntermediateTrieWitnessLenBucket, key); err != nil {
+		if err := ih.deleter.Delete(dbutils.IntermediateWitnessSizeBucket, key); err != nil {
 			log.Warn("could not delete intermediate trie hash", "err", err)
 		}
 	}
-
 }

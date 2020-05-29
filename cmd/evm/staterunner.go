@@ -26,6 +26,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/tests"
 
@@ -106,8 +107,12 @@ func stateTestCmd(ctx *cli.Context) error {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					dump := state.NewDumper(tds.Database(), tds.GetBlockNr()).DefaultRawDump()
-					result.State = &dump
+					if hasKV, ok := tds.Database().(ethdb.HasAbstractKV); ok {
+						dump := state.NewDumper(hasKV.AbstractKV(), tds.GetBlockNr()).DefaultRawDump()
+						result.State = &dump
+					} else {
+						fmt.Fprintf(os.Stderr, "database does not implement AbstractKV: %T\n", tds.Database())
+					}
 				}
 			}
 

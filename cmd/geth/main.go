@@ -160,6 +160,7 @@ var (
 		utils.LegacyGpoPercentileFlag,
 		utils.EWASMInterpreterFlag,
 		utils.EVMInterpreterFlag,
+		utils.DebugProtocolFlag,
 		configFileFlag,
 	}
 
