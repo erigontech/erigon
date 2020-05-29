@@ -146,6 +146,7 @@ var (
 	SyncStageProgress = []byte("SSP")
 	// Position to where to unwind sync stages
 	SyncStageUnwind = []byte("SSU")
+	CliqueBucket    = []byte("clique-")
 )
 
 var Buckets = [][]byte{
@@ -178,4 +179,5 @@ var Buckets = [][]byte{
 	LastPrunedBlockKey,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
+	CliqueBucket,
 }
