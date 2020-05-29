@@ -2,6 +2,7 @@ package ethdb
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"time"
 
@@ -207,6 +208,12 @@ func (b badgerBucket) Get(key []byte) (val []byte, err error) {
 	var item *badger.Item
 	b.prefix = append(b.prefix[:b.nameLen], key...)
 	item, err = b.tx.badger.Get(b.prefix)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	if item != nil {
 		val, err = item.ValueCopy(nil) // can improve this by using pool
 	}

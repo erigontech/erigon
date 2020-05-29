@@ -241,19 +241,22 @@ func TestMultipleBuckets(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		if err := db.Update(ctx, func(tx ethdb.Tx) error {
-			b := tx.Bucket(dbutils.CurrentStateBucket)
-			for i := uint8(0); i < 10; i++ {
-				require.NoError(t, b.Put([]byte{i}, []byte{i}))
+		msg := fmt.Sprintf("%T", db)
+		t.Run("FillBuckets "+msg, func(t *testing.T) {
+			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+				b := tx.Bucket(dbutils.CurrentStateBucket)
+				for i := uint8(0); i < 10; i++ {
+					require.NoError(t, b.Put([]byte{i}, []byte{i}))
+				}
+				b2 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+				for i := uint8(0); i < 12; i++ {
+					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
+				}
+				return b.Delete([]byte{5}) // delete from first bucket key 5, then will seek on it and expect to see key 6
+			}); err != nil {
+				require.NoError(t, err)
 			}
-			b2 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			for i := uint8(0); i < 12; i++ {
-				require.NoError(t, b2.Put([]byte{i}, []byte{i}))
-			}
-			return b.Delete([]byte{5}) // delete from first bucket key 5, then will seek on it and expect to see key 6
-		}); err != nil {
-			require.NoError(t, err)
-		}
+		})
 	}
 
 	for _, db := range readDBs {
@@ -294,6 +297,46 @@ func TestMultipleBuckets(t *testing.T) {
 			assert.Equal(t, 12, counter2)
 			assert.Equal(t, []byte{6}, key)
 			assert.Equal(t, []byte{6}, value)
+		})
+	}
+}
+
+func TestReadAfterPut(t *testing.T) {
+	writeDBs, _, closeAll := setupDatabases()
+	defer closeAll()
+
+	ctx := context.Background()
+
+	for _, db := range writeDBs {
+		db := db
+		msg := fmt.Sprintf("%T", db)
+		t.Run("GetAfterPut "+msg, func(t *testing.T) {
+			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+				b := tx.Bucket(dbutils.CurrentStateBucket)
+				for i := uint8(0); i < 10; i++ {
+					require.NoError(t, b.Put([]byte{i}, []byte{i}))
+					v, err := b.Get([]byte{i})
+					require.NoError(t, err)
+					require.Equal(t, []byte{i}, v)
+				}
+
+				b2 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+				for i := uint8(0); i < 12; i++ {
+					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
+					v, err := b2.Get([]byte{i})
+					require.NoError(t, err)
+					require.Equal(t, []byte{i}, v)
+				}
+				require.NoError(t, b2.Delete([]byte{5}))
+				v, err := b2.Get([]byte{5})
+				require.NoError(t, err)
+				require.Nil(t, v)
+
+				require.NoError(t, b2.Delete([]byte{255})) // delete non-existing key
+				return nil
+			}); err != nil {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

@@ -54,6 +54,12 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		// ..
 	}
 
+	if !opts.inMem {
+		if err := os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, err
+		}
+	}
+
 	logger := log.New("lmdb", path.Base(opts.path))
 
 	go func() {
@@ -265,8 +271,9 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 	}
 
 	val, err = b.tx.tx.Get(b.dbi, key)
+	fmt.Printf("Res: %x -> %x %s\n", key, val, err)
 	if lmdb.IsNotFound(err) {
-		return nil, err
+		return nil, nil
 	}
 	return val, err
 }

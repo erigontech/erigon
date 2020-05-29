@@ -49,7 +49,7 @@ func (db *ObjectDatabase) Put(bucket, key []byte, value []byte) error {
 }
 
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	var savedTx Tx
+	//var savedTx Tx
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
 			bucketEnd := bucketStart
@@ -72,7 +72,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 
 			bucketStart = bucketEnd
 		}
-		savedTx = tx
+		//savedTx = tx
 		return nil
 	})
 	if err != nil {
