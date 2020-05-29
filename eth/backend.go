@@ -599,8 +599,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		protos[i].DialCandidates = s.dialCandiates
 	}
 
-	// Debug
-	protos = append(protos, s.protocolManager.makeDebugProtocol())
+	if s.config.EnableDebugProtocol {
+		// Debug
+		protos = append(protos, s.protocolManager.makeDebugProtocol())
+	}
 
 	// MGR
 	protos = append(protos, s.protocolManager.makeMgrProtocol())
