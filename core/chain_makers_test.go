@@ -22,6 +22,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -96,11 +97,11 @@ func ExampleGenerateChain() {
 		return
 	}
 
-	state, _, _ := blockchain.State()
+	st := state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64()))
 	fmt.Printf("last block: #%d\n", blockchain.CurrentBlock().Number())
-	fmt.Println("balance of addr1:", state.GetBalance(addr1))
-	fmt.Println("balance of addr2:", state.GetBalance(addr2))
-	fmt.Println("balance of addr3:", state.GetBalance(addr3))
+	fmt.Println("balance of addr1:", st.GetBalance(addr1))
+	fmt.Println("balance of addr2:", st.GetBalance(addr2))
+	fmt.Println("balance of addr3:", st.GetBalance(addr3))
 	// Output:
 	// last block: #5
 	// balance of addr1: 989000

@@ -186,6 +186,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.ExecFlag,
 			utils.PreloadJSFlag,
 			utils.RemoteDbListenAddress,
+			utils.DebugProtocolFlag,
 		},
 	},
 	{

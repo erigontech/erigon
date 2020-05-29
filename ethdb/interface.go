@@ -42,10 +42,6 @@ type Getter interface {
 	// Key must contain 8byte inverted block number in the end.
 	GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error)
 
-	// GetAsOf returns the value valid as of a given timestamp.
-	// timestamp == block number
-	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)
-
 	// Has indicates whether a key exists in the database.
 	Has(bucket, key []byte) (bool, error)
 
@@ -57,8 +53,6 @@ type Getter interface {
 
 	// MultiWalk is similar to multiple Walk calls folded into one.
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error
-
-	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
 }
 
 type GetterPutter interface {

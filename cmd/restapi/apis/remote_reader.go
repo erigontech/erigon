@@ -2,7 +2,6 @@ package apis
 
 import (
 	"bytes"
-	"encoding/binary"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -21,8 +20,9 @@ import (
 
 // ChangeSetReader is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type RemoteReader struct {
-	accountReads map[common.Address]bool
-	storageReads map[common.Hash]bool
+	accountReads map[common.Address]struct{}
+	storageReads map[common.Address]map[common.Hash]struct{}
+	codeReads    map[common.Address]struct{}
 	blockNr      uint64
 	db           ethdb.KV
 }
@@ -80,8 +80,9 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 
 func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 	return &RemoteReader{
-		accountReads: make(map[common.Address]bool),
-		storageReads: make(map[common.Hash]bool),
+		accountReads: make(map[common.Address]struct{}),
+		storageReads: make(map[common.Address]map[common.Hash]struct{}),
+		codeReads:    make(map[common.Address]struct{}),
 		db:           db,
 		blockNr:      blockNr,
 	}
@@ -89,104 +90,80 @@ func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 
 func (r *RemoteReader) GetAccountReads() [][]byte {
 	output := make([][]byte, 0)
-	for key := range r.accountReads {
-		output = append(output, key.Bytes())
+	for address := range r.accountReads {
+		output = append(output, address.Bytes())
 	}
 	return output
 }
 
 func (r *RemoteReader) GetStorageReads() [][]byte {
 	output := make([][]byte, 0)
-	for key := range r.storageReads {
+	for address, m := range r.storageReads {
+		for key := range m {
+			output = append(output, append(address.Bytes(), key.Bytes()...))
+		}
+	}
+	return output
+}
+
+func (r *RemoteReader) GetCodeReads() [][]byte {
+	output := make([][]byte, 0)
+	for key := range r.codeReads {
 		output = append(output, key.Bytes())
 	}
 	return output
 }
 
 func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	r.accountReads[address] = true
-	addrHash, _ := common.HashData(address[:])
-	key := addrHash[:]
-	r.accountReads[address] = true
-	composite, _ := dbutils.CompositeKeySuffix(key, r.blockNr)
-	acc := accounts.NewAccount()
-	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		{
-			hB := tx.Bucket(dbutils.AccountsHistoryBucket)
-			hC := hB.Cursor()
-			hK, hV, err := hC.Seek(composite)
-			if err != nil {
-				return err
-			}
-
-			if hK != nil && bytes.HasPrefix(hK, key) {
-				err = acc.DecodeForStorage(hV)
-				if err != nil {
-					return err
-				}
-				return nil
-			}
-		}
-		{
-			v, err := tx.Bucket(dbutils.CurrentStateBucket).Get(key)
-			if err != nil {
-				return err
-			}
-			if v == nil {
-				return nil
-			}
-
-			root, err := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(key)
-			if err != nil {
-				return err
-			}
-			if root == nil {
-				return nil
-			}
-
-			err = acc.DecodeForStorage(v)
-			if err != nil {
-				return err
-			}
-			acc.Root = common.BytesToHash(root)
-			return nil
-		}
-
-		return ethdb.ErrKeyNotFound
-	})
+	r.accountReads[address] = struct{}{}
+	addrHash, err := common.HashData(address[:])
 	if err != nil {
+		return nil, err
+	}
+	enc, err := ethdb.GetAsOf(r.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], r.blockNr)
+	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(enc); err != nil {
+		return nil, err
+	}
 	return &acc, nil
 }
 
 func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	keyHash, _ := common.HashData(key[:])
-	addrHash, _ := common.HashData(address[:])
-
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	var val []byte
-	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		v, err := b.Get(compositeKey)
-		val = v
-		return err
-	})
+	m, ok := r.storageReads[address]
+	if !ok {
+		m = make(map[common.Hash]struct{})
+		r.storageReads[address] = m
+	}
+	m[*key] = struct{}{}
+	keyHash, err := common.HashData(key[:])
 	if err != nil {
 		return nil, err
 	}
-	r.storageReads[*key] = true
-	return val, nil
+
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
+	enc, err := ethdb.GetAsOf(r.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, r.blockNr)
+	if err != nil || enc == nil {
+		return nil, nil
+	}
+	return enc, nil
 }
 
 func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+	r.codeReads[address] = struct{}{}
 	if bytes.Equal(codeHash[:], crypto.Keccak256(nil)) {
 		return nil, nil
 	}
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket(dbutils.CodeBucket)
 		v, err := b.Get(codeHash[:])
 		val = v
 		return err
@@ -198,47 +175,14 @@ func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.H
 }
 
 func (r *RemoteReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
-	if bytes.Equal(codeHash[:], crypto.Keccak256(nil)) {
-		return 0, nil
-	}
-	var val []byte
-	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		v, err := b.Get(codeHash[:])
-		val = v
-		return err
-	})
+	code, err := r.ReadAccountCode(address, codeHash)
 	if err != nil {
 		return 0, err
 	}
-	return len(val), nil
+	return len(code), nil
 }
 
 func (r *RemoteReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	addrHash, _ := common.HashData(address[:])
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	copy(startkey, addrHash[:])
-	found := false
-	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		c := b.Cursor()
-		k, _, err := c.Seek(startkey)
-		if err != nil {
-			return err
-		}
-		if k != nil && bytes.HasPrefix(k, addrHash[:]) {
-			copy(incarnationBytes[:], k[common.HashLength:])
-			found = true
-		}
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	if found {
-		return (^binary.BigEndian.Uint64(incarnationBytes[:])), nil
-	}
 	return 0, nil
 }
 

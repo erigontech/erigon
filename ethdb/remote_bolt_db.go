@@ -129,47 +129,6 @@ func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64
 	return dat, err
 }
 
-// GetAsOf returns the value valid as of a given timestamp.
-//func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-//	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)
-//}
-
-// GetAsOf returns the value valid as of a given timestamp.
-func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	var dat []byte
-	err := db.db.View(context.Background(), func(tx Tx) error {
-		{
-			hK, hV, err := tx.Bucket(hBucket).Cursor().Seek(composite)
-			if err != nil {
-				return err
-			}
-
-			if hK != nil && bytes.HasPrefix(hK, key) {
-				dat = make([]byte, len(hV))
-				copy(dat, hV)
-				return nil
-			}
-		}
-		{
-			v, err := tx.Bucket(bucket).Get(key)
-			if err != nil {
-				return err
-			}
-			if v == nil {
-				return ErrKeyNotFound
-			}
-
-			dat = make([]byte, len(v))
-			copy(dat, v)
-			return nil
-		}
-
-		return ErrKeyNotFound
-	})
-	return dat, err
-}
-
 func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(context.Background(), func(tx Tx) error {

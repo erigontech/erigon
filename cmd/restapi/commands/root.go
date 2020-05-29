@@ -14,11 +14,13 @@ import (
 
 var (
 	remoteDbAddress string
+	boltPath        string
 	listenAddress   string
 )
 
 func init() {
-	rootCmd.Flags().StringVar(&remoteDbAddress, "remote-db-addr", "localhost:9999", "address of remote DB listener of a turbo-geth node")
+	rootCmd.Flags().StringVar(&remoteDbAddress, "remote-db-addr", "", "address of remote DB listener of a turbo-geth node")
+	rootCmd.Flags().StringVar(&boltPath, "bolt-path", "", "path to the boltdb database")
 	rootCmd.Flags().StringVar(&listenAddress, "rpcaddr", "localhost:8080", "REST server listening interface")
 }
 
@@ -26,7 +28,7 @@ var rootCmd = &cobra.Command{
 	Use:   "restapi",
 	Short: "restapi exposes read-only blockchain APIs through REST (requires running turbo-geth node)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return rest.ServeREST(cmd.Context(), listenAddress, remoteDbAddress)
+		return rest.ServeREST(cmd.Context(), listenAddress, remoteDbAddress, boltPath)
 	},
 }
 

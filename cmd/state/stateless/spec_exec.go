@@ -180,7 +180,7 @@ func speculativeExecution(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		dbstate := state.NewDbState(ethDb.AbstractKV(), block.NumberU64()-1)
 
 		// First pass - execute transactions in sequence
 		statedb1 := state.New(dbstate)

@@ -2,12 +2,12 @@ package trie
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"time"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -31,7 +31,7 @@ type StreamReceiver interface {
 		storageValue []byte,
 		hash []byte,
 		cutoff int,
-		witnessLen uint64,
+		witnessSize uint64,
 	) error
 
 	Result() SubTries
@@ -46,15 +46,15 @@ type FlatDbSubTrieLoader struct {
 	fixedbytes         []int
 	masks              []byte
 	cutoffs            []int
-	boltDB             *bolt.DB
+	kv                 ethdb.KV
 	nextAccountKey     [32]byte
 	k, v               []byte
 	ihK, ihV           []byte
 	minKeyAsNibbles    bytes.Buffer
 
-	itemPresent   bool
-	itemType      StreamItem
-	getWitnessLen func(prefix []byte) uint64
+	itemPresent    bool
+	itemType       StreamItem
+	getWitnessSize func(prefix []byte) uint64
 
 	// Storage item buffer
 	storageKeyPart1 []byte
@@ -66,7 +66,7 @@ type FlatDbSubTrieLoader struct {
 	accountValue accounts.Account
 	hashValue    []byte
 	streamCutoff int
-	witnessLen   uint64
+	witnessSize  uint64
 
 	receiver        StreamReceiver
 	defaultReceiver *DefaultReceiver
@@ -90,7 +90,7 @@ type DefaultReceiver struct {
 	a            accounts.Account
 	leafData     GenStructStepLeafData
 	accData      GenStructStepAccountData
-	witnessLen   uint64
+	witnessSize  uint64
 }
 
 func NewDefaultReceiver() *DefaultReceiver {
@@ -105,8 +105,8 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 }
 
 // Reset prepares the loader for reuse
-func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Getter, rl RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
-	fstl.defaultReceiver.Reset(rl, trace)
+func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, receiverDecider RetainDecider, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
+	fstl.defaultReceiver.Reset(receiverDecider, trace)
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
@@ -127,11 +127,10 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Getter, rl RetainDecider, dbPref
 	if len(dbPrefixes) == 0 {
 		return nil
 	}
-	if hasBolt, ok := db.(ethdb.HasKV); ok {
-		fstl.boltDB = hasBolt.KV()
-	}
-	if fstl.boltDB == nil {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
+	if hasKV, ok := db.(ethdb.HasAbstractKV); ok {
+		fstl.kv = hasKV.AbstractKV()
+	} else {
+		return fmt.Errorf("database doest not implement AbstractKV: %T", db)
 	}
 	fixedbytes := make([]int, len(fixedbits))
 	masks := make([]byte, len(fixedbits))
@@ -157,9 +156,10 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
-func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error {
+func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error {
 	var isIH bool
 	var minKey []byte
+	var err error
 	if !first {
 		isIH, minKey = keyIsBefore(fstl.ihK, fstl.k)
 	}
@@ -204,20 +204,28 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 				// Looking for storage sub-tree
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
-			fstl.k, fstl.v = c.SeekTo(dbPrefix)
+			if fstl.k, fstl.v, err = c.SeekTo(dbPrefix); err != nil {
+				return err
+			}
 			if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
 				// Advance past the storage to the first account
 				if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-					fstl.k, fstl.v = c.SeekTo(fstl.nextAccountKey[:])
+					if fstl.k, fstl.v, err = c.SeekTo(fstl.nextAccountKey[:]); err != nil {
+						return err
+					}
 				} else {
 					fstl.k = nil
 				}
 			}
-			fstl.ihK, fstl.ihV = ih.SeekTo(dbPrefix)
+			if fstl.ihK, fstl.ihV, err = ih.SeekTo(dbPrefix); err != nil {
+				return err
+			}
 			if len(dbPrefix) <= common.HashLength && len(fstl.ihK) > common.HashLength {
 				// Advance to the first account
 				if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-					fstl.ihK, fstl.ihV = ih.SeekTo(fstl.nextAccountKey[:])
+					if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+						return err
+					}
 				} else {
 					fstl.ihK = nil
 				}
@@ -253,10 +261,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 		if len(fstl.k) > common.HashLength && !bytes.HasPrefix(fstl.k, fstl.accAddrHashWithInc[:]) {
 			if bytes.Compare(fstl.k, fstl.accAddrHashWithInc[:]) < 0 {
 				// Skip all the irrelevant storage in the middle
-				fstl.k, fstl.v = c.SeekTo(fstl.accAddrHashWithInc[:])
+				if fstl.k, fstl.v, err = c.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+					return err
+				}
 			} else {
 				if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-					fstl.k, fstl.v = c.SeekTo(fstl.nextAccountKey[:])
+					if fstl.k, fstl.v, err = c.SeekTo(fstl.nextAccountKey[:]); err != nil {
+						return err
+					}
 				} else {
 					fstl.k = nil
 				}
@@ -279,7 +291,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 			}
 			fstl.hashValue = nil
 			fstl.storageValue = fstl.v
-			fstl.k, fstl.v = c.Next()
+			if fstl.k, fstl.v, err = c.Next(); err != nil {
+				return err
+			}
 			if fstl.trace {
 				fmt.Printf("k after storageWalker and Next: %x\n", fstl.k)
 			}
@@ -294,15 +308,20 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 			}
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], ^fstl.accountValue.Incarnation)
-			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
+			// Now we know the correct incarnation of the account, an
+			//d we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
-			fstl.k, fstl.v = c.SeekTo(fstl.accAddrHashWithInc[:])
+			if fstl.k, fstl.v, err = c.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+				return err
+			}
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and SeekTo: %x\n", fstl.k)
 			}
 			if !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
-				fstl.ihK, fstl.ihV = ih.SeekTo(fstl.accAddrHashWithInc[:])
+				if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -313,7 +332,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 	keyToNibblesWithoutInc(minKey, &fstl.minKeyAsNibbles)
 
 	if fstl.minKeyAsNibbles.Len() < cutoff {
-		fstl.ihK, fstl.ihV = ih.Next() // go to children, not to sibling
+		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
+			return err
+		} // go to children, not to sibling
 		return nil
 	}
 
@@ -323,17 +344,23 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 	}
 
 	if retain { // can't use ih as is, need go to children
-		fstl.ihK, fstl.ihV = ih.Next() // go to children, not to sibling
+		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
+			return err
+		} // go to children, not to sibling
 		return nil
 	}
 
 	if len(fstl.ihK) > common.HashLength && !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
 		if bytes.Compare(fstl.ihK, fstl.accAddrHashWithInc[:]) < 0 {
 			// Skip all the irrelevant storage in the middle
-			fstl.ihK, fstl.ihV = ih.SeekTo(fstl.accAddrHashWithInc[:])
+			if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+				return err
+			}
 		} else {
 			if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-				fstl.ihK, fstl.ihV = ih.SeekTo(fstl.nextAccountKey[:])
+				if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+					return err
+				}
 			} else {
 				fstl.ihK = nil
 			}
@@ -356,18 +383,18 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 		}
 		fstl.hashValue = fstl.ihV
 		fstl.storageValue = nil
-		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
+		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	} else {
 		fstl.itemType = AHashStreamItem
 		fstl.accountKey = fstl.ihK
 		fstl.storageKeyPart1 = nil
 		fstl.storageKeyPart2 = nil
 		fstl.hashValue = fstl.ihV
-		fstl.witnessLen = fstl.getWitnessLen(fstl.ihK)
+		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	}
 
 	// skip subtree
-	next, ok := nextSubtree(fstl.ihK)
+	next, ok := dbutils.NextSubtree(fstl.ihK)
 	if !ok { // no siblings left
 		if !retain { // last sub-tree was taken from IH, then nothing to look in the main bucket. Can stop.
 			fstl.k = nil
@@ -382,12 +409,16 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 	}
 
 	if !bytes.HasPrefix(fstl.k, next) {
-		fstl.k, fstl.v = c.SeekTo(next)
+		if fstl.k, fstl.v, err = c.SeekTo(next); err != nil {
+			return err
+		}
 	}
 	if len(next) <= common.HashLength && len(fstl.k) > common.HashLength {
 		// Advance past the storage to the first account
 		if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-			fstl.k, fstl.v = c.SeekTo(fstl.nextAccountKey[:])
+			if fstl.k, fstl.v, err = c.SeekTo(fstl.nextAccountKey[:]); err != nil {
+				return err
+			}
 		} else {
 			fstl.k = nil
 		}
@@ -396,12 +427,16 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih *bolt.Cursor, first bool) error
 		fmt.Printf("k after next: %x\n", fstl.k)
 	}
 	if !bytes.HasPrefix(fstl.ihK, next) {
-		fstl.ihK, fstl.ihV = ih.SeekTo(next)
+		if fstl.ihK, fstl.ihV, err = ih.SeekTo(next); err != nil {
+			return err
+		}
 	}
 	if len(next) <= common.HashLength && len(fstl.ihK) > common.HashLength {
 		// Advance past the storage to the first account
 		if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-			fstl.ihK, fstl.ihV = ih.SeekTo(fstl.nextAccountKey[:])
+			if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+				return err
+			}
 		} else {
 			fstl.ihK = nil
 		}
@@ -438,7 +473,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessLen uint64,
+	witnessSize uint64,
 ) error {
 	switch itemType {
 	case StorageStreamItem:
@@ -448,7 +483,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		dr.saveValueStorage(false, storageValue, hash, witnessLen)
+		dr.saveValueStorage(false, storageValue, hash, witnessSize)
 	case SHashStreamItem:
 		dr.advanceKeysStorage(storageKeyPart1, storageKeyPart2, false /* terminator */)
 		if dr.currStorage.Len() > 0 {
@@ -456,7 +491,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		dr.saveValueStorage(true, storageValue, hash, witnessLen)
+		dr.saveValueStorage(true, storageValue, hash, witnessSize)
 	case AccountStreamItem:
 		dr.advanceKeysAccount(accountKey, true /* terminator */)
 		if dr.curr.Len() > 0 && !dr.wasIH {
@@ -485,7 +520,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if err := dr.saveValueAccount(false, accountValue, hash, witnessLen); err != nil {
+		if err := dr.saveValueAccount(false, accountValue, hash, witnessSize); err != nil {
 			return err
 		}
 	case AHashStreamItem:
@@ -516,7 +551,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if err := dr.saveValueAccount(true, accountValue, hash, witnessLen); err != nil {
+		if err := dr.saveValueAccount(true, accountValue, hash, witnessSize); err != nil {
 			return err
 		}
 	case CutoffStreamItem:
@@ -603,17 +638,20 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	if len(fstl.dbPrefixes) == 0 {
 		return SubTries{}, nil
 	}
-	if err := fstl.boltDB.View(func(tx *bolt.Tx) error {
+	if err := fstl.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		ih := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		iwl := tx.Bucket(dbutils.IntermediateTrieWitnessLenBucket).Cursor()
-		fstl.getWitnessLen = func(prefix []byte) uint64 {
+		iwl := tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor()
+		fstl.getWitnessSize = func(prefix []byte) uint64 {
 			if !debug.IsTrackWitnessSizeEnabled() {
 				return 0
 			}
-			k, v := iwl.SeekTo(prefix)
+			k, v, err := iwl.SeekTo(prefix)
+			if err != nil {
+				panic(err)
+			}
 			if !bytes.Equal(k, prefix) {
-				panic(fmt.Sprintf("IH and DataLen buckets must have same keys set: %x, %x", k, prefix))
+				panic(fmt.Sprintf("IH and WitnessSize buckets must have same keys set: %x, %x", k, prefix))
 			}
 			return binary.BigEndian.Uint64(v)
 		}
@@ -627,7 +665,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				}
 			}
 			if fstl.itemPresent {
-				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKeyPart1, fstl.storageKeyPart2, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessLen); err != nil {
+				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKeyPart1, fstl.storageKeyPart2, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessSize); err != nil {
 					return err
 				}
 				fstl.itemPresent = false
@@ -718,7 +756,7 @@ func (dr *DefaultReceiver) genStructStorage() error {
 	var data GenStructStepData
 	if dr.wasIHStorage {
 		dr.hashData.Hash = common.BytesToHash(dr.valueStorage.Bytes())
-		dr.hashData.DataLen = dr.witnessLen
+		dr.hashData.WitnessSize = dr.witnessSize
 		data = &dr.hashData
 	} else {
 		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
@@ -731,13 +769,13 @@ func (dr *DefaultReceiver) genStructStorage() error {
 	return nil
 }
 
-func (dr *DefaultReceiver) saveValueStorage(isIH bool, v, h []byte, witnessLen uint64) {
+func (dr *DefaultReceiver) saveValueStorage(isIH bool, v, h []byte, witnessSize uint64) {
 	// Remember the current value
 	dr.wasIHStorage = isIH
 	dr.valueStorage.Reset()
 	if isIH {
 		dr.valueStorage.Write(h)
-		dr.witnessLen = witnessLen
+		dr.witnessSize = witnessSize
 	} else {
 		dr.valueStorage.Write(v)
 	}
@@ -770,7 +808,7 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	var data GenStructStepData
 	if dr.wasIH {
 		copy(dr.hashData.Hash[:], dr.value.Bytes())
-		dr.hashData.DataLen = dr.witnessLen
+		dr.hashData.WitnessSize = dr.witnessSize
 		data = &dr.hashData
 	} else {
 		dr.accData.Balance.Set(&dr.a.Balance)
@@ -795,12 +833,12 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	return nil
 }
 
-func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []byte, witnessLen uint64) error {
+func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []byte, witnessSize uint64) error {
 	dr.wasIH = isIH
 	if isIH {
 		dr.value.Reset()
 		dr.value.Write(h)
-		dr.witnessLen = witnessLen
+		dr.witnessSize = witnessSize
 		return nil
 	}
 	dr.a.Copy(v)
@@ -813,21 +851,6 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 		}
 	}
 	return nil
-}
-
-// nextSubtree does []byte++. Returns false if overflow.
-func nextSubtree(in []byte) ([]byte, bool) {
-	r := make([]byte, len(in))
-	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
-			r[i]++
-			return r, true
-		}
-
-		r[i] = 0
-	}
-	return nil, false
 }
 
 func nextAccount(in, out []byte) bool {

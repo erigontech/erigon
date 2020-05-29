@@ -49,12 +49,12 @@ func (a *storageItem) Less(b llrb.Item) bool {
 
 // Implements StateReader by wrapping database only, without trie
 type DbState struct {
-	db      ethdb.Getter
+	db      ethdb.KV
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewDbState(db ethdb.Getter, blockNr uint64) *DbState {
+func NewDbState(db ethdb.KV, blockNr uint64) *DbState {
 	return &DbState{
 		db:      db,
 		blockNr: blockNr,
@@ -80,7 +80,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	st := llrb.New()
 	var s [common.HashLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
-	accData, _ := dbs.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	accData, _ := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err = acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
@@ -105,7 +105,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	err = dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.HashLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err = ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.HashLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addrHash[:]) {
 			return false, nil
 		}
@@ -139,7 +139,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		if !item.value.IsZero() {
 			// Skip if value == 0
 			if item.key == emptyHash {
-				key, err := dbs.db.Get(dbutils.PreimagePrefix, item.seckey[:])
+				key, err := ethdb.Get(dbs.db, dbutils.PreimagePrefix, item.seckey[:])
 				if err == nil {
 					copy(item.key[:], key)
 				} else {
@@ -158,7 +158,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 
 func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
-	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err := ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if vs == nil || len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
@@ -168,7 +168,7 @@ func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address
 			return true, nil
 		}
 		addrHash := common.BytesToHash(ks[:common.HashLength])
-		preimage, err := dbs.db.Get(dbutils.PreimagePrefix, addrHash[:])
+		preimage, err := ethdb.Get(dbs.db, dbutils.PreimagePrefix, addrHash[:])
 		if err == nil {
 			addr := &common.Address{}
 			addr.SetBytes(preimage)
@@ -189,7 +189,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err != nil {
 		return nil, err
 	}
-	enc, err := dbs.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	enc, err := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -212,7 +212,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := dbs.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
+	enc, err := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -223,7 +223,7 @@ func (dbs *DbState) ReadAccountCode(address common.Address, codeHash common.Hash
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	return dbs.db.Get(dbutils.CodeBucket, codeHash[:])
+	return ethdb.Get(dbs.db, dbutils.CodeBucket, codeHash[:])
 }
 
 func (dbs *DbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
@@ -281,12 +281,8 @@ func (dbs *DbState) CreateContract(address common.Address) error {
 }
 
 func (dbs *DbState) GetKey(shaKey []byte) []byte {
-	key, _ := dbs.db.Get(dbutils.PreimagePrefix, shaKey)
+	key, _ := ethdb.Get(dbs.db, dbutils.PreimagePrefix, shaKey)
 	return key
-}
-
-func (dbs *DbState) Dumper() *Dumper {
-	return &Dumper{db: dbs.db, blockNumber: dbs.blockNr}
 }
 
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
@@ -306,7 +302,7 @@ func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes,
 
 	i := 0
 
-	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
+	err := ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			val := new(big.Int).SetBytes(value)
 
@@ -336,7 +332,7 @@ func (dbs *DbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walk
 	i := 0
 
 	var acc accounts.Account
-	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
+	err := ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			if len(key) > 32 {
 				return true, nil

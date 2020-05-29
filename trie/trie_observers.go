@@ -12,7 +12,7 @@ type Observer interface {
 	CodeNodeTouched(hex []byte)
 	CodeNodeSizeChanged(hex []byte, newSize uint)
 
-	WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64, witnessLen uint64)
+	WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64, witnessSize uint64)
 	WillUnloadNode(key []byte, nodeHash common.Hash)
 	BranchNodeLoaded(prefixAsNibbles []byte, incarnation uint64)
 }
@@ -99,9 +99,9 @@ func (mux *ObserverMux) WillUnloadNode(key []byte, nodeHash common.Hash) {
 	}
 }
 
-func (mux *ObserverMux) WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64, witnessLen uint64) {
+func (mux *ObserverMux) WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64, witnessSize uint64) {
 	for _, child := range mux.children {
-		child.WillUnloadBranchNode(key, nodeHash, incarnation, witnessLen)
+		child.WillUnloadBranchNode(key, nodeHash, incarnation, witnessSize)
 	}
 }
 
