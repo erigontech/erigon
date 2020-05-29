@@ -929,6 +929,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 
 	now := time.Now()
 
+Loop:
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
@@ -940,7 +941,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 				for j := 0; j < len(blocks); j++ {
 					if _, err1 := bc.InsertChain(context.Background(), blocks[j:j+1]); err1 != nil {
 						log.Error("Could not insert block", "error", err1)
-						break
+						break Loop
 					}
 				}
 				break

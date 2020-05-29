@@ -41,17 +41,15 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	if err != nil {
 		return nil, err
 	}
-	//defer env.Close()
 
 	err = env.SetMaxDBs(100)
 	if err != nil {
 		return nil, err
 	}
 
-	// set the memory map size (maximum database size) to 1GB.
-	err = env.SetMapSize(1 << 30)
+	err = env.SetMapSize(1 << 45) // 35TB
 	if err != nil {
-		// ..
+		return nil, err
 	}
 
 	if !opts.inMem {
@@ -91,7 +89,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	if opts.inMem {
 		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
 	}
-	err = env.Open(opts.path, flags, 0644)
+	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, err
 	}
