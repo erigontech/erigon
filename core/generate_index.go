@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewIndexGenerator(db ethdb.Database) *IndexGenerator {
+func NewIndexGenerator(db ethdb.Database, quitCh chan struct{}) *IndexGenerator {
 	return &IndexGenerator{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -33,6 +33,7 @@ type IndexGenerator struct {
 	db               ethdb.Database
 	ChangeSetBufSize uint64
 	TempDir          string
+	quitCh           chan struct{}
 }
 
 var mapper = map[string]struct {
@@ -179,6 +180,10 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 	currentKey := dbutils.EncodeTimestamp(timestampTo)
 	keys := make(map[string]struct{})
 	err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
+		if err := common.Stopped(ig.quitCh); err != nil {
+			return false, err
+		}
+
 		currentKey = common.CopyBytes(k)
 		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
 			keys[string(kk)] = struct{}{}
@@ -267,6 +272,9 @@ func (ig *IndexGenerator) fillChangeSetBuffer(bucket []byte, blockNum uint64, ch
 	startKey := dbutils.EncodeTimestamp(blockNum)
 	done := true
 	if err := ig.db.Walk(bucket, startKey, 0, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(ig.quitCh); err != nil {
+			return false, err
+		}
 		blockNum, _ = dbutils.DecodeTimestamp(k)
 		if offset+len(v) > len(changesets) { // Adding the current changeset would overflow the buffer
 			done = false
@@ -353,6 +361,10 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 	batch := ig.db.NewBatch()
 	var nbytes [8]byte
 	for h.Len() > 0 {
+		if err := common.Stopped(ig.quitCh); err != nil {
+			return err
+		}
+
 		element := (heap.Pop(h)).(etl.HeapElem)
 		reader := readers[element.TimeIdx]
 		k := element.Key

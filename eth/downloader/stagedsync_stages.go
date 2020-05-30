@@ -55,9 +55,7 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 
 // SaveStageProgress saves the progress of the given stage in the database
 func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
-	var v [8]byte
-	binary.BigEndian.PutUint64(v[:], progress)
-	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, v[:])
+	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, encodeBigEndian(progress))
 }
 
 // UnwindAllStages marks all the stages after the Headers stage (where unwinding is initiated) to be unwound
@@ -68,10 +66,12 @@ func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
 		if err != nil {
 			return err
 		}
-		progress, err1 := GetStageProgress(db, stage)
-		if err1 != nil {
-			return err1
+
+		progress, err := GetStageProgress(db, stage)
+		if err != nil {
+			return err
 		}
+
 		if (existingUnwindPoint == 0 || existingUnwindPoint > unwindPoint) && unwindPoint < progress {
 			// Only lower, not higher
 			err = SaveStageUnwind(db, stage, unwindPoint)
@@ -83,7 +83,7 @@ func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
 	return nil
 }
 
-// GetStageInvalidation retrives the invalidation for the given stage
+// GetStageInvalidation retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
@@ -102,7 +102,11 @@ func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
 
 // SaveStageInvalidation saves the progress of the given stage in the database
 func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
+	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, encodeBigEndian(invalidation))
+}
+
+func encodeBigEndian(n uint64) []byte {
 	var v [8]byte
-	binary.BigEndian.PutUint64(v[:], invalidation)
-	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, v[:])
+	binary.BigEndian.PutUint64(v[:], n)
+	return v[:]
 }

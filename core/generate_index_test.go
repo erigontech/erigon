@@ -20,7 +20,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	test := func(blocksNum int, csBucket []byte) func(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
-			ig := NewIndexGenerator(db)
+			ig := NewIndexGenerator(db, make(chan struct{}))
 			log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 			csInfo, ok := mapper[string(csBucket)]
 			if !ok {
@@ -66,7 +66,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		hashes, expected := generateTestData(t, db, csbucket, 2100)
 		mp := mapper[string(csbucket)]
 		indexBucket := mp.IndexBucket
-		ig := NewIndexGenerator(db)
+		ig := NewIndexGenerator(db, make(chan struct{}))
 		err := ig.GenerateIndex(0, csbucket)
 		if err != nil {
 			t.Fatal(err)

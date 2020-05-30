@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
@@ -19,7 +19,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	}
 	log.Info("Account history index generation started", "from", blockNum)
 
-	ig := core.NewIndexGenerator(db)
+	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
 	var err error
 	if plainState {
@@ -38,7 +38,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 
 }
 
-func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
 	var blockNum uint64
 	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
@@ -47,7 +47,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	} else {
 		return fmt.Errorf("reading storage history process: %v", err)
 	}
-	ig := core.NewIndexGenerator(db)
+	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
 	var err error
 	if plainState {
@@ -59,23 +59,23 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return err
 	}
 
-	if err := SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
+	if err = SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool) error {
-	ig := core.NewIndexGenerator(db)
+func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
+	ig := core.NewIndexGenerator(db, quitCh)
 	if plainState {
 		return ig.Truncate(unwindPoint, dbutils.PlainAccountChangeSetBucket)
 	}
 	return ig.Truncate(unwindPoint, dbutils.AccountChangeSetBucket)
 }
 
-func unwindStorageHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool) error {
-	ig := core.NewIndexGenerator(db)
+func unwindStorageHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
+	ig := core.NewIndexGenerator(db, quitCh)
 	if plainState {
 		return ig.Truncate(unwindPoint, dbutils.PlainStorageChangeSetBucket)
 	}

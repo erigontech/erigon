@@ -13,7 +13,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	if err != nil {
 		return err
 	}
-	ig := core.NewIndexGenerator(db)
+	ig := core.NewIndexGenerator(db, make(chan struct{}))
 
 	err = ig.DropIndex(dbutils.AccountsHistoryBucket)
 	if err != nil {
