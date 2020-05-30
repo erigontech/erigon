@@ -2290,12 +2290,13 @@ func testGetProof(chaindata string, address common.Address) error {
 	check(dberr)
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
 	block := *headNumber - 100
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
 	loader := trie.NewFlatDbSubTrieLoader()
-	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(6), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	var initialTrie *trie.Trie
@@ -2306,6 +2307,7 @@ func testGetProof(chaindata string, address common.Address) error {
 		}
 		runtime.ReadMemStats(&m)
 		log.Info("Loaded initial trie", "size", initialTrie.NumberOfAccounts(), "root", fmt.Sprintf("%x", initialTrie.Hash()),
+			"expected root", fmt.Sprintf("%x", headHeader.Root),
 			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	} else {
 		return err
