@@ -591,7 +591,7 @@ func (d *Downloader) cancel() {
 	// Close the current cancel channel
 	d.cancelLock.Lock()
 	defer d.cancelLock.Unlock()
-	safeClose(d.cancelCh)
+	common.SafeClose(d.cancelCh)
 }
 
 // Cancel aborts all of the operations and waits for all download goroutines to
@@ -610,23 +610,11 @@ func (d *Downloader) Terminate() {
 	d.blockchain.Stop()
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
-	safeClose(d.quitCh)
+	common.SafeClose(d.quitCh)
 	d.quitLock.Unlock()
 
 	// Cancel any pending download requests
 	d.Cancel()
-}
-
-func safeClose(ch chan struct{}) {
-	if ch == nil {
-		return
-	}
-	select {
-	case <-ch:
-		// Channel was already closed
-	default:
-		close(ch)
-	}
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
@@ -1490,10 +1478,8 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 			gotHeaders = true
 			for len(headers) > 0 {
 				// Terminate if something failed in between processing chunks
-				select {
-				case <-d.cancelCh:
-					return errCanceled
-				default:
+				if err := common.Stopped(d.quitCh); err != nil {
+					return err
 				}
 				// Select the next chunk of headers to import
 				limit := maxHeadersProcess
@@ -1607,10 +1593,8 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	if len(results) == 0 {
 		return 0, nil
 	}
-	select {
-	case <-d.quitCh:
+	if err := common.Stopped(d.quitCh); err != nil {
 		return 0, errCancelContentProcessing
-	default:
 	}
 	// Retrieve the a batch of results to import
 	first, last := results[0].Header, results[len(results)-1].Header

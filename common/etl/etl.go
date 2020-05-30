@@ -4,17 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"runtime"
 
+	"github.com/ugorji/go/codec"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ugorji/go/codec"
 )
 
 var cbor codec.CborHandle
@@ -33,8 +33,6 @@ type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 
 type LoadNextFunc func(k []byte, v []byte) error
 type LoadFunc func(k []byte, valueDecoder Decoder, state State, next LoadNextFunc) error
-
-var errStopped = errors.New("stopped")
 
 func Transform(
 	db ethdb.Database,
@@ -66,7 +64,7 @@ func extractBucketIntoFiles(
 	startkey []byte,
 	datadir string,
 	extractFunc ExtractFunc,
-	quit chan struct{},
+	_ chan struct{},
 ) ([]string, error) {
 	buffer := bytes.NewBuffer(make([]byte, 0))
 	encoder := codec.NewEncoder(nil, &cbor)
@@ -275,22 +273,13 @@ func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
 type bucketState struct {
 	getter ethdb.Getter
 	bucket []byte
-	quit chan struct{}
+	quit   chan struct{}
 }
 
 func (s *bucketState) Get(key []byte) ([]byte, error) {
 	return s.getter.Get(s.bucket, key)
 }
 
-
 func (s *bucketState) Stopped() error {
-	if s.quit == nil {
-		return nil
-	}
-	select {
-	case <-s.quit:
-		return errStopped
-	default:
-	}
-	return  nil
+	return common.Stopped(s.quit)
 }

@@ -109,10 +109,8 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
 	for {
-		select {
-		case <-quit:
-			return 0, errCanceled
-		default:
+		if err = common.Stopped(quit); err != nil {
+			return 0, err
 		}
 
 		blockNum := atomic.LoadUint64(&nextBlockNumber)

@@ -34,10 +34,8 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	var headers = make(map[common.Hash]*types.Header) // We use map because there might be more than one header by block number
 	var hashCount = 0
 	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
-		select {
-		case <-d.quitCh:
-			return false, errCanceled
-		default:
+		if err = common.Stopped(d.quitCh); err != nil {
+			return false, err
 		}
 
 		// Skip non relevant records
@@ -110,10 +108,8 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
 	for {
-		select {
-		case <-d.quitCh:
-			return errCanceled
-		default:
+		if err := common.Stopped(d.quitCh); err != nil {
+			return err
 		}
 
 		results := d.queue.Results(true)

@@ -98,7 +98,9 @@ func promoteHashedState(db ethdb.Database, progress uint64, datadir string, quit
 }
 
 func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan struct{}) error {
-
+	if err := common.Stopped(quit); err != nil {
+		return err
+	}
 	err := etl.Transform(
 		db,
 		dbutils.PlainStateBucket,

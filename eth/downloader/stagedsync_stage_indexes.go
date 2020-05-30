@@ -168,6 +168,10 @@ func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.Load
 		}
 		index = index.Append(blockNr, vzero)
 
+		if err = state.Stopped(); err != nil {
+			return err
+		}
+
 		err = next(currentChunkKey, index)
 		if err != nil {
 			return err

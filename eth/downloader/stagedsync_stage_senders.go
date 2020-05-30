@@ -69,10 +69,8 @@ func (d *Downloader) spawnRecoverSendersStage() error {
 
 	needExit := false
 	for !needExit {
-		select {
-		case <-d.quitCh:
-			return errCanceled
-		default:
+		if err = common.Stopped(d.quitCh); err != nil {
+			return err
 		}
 
 		written := 0
@@ -131,10 +129,8 @@ type senderRecoveryJob struct {
 func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}) {
 	var job *senderRecoveryJob
 	for {
-		select {
-		case <-quit:
+		if err := common.Stopped(quit); err != nil {
 			return
-		default:
 		}
 
 		job = <-in
