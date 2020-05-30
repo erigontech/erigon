@@ -25,7 +25,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(m2, 0, getDataDir())
+	err := promoteHashedState(m2, 0, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(m2, 0, getDataDir())
+	err := promoteHashedState(m2, 0, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 51, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 = db2.NewBatch()
-	err = promoteHashedState(m2, 50, getDataDir())
+	err = promoteHashedState(m2, 50, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 51, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(m2, 50, getDataDir())
+	err := promoteHashedState(m2, 50, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
