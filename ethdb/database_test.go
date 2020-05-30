@@ -20,6 +20,7 @@ package ethdb
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -59,7 +61,11 @@ func newTestBadgerDB() (*BadgerDatabase, func()) {
 	}
 }
 
-var testBucket = []byte("TestBucket")
+func newTestLmdb() *ObjectDatabase {
+	return NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+}
+
+var testBucket = dbutils.CurrentStateBucket
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestBoltDB_PutGet(t *testing.T) {
@@ -75,6 +81,12 @@ func TestMemoryDB_PutGet(t *testing.T) {
 func TestBadgerDB_PutGet(t *testing.T) {
 	db, remove := newTestBadgerDB()
 	defer remove()
+	testPutGet(db, t)
+}
+
+func TestLMDB_PutGet(t *testing.T) {
+	db := newTestLmdb()
+	defer db.Close()
 	testPutGet(db, t)
 }
 
@@ -177,6 +189,12 @@ func TestMemoryDB_ParallelPutGet(t *testing.T) {
 	testParallelPutGet(NewMemDatabase())
 }
 
+func TestLMDB_ParallelPutGet(t *testing.T) {
+	db := newTestLmdb()
+	defer db.Close()
+	testParallelPutGet(db)
+}
+
 func TestBadgerDB_ParallelPutGet(t *testing.T) {
 	db, remove := newTestBadgerDB()
 	defer remove()
@@ -251,6 +269,12 @@ func TestBoltDB_Walk(t *testing.T) {
 func TestBadgerDB_Walk(t *testing.T) {
 	db, remove := newTestBadgerDB()
 	defer remove()
+	testWalk(db, t)
+}
+
+func TestLMDB_Walk(t *testing.T) {
+	db := newTestLmdb()
+	defer db.Close()
 	testWalk(db, t)
 }
 

@@ -85,7 +85,7 @@ func (m *mutation) Has(bucket, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) DiskSize() int64 {
+func (m *mutation) DiskSize() uint64 {
 	if m.db == nil {
 		return 0
 	}

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -88,7 +89,7 @@ func newSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, number uin
 
 // loadSnapshot loads an existing snapshot from the database.
 func loadSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, db ethdb.Database, hash common.Hash) (*Snapshot, error) {
-	blob, err := db.Get([]byte("clique-"), hash[:])
+	blob, err := db.Get(dbutils.CliqueBucket, hash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +109,7 @@ func (s *Snapshot) store(db ethdb.Database) error {
 	if err != nil {
 		return err
 	}
-	return db.Put([]byte("clique-"), s.Hash[:], blob)
+	return db.Put(dbutils.CliqueBucket, s.Hash[:], blob)
 }
 
 // copy creates a deep copy of the snapshot, though not the individual votes.

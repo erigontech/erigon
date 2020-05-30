@@ -37,7 +37,7 @@ func findIntermediateHashByPrefix(prefixS string, remoteDB ethdb.KV) ([]*Interme
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		c := interBucket.Cursor().Prefix(prefix)
 
-		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
