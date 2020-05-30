@@ -3,13 +3,13 @@ package verify
 import (
 	"bytes"
 	"fmt"
+	"log"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"log"
-	"time"
 )
 
 func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) error {
@@ -19,15 +19,15 @@ func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) er
 	}
 	startTime := time.Now()
 
-	var walker func([]byte) core.ChangesetWalker
+	var walker func([]byte) changeset.Walker
 	if bytes.Equal(dbutils.AccountChangeSetBucket, changeSetBucket) {
-		walker = func(cs []byte) core.ChangesetWalker {
+		walker = func(cs []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(cs)
 		}
 	}
 
 	if bytes.Equal(dbutils.StorageChangeSetBucket, changeSetBucket) {
-		walker = func(cs []byte) core.ChangesetWalker {
+		walker = func(cs []byte) changeset.Walker {
 			return changeset.StorageChangeSetBytes(cs)
 		}
 	}
