@@ -341,7 +341,7 @@ func walkAsOfThinStorage(db KV, startkey []byte, fixedbits int, timestamp uint64
 }
 
 func WalkAsOf(db KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
+	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", dbi, hBucket, startkey, fixedbits, timestamp)
 	if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
 		return walkAsOfThinAccounts(db, startkey, fixedbits, timestamp, walker)
 	} else if bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {

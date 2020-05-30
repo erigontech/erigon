@@ -4,17 +4,18 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"reflect"
+	"sort"
+	"strconv"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"os"
-	"reflect"
-	"sort"
-	"strconv"
-	"testing"
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
@@ -27,7 +28,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = ig.GenerateIndex(0, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
+	err = ig.GenerateIndex(0, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) changeset.Walker {
 		return changeset.AccountChangeSetBytes(bytes)
 	}, nil)
 	if err != nil {
@@ -59,7 +60,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	}
 
 	ig := NewIndexGenerator(db)
-	err = ig.GenerateIndex(0, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
+	err = ig.GenerateIndex(0, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) changeset.Walker {
 		return changeset.AccountChangeSetBytes(bytes)
 	}, nil)
 	if err != nil {
@@ -78,7 +79,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[hashes[1]][1] = reduceSlice(expected[hashes[1]][1], 2050)
 		expected[hashes[2]][0] = reduceSlice(expected[hashes[2]][0], 2050)
 
-		err = ig.Truncate(2050, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
+		err = ig.Truncate(2050, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(bytes)
 		})
 		if err != nil {
@@ -97,7 +98,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[hashes[1]][1] = reduceSlice(expected[hashes[1]][1], 2000)
 		expected[hashes[2]][0] = reduceSlice(expected[hashes[2]][0], 2000)
 
-		err = ig.Truncate(2000, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
+		err = ig.Truncate(2000, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(bytes)
 		})
 		if err != nil {
@@ -110,7 +111,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	})
 
 	t.Run("truncate to 1999", func(t *testing.T) {
-		err = ig.Truncate(1999, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
+		err = ig.Truncate(1999, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(bytes)
 		})
 		if err != nil {
@@ -133,7 +134,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[hashes[1]][0] = reduceSlice(expected[hashes[1]][0], 999)
 		expected[hashes[2]][0] = reduceSlice(expected[hashes[2]][0], 999)
 
-		err = ig.Truncate(999, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) ChangesetWalker {
+		err = ig.Truncate(999, dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket, func(bytes []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(bytes)
 		})
 		if err != nil {
@@ -228,7 +229,7 @@ func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
 	}
 
 	ig := NewIndexGenerator(db)
-	err = ig.GenerateIndex(0, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, func(bytes []byte) ChangesetWalker {
+	err = ig.GenerateIndex(0, dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket, func(bytes []byte) changeset.Walker {
 		return changeset.StorageChangeSetBytes(bytes)
 	}, nil)
 	if err != nil {

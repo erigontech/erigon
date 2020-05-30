@@ -37,7 +37,7 @@ func findIntermediateDataLenByPrefix(prefixS string, remoteDB ethdb.KV) ([]*Inte
 		interBucket := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
 		c := interBucket.Cursor().Prefix(prefix)
 
-		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}

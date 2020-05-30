@@ -1271,6 +1271,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.BadgerDB = strings.EqualFold(databaseFlag, "badger") //case insensitive
+	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb")       //case insensitive
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {

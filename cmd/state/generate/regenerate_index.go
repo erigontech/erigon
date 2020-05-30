@@ -3,6 +3,7 @@ package generate
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -14,15 +15,15 @@ func RegenerateIndex(chaindata string, indexBucket []byte, csBucket []byte) erro
 	if err != nil {
 		return err
 	}
-	var walker func([]byte) core.ChangesetWalker
+	var walker func([]byte) changeset.Walker
 	if bytes.Equal(dbutils.AccountChangeSetBucket, csBucket) {
-		walker = func(cs []byte) core.ChangesetWalker {
+		walker = func(cs []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(cs)
 		}
 	}
 
 	if bytes.Equal(dbutils.StorageChangeSetBucket, csBucket) {
-		walker = func(cs []byte) core.ChangesetWalker {
+		walker = func(cs []byte) changeset.Walker {
 			return changeset.StorageChangeSetBytes(cs)
 		}
 	}

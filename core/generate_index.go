@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -68,7 +69,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64, indexBucket []byte) f
 	}
 }
 
-func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker, commitHook func(db ethdb.Database, blockNum uint64) error) error {
+func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) changeset.Walker, commitHook func(db ethdb.Database, blockNum uint64) error) error {
 	batchSize := 1000000
 	//addrHash - > index or addhash + last block for full chunk contracts
 	ig.cache = make(map[string][]IndexWithKey, batchSize)
@@ -155,7 +156,7 @@ func (ig *IndexGenerator) GenerateIndex(from uint64, changeSetBucket []byte, ind
 	return nil
 }
 
-func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker) error {
+func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) changeset.Walker) error {
 	currentKey := dbutils.EncodeTimestamp(timestampTo)
 	keys := make(map[string]struct{})
 	err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
@@ -231,8 +232,4 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 		}
 	}
 	return errors.New("imposible to drop")
-}
-
-type ChangesetWalker interface {
-	Walk(func([]byte, []byte) error) error
 }
