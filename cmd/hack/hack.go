@@ -2308,14 +2308,11 @@ func testGetProof(chaindata string, address common.Address) error {
 
 	collector := etl.NewCollector(".")
 	hashCollector := func(keyHex []byte, hash []byte) error {
-		if len(keyHex)%2 != 0 {
+		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
-		if k == nil {
-			k = []byte{}
-		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
