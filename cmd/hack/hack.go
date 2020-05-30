@@ -2367,6 +2367,10 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
 	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
+		if timestamp >= *headNumber {
+			return false, nil
+		}
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := storageMap[string(kk)]; !ok {
@@ -2447,8 +2451,8 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	hash := rawdb.ReadCanonicalHash(db, block-1)
-	header := rawdb.ReadHeader(db, hash, block-1)
+	hash := rawdb.ReadCanonicalHash(db, block)
+	header := rawdb.ReadHeader(db, hash, block)
 	tr := trie.New(common.Hash{})
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		fmt.Printf("Error hooking: %v\n", err)
