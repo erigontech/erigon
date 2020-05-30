@@ -133,7 +133,6 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 			return nil
 		}
 	}
-	return nil
 }
 
 func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
