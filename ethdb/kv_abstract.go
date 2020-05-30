@@ -10,6 +10,7 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
+	Size() uint64 // in bytes
 }
 
 type Tx interface {

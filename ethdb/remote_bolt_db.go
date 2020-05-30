@@ -74,12 +74,12 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
-			return fmt.Errorf("bucket not found, %s", bucket)
+			return fmt.Errorf("dbi not found, %s", bucket)
 		}
 
 		v, err := b.Get(key)
 		if err != nil {
-			return fmt.Errorf("%w. bucket: %s, key: %s", err, bucket, key)
+			return fmt.Errorf("%w. dbi: %s, key: %s", err, bucket, key)
 		}
 		if v != nil {
 			dat = make([]byte, len(v))
@@ -102,13 +102,13 @@ func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64
 	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
-			return fmt.Errorf("bucket not found, %s", bucket)
+			return fmt.Errorf("dbi not found, %s", bucket)
 		}
 
 		c := b.Cursor()
 		k, v, err := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 		if err != nil {
-			return fmt.Errorf("%w. bucket: %s, key: %s", err, bucket, key)
+			return fmt.Errorf("%w. dbi: %s, key: %s", err, bucket, key)
 		}
 
 		if !bytes.HasPrefix(k, key) {

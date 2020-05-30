@@ -18,7 +18,6 @@ package ethdb
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"runtime"
 	"time"
@@ -82,22 +81,16 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 
 // NewEphemeralBadger returns a new BadgerDB in a temporary directory.
 func NewEphemeralBadger() (*BadgerDatabase, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
-	if err != nil {
-		return nil, err
-	}
+	logger := log.New("db", "badgerInMem")
 
-	logger := log.New("database", dir)
-
-	db, err := badger.Open(badger.DefaultOptions(dir))
+	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
 	if err != nil {
 		return nil, err
 	}
 
 	return &BadgerDatabase{
-		db:     db,
-		log:    logger,
-		tmpDir: dir,
+		db:  db,
+		log: logger,
 	}, nil
 }
 
@@ -197,7 +190,7 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *badger.Txn) error {
-		{ // first look in the historical bucket
+		{ // first look in the historical dbi
 			it := tx.NewIterator(badger.DefaultIteratorOptions)
 			defer it.Close()
 			it.Seek(bucketKey(hBucket, composite))
@@ -209,7 +202,7 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 			}
 		}
 
-		{ // fall back to the current bucket
+		{ // fall back to the current dbi
 			item, err2 := tx.Get(bucketKey(bucket, key))
 			if err2 != nil {
 				return err2
@@ -380,9 +373,9 @@ func (db *BadgerDatabase) IdealBatchSize() int {
 }
 
 // DiskSize returns the total disk size of the database in bytes.
-func (db *BadgerDatabase) DiskSize() int64 {
+func (db *BadgerDatabase) DiskSize() uint64 {
 	lsm, vlog := db.db.Size()
-	return lsm + vlog
+	return uint64(lsm + vlog)
 }
 
 // MemCopy creates a copy of the database in a temporary directory.

@@ -241,7 +241,7 @@ beginTx:
 
 		c := tx.Bucket(dbutils.AccountsHistoryBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
 
-		for k, vSize, err := c.Seek(r.HistoryKey); k != nil || err != nil; k, vSize, err = c.Next() {
+		for k, vSize, err := c.Seek(r.HistoryKey); k != nil; k, vSize, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -296,7 +296,7 @@ beginTx2:
 			return nil
 		}
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
-		for k, _, err := c.Seek(r.AccountKey); k != nil || err != nil; k, _, err = c.Next() {
+		for k, _, err := c.Seek(r.AccountKey); k != nil; k, _, err = c.Next() {
 			if len(k) != 32 {
 				continue
 			}
@@ -466,7 +466,7 @@ beginTx:
 		}
 
 		c := tx.Bucket(dbutils.StorageHistoryBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
-		for k, vSize, err := c.Seek(r.HistoryKey); k != nil || err != nil; k, vSize, err = c.Next() {
+		for k, vSize, err := c.Seek(r.HistoryKey); k != nil; k, vSize, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -522,7 +522,7 @@ beginTx2:
 	// Go through the current state
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
-		for k, _, err := c.Seek(r.StorageKey); k != nil || err != nil; k, _, err = c.Next() {
+		for k, _, err := c.Seek(r.StorageKey); k != nil; k, _, err = c.Next() {
 			if len(k) == 32 {
 				continue
 			}
@@ -703,7 +703,7 @@ beginTx:
 		fmt.Println("Preloading block numbers...")
 
 		c := tx.Bucket(dbutils.HeaderPrefix).Cursor().Prefetch(CursorBatchSize)
-		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -732,7 +732,7 @@ beginTx:
 
 		fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
 		i = 0
-		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return fmt.Errorf("loop break: %w", err)
 			}

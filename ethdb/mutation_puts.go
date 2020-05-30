@@ -1,7 +1,7 @@
 package ethdb
 
 type puts struct {
-	mp   map[string]putsBucket //map[bucket]putsBucket
+	mp   map[string]putsBucket //map[dbi]putsBucket
 	size int
 	len  int
 }

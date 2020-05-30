@@ -79,7 +79,7 @@ func OpenDB(path string) (*DB, error) {
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
+	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true, KeysPrefixCompressionDisable: true})
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ require (
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
 	github.com/aws/aws-sdk-go v1.28.9
 	github.com/blend/go-sdk v2.0.0+incompatible // indirect
+	github.com/bmatsuo/lmdb-go v1.8.1-0.20170215130253-a14b5a390eff
 	github.com/btcsuite/btcd v0.0.0-20171128150713-2e60448ffcc6
 	github.com/cespare/cp v0.1.0
 	github.com/cloudflare/cloudflare-go v0.10.6
