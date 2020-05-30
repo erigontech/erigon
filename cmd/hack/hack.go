@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -2283,6 +2284,15 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
+func identityLoadFunc(k []byte, valueDecoder etl.Decoder, _ etl.State, next etl.LoadNextFunc) error {
+	var v []byte
+	err := valueDecoder.Decode(&v)
+	if err != nil {
+		return err
+	}
+	return next(k, v)
+}
+
 func testGetProof(chaindata string, address common.Address) error {
 	storageKeys := []string{}
 	var m runtime.MemStats
@@ -2296,8 +2306,17 @@ func testGetProof(chaindata string, address common.Address) error {
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
+	collector := etl.NewCollector(".")
+	hashCollector := func(keyHex []byte, hash []byte) error {
+		if len(keyHex) % 2 != 0 {
+			return nil
+		}
+		var k []byte
+		trie.DecompressNibbles(keyHex, &k)
+		return collector.Collect(k, hash)
+	}
 	loader := trie.NewFlatDbSubTrieLoader()
-	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	if subTries, err := loader.LoadSubTries(); err == nil {
@@ -2306,6 +2325,9 @@ func testGetProof(chaindata string, address common.Address) error {
 			"expected root", fmt.Sprintf("%x", headHeader.Root),
 			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	} else {
+		return err
+	}
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, identityLoadFunc); err != nil {
 		return err
 	}
 	ts := dbutils.EncodeTimestamp(block)

@@ -32,6 +32,67 @@ type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 type LoadNextFunc func(k []byte, v []byte) error
 type LoadFunc func(k []byte, valueDecoder Decoder, state State, next LoadNextFunc) error
 
+// Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
+// as a Collect Transform Load
+type Collector struct {
+	extractNextFunc ExtractNextFunc
+	flushBuffer func() error
+	filenames []string
+}
+
+func NewCollector(datadir string) *Collector {
+	c := &Collector{}
+	buffer := bytes.NewBuffer(make([]byte, 0))
+	encoder := codec.NewEncoder(nil, &cbor)
+	c.filenames = make([]string, 0)
+
+	sortableBuffer := newSortableBuffer()
+
+	c.flushBuffer = func() error {
+		filename, err := sortableBuffer.FlushToDisk(datadir)
+		if err != nil {
+			return err
+		}
+		if len(filename) > 0 {
+			c.filenames = append(c.filenames, filename)
+		}
+		return nil
+	}
+
+	c.extractNextFunc = func(k []byte, v interface{}) error {
+		buffer.Reset()
+		encoder.Reset(buffer)
+		err := encoder.Encode(v)
+		if err != nil {
+			return err
+		}
+		encodedValue := buffer.Bytes()
+		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
+		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
+			err = c.flushBuffer()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return c
+}
+
+func (c *Collector) Collect(k, v []byte) error {
+	return c.extractNextFunc(k, v)
+}
+
+func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc) error {
+	if err := c.flushBuffer(); err != nil {
+		return err
+	}
+	defer func() {
+		deleteFiles(c.filenames)
+	}()
+	return loadFilesIntoBucket(db, toBucket, c.filenames, loadFunc)
+}
+
 func Transform(
 	db ethdb.Database,
 	fromBucket []byte,

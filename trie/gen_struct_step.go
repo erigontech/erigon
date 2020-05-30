@@ -42,9 +42,7 @@ type structInfoReceiver interface {
 }
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
-type HashCollector interface {
-	Collect(keyHex []byte, hash []byte) error
-}
+type HashCollector func(keyHex []byte, hash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -199,7 +197,7 @@ func GenStructStep(
 				}
 			}
 			if h != nil {
-				if err := h.Collect(curr[:maxLen], e.topHash()); err != nil {
+				if err := h(curr[:maxLen], e.topHash()); err != nil {
 					return nil, err
 				}
 			}
