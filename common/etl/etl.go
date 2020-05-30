@@ -64,7 +64,7 @@ func extractBucketIntoFiles(
 	startkey []byte,
 	datadir string,
 	extractFunc ExtractFunc,
-	_ chan struct{},
+	quit chan struct{},
 ) ([]string, error) {
 	buffer := bytes.NewBuffer(make([]byte, 0))
 	encoder := codec.NewEncoder(nil, &cbor)
@@ -102,6 +102,9 @@ func extractBucketIntoFiles(
 	}
 
 	err := db.Walk(bucket, startkey, len(startkey)*8, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(quit); err != nil {
+			return false, err
+		}
 		err := extractFunc(k, v, extractNextFunc)
 		return true, err
 	})
@@ -162,6 +165,10 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 	}
 
 	for h.Len() > 0 {
+		if err := common.Stopped(quit); err != nil {
+			return err
+		}
+
 		element := (heap.Pop(h)).(HeapElem)
 		reader := readers[element.timeIdx]
 		decoder.ResetBytes(element.value)
