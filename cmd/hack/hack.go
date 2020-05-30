@@ -2300,14 +2300,9 @@ func testGetProof(chaindata string, address common.Address) error {
 	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
-	var initialTrie *trie.Trie
 	if subTries, err := loader.LoadSubTries(); err == nil {
-		initialTrie = trie.New(common.Hash{})
-		if err1 := initialTrie.HookSubTries(subTries, [][]byte{nil}); err1 != nil {
-			return err1
-		}
 		runtime.ReadMemStats(&m)
-		log.Info("Loaded initial trie", "size", initialTrie.NumberOfAccounts(), "root", fmt.Sprintf("%x", initialTrie.Hash()),
+		log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
 			"expected root", fmt.Sprintf("%x", headHeader.Root),
 			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	} else {
