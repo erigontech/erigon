@@ -49,8 +49,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	* Stage 4. Execute block bodies w/o calculating trie roots
 	 */
 	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
-	var syncHeadNumber uint64
-	err = spawnExecuteBlocksStage(d.stateDB, d.blockchain, &syncHeadNumber, d.quitCh)
+	syncHeadNumber, err := spawnExecuteBlocksStage(d.stateDB, d.blockchain, d.quitCh)
 	if err != nil {
 		return err
 	}
