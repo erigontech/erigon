@@ -214,12 +214,18 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 			if _, err := batch.Commit(); err != nil {
 				return err
 			}
+			var currentKeyStr string
+			if len(k) < 4 {
+				currentKeyStr = fmt.Sprintf("%x", k)
+			} else {
+				currentKeyStr = fmt.Sprintf("%x...", k[:4])
+			}
 			runtime.ReadMemStats(&m)
 			log.Info(
 				"Commited batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
-				"hashedKey", fmt.Sprintf("%x...", k[:4]),
+				"current key", currentKeyStr,
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		return nil
