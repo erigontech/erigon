@@ -37,7 +37,7 @@ type IndexGenerator struct {
 
 var mapper = map[string]struct {
 	IndexBucket   []byte
-	WalkerAdapter func(v []byte) ChangesetWalker
+	WalkerAdapter func(v []byte) changeset.Walker
 	KeySize       int
 	Template      string
 	New           func() *changeset.ChangeSet
@@ -45,7 +45,7 @@ var mapper = map[string]struct {
 }{
 	string(dbutils.AccountChangeSetBucket): {
 		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(v []byte) ChangesetWalker {
+		WalkerAdapter: func(v []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(v)
 		},
 		KeySize:  common.HashLength,
@@ -55,7 +55,7 @@ var mapper = map[string]struct {
 	},
 	string(dbutils.StorageChangeSetBucket): {
 		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(v []byte) ChangesetWalker {
+		WalkerAdapter: func(v []byte) changeset.Walker {
 			return changeset.StorageChangeSetBytes(v)
 		},
 		KeySize:  common.HashLength*2 + common.IncarnationLength,
@@ -65,7 +65,7 @@ var mapper = map[string]struct {
 	},
 	string(dbutils.PlainAccountChangeSetBucket): {
 		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(v []byte) ChangesetWalker {
+		WalkerAdapter: func(v []byte) changeset.Walker {
 			return changeset.AccountChangeSetPlainBytes(v)
 		},
 		KeySize:  common.AddressLength,
@@ -75,7 +75,7 @@ var mapper = map[string]struct {
 	},
 	string(dbutils.PlainStorageChangeSetBucket): {
 		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(v []byte) ChangesetWalker {
+		WalkerAdapter: func(v []byte) changeset.Walker {
 			return changeset.StorageChangeSetPlainBytes(v)
 		},
 		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
@@ -91,7 +91,21 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		return errors.New("unknown bucket type")
 	}
 	log.Info("Index generation started", "from", blockNum, "csbucket", string(changeSetBucket))
+	/*
+		todo make work using etl transform
+			err := etl.Transform(
+				ig.db,
+				changeSetBucket,
+				v.IndexBucket,
+				ig.TempDir,
+				dbutils.EncodeTimestamp(blockNum),
+				getExtractFunc(v.WalkerAdapter),
+				loadFunc)
+			if err != nil {
+				return err
+			}
 
+	*/
 	var m runtime.MemStats
 	var bufferFileNames []string
 	changesets := make([]byte, ig.ChangeSetBufSize) // 256 Mb buffer by default
@@ -412,7 +426,6 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 	return nil
 }
 
-
 /**
 
 startkey := dbutils.EncodeTimestamp(blockNum)
@@ -465,7 +478,8 @@ bytes2walker := func(b []byte) changeset.Walker {
 		return err
 	}
 */
-func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
+
+func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error { //nolint
 	var blockNumbers []uint64
 	err := valueDecoder.Decode(&blockNumbers)
 	if err != nil {
@@ -508,7 +522,7 @@ func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.Load
 	return nil
 }
 
-func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc {
+func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc { //nolint
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		bufferMap := make(map[string][]uint64)
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
