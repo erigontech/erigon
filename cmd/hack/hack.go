@@ -2293,7 +2293,7 @@ func identityLoadFunc(k []byte, valueDecoder etl.Decoder, _ etl.State, next etl.
 	return next(k, v)
 }
 
-func testGetProof(chaindata string, address common.Address) error {
+func testGetProof(chaindata string, address common.Address, rewind int) error {
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -2302,7 +2302,7 @@ func testGetProof(chaindata string, address common.Address) error {
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
-	block := *headNumber - 100
+	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
@@ -2622,7 +2622,7 @@ func main() {
 		resetHistoryIndex(*chaindata)
 	}
 	if *action == "getProof" {
-		if err := testGetProof(*chaindata, common.HexToAddress(*account)); err != nil {
+		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
