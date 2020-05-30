@@ -2301,7 +2301,7 @@ func testGetProof(chaindata string, address common.Address) error {
 	}
 	var initialTrie *trie.Trie
 	if subTries, err := loader.LoadSubTries(); err == nil {
-		initialTrie = trie.New(subTries.Hashes[0])
+		initialTrie = trie.New(common.Hash{})
 		if err1 := initialTrie.HookSubTries(subTries, [][]byte{nil}); err1 != nil {
 			return err1
 		}
@@ -2410,12 +2410,8 @@ func testGetProof(chaindata string, address common.Address) error {
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	prefixes, fixedbits, hooks := initialTrie.FindSubTriesToLoad(unfurl)
-	log.Info("Found db prefixes", "len(prefixes)", len(prefixes),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	unfurl.Rewind()
 	loader = trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, prefixes, fixedbits, false); err != nil {
+	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
@@ -2430,10 +2426,11 @@ func testGetProof(chaindata string, address common.Address) error {
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	hash := rawdb.ReadCanonicalHash(db, block-1)
 	header := rawdb.ReadHeader(db, hash, block-1)
-	if err = initialTrie.HookSubTries(subTries, hooks); err != nil {
+	tr := trie.New(common.Hash{})
+	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		fmt.Printf("Error hooking: %v\n", err)
 	}
-	fmt.Printf("Resulting root: %x, expected root: %x\n", initialTrie.Hash(), header.Root)
+	fmt.Printf("Resulting root: %x, expected root: %x\n", tr.Hash(), header.Root)
 	return nil
 }
 
