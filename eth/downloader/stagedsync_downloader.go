@@ -23,7 +23,8 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	log.Info("Checking for unwinding...")
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
 	for stage := Finish - 1; stage > Headers; stage-- {
-		unwindPoint, err := GetStageUnwind(d.stateDB, stage)
+		var unwindPoint uint64
+		unwindPoint, err = GetStageUnwind(d.stateDB, stage)
 		if err != nil {
 			return err
 		}
