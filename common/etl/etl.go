@@ -85,14 +85,14 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, v)
 }
 
-func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc) error {
+func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, quitCh chan struct{}) error {
 	if err := c.flushBuffer(nil); err != nil {
 		return err
 	}
 	defer func() {
 		deleteFiles(c.filenames)
 	}()
-	return loadFilesIntoBucket(db, toBucket, c.filenames, loadFunc)
+	return loadFilesIntoBucket(db, toBucket, c.filenames, loadFunc, quitCh)
 }
 
 func Transform(
