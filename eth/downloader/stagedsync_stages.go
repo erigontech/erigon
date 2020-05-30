@@ -60,17 +60,9 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 
 // UnwindAllStages marks all the stages after the Headers stage (where unwinding is initiated) to be unwound
 // unwinding needs to have in the reverse order of stages
-func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64, quitCh chan struct{}) error {
-	var existingUnwindPoint uint64
-	var err error
+func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
 	for stage := Headers + 1; stage < Finish; stage++ {
-		select {
-		case <-quitCh:
-			return errCanceled
-		default:
-		}
-
-		existingUnwindPoint, err = GetStageUnwind(db, stage)
+		existingUnwindPoint, err := GetStageUnwind(db, stage)
 		if err != nil {
 			return err
 		}

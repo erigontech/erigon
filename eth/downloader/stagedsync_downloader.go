@@ -15,9 +15,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	* Stage 1. Download Headers
 	 */
 	log.Info("Sync stage 1/7. Downloading headers...")
-	err = d.runStep(func() error {
-		return d.DownloadHeaders(headersFetchers)
-	})
+	err = d.DownloadHeaders(headersFetchers)
 	if err != nil {
 		return err
 	}
@@ -29,9 +27,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	cont := true
 
 	for cont && err == nil {
-		err = d.runStep(func() error {
-			return d.spawnBodyDownloadStage(p.id, &cont)
-		})
+		cont, err = d.spawnBodyDownloadStage(p.id)
 		if err != nil {
 			return err
 		}
@@ -44,10 +40,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 3/7. Recovering senders from tx signatures...")
 
-	err = d.runStep(func() error {
-		return d.spawnRecoverSendersStage()
-	})
-	if err != nil {
+	if err = d.spawnRecoverSendersStage(); err != nil {
 		return err
 	}
 	log.Info("Sync stage 3/7. Recovering senders from tx signatures... Complete!")
@@ -57,9 +50,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 	 */
 	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
 	var syncHeadNumber uint64
-	err = d.runStep(func() error {
-		return spawnExecuteBlocksStage(d.stateDB, d.blockchain, &syncHeadNumber, d.quitCh)
-	})
+	err = spawnExecuteBlocksStage(d.stateDB, d.blockchain, &syncHeadNumber, d.quitCh)
 	if err != nil {
 		return err
 	}
@@ -68,9 +59,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
-	err = d.runStep(func() error {
-		return spawnCheckFinalHashStage(d.stateDB, syncHeadNumber, d.datadir)
-	})
+	err = spawnCheckFinalHashStage(d.stateDB, syncHeadNumber, d.datadir)
 	if err != nil {
 		return err
 	}
@@ -79,9 +68,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 6/7. Generating account history index")
-		err = d.runStep(func() error {
-			return spawnAccountHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
-		})
+		err = spawnAccountHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
 		if err != nil {
 			return err
 		}
@@ -92,9 +79,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 
 	if d.history {
 		log.Info("Sync stage 7/7. Generating storage history index")
-		err = d.runStep(func() error {
-			return spawnStorageHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
-		})
+		err = spawnStorageHistoryIndex(d.stateDB, d.datadir, core.UsePlainStateExecution, d.quitCh)
 		if err != nil {
 			return err
 		}
@@ -107,9 +92,7 @@ func (d *Downloader) doStagedSyncWithFetchers(p *peerConnection, headersFetchers
 }
 
 func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
-	err := d.runStep(func() error {
-		return d.spawnSync(headersFetchers)
-	})
+	err := d.spawnSync(headersFetchers)
 	if err != nil {
 		return err
 	}
@@ -118,11 +101,7 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 	log.Info("Checking for unwinding...")
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
 	for stage := Finish - 1; stage > Headers; stage-- {
-		var unwindPoint uint64
-		err = d.runStep(func() error {
-			unwindPoint, err = GetStageUnwind(d.stateDB, stage)
-			return err
-		})
+		unwindPoint, err := GetStageUnwind(d.stateDB, stage)
 		if err != nil {
 			return err
 		}
@@ -131,41 +110,27 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 			continue
 		}
 
-		var stageFn func() error
 		switch stage {
 		case Bodies:
-			stageFn = func() error { return d.unwindBodyDownloadStage(unwindPoint) }
+			err = d.unwindBodyDownloadStage(unwindPoint)
 		case Senders:
-			stageFn = func() error { return d.unwindSendersStage(unwindPoint) }
+			err = d.unwindSendersStage(unwindPoint)
 		case Execution:
-			stageFn = func() error { return unwindExecutionStage(unwindPoint, d.stateDB) }
+			err = unwindExecutionStage(unwindPoint, d.stateDB)
 		case HashCheck:
-			stageFn = func() error { return unwindHashCheckStage(unwindPoint, d.stateDB) }
+			err = unwindHashCheckStage(unwindPoint, d.stateDB)
 		case AccountHistoryIndex:
-			stageFn = func() error { return unwindAccountHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution) }
+			err = unwindAccountHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution)
 		case StorageHistoryIndex:
-			stageFn = func() error { return unwindStorageHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution) }
+			err = unwindStorageHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution)
 		default:
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
 
-		if err = d.runStep(stageFn); err != nil {
-			return fmt.Errorf("error unwinding stage: %d: %v", stage, err)
+		if err != nil {
+			return fmt.Errorf("error unwinding stage: %d: %w", stage, err)
 		}
 	}
 	log.Info("Checking for unwinding... Complete!")
 	return nil
-}
-
-func (d *Downloader) runStep(fn func() error) error {
-	return run(d.quitCh, fn)
-}
-
-func run(quitCh chan struct{}, fn func() error) error {
-	select {
-	case <-quitCh:
-		return errCanceled
-	default:
-	}
-	return fn()
 }

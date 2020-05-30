@@ -12,9 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
-	*cont = false
-
+func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -25,7 +23,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
 	// Figure out how many blocks have already been downloaded
 	origin, err := GetStageProgress(d.stateDB, Bodies)
 	if err != nil {
-		return fmt.Errorf("getting Bodies stage progress: %w", err)
+		return false, fmt.Errorf("getting Bodies stage progress: %w", err)
 	}
 	// Figure out how many headers we have
 	currentNumber := origin + 1
@@ -73,19 +71,19 @@ func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("walking over canonical hashes: %w", err)
+		return false, fmt.Errorf("walking over canonical hashes: %w", err)
 	}
 	if missingHeader != 0 {
 		if err1 := SaveStageProgress(d.stateDB, Headers, missingHeader); err1 != nil {
-			return fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
+			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
 		}
 		// This will cause the sync return to the header stage
-		return nil
+		return false, nil
 	}
 	d.queue.Reset()
 	if hashCount <= 1 {
 		// No more bodies to download
-		return nil
+		return false, nil
 	}
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
@@ -96,7 +94,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
 	case d.bodyWakeCh <- true:
 	case <-d.cancelCh:
 	case <-d.quitCh:
-		return errCanceled
+		return false, errCanceled
 	}
 
 	// Now fetch all the bodies
@@ -105,51 +103,36 @@ func (d *Downloader) spawnBodyDownloadStage(id string, cont *bool) error {
 		func() error { return d.processBodiesStage(to) },
 	}
 
-	*cont = true
-	err = d.runStep(func() error { return d.spawnSync(fetchers) })
-	if err != nil {
-		return err
-	}
-	return nil
+	return true, d.spawnSync(fetchers)
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
-	var err error
-
 	for {
-		err = d.runStep(func() error {
-			return d.processBodies(to)
-		})
-		if err == errDone {
+		select {
+		case <-d.quitCh:
+			return errCanceled
+		default:
+		}
+
+		results := d.queue.Results(true)
+		if len(results) == 0 {
 			return nil
 		}
+		lastNumber, err := d.importBlockResults(results, false /* execute */)
 		if err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (d *Downloader) processBodies(to uint64) error {
-	results := d.queue.Results(true)
-	if len(results) == 0 {
-		return errDone
-	}
-	lastNumber, err := d.importBlockResults(results, false /* execute */)
-	if err != nil {
-		return err
-	}
-	if lastNumber == to {
-		select {
-		case d.bodyWakeCh <- false:
-		case <-d.quitCh:
-		case <-d.cancelCh:
+		if lastNumber == to {
+			select {
+			case d.bodyWakeCh <- false:
+			case <-d.quitCh:
+			case <-d.cancelCh:
+			}
+			return nil
 		}
-		return errDone
 	}
-
 	return nil
 }
 

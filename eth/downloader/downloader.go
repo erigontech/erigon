@@ -592,15 +592,7 @@ func (d *Downloader) cancel() {
 	// Close the current cancel channel
 	d.cancelLock.Lock()
 	defer d.cancelLock.Unlock()
-
-	if d.cancelCh != nil {
-		select {
-		case <-d.cancelCh:
-			// Channel was already closed
-		default:
-			close(d.cancelCh)
-		}
-	}
+	safeClose(d.cancelCh)
 }
 
 // Cancel aborts all of the operations and waits for all download goroutines to
@@ -619,15 +611,23 @@ func (d *Downloader) Terminate() {
 	d.blockchain.Stop()
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
-	select {
-	case <-d.quitCh:
-	default:
-		close(d.quitCh)
-	}
+	safeClose(d.quitCh)
 	d.quitLock.Unlock()
 
 	// Cancel any pending download requests
 	d.Cancel()
+}
+
+func safeClose(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	select {
+	case <-ch:
+		// Channel was already closed
+	default:
+		close(ch)
+	}
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
@@ -1247,8 +1247,6 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 		select {
 		case <-d.quitCh:
 			return errCanceled
-		case <-d.cancelCh:
-			return errCanceled
 
 		case packet := <-deliveryCh:
 			// If the peer was previously banned and failed to deliver its pack
@@ -1306,12 +1304,6 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 			}
 			// Check for fetch request timeouts and demote the responsible peers
 			for pid, fails := range expire() {
-				select {
-				case <-d.quitCh:
-					return errCanceled
-				default:
-				}
-
 				if peer := d.peers.Peer(pid); peer != nil {
 					// If a lot of retrieval elements expired, we might have overestimated the remote peer or perhaps
 					// ourselves. Only reset to minimal throughput but don't drop just yet. If even the minimal times
@@ -1538,7 +1530,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
 						if newCanonical {
 							// Need to unwind further stages
-							if err1 := UnwindAllStages(d.stateDB, lowestCanonicalNumber, d.quitCh); err1 != nil {
+							if err1 := UnwindAllStages(d.stateDB, lowestCanonicalNumber); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
 						}
