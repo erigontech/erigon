@@ -43,7 +43,8 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		datadir,
 		startkey,
 		getExtractFunc(bytes2walker),
-		getLoadFunc(quit),
+		loadFunc,
+		quit,
 	)
 	if err != nil {
 		return err
@@ -82,7 +83,8 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		datadir,
 		startkey,
 		getExtractFunc(bytes2walker),
-		getLoadFunc(quit))
+		loadFunc,
+		quit)
 	if err != nil {
 		return err
 	}
@@ -127,55 +129,51 @@ func walkerFactory(csBucket []byte, plainState bool) func(bytes []byte) changese
 	}
 }
 
-func getLoadFunc(quit chan struct{}) func(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
-	return func(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
-		var blockNumbers []uint64
-		err := valueDecoder.Decode(&blockNumbers)
+func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
+	var blockNumbers []uint64
+	err := valueDecoder.Decode(&blockNumbers)
+	if err != nil {
+		return err
+	}
+	for _, b := range blockNumbers {
+		if err = state.Stopped(); err != nil {
+			return err
+		}
+
+		vzero := (b & emptyValBit) != 0
+		blockNr := b &^ emptyValBit
+		currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
+		indexBytes, err1 := state.Get(currentChunkKey)
+		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("find chunk failed: %w", err1)
+		}
+		var index dbutils.HistoryIndexBytes
+		if len(indexBytes) == 0 {
+			index = dbutils.NewHistoryIndex()
+		} else if dbutils.CheckNewIndexChunk(indexBytes, blockNr) {
+			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
+			index = dbutils.WrapHistoryIndex(indexBytes)
+			indexKey, err3 := index.Key(k)
+			if err3 != nil {
+				return err3
+			}
+			// Flush the old chunk
+			if err4 := next(indexKey, index); err4 != nil {
+				return err4
+			}
+			// Start a new chunk
+			index = dbutils.NewHistoryIndex()
+		} else {
+			index = dbutils.WrapHistoryIndex(indexBytes)
+		}
+		index = index.Append(blockNr, vzero)
+
+		err = next(currentChunkKey, index)
 		if err != nil {
 			return err
 		}
-		for _, b := range blockNumbers {
-			select {
-			case <-quit:
-				return errCanceled
-			default:
-			}
-
-			vzero := (b & emptyValBit) != 0
-			blockNr := b &^ emptyValBit
-			currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
-			indexBytes, err1 := state.Get(currentChunkKey)
-			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("find chunk failed: %w", err1)
-			}
-			var index dbutils.HistoryIndexBytes
-			if len(indexBytes) == 0 {
-				index = dbutils.NewHistoryIndex()
-			} else if dbutils.CheckNewIndexChunk(indexBytes, blockNr) {
-				// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
-				index = dbutils.WrapHistoryIndex(indexBytes)
-				indexKey, err3 := index.Key(k)
-				if err3 != nil {
-					return err3
-				}
-				// Flush the old chunk
-				if err4 := next(indexKey, index); err4 != nil {
-					return err4
-				}
-				// Start a new chunk
-				index = dbutils.NewHistoryIndex()
-			} else {
-				index = dbutils.WrapHistoryIndex(indexBytes)
-			}
-			index = index.Append(blockNr, vzero)
-
-			err = next(currentChunkKey, index)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
 	}
+	return nil
 }
 
 func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc {

@@ -18,7 +18,7 @@ import (
 
 var cbor codec.CborHandle
 
-func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string) error {
+func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
 	hashProgress, err := GetStageProgress(stateDB, HashCheck)
 	if err != nil {
 		return err
@@ -31,7 +31,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	}
 
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(stateDB, hashProgress, datadir)
+		err = promoteHashedState(stateDB, hashProgress, datadir, quit)
 		if err != nil {
 			return err
 		}
@@ -90,14 +90,14 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	return nil
 }
 
-func promoteHashedState(db ethdb.Database, progress uint64, datadir string) error {
+func promoteHashedState(db ethdb.Database, progress uint64, datadir string, quit chan struct{}) error {
 	if progress == 0 {
-		return promoteHashedStateCleanly(db, datadir)
+		return promoteHashedStateCleanly(db, datadir, quit)
 	}
 	return errors.New("incremental state promotion not implemented")
 }
 
-func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
+func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan struct{}) error {
 
 	err := etl.Transform(
 		db,
@@ -107,6 +107,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
 		nil,
 		keyTransformExtractFunc(transformPlainStateKey),
 		identityLoadFunc,
+		quit,
 	)
 
 	if err != nil {
@@ -121,6 +122,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string) error {
 		nil,
 		keyTransformExtractFunc(transformContractCodeKey),
 		identityLoadFunc,
+		quit,
 	)
 }
 
