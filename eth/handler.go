@@ -350,21 +350,27 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.maxPeers = maxPeers
 
 	// broadcast transactions
-	pm.wg.Add(1)
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
 	if pm.txsSub != nil {
+		pm.wg.Add(1)
 		go pm.txBroadcastLoop()
 	}
 
 	// broadcast mined blocks
-	pm.wg.Add(1)
 	pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
-	go pm.minedBroadcastLoop()
+	if pm.minedBlockSub != nil {
+		pm.wg.Add(1)
+		go pm.minedBroadcastLoop()
+	}
 
 	// start sync handlers
-	pm.wg.Add(2)
-	go pm.chainSync.loop()
+	if pm.chainSync != nil {
+		pm.wg.Add(1)
+		go pm.chainSync.loop()
+	}
+
+	pm.wg.Add(1)
 	go pm.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
 }
 
@@ -372,7 +378,9 @@ func (pm *ProtocolManager) Stop() {
 	if pm.txsSub != nil {
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
 	}
-	pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	if pm.minedBlockSub != nil {
+		pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	}
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
@@ -1197,6 +1205,8 @@ func (pm *ProtocolManager) txBroadcastLoop() {
 
 	for {
 		select {
+		case <-pm.quitSync:
+			return
 		case event := <-pm.txsCh:
 			// For testing purpose only, disable propagation
 			if pm.broadcastTxAnnouncesOnly {

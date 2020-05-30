@@ -10,10 +10,11 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/ugorji/go/codec"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ugorji/go/codec"
 )
 
 var cbor codec.CborHandle
@@ -24,6 +25,7 @@ type Decoder interface {
 
 type State interface {
 	Get([]byte) ([]byte, error)
+	Stopped() error
 }
 
 type ExtractNextFunc func(k []byte, v interface{}) error
@@ -101,9 +103,10 @@ func Transform(
 	startkey []byte,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
+	quit chan struct{},
 ) error {
 
-	filenames, err := extractBucketIntoFiles(db, fromBucket, startkey, datadir, extractFunc)
+	filenames, err := extractBucketIntoFiles(db, fromBucket, startkey, datadir, extractFunc, quit)
 
 	defer func() {
 		deleteFiles(filenames)
@@ -113,7 +116,7 @@ func Transform(
 		return err
 	}
 
-	return loadFilesIntoBucket(db, toBucket, filenames, loadFunc)
+	return loadFilesIntoBucket(db, toBucket, filenames, loadFunc, quit)
 }
 
 func extractBucketIntoFiles(
@@ -122,6 +125,7 @@ func extractBucketIntoFiles(
 	startkey []byte,
 	datadir string,
 	extractFunc ExtractFunc,
+	quit chan struct{},
 ) ([]string, error) {
 	buffer := bytes.NewBuffer(make([]byte, 0))
 	encoder := codec.NewEncoder(nil, &cbor)
@@ -159,6 +163,9 @@ func extractBucketIntoFiles(
 	}
 
 	err := db.Walk(bucket, startkey, len(startkey)*8, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(quit); err != nil {
+			return false, err
+		}
 		err := extractFunc(k, v, extractNextFunc)
 		return true, err
 	})
@@ -173,7 +180,7 @@ func extractBucketIntoFiles(
 	return filenames, nil
 }
 
-func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadFunc LoadFunc) error {
+func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadFunc LoadFunc, quit chan struct{}) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
@@ -196,7 +203,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 		}
 	}
 	batch := db.NewBatch()
-	state := &bucketState{batch, bucket}
+	state := &bucketState{batch, bucket, quit}
 
 	loadNextFunc := func(k, v []byte) error {
 		if err := batch.Put(bucket, k, v); err != nil {
@@ -219,6 +226,10 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 	}
 
 	for h.Len() > 0 {
+		if err := common.Stopped(quit); err != nil {
+			return err
+		}
+
 		element := (heap.Pop(h)).(HeapElem)
 		reader := readers[element.timeIdx]
 		decoder.ResetBytes(element.value)
@@ -342,8 +353,13 @@ func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
 type bucketState struct {
 	getter ethdb.Getter
 	bucket []byte
+	quit   chan struct{}
 }
 
 func (s *bucketState) Get(key []byte) ([]byte, error) {
 	return s.getter.Get(s.bucket, key)
+}
+
+func (s *bucketState) Stopped() error {
+	return common.Stopped(s.quit)
 }

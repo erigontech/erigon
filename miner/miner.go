@@ -133,6 +133,9 @@ func (miner *Miner) Start(coinbase common.Address) {
 }
 
 func (miner *Miner) Stop() {
+	if miner == nil || miner.worker == nil {
+		return
+	}
 	miner.worker.stop()
 	atomic.StoreInt32(&miner.shouldStart, 0)
 }

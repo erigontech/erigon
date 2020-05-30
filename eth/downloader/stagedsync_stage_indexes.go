@@ -16,7 +16,7 @@ const (
 	emptyValBit uint64 = 0x8000000000000000
 )
 
-func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool, quit chan struct{}) error {
 	if plainState {
 		log.Info("Skipped account index generation for plain state")
 		return nil
@@ -44,6 +44,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		startkey,
 		getExtractFunc(bytes2walker),
 		loadFunc,
+		quit,
 	)
 	if err != nil {
 		return err
@@ -55,7 +56,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 	return nil
 }
 
-func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool) error {
+func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool, quit chan struct{}) error {
 	if plainState {
 		log.Info("Skipped storage index generation for plain state")
 		return nil
@@ -82,7 +83,8 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		datadir,
 		startkey,
 		getExtractFunc(bytes2walker),
-		loadFunc)
+		loadFunc,
+		quit)
 	if err != nil {
 		return err
 	}
@@ -134,6 +136,10 @@ func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.Load
 		return err
 	}
 	for _, b := range blockNumbers {
+		if err = state.Stopped(); err != nil {
+			return err
+		}
+
 		vzero := (b & emptyValBit) != 0
 		blockNr := b &^ emptyValBit
 		currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
@@ -161,6 +167,10 @@ func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.Load
 			index = dbutils.WrapHistoryIndex(indexBytes)
 		}
 		index = index.Append(blockNr, vzero)
+
+		if err = state.Stopped(); err != nil {
+			return err
+		}
 
 		err = next(currentChunkKey, index)
 		if err != nil {
