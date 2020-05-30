@@ -317,6 +317,8 @@ func (b *sortableBuffer) FlushToDisk(datadir string, currentKey []byte) (string,
 	var currentKeyStr string
 	if currentKey == nil {
 		currentKeyStr = "final"
+	} else if len(currentKey) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", currentKey)
 	} else {
 		currentKeyStr = fmt.Sprintf("%x...", currentKey[:4])
 	}
