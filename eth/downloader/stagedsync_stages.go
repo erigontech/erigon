@@ -28,14 +28,14 @@ import (
 type SyncStage byte
 
 const (
-	Headers   SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	Bodies                     // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders                    // "From" recovered from signatures, bodies re-written
-	Execution                  // Executing each block w/o buildinf a trie
-	HashCheck                  // Checking the root hash
-	AccountHistoryIndex        // Generating history index for accounts
-	StorageHistoryIndex        // Generating history index for storage
-	Finish                     // Nominal stage after all other stages
+	Headers             SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders                              // "From" recovered from signatures, bodies re-written
+	Execution                            // Executing each block w/o buildinf a trie
+	HashCheck                            // Checking the root hash
+	AccountHistoryIndex                  // Generating history index for accounts
+	StorageHistoryIndex                  // Generating history index for storage
+	Finish                               // Nominal stage after all other stages
 )
 
 // GetStageProcess retrieves saved progress of given sync stage from the database
