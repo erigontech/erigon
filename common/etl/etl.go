@@ -1,13 +1,10 @@
 package etl
 
 import (
-	"bufio"
 	"bytes"
 	"container/heap"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"os"
 	"runtime"
 
 	"github.com/ugorji/go/codec"
@@ -17,7 +14,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-var cbor codec.CborHandle
+var (
+	cbor              codec.CborHandle
+	bufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
+)
 
 type Decoder interface {
 	Decode(interface{}) error
@@ -44,18 +44,17 @@ func Transform(
 	loadFunc LoadFunc,
 	quit chan struct{},
 ) error {
-
-	filenames, err := extractBucketIntoFiles(db, fromBucket, startkey, datadir, extractFunc, quit)
+	dataProviders, err := extractBucketIntoFiles(db, fromBucket, startkey, datadir, extractFunc, quit)
 
 	defer func() {
-		deleteFiles(filenames)
+		disposeProviders(dataProviders)
 	}()
 
 	if err != nil {
 		return err
 	}
 
-	return loadFilesIntoBucket(db, toBucket, filenames, loadFunc, quit)
+	return loadFilesIntoBucket(db, toBucket, dataProviders, loadFunc, quit)
 }
 
 func extractBucketIntoFiles(
@@ -65,20 +64,29 @@ func extractBucketIntoFiles(
 	datadir string,
 	extractFunc ExtractFunc,
 	quit chan struct{},
-) ([]string, error) {
+) ([]dataProvider, error) {
 	buffer := bytes.NewBuffer(make([]byte, 0))
 	encoder := codec.NewEncoder(nil, &cbor)
-	filenames := make([]string, 0)
+	providers := make([]dataProvider, 0)
 
 	sortableBuffer := newSortableBuffer()
 
-	flushBuffer := func() error {
-		filename, err := sortableBuffer.FlushToDisk(datadir)
+	flushBuffer := func(canStoreInRam bool) error {
+		if sortableBuffer.Len() == 0 {
+			return nil
+		}
+		var provider dataProvider
+		var err error
+		if canStoreInRam && len(providers) == 0 {
+			provider = KeepInRAM(sortableBuffer)
+		} else {
+			provider, err = FlushToDisk(sortableBuffer, datadir)
+		}
 		if err != nil {
 			return err
 		}
-		if len(filename) > 0 {
-			filenames = append(filenames, filename)
+		if provider != nil {
+			providers = append(providers, provider)
 		}
 		return nil
 	}
@@ -93,7 +101,7 @@ func extractBucketIntoFiles(
 		encodedValue := buffer.Bytes()
 		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
 		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			err = flushBuffer()
+			err = flushBuffer(false)
 			if err != nil {
 				return err
 			}
@@ -101,7 +109,7 @@ func extractBucketIntoFiles(
 		return nil
 	}
 
-	err := db.Walk(bucket, startkey, len(startkey)*8, func(k, v []byte) (bool, error) {
+	err := db.Walk(bucket, startkey, len(startkey), func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
@@ -112,33 +120,26 @@ func extractBucketIntoFiles(
 		return nil, err
 	}
 
-	err = flushBuffer()
+	err = flushBuffer(true)
 	if err != nil {
 		return nil, err
 	}
-	return filenames, nil
+	return providers, nil
 }
 
-func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadFunc LoadFunc, quit chan struct{}) error {
+func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc, quit chan struct{}) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
 	heap.Init(h)
-	readers := make([]io.Reader, len(files))
-	for i, filename := range files {
-		if f, err := os.Open(filename); err == nil {
-			readers[i] = bufio.NewReader(f)
-			defer f.Close() //nolint:errcheck
-		} else {
-			return err
-		}
-		decoder.Reset(readers[i])
-		if key, value, err := readElementFromDisk(decoder); err == nil {
+	for i, provider := range providers {
+		if key, value, err := provider.Next(decoder); err == nil {
 			he := HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
-			return fmt.Errorf("error reading first readers: n=%d current=%d filename=%s err=%v",
-				len(files), i, filename, err)
+			eee := fmt.Errorf("error reading first readers: n=%d current=%d provider=%s err=%v",
+				len(providers), i, provider, err)
+			panic(eee)
 		}
 	}
 	batch := db.NewBatch()
@@ -170,14 +171,13 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 		}
 
 		element := (heap.Pop(h)).(HeapElem)
-		reader := readers[element.TimeIdx]
+		provider := providers[element.TimeIdx]
 		decoder.ResetBytes(element.Value)
 		err := loadFunc(element.Key, decoder, state, loadNextFunc)
 		if err != nil {
 			return err
 		}
-		decoder.Reset(reader)
-		if element.Key, element.Value, err = readElementFromDisk(decoder); err == nil {
+		if element.Key, element.Value, err = provider.Next(decoder); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			return fmt.Errorf("error while reading next element from disk: %v", err)
@@ -187,12 +187,13 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 	return err
 }
 
-func deleteFiles(files []string) {
-	for _, filename := range files {
-		err := os.Remove(filename)
+func disposeProviders(providers []dataProvider) {
+	for _, p := range providers {
+		err := p.Dispose()
 		if err != nil {
-			log.Warn("promoting hashed state, error while removing temp file", "file", filename, "err", err)
+			log.Warn("promoting hashed state, error while disposing provider", "provier", p, "err", err)
 		}
+
 	}
 }
 
@@ -230,51 +231,17 @@ func (b *sortableBuffer) Swap(i, j int) {
 	b.entries[i], b.entries[j] = b.entries[j], b.entries[i]
 }
 
-func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
-	if len(b.entries) == 0 {
-		return "", nil
-	}
-	bufferFile, err := ioutil.TempFile(datadir, "tg-sync-sortable-buf")
-	if err != nil {
-		return "", err
-	}
-	defer bufferFile.Close() //nolint:errcheck
-
-	filename := bufferFile.Name()
-	w := bufio.NewWriter(bufferFile)
-	defer w.Flush() //nolint:errcheck
-	b.encoder.Reset(w)
-
-	for i := range b.entries {
-		err = writeToDisk(b.encoder, b.entries[i].key, b.entries[i].value)
-		if err != nil {
-			return "", fmt.Errorf("error writing entries to disk: %v", err)
-		}
-	}
-
-	b.entries = b.entries[:0] // keep the capacity
-	b.size = 0
-	return filename, nil
+func (b *sortableBuffer) Get(i int) sortableBufferEntry {
+	return b.entries[i]
 }
 
 func newSortableBuffer() *sortableBuffer {
 	return &sortableBuffer{
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
-		OptimalSize: 256 * 1024 * 1024, /* 256 mb */
+		OptimalSize: bufferOptimalSize,
 		encoder:     codec.NewEncoder(nil, &cbor),
 	}
-}
-
-func writeToDisk(encoder *codec.Encoder, key []byte, value []byte) error {
-	toWrite := [][]byte{key, value}
-	return encoder.Encode(toWrite)
-}
-
-func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
-	result := make([][]byte, 2)
-	err := decoder.Decode(&result)
-	return result[0], result[1], err
 }
 
 type bucketState struct {
