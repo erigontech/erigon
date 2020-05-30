@@ -209,7 +209,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 			}
 			runtime.ReadMemStats(&m)
 			log.Info(
-				"Commited hashed state",
+				"Commited batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
 				"hashedKey", fmt.Sprintf("%x...", k[:4]),
@@ -301,7 +301,12 @@ func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
 			return "", fmt.Errorf("error writing entries to disk: %v", err)
 		}
 	}
-
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info(
+		"Flushed buffer file",
+		"name", filename,
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	b.entries = b.entries[:0] // keep the capacity
 	b.size = 0
 	return filename, nil
