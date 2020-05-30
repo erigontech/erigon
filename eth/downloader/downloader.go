@@ -1244,7 +1244,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 	finished := false
 	for {
 		select {
-		case <-d.quitCh:
+		case <-d.cancelCh:
 			return errCanceled
 
 		case packet := <-deliveryCh:
