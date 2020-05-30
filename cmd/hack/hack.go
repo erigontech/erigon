@@ -2334,6 +2334,10 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	ts := dbutils.EncodeTimestamp(block)
 	accountMap := make(map[string]*accounts.Account)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
+		if timestamp >= *headNumber {
+			return false, nil
+		}
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := accountMap[string(kk)]; !ok {
