@@ -260,7 +260,7 @@ func writeToDisk(encoder *codec.Encoder, key []byte, value []byte) error {
 	return encoder.Encode(toWrite)
 }
 
-func readElementFromDisk(decoder *codec.Decoder) ([]byte, []byte, error) {
+func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
 	result := make([][]byte, 2)
 	err := decoder.Decode(&result)
 	return result[0], result[1], err
