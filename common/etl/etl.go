@@ -36,8 +36,8 @@ type LoadFunc func(k []byte, valueDecoder Decoder, state State, next LoadNextFun
 // as a Collect Transform Load
 type Collector struct {
 	extractNextFunc ExtractNextFunc
-	flushBuffer func() error
-	filenames []string
+	flushBuffer     func([]byte) error
+	filenames       []string
 }
 
 func NewCollector(datadir string) *Collector {
@@ -48,8 +48,8 @@ func NewCollector(datadir string) *Collector {
 
 	sortableBuffer := newSortableBuffer()
 
-	c.flushBuffer = func() error {
-		filename, err := sortableBuffer.FlushToDisk(datadir)
+	c.flushBuffer = func(currentKey []byte) error {
+		filename, err := sortableBuffer.FlushToDisk(datadir, currentKey)
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func NewCollector(datadir string) *Collector {
 		encodedValue := buffer.Bytes()
 		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
 		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			err = c.flushBuffer()
+			err = c.flushBuffer(k)
 			if err != nil {
 				return err
 			}
@@ -84,7 +84,7 @@ func (c *Collector) Collect(k, v []byte) error {
 }
 
 func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc) error {
-	if err := c.flushBuffer(); err != nil {
+	if err := c.flushBuffer(nil); err != nil {
 		return err
 	}
 	defer func() {
@@ -129,8 +129,8 @@ func extractBucketIntoFiles(
 
 	sortableBuffer := newSortableBuffer()
 
-	flushBuffer := func() error {
-		filename, err := sortableBuffer.FlushToDisk(datadir)
+	flushBuffer := func(currentKey []byte) error {
+		filename, err := sortableBuffer.FlushToDisk(datadir, currentKey)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func extractBucketIntoFiles(
 		encodedValue := buffer.Bytes()
 		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
 		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			err = flushBuffer()
+			err = flushBuffer(k)
 			if err != nil {
 				return err
 			}
@@ -166,7 +166,7 @@ func extractBucketIntoFiles(
 		return nil, err
 	}
 
-	err = flushBuffer()
+	err = flushBuffer(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ func (b *sortableBuffer) Swap(i, j int) {
 	b.entries[i], b.entries[j] = b.entries[j], b.entries[i]
 }
 
-func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
+func (b *sortableBuffer) FlushToDisk(datadir string, currentKey []byte) (string, error) {
 	if len(b.entries) == 0 {
 		return "", nil
 	}
@@ -303,8 +303,15 @@ func (b *sortableBuffer) FlushToDisk(datadir string) (string, error) {
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
+	var currentKeyStr string
+	if currentKey == nil {
+		currentKeyStr = "final"
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", currentKey[:4])
+	}
 	log.Info(
 		"Flushed buffer file",
+		"current key", currentKeyStr,
 		"name", filename,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	b.entries = b.entries[:0] // keep the capacity
