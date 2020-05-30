@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"os"
 	"runtime"
 	"sort"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -21,7 +21,6 @@ import (
 )
 
 func NewIndexGenerator(db ethdb.Database) *IndexGenerator {
-
 	return &IndexGenerator{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -100,7 +99,6 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 	var done = false
 	// In the first loop, we read all the changesets, create partial history indices, sort them, and
 	// write each batch into a file
-	var fill, walk, wri time.Duration
 	for !done {
 		if newDone, newBlockNum, newOffsets, newBlockNums, err := ig.fillChangeSetBuffer(changeSetBucket, blockNum, changesets, offsets, blockNums); err == nil {
 			done = newDone
@@ -180,30 +178,34 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 		return err
 	}
 
-	accountHistoryEffects := make(map[string][]byte)
-	var startKey = make([]byte, common.HashLength+8)
+	historyEffects := make(map[string][]byte)
+	keySize := vv.KeySize
+	if bytes.Equal(dbutils.StorageChangeSetBucket, changeSetBucket) || bytes.Equal(dbutils.PlainStorageChangeSetBucket, changeSetBucket) {
+		keySize -= 8
+	}
+
+	var startKey = make([]byte, keySize+8)
 
 	for key := range keys {
 		key := common.CopyBytes([]byte(key))
-		copy(startKey, key)
-
-		binary.BigEndian.PutUint64(startKey[common.HashLength:], timestampTo)
-		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*common.HashLength, func(k, v []byte) (bool, error) {
-			timestamp := binary.BigEndian.Uint64(k[common.HashLength:]) // the last timestamp in the chunk
+		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation(key))
+		fmt.Println("key - ", common.Bytes2Hex(key))
+		binary.BigEndian.PutUint64(startKey[keySize:], timestampTo)
+		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*keySize, func(k, v []byte) (bool, error) {
+			fmt.Println("key -- ", common.Bytes2Hex(k))
+			timestamp := binary.BigEndian.Uint64(k[keySize:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
-
 			if timestamp > timestampTo {
-				accountHistoryEffects[kStr] = nil
+				historyEffects[kStr] = nil
 				// truncate the chunk
 				index := dbutils.WrapHistoryIndex(v)
 				index = index.TruncateGreater(timestampTo)
 				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
 					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
-					lastK, err := index.Key(key)
-					if err != nil {
-						return false, err
-					}
-					accountHistoryEffects[string(lastK)] = common.CopyBytes(index)
+					lastK := make([]byte, len(k))
+					copy(lastK, k[:keySize])
+					binary.BigEndian.PutUint64(lastK[keySize:], ^uint64(0))
+					historyEffects[string(lastK)] = common.CopyBytes(index)
 				}
 			}
 			return true, nil
@@ -212,14 +214,12 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 		}
 	}
 
-	for key, value := range accountHistoryEffects {
+	for key, value := range historyEffects {
 		if value == nil {
-			//fmt.Println("drop", common.Bytes2Hex([]byte(key)), binary.BigEndian.Uint64([]byte(key)[common.HashLength:]))
 			if err := ig.db.Delete(vv.IndexBucket, []byte(key)); err != nil {
 				return err
 			}
 		} else {
-			//fmt.Println("write", common.Bytes2Hex([]byte(key)), binary.BigEndian.Uint64([]byte(key)[common.HashLength:]))
 			if err := ig.db.Put(vv.IndexBucket, []byte(key), value); err != nil {
 				return err
 			}

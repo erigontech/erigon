@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -59,207 +58,99 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	//don't run it parallel
-	db := ethdb.NewMemDatabase()
-	hashes, expected := generateTestData(t, db, dbutils.AccountChangeSetBucket, 2100)
-	indexBucket := dbutils.AccountsHistoryBucket
-	ig := NewIndexGenerator(db)
-	err := ig.GenerateIndex(0, dbutils.AccountChangeSetBucket)
-	if err != nil {
-		t.Fatal(err)
-	}
+	buckets := [][]byte{dbutils.StorageChangeSetBucket}
+	//buckets:=[][]byte{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket, dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	for i := range buckets {
+		csbucket := buckets[i]
+		db := ethdb.NewMemDatabase()
+		hashes, expected := generateTestData(t, db, csbucket, 2100)
+		mp := mapper[string(csbucket)]
+		indexBucket := mp.IndexBucket
+		ig := NewIndexGenerator(db)
+		err := ig.GenerateIndex(0, csbucket)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
-		pos := sort.Search(len(arr), func(i int) bool {
-			return arr[i] > timestamtTo
+		reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
+			pos := sort.Search(len(arr), func(i int) bool {
+				return arr[i] > timestamtTo
+			})
+			return arr[:pos]
+		}
+
+		t.Run("truncate to 2050 "+string(csbucket), func(t *testing.T) {
+			expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2050)
+			expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2050)
+			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2050)
+
+			err = ig.Truncate(2050, csbucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			checkIndex(t, db, indexBucket, hashes[0], 2030, expected[string(hashes[0])][2])
+			checkIndex(t, db, indexBucket, hashes[1], 2030, expected[string(hashes[1])][1])
+			checkIndex(t, db, indexBucket, hashes[2], 2030, expected[string(hashes[2])][0])
+			checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
+			checkIndex(t, db, indexBucket, hashes[1], 999, expected[string(hashes[1])][0])
 		})
-		return arr[:pos]
-	}
 
-	t.Run("truncate to 2050", func(t *testing.T) {
-		expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2050)
-		expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2050)
-		expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2050)
+		t.Run("truncate to 2000 "+string(csbucket), func(t *testing.T) {
+			expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2000)
+			expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2000)
+			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2000)
 
-		err = ig.Truncate(2050, dbutils.AccountChangeSetBucket)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		checkIndex(t, db, indexBucket, hashes[0], 2030, expected[string(hashes[0])][2])
-		checkIndex(t, db, indexBucket, hashes[1], 2030, expected[string(hashes[1])][1])
-		checkIndex(t, db, indexBucket, hashes[2], 2030, expected[string(hashes[2])][0])
-		checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
-		checkIndex(t, db, indexBucket, hashes[1], 999, expected[string(hashes[1])][0])
-	})
-
-	t.Run("truncate to 2000", func(t *testing.T) {
-		expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2000)
-		expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2000)
-		expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2000)
-
-		err = ig.Truncate(2000, dbutils.AccountChangeSetBucket)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		checkIndex(t, db, indexBucket, hashes[0], 2000, expected[string(hashes[0])][2])
-		checkIndex(t, db, indexBucket, hashes[1], 2000, expected[string(hashes[1])][1])
-		checkIndex(t, db, indexBucket, hashes[2], expected[string(hashes[2])][0][len(expected[string(hashes[2])][0])-1], expected[string(hashes[2])][0])
-	})
-
-	t.Run("truncate to 1999", func(t *testing.T) {
-		err = ig.Truncate(1999, dbutils.AccountChangeSetBucket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
-		checkIndex(t, db, indexBucket, hashes[1], 1998, expected[string(hashes[1])][0])
-		checkIndex(t, db, indexBucket, hashes[2], 1998, expected[string(hashes[2])][0])
-		_, err = db.GetIndexChunk(dbutils.AccountsHistoryBucket, hashes[0], 2000)
-		if err != ethdb.ErrKeyNotFound {
-			t.Fatal()
-		}
-		_, err = db.GetIndexChunk(dbutils.AccountsHistoryBucket, hashes[1], 2000)
-		if err != ethdb.ErrKeyNotFound {
-			t.Fatal()
-		}
-	})
-
-	t.Run("truncate to 999", func(t *testing.T) {
-		expected[string(hashes[1])][0] = reduceSlice(expected[string(hashes[1])][0], 999)
-		expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 999)
-
-		err = ig.Truncate(999, dbutils.AccountChangeSetBucket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkIndex(t, db, indexBucket, hashes[0], 999, expected[string(hashes[0])][0])
-		checkIndex(t, db, indexBucket, hashes[1], 998, expected[string(hashes[1])][0])
-		checkIndex(t, db, indexBucket, hashes[2], 999, expected[string(hashes[2])][0])
-		_, err = db.GetIndexChunk(dbutils.AccountsHistoryBucket, hashes[0], 1000)
-		if err != ethdb.ErrKeyNotFound {
-			t.Fatal()
-		}
-		_, err = db.GetIndexChunk(dbutils.AccountsHistoryBucket, hashes[1], 1000)
-		if err != ethdb.ErrKeyNotFound {
-			t.Fatal()
-		}
-	})
-}
-
-func TestName(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	_, _ = generateTestData(t, db, dbutils.AccountChangeSetBucket, 3000)
-	//db.GetChangeSetByBlock()
-}
-
-func TestIndexGenerator_GenerateIndexStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	key1, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	addrHash1 := crypto.PubkeyToAddress(key1.PublicKey).Hash()
-	key2, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	addrHash2 := crypto.PubkeyToAddress(key2.PublicKey).Hash()
-	key3, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	addrHash3 := crypto.PubkeyToAddress(key3.PublicKey).Hash()
-
-	compositeKey1 := dbutils.GenerateCompositeStorageKey(addrHash1, ^uint64(1), common.Hash{111})
-	compositeKey2 := dbutils.GenerateCompositeStorageKey(addrHash2, ^uint64(2), common.Hash{111})
-	compositeKey3 := dbutils.GenerateCompositeStorageKey(addrHash3, ^uint64(3), common.Hash{111})
-	expected11 := make([]uint64, 0)
-	expected12 := make([]uint64, 0)
-	expected13 := make([]uint64, 0)
-	expected21 := make([]uint64, 0)
-	expected22 := make([]uint64, 0)
-	expected3 := make([]uint64, 0)
-	const numOfBlocks = 2100
-
-	for i := 0; i < numOfBlocks; i++ {
-		cs := changeset.NewStorageChangeSet()
-		err = cs.Add(compositeKey1, []byte(strconv.Itoa(i)))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if i < 1000 {
-			expected11 = append(expected11, uint64(i))
-		} else if i < 2000 {
-			expected12 = append(expected12, uint64(i))
-		} else {
-			expected13 = append(expected13, uint64(i))
-		}
-
-		if i%2 == 0 {
-			err = cs.Add(compositeKey2, []byte(strconv.Itoa(i)))
+			err = ig.Truncate(2000, csbucket)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if i < 2000 {
-				expected21 = append(expected21, uint64(i))
-			} else {
-				expected22 = append(expected22, uint64(i))
-			}
-		}
-		if i%3 == 0 {
-			err = cs.Add(compositeKey3, []byte(strconv.Itoa(i)))
+			checkIndex(t, db, indexBucket, hashes[0], 2000, expected[string(hashes[0])][2])
+			checkIndex(t, db, indexBucket, hashes[1], 2000, expected[string(hashes[1])][1])
+			checkIndex(t, db, indexBucket, hashes[2], expected[string(hashes[2])][0][len(expected[string(hashes[2])][0])-1], expected[string(hashes[2])][0])
+		})
+
+		t.Run("truncate to 1999 "+string(csbucket), func(t *testing.T) {
+			err = ig.Truncate(1999, csbucket)
 			if err != nil {
 				t.Fatal(err)
 			}
-			expected3 = append(expected3, uint64(i))
-		}
-		v, innerErr := changeset.EncodeStorage(cs)
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		err = db.Put(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(uint64(i)), v)
-		if err != nil {
-			t.Fatal(err)
-		}
+			checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
+			checkIndex(t, db, indexBucket, hashes[1], 1998, expected[string(hashes[1])][0])
+			checkIndex(t, db, indexBucket, hashes[2], 1998, expected[string(hashes[2])][0])
+			_, err = db.GetIndexChunk(csbucket, hashes[0], 2000)
+			if err != ethdb.ErrKeyNotFound {
+				t.Fatal()
+			}
+			_, err = db.GetIndexChunk(csbucket, hashes[1], 2000)
+			if err != ethdb.ErrKeyNotFound {
+				t.Fatal()
+			}
+		})
+
+		t.Run("truncate to 999 "+string(csbucket), func(t *testing.T) {
+			expected[string(hashes[1])][0] = reduceSlice(expected[string(hashes[1])][0], 999)
+			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 999)
+
+			err = ig.Truncate(999, csbucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkIndex(t, db, indexBucket, hashes[0], 999, expected[string(hashes[0])][0])
+			checkIndex(t, db, indexBucket, hashes[1], 998, expected[string(hashes[1])][0])
+			checkIndex(t, db, indexBucket, hashes[2], 999, expected[string(hashes[2])][0])
+			_, err = db.GetIndexChunk(csbucket, hashes[0], 1000)
+			if err != ethdb.ErrKeyNotFound {
+				t.Fatal()
+			}
+			_, err = db.GetIndexChunk(csbucket, hashes[1], 1000)
+			if err != ethdb.ErrKeyNotFound {
+				t.Fatal()
+			}
+		})
 	}
 
-	ig := NewIndexGenerator(db)
-	err = ig.GenerateIndex(0, dbutils.StorageChangeSetBucket)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	check := func(compositeKey []byte, chunkBlock uint64, expected []uint64) {
-		t.Helper()
-		b, err := db.GetIndexChunk(dbutils.StorageHistoryBucket, compositeKey, chunkBlock)
-		if err != nil {
-			t.Fatal(err)
-		}
-		val, _, err := dbutils.HistoryIndexBytes(b).Decode()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !reflect.DeepEqual(val, expected) {
-			fmt.Println(val)
-			fmt.Println(expected)
-			t.Fatal()
-		}
-	}
-
-	check(compositeKey1, 0, expected11)
-	check(compositeKey1, 999, expected11)
-	check(compositeKey1, 1000, expected12)
-	check(compositeKey1, 1999, expected12)
-	check(compositeKey1, 2000, expected13)
-	check(compositeKey2, 0, expected21)
-	check(compositeKey2, 2000, expected22)
-	check(compositeKey3, 0, expected3)
 }
 
 func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
@@ -402,15 +293,4 @@ func generateAddrs(numOfAddrs int, isPlain bool) ([][]byte, error) {
 		addrs[i] = hash.Bytes()
 	}
 	return addrs, nil
-}
-
-func debugIndexes(db ethdb.Database, bucket []byte) { //nolint
-	l := common.HashLength
-	if bytes.Equal(dbutils.StorageHistoryBucket, bucket) {
-		l = common.HashLength * 2
-	}
-	db.Walk(bucket, []byte{}, 0, func(k []byte, v []byte) (bool, error) { //nolint
-		fmt.Println(common.Bytes2Hex(k), binary.BigEndian.Uint64(k[l:]))
-		return true, nil
-	})
 }

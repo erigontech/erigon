@@ -37,7 +37,6 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return nil
 	}
 
-
 	if core.UsePlainStateExecution {
 		err = promoteHashedState(stateDB, hashProgress, datadir)
 		if err != nil {

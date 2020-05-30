@@ -116,7 +116,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 
 		c = b.Cursor()
 		counter = 0
-		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+		for k, _, err = c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -150,7 +150,7 @@ func testCtxCancel(t *testing.T, db ethdb.KV) {
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		for {
-			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() { //nolint: scopelint
 				if err != nil {
 					return err
 				}
