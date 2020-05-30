@@ -2,6 +2,7 @@ package ethdb
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"time"
 
@@ -92,6 +93,11 @@ func (db *badgerDB) Close() {
 	} else {
 		db.log.Info("badger database closed")
 	}
+}
+
+func (db *badgerDB) Size() uint64 {
+	lsm, vlog := db.badger.Size()
+	return uint64(lsm + vlog)
 }
 
 func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {
@@ -202,6 +208,12 @@ func (b badgerBucket) Get(key []byte) (val []byte, err error) {
 	var item *badger.Item
 	b.prefix = append(b.prefix[:b.nameLen], key...)
 	item, err = b.tx.badger.Get(b.prefix)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	if item != nil {
 		val, err = item.ValueCopy(nil) // can improve this by using pool
 	}
@@ -232,7 +244,7 @@ func (b badgerBucket) Delete(key []byte) error {
 
 func (b badgerBucket) Cursor() Cursor {
 	c := &badgerCursor{bucket: b, ctx: b.tx.ctx, badgerOpts: badger.DefaultIteratorOptions}
-	c.prefix = append(c.prefix, b.prefix[:b.nameLen]...) // set bucket
+	c.prefix = append(c.prefix, b.prefix[:b.nameLen]...) // set dbi
 	c.badgerOpts.Prefix = c.prefix
 	return c
 }
@@ -267,13 +279,16 @@ func (c *badgerCursor) First() ([]byte, []byte, error) {
 	if c.badgerOpts.PrefetchValues {
 		c.v, c.err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
 	}
-	return c.k, c.v, c.err
+	if c.err != nil {
+		return []byte{}, nil, c.err
+	}
+	return c.k, c.v, nil
 }
 
 func (c *badgerCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
@@ -289,6 +304,10 @@ func (c *badgerCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.badgerOpts.PrefetchValues {
 		c.v, c.err = item.ValueCopy(c.v)
 	}
+	if c.err != nil {
+		return []byte{}, nil, c.err
+	}
+
 	return c.k, c.v, c.err
 }
 
@@ -299,26 +318,29 @@ func (c *badgerCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 func (c *badgerCursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err() // on error key should be != nil
 	default:
 	}
 
 	c.badger.Next()
 	if !c.badger.Valid() {
 		c.k = nil
-		return c.k, c.v, c.err
+		return c.k, c.v, nil
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
 	if c.badgerOpts.PrefetchValues {
 		c.v, c.err = item.ValueCopy(c.v)
 	}
+	if c.err != nil {
+		return []byte{}, nil, c.err // on error key should be != nil
+	}
 
-	return c.k, c.v, c.err
+	return c.k, c.v, nil
 }
 
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -338,7 +360,7 @@ type badgerNoValuesCursor struct {
 }
 
 func (c *badgerNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
+	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -358,17 +380,17 @@ func (c *badgerNoValuesCursor) First() ([]byte, uint32, error) {
 	c.badger.Rewind()
 	if !c.badger.Valid() {
 		c.k = nil
-		return c.k, 0, c.err
+		return c.k, 0, nil
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
-	return c.k, uint32(item.ValueSize()), c.err
+	return c.k, uint32(item.ValueSize()), nil
 }
 
 func (c *badgerNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
@@ -382,7 +404,7 @@ func (c *badgerNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
 
-	return c.k, uint32(item.ValueSize()), c.err
+	return c.k, uint32(item.ValueSize()), nil
 }
 
 func (c *badgerNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
@@ -392,7 +414,7 @@ func (c *badgerNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
 func (c *badgerNoValuesCursor) Next() ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
@@ -403,5 +425,5 @@ func (c *badgerNoValuesCursor) Next() ([]byte, uint32, error) {
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
-	return c.k, uint32(item.ValueSize()), c.err
+	return c.k, uint32(item.ValueSize()), nil
 }

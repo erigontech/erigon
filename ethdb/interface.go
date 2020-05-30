@@ -83,7 +83,7 @@ type Database interface {
 	IdealBatchSize() int
 
 	// DiskSize returns the total disk size of the database in bytes.
-	DiskSize() int64
+	DiskSize() uint64
 
 	Keys() ([][]byte, error)
 

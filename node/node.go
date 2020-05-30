@@ -656,6 +656,16 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 		return ethdb.NewBadgerDatabase(n.config.ResolvePath(name + "_badger"))
 	}
 
+	if n.config.LMDB {
+		log.Info("Opening Database (LMDB)")
+		dir := n.config.ResolvePath(name + "_lmdb")
+		kv, err := ethdb.NewLMDB().Path(dir).Open(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return ethdb.NewObjectDatabase(kv), nil
+	}
+
 	log.Info("Opening Database (Bolt)")
 	boltDb, err := ethdb.NewBoltDatabase(n.config.ResolvePath(name))
 	if err != nil {

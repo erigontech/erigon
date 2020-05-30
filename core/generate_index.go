@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"io"
 	"io/ioutil"
 	"os"
@@ -315,7 +316,7 @@ func (ig *IndexGenerator) writeBufferMapToTempFile(datadir string, pattern strin
 
 func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket []byte, keyLength int) error {
 	var m runtime.MemStats
-	h := &common.Heap{}
+	h := &etl.Heap{}
 	heap.Init(h)
 	readers := make([]io.Reader, len(bufferFileNames))
 	for i, fileName := range bufferFileNames {
@@ -329,7 +330,7 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 		// Read first key
 		keyBuf := make([]byte, keyLength)
 		if n, err := io.ReadFull(readers[i], keyBuf); err == nil && n == keyLength {
-			heap.Push(h, common.HeapElem{keyBuf, i, nil})
+			heap.Push(h, etl.HeapElem{keyBuf, i, nil})
 		} else {
 			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
 		}
@@ -338,7 +339,7 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 	batch := ig.db.NewBatch()
 	var nbytes [8]byte
 	for h.Len() > 0 {
-		element := (heap.Pop(h)).(common.HeapElem)
+		element := (heap.Pop(h)).(etl.HeapElem)
 		reader := readers[element.TimeIdx]
 		k := element.Key
 		// Read number of items for this key
@@ -409,4 +410,129 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 		return err
 	}
 	return nil
+}
+
+
+/**
+
+startkey := dbutils.EncodeTimestamp(blockNum)
+
+bytes2walker := func(b []byte) changeset.Walker {
+	return changeset.StorageChangeSetBytes(b)
+}
+
+err := etl.Transform(
+	db,
+	dbutils.StorageChangeSetBucket,
+	dbutils.StorageHistoryBucket,
+	datadir,
+	startkey,
+	getExtractFunc(bytes2walker),
+	loadFunc)
+if err != nil {
+	return err
+}
+
+if err = SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
+	return err
+}
+
+
+
+
+
+
+
+
+
+
+bytes2walker := func(b []byte) changeset.Walker {
+		return changeset.AccountChangeSetBytes(b)
+	}
+
+	startkey := dbutils.EncodeTimestamp(blockNum)
+
+	err := etl.Transform(
+		db,
+		dbutils.AccountChangeSetBucket,
+		dbutils.AccountsHistoryBucket,
+		datadir,
+		startkey,
+		getExtractFunc(bytes2walker),
+		loadFunc,
+	)
+	if err != nil {
+		return err
+	}
+*/
+func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
+	var blockNumbers []uint64
+	err := valueDecoder.Decode(&blockNumbers)
+	if err != nil {
+		return err
+	}
+	for _, b := range blockNumbers {
+		vzero := (b & emptyValBit) != 0
+		blockNr := b &^ emptyValBit
+		currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
+		indexBytes, err1 := state.Get(currentChunkKey)
+		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("find chunk failed: %w", err1)
+		}
+		var index dbutils.HistoryIndexBytes
+		if len(indexBytes) == 0 {
+			index = dbutils.NewHistoryIndex()
+		} else if dbutils.CheckNewIndexChunk(indexBytes, blockNr) {
+			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
+			index = dbutils.WrapHistoryIndex(indexBytes)
+			indexKey, err3 := index.Key(k)
+			if err3 != nil {
+				return err3
+			}
+			// Flush the old chunk
+			if err4 := next(indexKey, index); err4 != nil {
+				return err4
+			}
+			// Start a new chunk
+			index = dbutils.NewHistoryIndex()
+		} else {
+			index = dbutils.WrapHistoryIndex(indexBytes)
+		}
+		index = index.Append(blockNr, vzero)
+
+		err = next(currentChunkKey, index)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc {
+	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		bufferMap := make(map[string][]uint64)
+		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
+		err := bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
+			sKey := string(changesetKey)
+			list := bufferMap[sKey]
+			b := blockNum
+			if len(changesetValue) == 0 {
+				b |= emptyValBit
+			}
+			list = append(list, b)
+			bufferMap[sKey] = list
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		for k, v := range bufferMap {
+			err = next([]byte(k), v)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }

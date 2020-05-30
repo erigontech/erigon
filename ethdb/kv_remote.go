@@ -114,6 +114,10 @@ func (db *remoteDB) Close() {
 	}
 }
 
+func (db *remoteDB) Size() uint64 {
+	return 0
+}
+
 func (db *remoteDB) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
@@ -187,17 +191,26 @@ func (b remoteBucket) Cursor() Cursor {
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.First()
-	return c.k, c.v, c.err
+	if c.err != nil {
+		return []byte{}, c.v, c.err // on error key should be != nil
+	}
+	return c.k, c.v, nil
 }
 
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.Seek(seek)
-	return c.k, c.v, c.err
+	if c.err != nil {
+		return []byte{}, c.v, c.err
+	}
+	return c.k, c.v, nil
 }
 
 func (c *remoteCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.SeekTo(seek)
-	return c.k, c.v, c.err
+	if c.err != nil {
+		return []byte{}, c.v, c.err
+	}
+	return c.k, c.v, nil
 }
 
 func (c *remoteCursor) Next() ([]byte, []byte, error) {
@@ -206,7 +219,7 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -222,7 +235,7 @@ func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 }
 
 func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
+	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -240,17 +253,26 @@ func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, e
 func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {
 	var vSize uint32
 	c.k, vSize, c.err = c.remote.FirstKey()
-	return c.k, vSize, c.err
+	if c.err != nil {
+		return []byte{}, vSize, c.err
+	}
+	return c.k, vSize, nil
 }
 
 func (c *remoteNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	var vSize uint32
 	c.k, vSize, c.err = c.remote.SeekKey(seek)
-	return c.k, vSize, c.err
+	if c.err != nil {
+		return []byte{}, vSize, c.err
+	}
+	return c.k, vSize, nil
 }
 
 func (c *remoteNoValuesCursor) Next() ([]byte, uint32, error) {
 	var vSize uint32
 	c.k, vSize, c.err = c.remote.NextKey()
-	return c.k, vSize, c.err
+	if c.err != nil {
+		return []byte{}, vSize, c.err
+	}
+	return c.k, vSize, nil
 }
