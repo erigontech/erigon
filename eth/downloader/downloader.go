@@ -1350,12 +1350,6 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 			idles, total := idle()
 
 			for _, peer := range idles {
-				select {
-				case <-d.quitCh:
-					return errCanceled
-				default:
-				}
-
 				// Short circuit if throttling activated
 				if throttle() {
 					throttled = true
