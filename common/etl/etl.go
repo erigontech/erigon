@@ -281,3 +281,13 @@ func (s *bucketState) Get(key []byte) ([]byte, error) {
 func (s *bucketState) Stopped() error {
 	return common.Stopped(s.quit)
 }
+
+// IdentityLoadFunc loads entries as they are, without transformation
+func IdentityLoadFunc(k []byte, valueDecoder Decoder, _ State, next LoadNextFunc) error {
+	var v []byte
+	err := valueDecoder.Decode(&v)
+	if err != nil {
+		return err
+	}
+	return next(k, v)
+}

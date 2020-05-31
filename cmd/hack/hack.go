@@ -2284,15 +2284,6 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
-func identityLoadFunc(k []byte, valueDecoder etl.Decoder, _ etl.State, next etl.LoadNextFunc) error {
-	var v []byte
-	err := valueDecoder.Decode(&v)
-	if err != nil {
-		return err
-	}
-	return next(k, v)
-}
-
 func testGetProof(chaindata string, address common.Address, rewind int) error {
 	storageKeys := []string{}
 	var m runtime.MemStats
@@ -2328,7 +2319,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 		return err
 	}
 	quitCh := make(chan struct{})
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, identityLoadFunc, quitCh); err != nil {
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, quitCh); err != nil {
 		return err
 	}
 	ts := dbutils.EncodeTimestamp(block)

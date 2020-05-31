@@ -108,7 +108,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		datadir,
 		nil,
 		keyTransformExtractFunc(transformPlainStateKey),
-		identityLoadFunc,
+		etl.IdentityLoadFunc,
 		quit,
 	)
 
@@ -123,18 +123,9 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		datadir,
 		nil,
 		keyTransformExtractFunc(transformContractCodeKey),
-		identityLoadFunc,
+		etl.IdentityLoadFunc,
 		quit,
 	)
-}
-
-func identityLoadFunc(k []byte, valueDecoder etl.Decoder, _ etl.State, next etl.LoadNextFunc) error {
-	var v []byte
-	err := valueDecoder.Decode(&v)
-	if err != nil {
-		return err
-	}
-	return next(k, v)
 }
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
