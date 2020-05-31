@@ -8,9 +8,9 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ugorji/go/codec"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ugorji/go/codec"
 )
 
 type dataProvider interface {
