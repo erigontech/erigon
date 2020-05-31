@@ -1,38 +1,30 @@
 package generate
 
 import (
-	"bytes"
-	"fmt"
-
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"time"
 )
 
-func RegenerateIndex(chaindata string, indexBucket []byte, csBucket []byte) error {
+func RegenerateIndex(chaindata string, csBucket []byte) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
 	}
-	var walker func([]byte) changeset.Walker
-	if bytes.Equal(dbutils.AccountChangeSetBucket, csBucket) {
-		walker = func(cs []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(cs)
-		}
-	}
+	ig := core.NewIndexGenerator(db, make(chan struct{}))
 
-	if bytes.Equal(dbutils.StorageChangeSetBucket, csBucket) {
-		walker = func(cs []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(cs)
-		}
-	}
-
-	ig := core.NewIndexGenerator(db)
-	err = ig.GenerateIndex(0, csBucket, indexBucket, walker, nil)
+	err = ig.DropIndex(dbutils.AccountsHistoryBucket)
 	if err != nil {
 		return err
 	}
-	fmt.Println("Index is successfully regenerated")
+	startTime := time.Now()
+	log.Info("Index generation started", "start time", startTime)
+	err = ig.GenerateIndex(0, csBucket)
+	if err != nil {
+		return err
+	}
+	log.Info("Index is successfully regenerated", "it took", time.Since(startTime))
 	return nil
 }

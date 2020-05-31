@@ -120,36 +120,37 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 			break
 		}
 
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-
-		if core.UsePlainStateExecution {
-			plainReader := state.NewPlainStateReader(stateBatch)
-			plainReader.SetAccountCache(accountCache)
-			plainReader.SetStorageCache(storageCache)
-			plainReader.SetCodeCache(codeCache)
-			plainReader.SetCodeSizeCache(codeSizeCache)
-			stateReader = plainReader
-			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum)
-			plainWriter.SetAccountCache(accountCache)
-			plainWriter.SetStorageCache(storageCache)
-			plainWriter.SetCodeCache(codeCache)
-			plainWriter.SetCodeSizeCache(codeSizeCache)
-			stateWriter = plainWriter
-		} else {
-			hashStateReader := state.NewDbStateReader(stateBatch)
-			hashStateReader.SetAccountCache(accountCache)
-			hashStateReader.SetStorageCache(storageCache)
-			hashStateReader.SetCodeCache(codeCache)
-			hashStateReader.SetCodeSizeCache(codeSizeCache)
-			stateReader = hashStateReader
-			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum)
-			hashedStateWriter.SetAccountCache(accountCache)
-			hashedStateWriter.SetStorageCache(storageCache)
-			hashedStateWriter.SetCodeCache(codeCache)
-			hashedStateWriter.SetCodeSizeCache(codeSizeCache)
-			stateWriter = hashedStateWriter
+		type cacheSetter interface {
+			SetAccountCache(cache *fastcache.Cache)
+			SetStorageCache(cache *fastcache.Cache)
+			SetCodeCache(cache *fastcache.Cache)
+			SetCodeSizeCache(cache *fastcache.Cache)
 		}
+
+		var stateReader interface {
+			state.StateReader
+			cacheSetter
+		}
+		var stateWriter interface {
+			state.WriterWithChangeSets
+			cacheSetter
+		}
+		if core.UsePlainStateExecution {
+			stateReader = state.NewPlainStateReader(stateBatch)
+			stateWriter = state.NewPlainStateWriter(stateBatch, changeBatch, blockNum)
+		} else {
+			stateReader = state.NewDbStateReader(stateBatch)
+			stateWriter = state.NewDbStateWriter(stateBatch, changeBatch, blockNum)
+		}
+		stateReader.SetAccountCache(accountCache)
+		stateReader.SetStorageCache(storageCache)
+		stateReader.SetCodeCache(codeCache)
+		stateReader.SetCodeSizeCache(codeSizeCache)
+
+		stateWriter.SetAccountCache(accountCache)
+		stateWriter.SetStorageCache(storageCache)
+		stateWriter.SetCodeCache(codeCache)
+		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
 		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)

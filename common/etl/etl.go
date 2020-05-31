@@ -170,14 +170,14 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, files []string, loadF
 		}
 
 		element := (heap.Pop(h)).(HeapElem)
-		reader := readers[element.timeIdx]
-		decoder.ResetBytes(element.value)
-		err := loadFunc(element.key, decoder, state, loadNextFunc)
+		reader := readers[element.TimeIdx]
+		decoder.ResetBytes(element.Value)
+		err := loadFunc(element.Key, decoder, state, loadNextFunc)
 		if err != nil {
 			return err
 		}
 		decoder.Reset(reader)
-		if element.key, element.value, err = readElementFromDisk(decoder); err == nil {
+		if element.Key, element.Value, err = readElementFromDisk(decoder); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			return fmt.Errorf("error while reading next element from disk: %v", err)
