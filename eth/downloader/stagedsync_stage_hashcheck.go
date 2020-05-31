@@ -38,7 +38,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	}
 
 	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress == 0 {
+	if hashProgress > 0 {
 		return nil
 	}
 
@@ -50,7 +50,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
 	loader := trie.NewSubTrieLoader(blockNr)
 	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
 		return errors.Wrap(err1, "checking root hash failed")
 	}
@@ -108,7 +108,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		datadir,
 		nil,
 		keyTransformExtractFunc(transformPlainStateKey),
-		identityLoadFunc,
+		etl.IdentityLoadFunc,
 		quit,
 	)
 
@@ -123,18 +123,9 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		datadir,
 		nil,
 		keyTransformExtractFunc(transformContractCodeKey),
-		identityLoadFunc,
+		etl.IdentityLoadFunc,
 		quit,
 	)
-}
-
-func identityLoadFunc(k []byte, valueDecoder etl.Decoder, _ etl.State, next etl.LoadNextFunc) error {
-	var v []byte
-	err := valueDecoder.Decode(&v)
-	if err != nil {
-		return err
-	}
-	return next(k, v)
 }
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {

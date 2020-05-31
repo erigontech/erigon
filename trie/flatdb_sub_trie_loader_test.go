@@ -31,7 +31,7 @@ func TestResolve1(t *testing.T) {
 	r := NewSubTrieLoader(0)
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
-	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
 	require.NoError(err)
 	tr := New(common.Hash{})
 	assert.NoError(tr.HookSubTries(subTries, [][]byte{nil})) // hook up to the root of the trie
@@ -54,7 +54,7 @@ func TestResolve2(t *testing.T) {
 	r := NewSubTrieLoader(0)
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
-	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
 	tr := New(common.Hash{})
@@ -78,7 +78,7 @@ func TestResolve2Keep(t *testing.T) {
 	r := NewSubTrieLoader(0)
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
 	tr := New(common.Hash{})
@@ -103,7 +103,7 @@ func TestResolve3Keep(t *testing.T) {
 	r := NewSubTrieLoader(0)
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	subTries, err := r.LoadSubTries(db, 0, rs, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
+	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
 	require.NoError(err)
 
 	tr := New(common.Hash{})
@@ -134,7 +134,7 @@ func TestTrieSubTrieLoader(t *testing.T) {
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	_, err := resolver.LoadSubTries(db, 0, rs,
+	_, err := resolver.LoadSubTries(db, 0, rs, nil, /* HashCollector */
 		[][]byte{common.Hex2Bytes("aaaaa"), common.Hex2Bytes("bb")}, []int{40, 8}, false)
 	require.NoError(err, "resolve error")
 }
@@ -168,7 +168,7 @@ func TestTwoStorageItems(t *testing.T) {
 
 	resolver := NewSubTrieLoader(0)
 	rs := NewRetainList(0)
-	subTries, err1 := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 	require.NoError(err1, "resolve error")
 
 	assert.Equal(rootHash.String(), subTries.Hashes[0].String())
@@ -186,7 +186,7 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver2 := NewSubTrieLoader(0)
 	rs2 := NewRetainList(0)
 	rs2.AddHex([]byte{0xd})
-	subTries, err = resolver2.LoadSubTries(db, 0, rs2, [][]byte{{0xd0}}, []int{4}, false)
+	subTries, err = resolver2.LoadSubTries(db, 0, rs2, nil /* HashCollector */, [][]byte{{0xd0}}, []int{4}, false)
 	require.NoError(err, "resolve error")
 
 	err = tr.HookSubTries(subTries, [][]byte{{0xd}}) // hook up to the prefix 0xd
@@ -220,7 +220,7 @@ func TestTwoAccounts(t *testing.T) {
 	resolver := NewSubTrieLoader(0)
 	rs := NewRetainList(0)
 	rs.AddKey(key1)
-	subTries, err1 := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	subTries, err1 := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 	require.NoError(err1, "resolve error")
 	assert.Equal(expect.String(), subTries.Hashes[0].String())
 
@@ -245,7 +245,7 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 
 	rs := NewRetainList(0)
 	resolver := NewSubTrieLoader(0)
-	_, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+	_, err := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 	require.NotNil(t, err)
 }
 
@@ -323,7 +323,7 @@ func TestApiDetails(t *testing.T) {
 		rs.AddHex(hexf("000101%0122x", 0))
 		rs.AddHex(common.Hex2Bytes("000202"))
 		rs.AddHex(common.Hex2Bytes("0f"))
-		subTries, err := loader.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+		subTries, err := loader.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 
 		err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
@@ -372,7 +372,7 @@ func TestApiDetails(t *testing.T) {
 		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
 		rl.Rewind()
-		subTries, err := loader.LoadSubTries(db, 0, rl, dbPrefixes, fixedbits, false)
+		subTries, err := loader.LoadSubTries(db, 0, rl, nil /* HashCollector */, dbPrefixes, fixedbits, false)
 		require.NoError(err)
 
 		err = tr.HookSubTries(subTries, hooks) // hook up to the root
@@ -419,7 +419,7 @@ func TestApiDetails(t *testing.T) {
 			}
 		}
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
-		subTries, err := loader.LoadSubTries(db, 0, rs, dbPrefixes, fixedbits, false)
+		subTries, err := loader.LoadSubTries(db, 0, rs, nil /* HashCollector */, dbPrefixes, fixedbits, false)
 		require.NoError(err)
 
 		err = tr.HookSubTries(subTries, hooks) // hook up to the root
@@ -517,14 +517,14 @@ func TestStorageSubTrieLoader2(t *testing.T) {
 		resolver := NewSubTrieLoader(0)
 		rs := NewRetainList(0)
 		rs.AddHex(common.FromHex("00000001"))
-		_, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+		_, err := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 	}
 	{
 		resolver := NewSubTrieLoader(0)
 		rs := NewRetainList(0)
 		rs.AddKey(dbutils.GenerateStoragePrefix(kAcc2, a2.Incarnation))
-		_, err := resolver.LoadSubTries(db, 0, rs, [][]byte{nil}, []int{0}, false)
+		_, err := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 		assert.NoError(err)
 	}
 }

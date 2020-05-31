@@ -647,8 +647,12 @@ func (hb *HashBuilder) RootHash() (common.Hash, error) {
 
 func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
-	copy(hash[:], hb.hashStack[len(hb.hashStack)-hashStackStride+1:])
+	copy(hash[:], hb.topHash())
 	return hash
+}
+
+func (hb *HashBuilder) topHash() []byte {
+	return hb.hashStack[len(hb.hashStack)-hashStackStride+1:]
 }
 
 func (hb *HashBuilder) root() node {

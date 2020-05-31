@@ -238,7 +238,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 		l := trie.NewSubTrieLoader(blockNum)
 		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 		rl := trie.NewRetainList(0)
-		subTries, err := l.LoadSubTries(stateDb, blockNum, rl, [][]byte{nil}, []int{0}, false)
+		subTries, err := l.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 		if err != nil {
 			fmt.Printf("%v\n", err)
 		}
@@ -279,7 +279,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
 			rl := trie.NewRetainList(0)
-			subTries, err := sl.LoadSubTries(stateDb, blockNum, rl, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
+			subTries, err := sl.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err != nil {
 				fmt.Printf("%x: %v\n", addrHash, err)
 				fmt.Printf("incarnation: %d, account.Root: %x\n", account.Incarnation, account.Root)

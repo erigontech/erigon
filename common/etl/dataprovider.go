@@ -6,7 +6,10 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"runtime"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
 
@@ -20,7 +23,7 @@ type fileDataProvider struct {
 	reader io.Reader
 }
 
-func FlushToDisk(b *sortableBuffer, datadir string) (dataProvider, error) {
+func FlushToDisk(currentKey []byte, b *sortableBuffer, datadir string) (dataProvider, error) {
 	if len(b.entries) == 0 {
 		return nil, nil
 	}
@@ -43,7 +46,21 @@ func FlushToDisk(b *sortableBuffer, datadir string) (dataProvider, error) {
 			return nil, fmt.Errorf("error writing entries to disk: %v", err)
 		}
 	}
-
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	var currentKeyStr string
+	if currentKey == nil {
+		currentKeyStr = "final"
+	} else if len(currentKey) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", currentKey)
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", currentKey[:4])
+	}
+	log.Info(
+		"Flushed buffer file",
+		"current key", currentKeyStr,
+		"name", bufferFile.Name(),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	b.entries = b.entries[:0] // keep the capacity
 	b.size = 0
 

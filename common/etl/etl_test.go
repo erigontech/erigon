@@ -61,21 +61,23 @@ func TestFileDataProviders(t *testing.T) {
 	sourceBucket := []byte("source")
 	generateTestData(t, db, sourceBucket, 10)
 
-	dataProviders, err := extractBucketIntoFiles(db, sourceBucket, nil, "", testExtractToMapFunc, nil)
+	collector := NewCollector("")
+
+	err := extractBucketIntoFiles(db, sourceBucket, nil, collector, testExtractToMapFunc, nil)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 10, len(dataProviders))
+	assert.Equal(t, 10, len(collector.dataProviders))
 
-	for _, p := range dataProviders {
+	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
 		assert.True(t, ok)
 		_, err = os.Stat(fp.file.Name())
 		assert.NoError(t, err)
 	}
 
-	disposeProviders(dataProviders)
+	disposeProviders(collector.dataProviders)
 
-	for _, p := range dataProviders {
+	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
 		assert.True(t, ok)
 		_, err = os.Stat(fp.file.Name())
@@ -89,12 +91,13 @@ func TestRAMDataProviders(t *testing.T) {
 	sourceBucket := []byte("source")
 	generateTestData(t, db, sourceBucket, 10)
 
-	dataProviders, err := extractBucketIntoFiles(db, sourceBucket, nil, "", testExtractToMapFunc, nil)
+	collector := NewCollector("")
+	err := extractBucketIntoFiles(db, sourceBucket, nil, collector, testExtractToMapFunc, nil)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 1, len(dataProviders))
+	assert.Equal(t, 1, len(collector.dataProviders))
 
-	for _, p := range dataProviders {
+	for _, p := range collector.dataProviders {
 		mp, ok := p.(*memoryDataProvider)
 		assert.True(t, ok)
 		assert.Equal(t, 10, mp.buffer.Len())
