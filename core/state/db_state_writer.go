@@ -234,7 +234,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = dsw.writeIndex(accountChanges, dbutils.AccountsHistoryBucket)
+	err = writeIndex(dsw.blockNr, accountChanges, dbutils.AccountsHistoryBucket, dsw.changeDb)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = dsw.writeIndex(storageChanges, dbutils.StorageHistoryBucket)
+	err = writeIndex(dsw.blockNr, storageChanges, dbutils.StorageHistoryBucket, dsw.changeDb)
 	if err != nil {
 		return err
 	}
@@ -251,19 +251,18 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	return nil
 }
 
-func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
+func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket []byte, changeDb ethdb.Database) error {
 	for _, change := range changes.Changes {
-		currentChunkKey := dbutils.IndexChunkKey(change.Key, ^uint64(0))
-		indexBytes, err := dsw.changeDb.Get(bucket, currentChunkKey)
+		currentChunkKey := dbutils.CurrentChunkKey(change.Key)
+		indexBytes, err := changeDb.Get(bucket, currentChunkKey)
 		if err != nil && err != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
-		v := dsw.blockNr
 
 		var index dbutils.HistoryIndexBytes
 		if len(indexBytes) == 0 {
 			index = dbutils.NewHistoryIndex()
-		} else if dbutils.CheckNewIndexChunk(indexBytes, v) {
+		} else if dbutils.CheckNewIndexChunk(indexBytes, blocknum) {
 			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
 			index = dbutils.WrapHistoryIndex(indexBytes)
 			indexKey, err := index.Key(change.Key)
@@ -271,7 +270,7 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 				return err
 			}
 			// Flush the old chunk
-			if err := dsw.changeDb.Put(bucket, indexKey, index); err != nil {
+			if err := changeDb.Put(bucket, indexKey, index); err != nil {
 				return err
 			}
 			// Start a new chunk
@@ -279,9 +278,9 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 		} else {
 			index = dbutils.WrapHistoryIndex(indexBytes)
 		}
-		index = index.Append(v, len(change.Value) == 0)
+		index = index.Append(blocknum, len(change.Value) == 0)
 
-		if err := dsw.changeDb.Put(bucket, currentChunkKey, index); err != nil {
+		if err := changeDb.Put(bucket, currentChunkKey, index); err != nil {
 			return err
 		}
 	}

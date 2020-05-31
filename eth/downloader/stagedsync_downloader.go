@@ -119,9 +119,9 @@ func (d *Downloader) DownloadHeaders(headersFetchers []func() error) error {
 		case HashCheck:
 			err = unwindHashCheckStage(unwindPoint, d.stateDB)
 		case AccountHistoryIndex:
-			err = unwindAccountHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution)
+			err = unwindAccountHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution, d.quitCh)
 		case StorageHistoryIndex:
-			err = unwindStorageHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution)
+			err = unwindStorageHistoryIndex(unwindPoint, d.stateDB, core.UsePlainStateExecution, d.quitCh)
 		default:
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}
