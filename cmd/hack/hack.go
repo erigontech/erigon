@@ -2448,7 +2448,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		fmt.Printf("Error hooking: %v\n", err)
 	}
-	fmt.Printf("Resulting root: %x, expected root: %x\n", tr.Hash(), header.Root)
+	fmt.Printf("Resulting root: %x (subTrie %x), expected root: %x\n", tr.Hash(), subTries.Hashes[0], header.Root)
 	return nil
 }
 
