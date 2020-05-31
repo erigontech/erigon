@@ -25,6 +25,8 @@ import (
 	"math/big"
 	"sync"
 	"testing"
+
+	"github.com/holiman/uint256"
 )
 
 type testEncoder struct {
@@ -137,6 +139,31 @@ var encTests = []encTest{
 	// negative ints are not supported
 	{val: big.NewInt(-1), error: "rlp: cannot encode negative *big.Int"},
 
+	// uint256 integers (should match uint for small values)
+	{val: uint256.NewInt(), output: "80"},
+	{val: uint256.NewInt().SetUint64(1), output: "01"},
+	{val: uint256.NewInt().SetUint64(127), output: "7F"},
+	{val: uint256.NewInt().SetUint64(128), output: "8180"},
+	{val: uint256.NewInt().SetUint64(256), output: "820100"},
+	{val: uint256.NewInt().SetUint64(1024), output: "820400"},
+	{val: uint256.NewInt().SetUint64(0xFFFFFF), output: "83FFFFFF"},
+	{val: uint256.NewInt().SetUint64(0xFFFFFFFF), output: "84FFFFFFFF"},
+	{val: uint256.NewInt().SetUint64(0xFFFFFFFFFF), output: "85FFFFFFFFFF"},
+	{val: uint256.NewInt().SetUint64(0xFFFFFFFFFFFF), output: "86FFFFFFFFFFFF"},
+	{val: uint256.NewInt().SetUint64(0xFFFFFFFFFFFFFF), output: "87FFFFFFFFFFFFFF"},
+	{
+		val:    uint256.NewInt().SetBytes(unhex("102030405060708090A0B0C0D0E0F2")),
+		output: "8F102030405060708090A0B0C0D0E0F2",
+	},
+	{
+		val:    uint256.NewInt().SetBytes(unhex("0100020003000400050006000700080009000A000B000C000D000E01")),
+		output: "9C0100020003000400050006000700080009000A000B000C000D000E01",
+	},
+
+	// non-pointer uint256.Int
+	{val: *uint256.NewInt(), output: "80"},
+	{val: *uint256.NewInt().SetUint64(0xFFFFFF), output: "83FFFFFF"},
+
 	// byte slices, strings
 	{val: []byte{}, output: "80"},
 	{val: []byte{0x7E}, output: "7E"},
@@ -242,6 +269,7 @@ var encTests = []encTest{
 	{val: (*[]byte)(nil), output: "80"},
 	{val: (*[10]byte)(nil), output: "80"},
 	{val: (*big.Int)(nil), output: "80"},
+	{val: (*uint256.Int)(nil), output: "80"},
 	{val: (*[]string)(nil), output: "C0"},
 	{val: (*[10]string)(nil), output: "C0"},
 	{val: (*[]interface{})(nil), output: "C0"},

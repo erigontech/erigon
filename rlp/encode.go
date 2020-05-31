@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
+
+	"github.com/holiman/uint256"
 )
 
 // https://github.com/ethereum/wiki/wiki/RLP
@@ -344,6 +346,10 @@ func makeWriter(typ reflect.Type, ts tags) (writer, error) {
 		return writeBigIntPtr, nil
 	case typ.AssignableTo(bigInt):
 		return writeBigIntNoPtr, nil
+	case typ.AssignableTo(reflect.PtrTo(uint256Int)):
+		return writeUint256Ptr, nil
+	case typ.AssignableTo(uint256Int):
+		return writeUint256NoPtr, nil
 	case kind == reflect.Ptr:
 		return makePtrWriter(typ, ts)
 	case reflect.PtrTo(typ).Implements(encoderInterface):
@@ -421,6 +427,29 @@ func writeBigInt(i *big.Int, w *encbuf) error {
 	if cmp := i.Cmp(big0); cmp == -1 {
 		return fmt.Errorf("rlp: cannot encode negative *big.Int")
 	} else if cmp == 0 {
+		w.str = append(w.str, EmptyStringCode)
+	} else {
+		w.encodeString(i.Bytes())
+	}
+	return nil
+}
+
+func writeUint256Ptr(val reflect.Value, w *encbuf) error {
+	ptr := val.Interface().(*uint256.Int)
+	if ptr == nil {
+		w.str = append(w.str, EmptyStringCode)
+		return nil
+	}
+	return writeUint256(ptr, w)
+}
+
+func writeUint256NoPtr(val reflect.Value, w *encbuf) error {
+	i := val.Interface().(uint256.Int)
+	return writeUint256(&i, w)
+}
+
+func writeUint256(i *uint256.Int, w *encbuf) error {
+	if i.IsZero() {
 		w.str = append(w.str, EmptyStringCode)
 	} else {
 		w.encodeString(i.Bytes())
