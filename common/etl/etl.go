@@ -40,6 +40,7 @@ type Collector struct {
 	extractNextFunc ExtractNextFunc
 	flushBuffer     func([]byte, bool) error
 	dataProviders   []dataProvider
+	allFlushed      bool
 }
 
 func NewCollector(datadir string) *Collector {
@@ -57,6 +58,7 @@ func NewCollector(datadir string) *Collector {
 		var err error
 		if canStoreInRam && len(c.dataProviders) == 0 {
 			provider = KeepInRAM(sortableBuffer)
+			c.allFlushed = true
 		} else {
 			provider, err = FlushToDisk(currentKey, sortableBuffer, datadir)
 		}
@@ -72,15 +74,13 @@ func NewCollector(datadir string) *Collector {
 	c.extractNextFunc = func(k []byte, v interface{}) error {
 		buffer.Reset()
 		encoder.Reset(buffer)
-		err := encoder.Encode(v)
-		if err != nil {
+		if err := encoder.Encode(v); err != nil {
 			return err
 		}
 		encodedValue := buffer.Bytes()
 		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
 		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			err = c.flushBuffer(k, false)
-			if err != nil {
+			if err := c.flushBuffer(k, false); err != nil {
 				return err
 			}
 		}
@@ -94,12 +94,14 @@ func (c *Collector) Collect(k, v []byte) error {
 }
 
 func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, quitCh chan struct{}) error {
-	if err := c.flushBuffer(nil, true); err != nil {
-		return err
-	}
 	defer func() {
 		disposeProviders(c.dataProviders)
 	}()
+	if !c.allFlushed {
+		if err := c.flushBuffer(nil, true); err != nil {
+			return err
+		}
+	}
 	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, quitCh)
 }
 
@@ -113,87 +115,34 @@ func Transform(
 	loadFunc LoadFunc,
 	quit chan struct{},
 ) error {
-	dataProviders, err := extractBucketIntoFiles(db, fromBucket, startkey, datadir, extractFunc, quit)
-
-	defer func() {
-		disposeProviders(dataProviders)
-	}()
-
-	if err != nil {
+	collector := NewCollector(datadir)
+	if err := extractBucketIntoFiles(db, fromBucket, startkey, collector, extractFunc, quit); err != nil {
+		disposeProviders(collector.dataProviders)
 		return err
 	}
-
-	return loadFilesIntoBucket(db, toBucket, dataProviders, loadFunc, quit)
+	return collector.Load(db, toBucket, loadFunc, quit)
 }
 
 func extractBucketIntoFiles(
 	db ethdb.Database,
 	bucket []byte,
 	startkey []byte,
-	datadir string,
+	collector *Collector,
 	extractFunc ExtractFunc,
 	quit chan struct{},
-) ([]dataProvider, error) {
-	buffer := bytes.NewBuffer(make([]byte, 0))
-	encoder := codec.NewEncoder(nil, &cbor)
-	providers := make([]dataProvider, 0)
-
-	sortableBuffer := newSortableBuffer()
-
-	flushBuffer := func(currentKey []byte, canStoreInRam bool) error {
-		if sortableBuffer.Len() == 0 {
-			return nil
-		}
-		var provider dataProvider
-		var err error
-		if canStoreInRam && len(providers) == 0 {
-			provider = KeepInRAM(sortableBuffer)
-		} else {
-			provider, err = FlushToDisk(currentKey, sortableBuffer, datadir)
-		}
-		if err != nil {
-			return err
-		}
-		if provider != nil {
-			providers = append(providers, provider)
-		}
-		return nil
-	}
-
-	extractNextFunc := func(k []byte, v interface{}) error {
-		buffer.Reset()
-		encoder.Reset(buffer)
-		err := encoder.Encode(v)
-		if err != nil {
-			return err
-		}
-		encodedValue := buffer.Bytes()
-		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
-		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			err = flushBuffer(k, false)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	err := db.Walk(bucket, startkey, len(startkey), func(k, v []byte) (bool, error) {
+) error {
+	if err := db.Walk(bucket, startkey, len(startkey), func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
-		err := extractFunc(k, v, extractNextFunc)
-		return true, err
-	})
-	if err != nil {
-		return nil, err
+		if err := extractFunc(k, v, collector.extractNextFunc); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return err
 	}
-
-	err = flushBuffer(nil, true)
-	if err != nil {
-		return nil, err
-	}
-	return providers, nil
+	return collector.flushBuffer(nil, true)
 }
 
 func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc, quit chan struct{}) error {
