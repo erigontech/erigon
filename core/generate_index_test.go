@@ -28,7 +28,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			}
 			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum)
 
-			ig.ChangeSetBufSize = 1024
+			ig.ChangeSetBufSize = 16 * 1024
 			err := ig.GenerateIndex(0, csBucket)
 			if err != nil {
 				t.Fatal(err)
