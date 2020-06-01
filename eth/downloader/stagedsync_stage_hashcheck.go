@@ -106,10 +106,9 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		dbutils.PlainStateBucket,
 		dbutils.CurrentStateBucket,
 		datadir,
-		nil,
 		keyTransformExtractFunc(transformPlainStateKey),
 		etl.IdentityLoadFunc,
-		quit,
+		etl.TransformArgs{Quit: quit},
 	)
 
 	if err != nil {
@@ -121,10 +120,9 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		dbutils.PlainContractCodeBucket,
 		dbutils.ContractCodeBucket,
 		datadir,
-		nil,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
-		quit,
+		etl.TransformArgs{Quit: quit},
 	)
 }
 

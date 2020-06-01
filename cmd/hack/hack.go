@@ -2319,7 +2319,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 		return err
 	}
 	quitCh := make(chan struct{})
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, quitCh); err != nil {
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
 	ts := dbutils.EncodeTimestamp(block)
