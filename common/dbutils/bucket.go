@@ -116,7 +116,8 @@ var (
 	ConfigPrefix   = []byte("ethereum-config-") // config prefix for the db
 
 	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
-	BloomBitsIndexPrefix = []byte("iB") // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefix      = []byte("iB")      // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefixShead = []byte("iBshead") // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
 	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
 	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
@@ -145,6 +146,7 @@ var (
 	SyncStageProgress = []byte("SSP")
 	// Position to where to unwind sync stages
 	SyncStageUnwind = []byte("SSU")
+	CliqueBucket    = []byte("clique-")
 )
 
 var Buckets = [][]byte{
@@ -173,5 +175,21 @@ var Buckets = [][]byte{
 	PreimagePrefix,
 	ConfigPrefix,
 	BloomBitsIndexPrefix,
+	BloomBitsIndexPrefixShead,
 	LastPrunedBlockKey,
+	DatabaseInfoBucket,
+	IncarnationMapBucket,
+	LastAppliedMigration,
+	StorageModeHistory,
+	StorageModeReceipts,
+	StorageModeTxIndex,
+	StorageModePreImages,
+	StorageModeThinHistory,
+	CliqueBucket,
+	SyncStageProgress,
+	SyncStageUnwind,
+	PlainStateBucket,
+	PlainContractCodeBucket,
+	PlainAccountChangeSetBucket,
+	PlainStorageChangeSetBucket,
 }

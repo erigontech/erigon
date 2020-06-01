@@ -316,31 +316,28 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 	tds.SetBlockNr(0)
+
+	var blockWriter state.WriterWithChangeSets
 	if UsePlainStateExecution {
-		blockWriter := tds.PlainStateWriter()
-		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
-		}
-		// Always write changesets
-		if err := blockWriter.WriteChangeSets(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
-		}
+		blockWriter = tds.PlainStateWriter()
 	} else {
-		blockWriter := tds.DbStateWriter()
-		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
-		}
-		// Always write changesets
-		if err := blockWriter.WriteChangeSets(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
-		}
-		// Optionally write history
-		if history {
-			if err := blockWriter.WriteHistory(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write history: %v", err)
-			}
+		blockWriter = tds.DbStateWriter()
+	}
+
+	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+	}
+
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+	}
+	// Optionally write history
+	if history {
+		if err := blockWriter.WriteHistory(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
 		}
 	}
+
 	if _, err := batch.Commit(); err != nil {
 		return nil, nil, err
 	}

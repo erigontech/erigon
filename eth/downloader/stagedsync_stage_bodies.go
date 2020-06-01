@@ -23,7 +23,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	// Figure out how many blocks have already been downloaded
 	origin, err := GetStageProgress(d.stateDB, Bodies)
 	if err != nil {
-		return false, fmt.Errorf("getting Bodies stage progress: %v", err)
+		return false, fmt.Errorf("getting Bodies stage progress: %w", err)
 	}
 	// Figure out how many headers we have
 	currentNumber := origin + 1
@@ -34,6 +34,10 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	var headers = make(map[common.Hash]*types.Header) // We use map because there might be more than one header by block number
 	var hashCount = 0
 	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
+		if err = common.Stopped(d.quitCh); err != nil {
+			return false, err
+		}
+
 		// Skip non relevant records
 		if len(k) == 8+len(dbutils.HeaderHashSuffix) && bytes.Equal(k[8:], dbutils.HeaderHashSuffix) {
 			// This is how we learn about canonical chain
@@ -65,11 +69,11 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 		return true, nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("walking over canonical hashes: %v", err)
+		return false, fmt.Errorf("walking over canonical hashes: %w", err)
 	}
 	if missingHeader != 0 {
 		if err1 := SaveStageProgress(d.stateDB, Headers, missingHeader); err1 != nil {
-			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %v", err1)
+			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
 		}
 		// This will cause the sync return to the header stage
 		return false, nil
@@ -83,15 +87,20 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	d.queue.Prepare(from, d.mode)
 	d.queue.ScheduleBodies(from, hashes[:hashCount-1], headers)
 	to := from + uint64(hashCount-1)
+
 	select {
 	case d.bodyWakeCh <- true:
 	case <-d.cancelCh:
+	case <-d.quitCh:
+		return false, errCanceled
 	}
+
 	// Now fetch all the bodies
 	fetchers := []func() error{
 		func() error { return d.fetchBodies(from) },
 		func() error { return d.processBodiesStage(to) },
 	}
+
 	return true, d.spawnSync(fetchers)
 }
 
@@ -99,6 +108,10 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
 	for {
+		if err := common.Stopped(d.quitCh); err != nil {
+			return err
+		}
+
 		results := d.queue.Results(true)
 		if len(results) == 0 {
 			return nil
@@ -110,6 +123,7 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 		if lastNumber == to {
 			select {
 			case d.bodyWakeCh <- false:
+			case <-d.quitCh:
 			case <-d.cancelCh:
 			}
 			return nil

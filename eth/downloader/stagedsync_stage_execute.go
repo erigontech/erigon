@@ -2,9 +2,9 @@ package downloader
 
 import (
 	"fmt"
-	//"os"
+	// "os"
 	"runtime"
-	//"runtime/pprof"
+	// "runtime/pprof"
 	"sync/atomic"
 	"time"
 
@@ -72,7 +72,7 @@ func (l *progressLogger) Stop() {
 const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 
-func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uint64, error) {
+func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}) (uint64, error) {
 	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
 	if err != nil {
 		return 0, err
@@ -109,6 +109,10 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
 	for {
+		if err = common.Stopped(quit); err != nil {
+			return 0, err
+		}
+
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
 
 		block := blockchain.GetBlockByNumber(blockNum)
@@ -116,36 +120,37 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			break
 		}
 
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-
-		if core.UsePlainStateExecution {
-			plainReader := state.NewPlainStateReader(stateBatch)
-			plainReader.SetAccountCache(accountCache)
-			plainReader.SetStorageCache(storageCache)
-			plainReader.SetCodeCache(codeCache)
-			plainReader.SetCodeSizeCache(codeSizeCache)
-			stateReader = plainReader
-			plainWriter := state.NewPlainStateWriter(stateBatch, changeBatch, blockNum)
-			plainWriter.SetAccountCache(accountCache)
-			plainWriter.SetStorageCache(storageCache)
-			plainWriter.SetCodeCache(codeCache)
-			plainWriter.SetCodeSizeCache(codeSizeCache)
-			stateWriter = plainWriter
-		} else {
-			hashStateReader := state.NewDbStateReader(stateBatch)
-			hashStateReader.SetAccountCache(accountCache)
-			hashStateReader.SetStorageCache(storageCache)
-			hashStateReader.SetCodeCache(codeCache)
-			hashStateReader.SetCodeSizeCache(codeSizeCache)
-			stateReader = hashStateReader
-			hashedStateWriter := state.NewDbStateWriter(stateBatch, changeBatch, blockNum)
-			hashedStateWriter.SetAccountCache(accountCache)
-			hashedStateWriter.SetStorageCache(storageCache)
-			hashedStateWriter.SetCodeCache(codeCache)
-			hashedStateWriter.SetCodeSizeCache(codeSizeCache)
-			stateWriter = hashedStateWriter
+		type cacheSetter interface {
+			SetAccountCache(cache *fastcache.Cache)
+			SetStorageCache(cache *fastcache.Cache)
+			SetCodeCache(cache *fastcache.Cache)
+			SetCodeSizeCache(cache *fastcache.Cache)
 		}
+
+		var stateReader interface {
+			state.StateReader
+			cacheSetter
+		}
+		var stateWriter interface {
+			state.WriterWithChangeSets
+			cacheSetter
+		}
+		if core.UsePlainStateExecution {
+			stateReader = state.NewPlainStateReader(stateBatch)
+			stateWriter = state.NewPlainStateWriter(stateBatch, changeBatch, blockNum)
+		} else {
+			stateReader = state.NewDbStateReader(stateBatch)
+			stateWriter = state.NewDbStateWriter(stateBatch, changeBatch, blockNum)
+		}
+		stateReader.SetAccountCache(accountCache)
+		stateReader.SetStorageCache(storageCache)
+		stateReader.SetCodeCache(codeCache)
+		stateReader.SetCodeSizeCache(codeSizeCache)
+
+		stateWriter.SetAccountCache(accountCache)
+		stateWriter.SetStorageCache(storageCache)
+		stateWriter.SetCodeCache(codeCache)
+		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
 		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
@@ -178,15 +183,19 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain) (uin
 			}
 		*/
 	}
+
+	// the last processed block
+	syncHeadNumber := atomic.LoadUint64(&nextBlockNumber) - 1
+
 	_, err = stateBatch.Commit()
 	if err != nil {
-		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
+		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
 	}
 	_, err = changeBatch.Commit()
 	if err != nil {
-		return atomic.LoadUint64(&nextBlockNumber) - 1, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
+		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
-	return atomic.LoadUint64(&nextBlockNumber) - 1 /* the last processed block */, nil
+	return syncHeadNumber, nil
 }
 
 func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
@@ -194,6 +203,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
 	}
+
 	if unwindPoint >= lastProcessedBlockNumber {
 		err = SaveStageUnwind(stateDB, Execution, 0)
 		if err != nil {
@@ -212,6 +222,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	deleteAccountFunc := deleteAccountHashed
 	writeAccountFunc := writeAccountHashed
 	recoverCodeHashFunc := recoverCodeHashHashed
+
 	if core.UsePlainStateExecution {
 		rewindFunc = ethdb.RewindDataPlain
 		stateBucket = dbutils.PlainStateBucket
@@ -223,16 +234,18 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		recoverCodeHashFunc = recoverCodeHashPlain
 	}
 
-	accountMap, storageMap, err2 := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
-	if err2 != nil {
+	accountMap, storageMap, err := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
+	if err != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
+
 	for key, value := range accountMap {
 		if len(value) > 0 {
 			var acc accounts.Account
 			if err = acc.DecodeForStorage(value); err != nil {
 				return err
 			}
+
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, stateDB, key)
 			if err = writeAccountFunc(mutation, key, acc); err != nil {
@@ -261,14 +274,17 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 			return err
 		}
 	}
+
 	err = SaveStageUnwind(mutation, Execution, 0)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
+
 	_, err = mutation.Commit()
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
+
 	return nil
 }
 

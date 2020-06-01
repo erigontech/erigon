@@ -7,6 +7,10 @@ import (
 	"reflect"
 )
 
+type Walker interface {
+	Walk(func(k, v []byte) error) error
+}
+
 func NewChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),

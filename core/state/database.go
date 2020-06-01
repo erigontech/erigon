@@ -77,6 +77,7 @@ type StateWriter interface {
 type WriterWithChangeSets interface {
 	StateWriter
 	WriteChangeSets() error
+	WriteHistory() error
 }
 
 type NoopWriter struct {
@@ -651,7 +652,7 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*
 		if loader == nil {
 			return trie.SubTries{}, nil
 		}
-		subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, dbPrefixes, fixedbits, trace)
+		subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, nil /* hashCollector */, dbPrefixes, fixedbits, trace)
 		if err != nil {
 			return subTries, err
 		}
@@ -946,8 +947,8 @@ func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[strin
 		if err := tds.db.Walk(dbutils.AccountsHistoryBucket, startKey, 8*common.HashLength, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[common.HashLength:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
-			accountHistoryEffects[kStr] = nil
 			if timestamp > timestampTo {
+				accountHistoryEffects[kStr] = nil
 				// truncate the chunk
 				index := dbutils.WrapHistoryIndex(v)
 				index = index.TruncateGreater(timestampTo)
@@ -973,8 +974,8 @@ func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[strin
 		if err := tds.db.Walk(dbutils.StorageHistoryBucket, startKey, 8*2*common.HashLength, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[2*common.HashLength:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
-			storageHistoryEffects[kStr] = nil
 			if timestamp > timestampTo {
+				storageHistoryEffects[kStr] = nil
 				index := dbutils.WrapHistoryIndex(v)
 				index = index.TruncateGreater(timestampTo)
 				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted

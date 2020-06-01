@@ -104,7 +104,9 @@ func (opts boltOpts) MustOpen(ctx context.Context) KV {
 }
 
 func NewBolt() boltOpts {
-	return boltOpts{Bolt: bolt.DefaultOptions}
+	o := boltOpts{Bolt: bolt.DefaultOptions}
+	o.Bolt.KeysPrefixCompressionDisable = true
+	return o
 }
 
 // Close closes BoltKV
@@ -115,6 +117,10 @@ func (db *BoltKV) Close() {
 	} else {
 		db.log.Info("bolt database closed")
 	}
+}
+
+func (db *BoltKV) Size() uint64 {
+	return uint64(db.bolt.Size())
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
@@ -193,7 +199,8 @@ func (b boltBucket) Put(key []byte, value []byte) error {
 		return b.tx.ctx.Err()
 	default:
 	}
-	return b.bolt.Put(key, value)
+	err := b.bolt.Put(key, value)
+	return err
 }
 
 func (b boltBucket) Delete(key []byte) error {
@@ -220,10 +227,10 @@ func (c *boltCursor) initCursor() {
 func (c *boltCursor) First() ([]byte, []byte, error) {
 	if len(c.prefix) == 0 {
 		c.k, c.v = c.bolt.First()
-		return c.k, c.v, nil
+	} else {
+		c.k, c.v = c.bolt.Seek(c.prefix)
 	}
 
-	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
@@ -233,12 +240,12 @@ func (c *boltCursor) First() ([]byte, []byte, error) {
 func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
+	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
@@ -247,12 +254,12 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
 	c.k, c.v = c.bolt.SeekTo(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
+	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
@@ -261,19 +268,19 @@ func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 func (c *boltCursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
+		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, nil, nil
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -289,7 +296,7 @@ func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 }
 
 func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
+	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -320,7 +327,7 @@ func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
 func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err() // on error key should be != nil
 	default:
 	}
 
@@ -334,7 +341,7 @@ func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
+		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 

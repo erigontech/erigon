@@ -1,11 +1,11 @@
-package downloader
+package etl
 
 import "bytes"
 
 type HeapElem struct {
-	key     []byte
-	timeIdx int
-	value   []byte
+	Key     []byte
+	TimeIdx int
+	Value   []byte
 }
 
 type Heap []HeapElem
@@ -15,10 +15,10 @@ func (h Heap) Len() int {
 }
 
 func (h Heap) Less(i, j int) bool {
-	if c := bytes.Compare(h[i].key, h[j].key); c != 0 {
+	if c := bytes.Compare(h[i].Key, h[j].Key); c != 0 {
 		return c < 0
 	}
-	return h[i].timeIdx < h[j].timeIdx
+	return h[i].TimeIdx < h[j].TimeIdx
 }
 
 func (h Heap) Swap(i, j int) {
