@@ -21,6 +21,7 @@ package secp256k1
 #endif
 #define ECMULT_WINDOW_SIZE 15
 #define ECMULT_GEN_PREC_BITS 4
+#define USE_ENDOMORPHISM
 #define NDEBUG
 #include "./libsecp256k1/src/secp256k1.c"
 #include "./libsecp256k1/src/modules/recovery/main_impl.h"
