@@ -105,22 +105,26 @@ func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, 
 	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, quitCh)
 }
 
+type TransformArgs struct {
+	ExtractStartKey []byte
+	Quit            chan struct{}
+}
+
 func Transform(
 	db ethdb.Database,
 	fromBucket []byte,
 	toBucket []byte,
 	datadir string,
-	startkey []byte,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
-	quit chan struct{},
+	args TransformArgs,
 ) error {
 	collector := NewCollector(datadir)
-	if err := extractBucketIntoFiles(db, fromBucket, startkey, collector, extractFunc, quit); err != nil {
+	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, collector, extractFunc, args.Quit); err != nil {
 		disposeProviders(collector.dataProviders)
 		return err
 	}
-	return collector.Load(db, toBucket, loadFunc, quit)
+	return collector.Load(db, toBucket, loadFunc, args.Quit)
 }
 
 func extractBucketIntoFiles(

@@ -115,10 +115,9 @@ func TestTransformRAMOnly(t *testing.T) {
 		sourceBucket,
 		destBucket,
 		"", // temp dir
-		nil,
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		nil,
+		TransformArgs{},
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
@@ -133,10 +132,9 @@ func TestEmptySourceBucket(t *testing.T) {
 		sourceBucket,
 		destBucket,
 		"", // temp dir
-		nil,
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		nil,
+		TransformArgs{},
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
@@ -153,10 +151,9 @@ func TestTransformStartkey(t *testing.T) {
 		sourceBucket,
 		destBucket,
 		"", // temp dir
-		[]byte(fmt.Sprintf("%10d-key-%010d", 5, 5)),
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		nil,
+		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
@@ -178,10 +175,9 @@ func TestTransformThroughFiles(t *testing.T) {
 		sourceBucket,
 		destBucket,
 		"", // temp dir
-		nil,
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		nil,
+		TransformArgs{},
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
@@ -198,10 +194,9 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 		sourceBucket,
 		destBucket,
 		"", // temp dir
-		nil,
 		testExtractDoubleToMapFunc,
 		testLoadFromMapFunc,
-		nil,
+		TransformArgs{},
 	)
 	assert.Nil(t, err)
 	compareBucketsDouble(t, db, sourceBucket, destBucket)
@@ -218,10 +213,9 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 		sourceBucket,
 		destBucket,
 		"", // temp dir
-		nil,
 		testExtractToMapFunc,
 		testLoadFromMapDoubleFunc,
-		nil,
+		TransformArgs{},
 	)
 	assert.Nil(t, err)
 	compareBucketsDouble(t, db, sourceBucket, destBucket)
