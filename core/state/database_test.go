@@ -1239,7 +1239,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+	if _, err := tds.ResolveStateTrie(false /* extractWitness */, false /* trace */); err != nil {
 		assert.NoError(t, err)
 	}
 
