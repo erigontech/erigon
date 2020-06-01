@@ -140,7 +140,7 @@ func TestEmptySourceBucket(t *testing.T) {
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
 }
 
-func TestTransformStartkey(t *testing.T) {
+func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
 	sourceBucket := []byte("source")
@@ -154,6 +154,25 @@ func TestTransformStartkey(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
+	)
+	assert.Nil(t, err)
+	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
+}
+
+func TestTransformLoadStartKey(t *testing.T) {
+	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
+	db := ethdb.NewMemDatabase()
+	sourceBucket := []byte("source")
+	destBucket := []byte("dest")
+	generateTestData(t, db, sourceBucket, 10)
+	err := Transform(
+		db,
+		sourceBucket,
+		destBucket,
+		"", // temp dir
+		testExtractToMapFunc,
+		testLoadFromMapFunc,
+		TransformArgs{LoadStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
