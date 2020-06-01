@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
@@ -47,6 +49,32 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 
 	_, _, err := readElementFromDisk(decoder)
 	assert.Equal(t, io.EOF, err)
+}
+
+func TestNextKey(t *testing.T) {
+	for _, tc := range []string{
+		"00000001->00000002",
+		"000000FF->00000100",
+		"FEFFFFFF->FF000000",
+	} {
+		parts := strings.Split(tc, "->")
+		input := common.Hex2Bytes(parts[0])
+		expectedOutput := common.Hex2Bytes(parts[1])
+		actualOutput, err := NextKey(input)
+		assert.NoError(t, err)
+		assert.Equal(t, expectedOutput, actualOutput)
+	}
+}
+
+func TestNextKeyErr(t *testing.T) {
+	for _, tc := range []string{
+		"",
+		"FFFFFF",
+	} {
+		input := common.Hex2Bytes(tc)
+		_, err := NextKey(input)
+		assert.Error(t, err)
+	}
 }
 
 func TestFileDataProviders(t *testing.T) {
@@ -121,6 +149,73 @@ func TestTransformRAMOnly(t *testing.T) {
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
+}
+
+func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
+	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
+	db := ethdb.NewMemDatabase()
+	sourceBucket := []byte("source")
+	destBucket := []byte("dest")
+	generateTestData(t, db, sourceBucket, 20)
+
+	numberOfCalls := 0
+	finalized := false
+
+	err := Transform(
+		db,
+		sourceBucket,
+		destBucket,
+		"", // temp dir
+		testExtractToMapFunc,
+		testLoadFromMapFunc,
+		TransformArgs{
+			OnLoadCommit: func(_ []byte, isDone bool) {
+				numberOfCalls++
+				if isDone {
+					finalized = true
+				}
+			},
+			loadBatchSize: 1,
+		},
+	)
+	assert.Nil(t, err)
+	compareBuckets(t, db, sourceBucket, destBucket, nil)
+
+	assert.Equal(t, 21, numberOfCalls)
+	assert.True(t, finalized)
+}
+
+func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
+	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
+	db := ethdb.NewMemDatabase()
+	sourceBucket := []byte("source")
+	destBucket := []byte("dest")
+	generateTestData(t, db, sourceBucket, 20)
+
+	numberOfCalls := 0
+	finalized := false
+
+	err := Transform(
+		db,
+		sourceBucket,
+		destBucket,
+		"", // temp dir
+		testExtractToMapFunc,
+		testLoadFromMapFunc,
+		TransformArgs{
+			OnLoadCommit: func(_ []byte, isDone bool) {
+				numberOfCalls++
+				if isDone {
+					finalized = true
+				}
+			},
+		},
+	)
+	assert.Nil(t, err)
+	compareBuckets(t, db, sourceBucket, destBucket, nil)
+
+	assert.Equal(t, 1, numberOfCalls)
+	assert.True(t, finalized)
 }
 
 func TestEmptySourceBucket(t *testing.T) {

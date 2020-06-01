@@ -105,10 +105,38 @@ func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, 
 	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
 }
 
+// NextKey generates the possible next key w/o changing the key length.
+// for [0x01, 0x01, 0x01] it will generate [0x01, 0x01, 0x02], etc
+func NextKey(key []byte) ([]byte, error) {
+	if len(key) == 0 {
+		return key, fmt.Errorf("could not apply NextKey for the empty key")
+	}
+	nextKey := common.CopyBytes(key)
+	for i := len(key) - 1; i >= 0; i-- {
+		b := nextKey[i]
+		if b < 0xFF {
+			nextKey[i] = b + 1
+			return nextKey, nil
+		}
+		if b == 0xFF {
+			nextKey[i] = 0
+		}
+	}
+	return key, fmt.Errorf("overflow while applying NextKey")
+}
+
+// LoadCommitHandler is a callback called each time a new batch is being
+// loaded from files into a DB
+// * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
+// * `isDone`: true, if everything is processed
+type LoadCommitHandler func(key []byte, isDone bool)
+
 type TransformArgs struct {
 	ExtractStartKey []byte
 	LoadStartKey    []byte
 	Quit            chan struct{}
+	OnLoadCommit    LoadCommitHandler
+	loadBatchSize   int // used in testing
 }
 
 func Transform(
@@ -177,9 +205,12 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			return err
 		}
 		batchSize := batch.BatchSize()
-		if batchSize > batch.IdealBatchSize() {
+		if batchSize > batch.IdealBatchSize() || args.loadBatchSize > 0 && batchSize > args.loadBatchSize {
 			if _, err := batch.Commit(); err != nil {
 				return err
+			}
+			if args.OnLoadCommit != nil {
+				args.OnLoadCommit(k, false)
 			}
 			var currentKeyStr string
 			if len(k) < 4 {
@@ -217,6 +248,9 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		}
 	}
 	_, err := batch.Commit()
+	if args.OnLoadCommit != nil {
+		args.OnLoadCommit([]byte{}, true)
+	}
 	return err
 }
 
