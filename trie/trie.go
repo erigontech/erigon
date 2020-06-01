@@ -784,7 +784,7 @@ func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
 		root := subTries.roots[i]
 		hash := subTries.Hashes[i]
 		if root == nil {
-			return fmt.Errorf("root==nil for hook %x, hash %x\n", hookNibbles, hash)
+			return fmt.Errorf("root==nil for hook %x", hookNibbles)
 		}
 		if err := t.hook(hookNibbles, root, hash[:]); err != nil {
 			return fmt.Errorf("hook %x: %v", hookNibbles, err)

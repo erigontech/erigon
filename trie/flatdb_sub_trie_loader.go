@@ -56,8 +56,8 @@ type FlatDbSubTrieLoader struct {
 	getWitnessSize func(prefix []byte) uint64
 
 	// Storage item buffer
-	storageKey      []byte
-	storageValue    []byte
+	storageKey   []byte
+	storageValue []byte
 
 	// Acount item buffer
 	accountKey   []byte
