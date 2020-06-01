@@ -192,8 +192,7 @@ type Receiver struct {
 func (r *Receiver) Receive(
 	itemType trie.StreamItem,
 	accountKey []byte,
-	storageKeyPart1 []byte,
-	storageKeyPart2 []byte,
+	storageKey []byte,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
@@ -206,33 +205,26 @@ func (r *Receiver) Receive(
 		var c int
 		switch itemType {
 		case trie.StorageStreamItem, trie.SHashStreamItem:
-			if len(k) > common.HashLength {
-				c = bytes.Compare(k[:common.HashLength], storageKeyPart1)
-				if c == 0 {
-					c = bytes.Compare(k[common.HashLength+common.IncarnationLength:], storageKeyPart2)
-				}
-			} else {
-				c = bytes.Compare(k, storageKeyPart1)
-			}
+			c = bytes.Compare(k, storageKey)
 		case trie.AccountStreamItem, trie.AHashStreamItem:
 			c = bytes.Compare(k, accountKey)
 		case trie.CutoffStreamItem:
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessLen)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
 			if c <= 0 && len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k[:32], k[40:], nil, v, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if c <= 0 && v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, nil, v, nil, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
 			}
@@ -243,7 +235,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessLen)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessLen)
 }
 
 func (r *Receiver) Result() trie.SubTries {

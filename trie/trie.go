@@ -418,6 +418,7 @@ func (t *Trie) FindSubTriesToLoad(rl RetainDecider) (prefixes [][]byte, fixedbit
 }
 
 var bytes8 [8]byte
+var bytes16 [16]byte
 
 func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
 	switch n := nd.(type) {
@@ -765,6 +766,9 @@ func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
 	for i, hookNibbles := range hooks {
 		root := subTries.roots[i]
 		hash := subTries.Hashes[i]
+		if root == nil {
+			return fmt.Errorf("root==nil for hook %x, hash %x\n", hookNibbles, hash)
+		}
 		if err := t.hook(hookNibbles, root, hash[:]); err != nil {
 			return fmt.Errorf("hook %x: %v", hookNibbles, err)
 		}

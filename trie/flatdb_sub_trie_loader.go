@@ -25,8 +25,7 @@ type StreamReceiver interface {
 	Receive(
 		itemType StreamItem,
 		accountKey []byte,
-		storageKeyPart1 []byte,
-		storageKeyPart2 []byte,
+		storageKey []byte,
 		accountValue *accounts.Account,
 		storageValue []byte,
 		hash []byte,
@@ -57,8 +56,7 @@ type FlatDbSubTrieLoader struct {
 	getWitnessSize func(prefix []byte) uint64
 
 	// Storage item buffer
-	storageKeyPart1 []byte
-	storageKeyPart2 []byte
+	storageKey      []byte
 	storageValue    []byte
 
 	// Acount item buffer
@@ -137,11 +135,7 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	masks := make([]byte, len(fixedbits))
 	cutoffs := make([]int, len(fixedbits))
 	for i, bits := range fixedbits {
-		if bits >= 256 /* addrHash */ +64 /* incarnation */ {
-			cutoffs[i] = bits/4 - 16 // Remove incarnation
-		} else {
-			cutoffs[i] = bits / 4
-		}
+		cutoffs[i] = bits / 4
 		fixedbytes[i], masks[i] = ethdb.Bytesmask(bits)
 	}
 	fstl.fixedbytes = fixedbytes
@@ -279,17 +273,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		fstl.itemPresent = true
 		if len(fstl.k) > common.HashLength {
 			fstl.itemType = StorageStreamItem
-			if len(fstl.k) >= common.HashLength {
-				fstl.storageKeyPart1 = fstl.k[:common.HashLength]
-				if len(fstl.k) >= common.HashLength+common.IncarnationLength {
-					fstl.storageKeyPart2 = fstl.k[common.HashLength+common.IncarnationLength:]
-				} else {
-					fstl.storageKeyPart2 = nil
-				}
-			} else {
-				fstl.storageKeyPart1 = fstl.k
-				fstl.storageKeyPart2 = nil
-			}
+			fstl.storageKey = fstl.k
 			fstl.hashValue = nil
 			fstl.storageValue = fstl.v
 			if fstl.k, fstl.v, err = c.Next(); err != nil {
@@ -301,8 +285,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		} else {
 			fstl.itemType = AccountStreamItem
 			fstl.accountKey = fstl.k
-			fstl.storageKeyPart1 = nil
-			fstl.storageKeyPart2 = nil
+			fstl.storageKey = nil
 			fstl.hashValue = nil
 			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
 				return fmt.Errorf("fail DecodeForStorage: %w", err)
@@ -330,7 +313,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 
 	// ih part
 	fstl.minKeyAsNibbles.Reset()
-	keyToNibblesWithoutInc(minKey, &fstl.minKeyAsNibbles)
+	keyToNibbles(minKey, &fstl.minKeyAsNibbles)
 
 	if fstl.minKeyAsNibbles.Len() < cutoff {
 		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
@@ -371,25 +354,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	fstl.itemPresent = true
 	if len(fstl.ihK) > common.HashLength {
 		fstl.itemType = SHashStreamItem
-		if len(fstl.ihK) >= common.HashLength {
-			fstl.storageKeyPart1 = fstl.ihK[:common.HashLength]
-			if len(fstl.ihK) >= common.HashLength+common.IncarnationLength {
-				fstl.storageKeyPart2 = fstl.ihK[common.HashLength+common.IncarnationLength:]
-			} else {
-				fstl.storageKeyPart2 = nil
-			}
-		} else {
-			fstl.storageKeyPart1 = fstl.ihK
-			fstl.storageKeyPart2 = nil
-		}
+		fstl.storageKey = fstl.ihK
 		fstl.hashValue = fstl.ihV
 		fstl.storageValue = nil
 		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	} else {
 		fstl.itemType = AHashStreamItem
 		fstl.accountKey = fstl.ihK
-		fstl.storageKeyPart1 = nil
-		fstl.storageKeyPart2 = nil
+		fstl.storageKey = nil
 		fstl.hashValue = fstl.ihV
 		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	}
@@ -469,8 +441,7 @@ func (dr *DefaultReceiver) Reset(rl RetainDecider, hc HashCollector, trace bool)
 
 func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	accountKey []byte,
-	storageKeyPart1 []byte,
-	storageKeyPart2 []byte,
+	storageKey []byte,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
@@ -479,7 +450,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 ) error {
 	switch itemType {
 	case StorageStreamItem:
-		dr.advanceKeysStorage(storageKeyPart1, storageKeyPart2, true /* terminator */)
+		dr.advanceKeysStorage(storageKey, true /* terminator */)
 		if dr.currStorage.Len() > 0 {
 			if err := dr.genStructStorage(); err != nil {
 				return err
@@ -487,7 +458,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 		}
 		dr.saveValueStorage(false, storageValue, hash, witnessSize)
 	case SHashStreamItem:
-		dr.advanceKeysStorage(storageKeyPart1, storageKeyPart2, false /* terminator */)
+		dr.advanceKeysStorage(storageKey, false /* terminator */)
 		if dr.currStorage.Len() > 0 {
 			if err := dr.genStructStorage(); err != nil {
 				return err
@@ -497,7 +468,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	case AccountStreamItem:
 		dr.advanceKeysAccount(accountKey, true /* terminator */)
 		if dr.curr.Len() > 0 && !dr.wasIH {
-			dr.cutoffKeysStorage(2 * common.HashLength)
+			dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			if dr.currStorage.Len() > 0 {
 				if err := dr.genStructStorage(); err != nil {
 					return err
@@ -528,7 +499,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	case AHashStreamItem:
 		dr.advanceKeysAccount(accountKey, false /* terminator */)
 		if dr.curr.Len() > 0 && !dr.wasIH {
-			dr.cutoffKeysStorage(2 * common.HashLength)
+			dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			if dr.currStorage.Len() > 0 {
 				if err := dr.genStructStorage(); err != nil {
 					return err
@@ -557,7 +528,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 			return err
 		}
 	case CutoffStreamItem:
-		if cutoff >= 2*common.HashLength {
+		if cutoff >= 2*(common.HashLength+common.IncarnationLength) {
 			dr.cutoffKeysStorage(cutoff)
 			if dr.currStorage.Len() > 0 {
 				if err := dr.genStructStorage(); err != nil {
@@ -583,7 +554,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 		} else {
 			dr.cutoffKeysAccount(cutoff)
 			if dr.curr.Len() > 0 && !dr.wasIH {
-				dr.cutoffKeysStorage(2 * common.HashLength)
+				dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 				if dr.currStorage.Len() > 0 {
 					if err := dr.genStructStorage(); err != nil {
 						return err
@@ -667,7 +638,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 				}
 			}
 			if fstl.itemPresent {
-				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKeyPart1, fstl.storageKeyPart2, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessSize); err != nil {
+				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff, fstl.witnessSize); err != nil {
 					return err
 				}
 				fstl.itemPresent = false
@@ -709,34 +680,12 @@ func keyToNibbles(k []byte, w io.ByteWriter) {
 	}
 }
 
-func keyToNibblesWithoutInc(k []byte, w io.ByteWriter) {
-	// Transform k to nibbles, but skip the incarnation part in the middle
-	for i, b := range k {
-		if i == common.HashLength {
-			break
-		}
-		//nolint:errcheck
-		w.WriteByte(b / 16)
-		//nolint:errcheck
-		w.WriteByte(b % 16)
-	}
-	if len(k) > common.HashLength+common.IncarnationLength {
-		for _, b := range k[common.HashLength+common.IncarnationLength:] {
-			//nolint:errcheck
-			w.WriteByte(b / 16)
-			//nolint:errcheck
-			w.WriteByte(b % 16)
-		}
-	}
-}
-
-func (dr *DefaultReceiver) advanceKeysStorage(kPart1, kPart2 []byte, terminator bool) {
+func (dr *DefaultReceiver) advanceKeysStorage(k []byte, terminator bool) {
 	dr.currStorage.Reset()
 	dr.currStorage.Write(dr.succStorage.Bytes())
 	dr.succStorage.Reset()
 	// Transform k to nibbles, but skip the incarnation part in the middle
-	keyToNibbles(kPart1, &dr.succStorage)
-	keyToNibbles(kPart2, &dr.succStorage)
+	keyToNibbles(k, &dr.succStorage)
 
 	if terminator {
 		dr.succStorage.WriteByte(16)

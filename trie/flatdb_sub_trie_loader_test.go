@@ -366,10 +366,15 @@ func TestApiDetails(t *testing.T) {
 	{ // storage loader
 		loader := NewSubTrieLoader(0)
 		rl := NewRetainList(0)
-		rl.AddHex(append(hexf("000101%0122x", 0), hexf("%0128x", 0)...))
-		rl.AddHex(append(hexf("000201%0122x", 0), hexf("%0128x", 0)...))
-		rl.AddHex(append(hexf("000202%0122x", 0), hexf("%0128x", 0)...))
-		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
+		binary.BigEndian.PutUint64(bytes8[:], ^uint64(2))
+		for i, b := range bytes8[:] {
+			bytes16[i*2] = b / 16
+			bytes16[i*2+1] = b % 16
+		}
+		rl.AddHex(append(append(hexf("000101%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
+		rl.AddHex(append(append(hexf("000201%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
+		rl.AddHex(append(append(hexf("000202%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
+		rl.AddHex(append(append(hexf("0f0f0f%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
 		rl.Rewind()
 		subTries, err := loader.LoadSubTries(db, 0, rl, nil /* HashCollector */, dbPrefixes, fixedbits, false)

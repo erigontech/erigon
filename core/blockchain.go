@@ -1770,11 +1770,11 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				return k, err
 			}
 
-			err = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
-			if err != nil {
-				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
-			}
+			//err = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
+			//if err != nil {
+			//	bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
+			//	return k, err
+			//}
 
 			reuseTrieDbState = false
 			err = bc.processor.PostProcess(block, bc.trieDbState, receipts)
