@@ -190,6 +190,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		} else {
 			cmp = 0
 		}
+		if fstl.trace {
+			fmt.Printf("minKey %x, dbPrefix %x, cmp %d, fstl.rangeIdx %d, %x\n", minKey, dbPrefix, cmp, fstl.rangeIdx, fstl.dbPrefixes)
+		}
 		if cmp == 0 && fstl.itemPresent {
 			return nil
 		}
@@ -237,6 +240,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 				fstl.itemPresent = true
 				fstl.itemType = CutoffStreamItem
 				fstl.streamCutoff = cutoff
+				if fstl.trace {
+					fmt.Printf("Inserting cutoff %d\n", cutoff)
+				}
 			}
 			if fstl.rangeIdx == len(fstl.dbPrefixes) {
 				return nil
@@ -528,6 +534,9 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 			return err
 		}
 	case CutoffStreamItem:
+		if dr.trace {
+			fmt.Printf("storage cuttoff %d\n", cutoff)
+		}
 		if cutoff >= 2*(common.HashLength+common.IncarnationLength) {
 			dr.cutoffKeysStorage(cutoff)
 			if dr.currStorage.Len() > 0 {

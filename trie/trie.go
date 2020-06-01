@@ -414,21 +414,22 @@ func min(a, b int) int {
 // It also create list of `hooks`, the paths in the trie (in nibbles) where the loaded
 // sub-tries need to be inserted.
 func (t *Trie) FindSubTriesToLoad(rl RetainDecider) (prefixes [][]byte, fixedbits []int, hooks [][]byte) {
-	return findSubTriesToLoad(t.root, nil, rl, nil, 0, nil, nil, nil)
+	return findSubTriesToLoad(t.root, nil, nil, rl, nil, 0, nil, nil, nil)
 }
 
 var bytes8 [8]byte
 var bytes16 [16]byte
 
-func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
+func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
 	switch n := nd.(type) {
 	case *shortNode:
 		nKey := n.Key
 		if nKey[len(nKey)-1] == 16 {
 			nKey = nKey[:len(nKey)-1]
 		}
-		newNibblePath := append(nibblePath, nKey...)
-		if !rl.Retain(newNibblePath) {
+		nibblePath = append(nibblePath, nKey...)
+		hook = append(hook, nKey...)
+		if !rl.Retain(nibblePath) {
 			return prefixes, fixedbits, hooks
 		}
 		for _, b := range nKey {
@@ -440,13 +441,14 @@ func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix [
 			}
 			bits += 4
 		}
-		return findSubTriesToLoad(n.Val, newNibblePath, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
+		return findSubTriesToLoad(n.Val, nibblePath, hook, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
 		newNibblePath := append(nibblePath, i1)
+		newHook := append(hook, i1)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
@@ -456,9 +458,10 @@ func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix [
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
 				newDbPrefix[len(newDbPrefix)-1] |= (i1 & 0xf)
 			}
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
 		newNibblePath = append(nibblePath, i2)
+		newHook = append(hook, i2)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
@@ -468,7 +471,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix [
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
 				newDbPrefix[len(newDbPrefix)-1] |= (i2 & 0xf)
 			}
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *fullNode:
@@ -476,9 +479,11 @@ func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix [
 		newFixedBits = fixedbits
 		newHooks = hooks
 		var newNibblePath []byte
+		var newHook []byte
 		for i, child := range n.Children {
 			if child != nil {
 				newNibblePath = append(nibblePath, byte(i))
+				newHook = append(hook, byte(i))
 				if rl.Retain(newNibblePath) {
 					var newDbPrefix []byte
 					if bits%8 == 0 {
@@ -488,7 +493,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix [
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
 						newDbPrefix[len(newDbPrefix)-1] |= (byte(i) & 0xf)
 					}
-					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
+					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 				}
 			}
 		}
@@ -499,11 +504,23 @@ func findSubTriesToLoad(nd node, nibblePath []byte, rl RetainDecider, dbPrefix [
 		}
 		binary.BigEndian.PutUint64(bytes8[:], ^n.Incarnation)
 		dbPrefix = append(dbPrefix, bytes8[:]...)
-		return findSubTriesToLoad(n.storage, nibblePath, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
+		// Add decompressed incarnation to the nibblePath
+		for i, b := range bytes8[:] {
+			bytes16[i*2] = b / 16
+			bytes16[i*2+1] = b % 16
+		}
+		nibblePath = append(nibblePath, bytes16[:]...)
+		newPrefixes = prefixes
+		newFixedBits = fixedbits
+		newHooks = hooks
+		if rl.Retain(nibblePath) {
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.storage, nibblePath, hook, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
+		}
+		return newPrefixes, newFixedBits, newHooks
 	case hashNode:
 		newPrefixes = append(prefixes, common.CopyBytes(dbPrefix))
 		newFixedBits = append(fixedbits, bits)
-		newHooks = append(hooks, common.CopyBytes(nibblePath))
+		newHooks = append(hooks, common.CopyBytes(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks

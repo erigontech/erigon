@@ -134,6 +134,7 @@ type Buffer struct {
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
 	accountReads map[common.Hash]struct{}
+	accountReadsIncarnation map[common.Hash]uint64
 	deleted      map[common.Hash]struct{}
 	created      map[common.Hash]struct{}
 }
@@ -148,6 +149,7 @@ func (b *Buffer) initialise() {
 	b.storageReads = make(map[common.StorageKey]struct{})
 	b.accountUpdates = make(map[common.Hash]*accounts.Account)
 	b.accountReads = make(map[common.Hash]struct{})
+	b.accountReadsIncarnation = make(map[common.Hash]uint64)
 	b.deleted = make(map[common.Hash]struct{})
 	b.created = make(map[common.Hash]struct{})
 }
@@ -207,6 +209,9 @@ func (b *Buffer) merge(other *Buffer) {
 	}
 	for addrHash := range other.accountReads {
 		b.accountReads[addrHash] = struct{}{}
+	}
+	for addrHash, incarnation := range other.accountReadsIncarnation {
+		b.accountReadsIncarnation[addrHash] = incarnation
 	}
 }
 
@@ -539,14 +544,25 @@ func (tds *TrieDbState) resolveCodeTouches(
 	return nil
 }
 
+var bytes8 [8]byte
+
 func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, loadFunc trie.LoadFunc) error {
 	// Build the retain list
 	rl := trie.NewRetainList(0)
 	for _, addrHash := range accountTouches {
-		var nibbles = make([]byte, 2*len(addrHash))
+		var incarnation uint64
+		if inc, ok := tds.aggregateBuffer.accountReadsIncarnation[addrHash]; ok {
+			incarnation = inc
+		}
+		var nibbles = make([]byte, 2*(common.HashLength+common.IncarnationLength))
 		for i, b := range addrHash[:] {
 			nibbles[i*2] = b / 16
 			nibbles[i*2+1] = b % 16
+		}
+		binary.BigEndian.PutUint64(bytes8[:], ^incarnation)
+		for i, b := range bytes8[:] {
+			nibbles[2*common.HashLength+i*2] = b / 16
+			nibbles[2*common.HashLength+i*2+1] = b % 16
 		}
 		rl.AddHex(nibbles)
 	}
@@ -853,6 +869,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
 				return err
 			}
+			b.accountReadsIncarnation[addrHash] = acc.Incarnation
 		} else {
 			b.accountUpdates[addrHash] = nil
 			if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
@@ -1037,11 +1054,18 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	if err != nil {
 		return nil, err
 	}
+	var account *accounts.Account
+	account, err = tds.readAccountDataByHash(addrHash)
+	if err != nil {
+		return nil, err
+	}
 	if tds.resolveReads {
 		tds.currentBuffer.accountReads[addrHash] = struct{}{}
+		if account != nil {
+			tds.currentBuffer.accountReadsIncarnation[addrHash] = account.Incarnation
+		}
 	}
-
-	return tds.readAccountDataByHash(addrHash)
+	return account, nil
 }
 
 func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
@@ -1284,6 +1308,9 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
+	if original != nil {
+		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
+	}
 	return nil
 }
 
@@ -1294,6 +1321,9 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
+	if original != nil {
+		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
+	}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	delete(tsw.tds.currentBuffer.codeUpdates, addrHash)
