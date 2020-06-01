@@ -93,7 +93,7 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, v)
 }
 
-func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, quitCh chan struct{}) error {
+func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		disposeProviders(c.dataProviders)
 	}()
@@ -102,7 +102,41 @@ func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, 
 			return err
 		}
 	}
-	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, quitCh)
+	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
+}
+
+// NextKey generates the possible next key w/o changing the key length.
+// for [0x01, 0x01, 0x01] it will generate [0x01, 0x01, 0x02], etc
+func NextKey(key []byte) ([]byte, error) {
+	if len(key) == 0 {
+		return key, fmt.Errorf("could not apply NextKey for the empty key")
+	}
+	nextKey := common.CopyBytes(key)
+	for i := len(key) - 1; i >= 0; i-- {
+		b := nextKey[i]
+		if b < 0xFF {
+			nextKey[i] = b + 1
+			return nextKey, nil
+		}
+		if b == 0xFF {
+			nextKey[i] = 0
+		}
+	}
+	return key, fmt.Errorf("overflow while applying NextKey")
+}
+
+// LoadCommitHandler is a callback called each time a new batch is being
+// loaded from files into a DB
+// * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
+// * `isDone`: true, if everything is processed
+type LoadCommitHandler func(key []byte, isDone bool)
+
+type TransformArgs struct {
+	ExtractStartKey []byte
+	LoadStartKey    []byte
+	Quit            chan struct{}
+	OnLoadCommit    LoadCommitHandler
+	loadBatchSize   int // used in testing
 }
 
 func Transform(
@@ -110,17 +144,16 @@ func Transform(
 	fromBucket []byte,
 	toBucket []byte,
 	datadir string,
-	startkey []byte,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
-	quit chan struct{},
+	args TransformArgs,
 ) error {
 	collector := NewCollector(datadir)
-	if err := extractBucketIntoFiles(db, fromBucket, startkey, collector, extractFunc, quit); err != nil {
+	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, collector, extractFunc, args.Quit); err != nil {
 		disposeProviders(collector.dataProviders)
 		return err
 	}
-	return collector.Load(db, toBucket, loadFunc, quit)
+	return collector.Load(db, toBucket, loadFunc, args)
 }
 
 func extractBucketIntoFiles(
@@ -145,7 +178,7 @@ func extractBucketIntoFiles(
 	return collector.flushBuffer(nil, true)
 }
 
-func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc, quit chan struct{}) error {
+func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
@@ -161,16 +194,23 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		}
 	}
 	batch := db.NewBatch()
-	state := &bucketState{batch, bucket, quit}
+	state := &bucketState{batch, bucket, args.Quit}
 
 	loadNextFunc := func(k, v []byte) error {
+		// we ignore everything that is before this key
+		if bytes.Compare(k, args.LoadStartKey) < 0 {
+			return nil
+		}
 		if err := batch.Put(bucket, k, v); err != nil {
 			return err
 		}
 		batchSize := batch.BatchSize()
-		if batchSize > batch.IdealBatchSize() {
+		if batchSize > batch.IdealBatchSize() || args.loadBatchSize > 0 && batchSize > args.loadBatchSize {
 			if _, err := batch.Commit(); err != nil {
 				return err
+			}
+			if args.OnLoadCommit != nil {
+				args.OnLoadCommit(k, false)
 			}
 			var currentKeyStr string
 			if len(k) < 4 {
@@ -190,7 +230,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	}
 
 	for h.Len() > 0 {
-		if err := common.Stopped(quit); err != nil {
+		if err := common.Stopped(args.Quit); err != nil {
 			return err
 		}
 
@@ -208,6 +248,9 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		}
 	}
 	_, err := batch.Commit()
+	if args.OnLoadCommit != nil {
+		args.OnLoadCommit([]byte{}, true)
+	}
 	return err
 }
 

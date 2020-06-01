@@ -4,8 +4,8 @@
  * file COPYING or http://www.opensource.org/licenses/mit-license.php.*
  **********************************************************************/
 
-#ifndef _SECP256K1_GROUP_
-#define _SECP256K1_GROUP_
+#ifndef SECP256K1_GROUP_H
+#define SECP256K1_GROUP_H
 
 #include "num.h"
 #include "field.h"
@@ -65,12 +65,7 @@ static void secp256k1_ge_neg(secp256k1_ge *r, const secp256k1_ge *a);
 static void secp256k1_ge_set_gej(secp256k1_ge *r, secp256k1_gej *a);
 
 /** Set a batch of group elements equal to the inputs given in jacobian coordinates */
-static void secp256k1_ge_set_all_gej_var(secp256k1_ge *r, const secp256k1_gej *a, size_t len, const secp256k1_callback *cb);
-
-/** Set a batch of group elements equal to the inputs given in jacobian
- *  coordinates (with known z-ratios). zr must contain the known z-ratios such
- *  that mul(a[i].z, zr[i+1]) == a[i+1].z. zr[0] is ignored. */
-static void secp256k1_ge_set_table_gej_var(secp256k1_ge *r, const secp256k1_gej *a, const secp256k1_fe *zr, size_t len);
+static void secp256k1_ge_set_all_gej_var(secp256k1_ge *r, const secp256k1_gej *a, size_t len);
 
 /** Bring a batch inputs given in jacobian coordinates (with known z-ratios) to
  *  the same global z "denominator". zr must contain the known z-ratios such
@@ -78,6 +73,9 @@ static void secp256k1_ge_set_table_gej_var(secp256k1_ge *r, const secp256k1_gej 
  *  coordinates of the result are stored in r, the common z coordinate is
  *  stored in globalz. */
 static void secp256k1_ge_globalz_set_table_gej(size_t len, secp256k1_ge *r, secp256k1_fe *globalz, const secp256k1_gej *a, const secp256k1_fe *zr);
+
+/** Set a group element (affine) equal to the point at infinity. */
+static void secp256k1_ge_set_infinity(secp256k1_ge *r);
 
 /** Set a group element (jacobian) equal to the point at infinity. */
 static void secp256k1_gej_set_infinity(secp256k1_gej *r);
@@ -97,14 +95,13 @@ static int secp256k1_gej_is_infinity(const secp256k1_gej *a);
 /** Check whether a group element's y coordinate is a quadratic residue. */
 static int secp256k1_gej_has_quad_y_var(const secp256k1_gej *a);
 
-/** Set r equal to the double of a. If rzr is not-NULL, r->z = a->z * *rzr (where infinity means an implicit z = 0).
- * a may not be zero. Constant time. */
-static void secp256k1_gej_double_nonzero(secp256k1_gej *r, const secp256k1_gej *a, secp256k1_fe *rzr);
+/** Set r equal to the double of a, a cannot be infinity. Constant time. */
+static void secp256k1_gej_double_nonzero(secp256k1_gej *r, const secp256k1_gej *a);
 
-/** Set r equal to the double of a. If rzr is not-NULL, r->z = a->z * *rzr (where infinity means an implicit z = 0). */
+/** Set r equal to the double of a. If rzr is not-NULL this sets *rzr such that r->z == a->z * *rzr (where infinity means an implicit z = 0). */
 static void secp256k1_gej_double_var(secp256k1_gej *r, const secp256k1_gej *a, secp256k1_fe *rzr);
 
-/** Set r equal to the sum of a and b. If rzr is non-NULL, r->z = a->z * *rzr (a cannot be infinity in that case). */
+/** Set r equal to the sum of a and b. If rzr is non-NULL this sets *rzr such that r->z == a->z * *rzr (a cannot be infinity in that case). */
 static void secp256k1_gej_add_var(secp256k1_gej *r, const secp256k1_gej *a, const secp256k1_gej *b, secp256k1_fe *rzr);
 
 /** Set r equal to the sum of a and b (with b given in affine coordinates, and not infinity). */
@@ -112,7 +109,7 @@ static void secp256k1_gej_add_ge(secp256k1_gej *r, const secp256k1_gej *a, const
 
 /** Set r equal to the sum of a and b (with b given in affine coordinates). This is more efficient
     than secp256k1_gej_add_var. It is identical to secp256k1_gej_add_ge but without constant-time
-    guarantee, and b is allowed to be infinity. If rzr is non-NULL, r->z = a->z * *rzr (a cannot be infinity in that case). */
+    guarantee, and b is allowed to be infinity. If rzr is non-NULL this sets *rzr such that r->z == a->z * *rzr (a cannot be infinity in that case). */
 static void secp256k1_gej_add_ge_var(secp256k1_gej *r, const secp256k1_gej *a, const secp256k1_ge *b, secp256k1_fe *rzr);
 
 /** Set r equal to the sum of a and b (with the inverse of b's Z coordinate passed as bzinv). */
@@ -141,4 +138,4 @@ static void secp256k1_ge_storage_cmov(secp256k1_ge_storage *r, const secp256k1_g
 /** Rescale a jacobian point by b which must be non-zero. Constant-time. */
 static void secp256k1_gej_rescale(secp256k1_gej *r, const secp256k1_fe *b);
 
-#endif
+#endif /* SECP256K1_GROUP_H */
