@@ -9,10 +9,19 @@ package secp256k1
 #cgo CFLAGS: -I./libsecp256k1
 #cgo CFLAGS: -I./libsecp256k1/src/
 #define USE_NUM_NONE
-#define USE_FIELD_10X26
 #define USE_FIELD_INV_BUILTIN
-#define USE_SCALAR_8X32
 #define USE_SCALAR_INV_BUILTIN
+#if defined(__x86_64__)
+#define USE_FIELD_5X52
+#define USE_SCALAR_4X64
+#define HAVE___INT128
+#else
+#define USE_FIELD_10X26
+#define USE_SCALAR_8X32
+#endif
+#define ECMULT_WINDOW_SIZE 15
+#define ECMULT_GEN_PREC_BITS 4
+#define USE_ENDOMORPHISM
 #define NDEBUG
 #include "./libsecp256k1/src/secp256k1.c"
 #include "./libsecp256k1/src/modules/recovery/main_impl.h"
