@@ -273,6 +273,29 @@ func TestTransformLoadStartKey(t *testing.T) {
 	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
 }
 
+func TestTransformLoadStartKeyLexicography(t *testing.T) {
+	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
+	db := ethdb.NewMemDatabase()
+	sourceBucket := []byte("source")
+	destBucket := []byte("dest")
+	generateTestData(t, db, sourceBucket, 10)
+
+	//      intentional to make key #5 not to be ignored-------v
+	startKey := append([]byte(fmt.Sprintf("%10d-key-%010d", 5, 4)), 0x00, 0x00, 0x00, 0x00)
+
+	err := Transform(
+		db,
+		sourceBucket,
+		destBucket,
+		"", // temp dir
+		testExtractToMapFunc,
+		testLoadFromMapFunc,
+		TransformArgs{LoadStartKey: startKey},
+	)
+	assert.Nil(t, err)
+	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
+}
+
 func TestTransformThroughFiles(t *testing.T) {
 	oldSize := bufferOptimalSize
 	bufferOptimalSize = 1 // guarantee file per entry
