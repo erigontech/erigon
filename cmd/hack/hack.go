@@ -2316,7 +2316,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 			return err
 		}
 	}
-	ts := dbutils.EncodeTimestamp(block+1)
+	ts := dbutils.EncodeTimestamp(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
 		timestamp, _ := dbutils.DecodeTimestamp(k)
