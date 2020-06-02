@@ -1224,7 +1224,6 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds := state.NewTrieDbState(root, db, 0)
 	tds.SetResolveReads(true)
-	tsw := tds.DbStateWriter()
 	intraBlockState := state.New(tds)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1235,11 +1234,14 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
+	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		t.Errorf("error finalising 1st tx: %w", err)
+	}
+	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		t.Errorf("error committing block: %w", err)
 	}
 
-	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+	if _, err := tds.ResolveStateTrie(false /* extractWitness */, true /* trace */); err != nil {
 		assert.NoError(t, err)
 	}
 
@@ -1281,7 +1283,6 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds := state.NewTrieDbState(root, db, 0)
 	tds.SetResolveReads(true)
-	tsw := tds.DbStateWriter()
 	intraBlockState := state.New(tds)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1292,10 +1293,12 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
+	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		t.Errorf("error finalising 1st tx: %w", err)
 	}
-
+	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		t.Errorf("error committing block: %w", err)
+	}
 	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		assert.NoError(t, err)
 	}

@@ -2226,8 +2226,7 @@ type Receiver struct {
 func (r *Receiver) Receive(
 	itemType trie.StreamItem,
 	accountKey []byte,
-	storageKeyPart1 []byte,
-	storageKeyPart2 []byte,
+	storageKey []byte,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
@@ -2240,33 +2239,26 @@ func (r *Receiver) Receive(
 		var c int
 		switch itemType {
 		case trie.StorageStreamItem, trie.SHashStreamItem:
-			if len(k) > common.HashLength {
-				c = bytes.Compare(k[:common.HashLength], storageKeyPart1)
-				if c == 0 {
-					c = bytes.Compare(k[common.HashLength+common.IncarnationLength:], storageKeyPart2)
-				}
-			} else {
-				c = bytes.Compare(k, storageKeyPart1)
-			}
+			c = bytes.Compare(k, storageKey)
 		case trie.AccountStreamItem, trie.AHashStreamItem:
 			c = bytes.Compare(k, accountKey)
 		case trie.CutoffStreamItem:
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessSize)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
-			if c <= 0 && len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k[:32], k[40:], nil, v, nil, 0, 0); err != nil {
+			if len(v) > 0 {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
-			if c <= 0 && v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, nil, v, nil, nil, 0, 0); err != nil {
+			if v != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
 			}
@@ -2277,7 +2269,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKeyPart1, storageKeyPart2, accountValue, storageValue, hash, cutoff, witnessSize)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -2319,7 +2311,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 		return err
 	}
 	quitCh := make(chan struct{})
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, quitCh); err != nil {
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
 	ts := dbutils.EncodeTimestamp(block)
@@ -2402,10 +2394,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	for ks := range storageMap {
 		unfurlList[i] = ks
 		i++
-		var sk [64]byte
-		copy(sk[:], []byte(ks)[:common.HashLength])
-		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
-		unfurl.AddKey(sk[:])
+		unfurl.AddKey([]byte(ks))
 	}
 	rl := trie.NewRetainList(0)
 	addrHash, err := common.HashData(address[:])
@@ -2429,7 +2418,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	loader = trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	if err = loader.Reset(db, unfurl, unfurl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
@@ -2448,7 +2437,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		fmt.Printf("Error hooking: %v\n", err)
 	}
-	fmt.Printf("Resulting root: %x, expected root: %x\n", tr.Hash(), header.Root)
+	fmt.Printf("Resulting root: %x (subTrie %x), expected root: %x\n", tr.Hash(), subTries.Hashes[0], header.Root)
 	return nil
 }
 

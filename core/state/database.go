@@ -118,6 +118,7 @@ type Buffer struct {
 	// been modified, and then the contract has subsequently self-destructed, this structure will not contain any
 	// keys related to the storage of this contract, because they are irrelevant for the final state
 	storageUpdates map[common.Hash]map[common.Hash][]byte
+	storageIncarnation map[common.Hash]uint64
 	// storageReads structure collects all the keys of items that have been modified (or also just read, if the
 	// tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
 	// Even if the final results of the execution do not include some items, they will still be present in this structure.
@@ -127,12 +128,13 @@ type Buffer struct {
 	// There is a potential for optimisation - we may actually skip all the intermediate modification of the trie if
 	// we know that in the end, the entire storage will be dropped. However, this optimisation has not yet been
 	// implemented.
-	storageReads map[common.Hash]map[common.Hash]struct{}
+	storageReads map[common.StorageKey]struct{}
 	// accountUpdates structure collects the effects of the block (or transaxction) execution.
 	accountUpdates map[common.Hash]*accounts.Account
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
 	accountReads map[common.Hash]struct{}
+	accountReadsIncarnation map[common.Hash]uint64
 	deleted      map[common.Hash]struct{}
 	created      map[common.Hash]struct{}
 }
@@ -143,9 +145,11 @@ func (b *Buffer) initialise() {
 	b.codeSizeReads = make(map[common.Hash]common.Hash)
 	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
-	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
+	b.storageIncarnation = make(map[common.Hash]uint64)
+	b.storageReads = make(map[common.StorageKey]struct{})
 	b.accountUpdates = make(map[common.Hash]*accounts.Account)
 	b.accountReads = make(map[common.Hash]struct{})
+	b.accountReadsIncarnation = make(map[common.Hash]uint64)
 	b.deleted = make(map[common.Hash]struct{})
 	b.created = make(map[common.Hash]struct{})
 }
@@ -176,11 +180,13 @@ func (b *Buffer) merge(other *Buffer) {
 	for addrHash := range other.deleted {
 		b.deleted[addrHash] = struct{}{}
 		delete(b.storageUpdates, addrHash)
+		delete(b.storageIncarnation, addrHash)
 		delete(b.codeUpdates, addrHash)
 	}
 	for addrHash := range other.created {
 		b.created[addrHash] = struct{}{}
 		delete(b.storageUpdates, addrHash)
+		delete(b.storageIncarnation, addrHash)
 	}
 	for addrHash, om := range other.storageUpdates {
 		m, ok := b.storageUpdates[addrHash]
@@ -192,21 +198,20 @@ func (b *Buffer) merge(other *Buffer) {
 			m[keyHash] = v
 		}
 	}
-	for addrHash, om := range other.storageReads {
-		m, ok := b.storageReads[addrHash]
-		if !ok {
-			m = make(map[common.Hash]struct{})
-			b.storageReads[addrHash] = m
-		}
-		for keyHash := range om {
-			m[keyHash] = struct{}{}
-		}
+	for addrHash, incarnation := range other.storageIncarnation {
+		b.storageIncarnation[addrHash] = incarnation
+	}
+	for storageKey := range other.storageReads {
+		b.storageReads[storageKey] = struct{}{}
 	}
 	for addrHash, account := range other.accountUpdates {
 		b.accountUpdates[addrHash] = account
 	}
 	for addrHash := range other.accountReads {
 		b.accountReads[addrHash] = struct{}{}
+	}
+	for addrHash, incarnation := range other.accountReadsIncarnation {
+		b.accountReadsIncarnation[addrHash] = incarnation
 	}
 }
 
@@ -395,13 +400,8 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 // item updates would be inclided.
 func (tds *TrieDbState) buildStorageReads() common.StorageKeys {
 	storageTouches := common.StorageKeys{}
-	for addrHash, m := range tds.aggregateBuffer.storageReads {
-		for keyHash := range m {
-			var storageKey common.StorageKey
-			copy(storageKey[:], addrHash[:])
-			copy(storageKey[common.HashLength:], keyHash[:])
-			storageTouches = append(storageTouches, storageKey)
-		}
+	for storageKey := range tds.aggregateBuffer.storageReads {
+		storageTouches = append(storageTouches, storageKey)
 	}
 	sort.Sort(storageTouches)
 	return storageTouches
@@ -419,7 +419,8 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 		for keyHash := range m {
 			var storageKey common.StorageKey
 			copy(storageKey[:], addrHash[:])
-			copy(storageKey[common.HashLength:], keyHash[:])
+			binary.BigEndian.PutUint64(storageKey[common.HashLength:], ^tds.aggregateBuffer.storageIncarnation[addrHash])
+			copy(storageKey[common.HashLength+common.IncarnationLength:], keyHash[:])
 			storageTouches = append(storageTouches, storageKey)
 		}
 	}
@@ -429,7 +430,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	var values = make([][]byte, len(storageTouches))
 	for i, storageKey := range storageTouches {
 		copy(addrHash[:], storageKey[:])
-		copy(keyHash[:], storageKey[common.HashLength:])
+		copy(keyHash[:], storageKey[common.HashLength+common.IncarnationLength:])
 		values[i] = tds.aggregateBuffer.storageUpdates[addrHash][keyHash]
 	}
 	return storageTouches, values
@@ -543,14 +544,25 @@ func (tds *TrieDbState) resolveCodeTouches(
 	return nil
 }
 
+var bytes8 [8]byte
+
 func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, loadFunc trie.LoadFunc) error {
 	// Build the retain list
 	rl := trie.NewRetainList(0)
 	for _, addrHash := range accountTouches {
-		var nibbles = make([]byte, 2*len(addrHash))
+		var incarnation uint64
+		if inc, ok := tds.aggregateBuffer.accountReadsIncarnation[addrHash]; ok {
+			incarnation = inc
+		}
+		var nibbles = make([]byte, 2*(common.HashLength+common.IncarnationLength))
 		for i, b := range addrHash[:] {
 			nibbles[i*2] = b / 16
 			nibbles[i*2+1] = b % 16
+		}
+		binary.BigEndian.PutUint64(bytes8[:], ^incarnation)
+		for i, b := range bytes8[:] {
+			nibbles[2*common.HashLength+i*2] = b / 16
+			nibbles[2*common.HashLength+i*2+1] = b % 16
 		}
 		rl.AddHex(nibbles)
 	}
@@ -716,7 +728,7 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	if len(accountKeys) == 0 && len(storageKeys) == 0 {
 		return tds.t.Hash(), nil
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, aCodes, storageKeys, sValues, common.HashLength, &tds.newStream, hb, trace)
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, aCodes, storageKeys, sValues, common.HashLength+common.IncarnationLength, &tds.newStream, hb, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
@@ -857,6 +869,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
 				return err
 			}
+			b.accountReadsIncarnation[addrHash] = acc.Incarnation
 		} else {
 			b.accountUpdates[addrHash] = nil
 			if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
@@ -875,12 +888,10 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		m1, ok1 := b.storageReads[addrHash]
-		if !ok1 {
-			m1 = make(map[common.Hash]struct{})
-			b.storageReads[addrHash] = m1
-		}
-		m1[keyHash] = struct{}{}
+		b.storageIncarnation[addrHash] = ^binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
+		var storageKey common.StorageKey
+		copy(storageKey[:], []byte(key))
+		b.storageReads[storageKey] = struct{}{}
 		if len(value) > 0 {
 			m[keyHash] = value
 			if err := tds.db.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
@@ -1043,11 +1054,18 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	if err != nil {
 		return nil, err
 	}
+	var account *accounts.Account
+	account, err = tds.readAccountDataByHash(addrHash)
+	if err != nil {
+		return nil, err
+	}
 	if tds.resolveReads {
 		tds.currentBuffer.accountReads[addrHash] = struct{}{}
+		if account != nil {
+			tds.currentBuffer.accountReadsIncarnation[addrHash] = account.Incarnation
+		}
 	}
-
-	return tds.readAccountDataByHash(addrHash)
+	return account, nil
 }
 
 func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
@@ -1076,12 +1094,9 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	}
 
 	if tds.resolveReads {
-		m, ok := tds.currentBuffer.storageReads[addrHash]
-		if !ok {
-			m = make(map[common.Hash]struct{})
-			tds.currentBuffer.storageReads[addrHash] = m
-		}
-		m[seckey] = struct{}{}
+		var storageKey common.StorageKey
+		copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+		tds.currentBuffer.storageReads[storageKey] = struct{}{}
 	}
 
 	tds.tMu.Lock()
@@ -1293,6 +1308,9 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
+	if original != nil {
+		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
+	}
 	return nil
 }
 
@@ -1303,7 +1321,11 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
+	if original != nil {
+		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
+	}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
+	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	delete(tsw.tds.currentBuffer.codeUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = struct{}{}
 	if original.Incarnation > 0 {
@@ -1336,16 +1358,14 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 		m = make(map[common.Hash][]byte)
 		tsw.tds.currentBuffer.storageUpdates[addrHash] = m
 	}
-	m1, ok1 := tsw.tds.currentBuffer.storageReads[addrHash]
-	if !ok1 {
-		m1 = make(map[common.Hash]struct{})
-		tsw.tds.currentBuffer.storageReads[addrHash] = m1
-	}
+	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
 	seckey, err := tsw.tds.pw.HashKey(key, false /*save*/)
 	if err != nil {
 		return err
 	}
-	m1[seckey] = struct{}{}
+	var storageKey common.StorageKey
+	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+	tsw.tds.currentBuffer.storageReads[storageKey] = struct{}{}
 	if len(v) > 0 {
 		m[seckey] = v
 	} else {
@@ -1401,6 +1421,7 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
+	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	return nil
 }
 

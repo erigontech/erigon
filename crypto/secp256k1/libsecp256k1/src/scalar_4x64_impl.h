@@ -4,8 +4,8 @@
  * file COPYING or http://www.opensource.org/licenses/mit-license.php.*
  **********************************************************************/
 
-#ifndef _SECP256K1_SCALAR_REPR_IMPL_H_
-#define _SECP256K1_SCALAR_REPR_IMPL_H_
+#ifndef SECP256K1_SCALAR_REPR_IMPL_H
+#define SECP256K1_SCALAR_REPR_IMPL_H
 
 /* Limbs of the secp256k1 order. */
 #define SECP256K1_N_0 ((uint64_t)0xBFD25E8CD0364141ULL)
@@ -376,7 +376,7 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const uint64_t *l) 
     /* extract m6 */
     "movq %%r8, %q6\n"
     : "=g"(m0), "=g"(m1), "=g"(m2), "=g"(m3), "=g"(m4), "=g"(m5), "=g"(m6)
-    : "S"(l), "n"(SECP256K1_N_C_0), "n"(SECP256K1_N_C_1)
+    : "S"(l), "i"(SECP256K1_N_C_0), "i"(SECP256K1_N_C_1)
     : "rax", "rdx", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "cc");
 
     /* Reduce 385 bits into 258. */
@@ -455,7 +455,7 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const uint64_t *l) 
     /* extract p4 */
     "movq %%r9, %q4\n"
     : "=&g"(p0), "=&g"(p1), "=&g"(p2), "=g"(p3), "=g"(p4)
-    : "g"(m0), "g"(m1), "g"(m2), "g"(m3), "g"(m4), "g"(m5), "g"(m6), "n"(SECP256K1_N_C_0), "n"(SECP256K1_N_C_1)
+    : "g"(m0), "g"(m1), "g"(m2), "g"(m3), "g"(m4), "g"(m5), "g"(m6), "i"(SECP256K1_N_C_0), "i"(SECP256K1_N_C_1)
     : "rax", "rdx", "r8", "r9", "r10", "r11", "r12", "r13", "cc");
 
     /* Reduce 258 bits into 256. */
@@ -501,7 +501,7 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const uint64_t *l) 
     /* Extract c */
     "movq %%r9, %q0\n"
     : "=g"(c)
-    : "g"(p0), "g"(p1), "g"(p2), "g"(p3), "g"(p4), "D"(r), "n"(SECP256K1_N_C_0), "n"(SECP256K1_N_C_1)
+    : "g"(p0), "g"(p1), "g"(p2), "g"(p3), "g"(p4), "D"(r), "i"(SECP256K1_N_C_0), "i"(SECP256K1_N_C_1)
     : "rax", "rdx", "r8", "r9", "r10", "cc", "memory");
 #else
     uint128_t c;
@@ -946,4 +946,14 @@ SECP256K1_INLINE static void secp256k1_scalar_mul_shift_var(secp256k1_scalar *r,
     secp256k1_scalar_cadd_bit(r, 0, (l[(shift - 1) >> 6] >> ((shift - 1) & 0x3f)) & 1);
 }
 
-#endif
+static SECP256K1_INLINE void secp256k1_scalar_cmov(secp256k1_scalar *r, const secp256k1_scalar *a, int flag) {
+    uint64_t mask0, mask1;
+    mask0 = flag + ~((uint64_t)0);
+    mask1 = ~mask0;
+    r->d[0] = (r->d[0] & mask0) | (a->d[0] & mask1);
+    r->d[1] = (r->d[1] & mask0) | (a->d[1] & mask1);
+    r->d[2] = (r->d[2] & mask0) | (a->d[2] & mask1);
+    r->d[3] = (r->d[3] & mask0) | (a->d[3] & mask1);
+}
+
+#endif /* SECP256K1_SCALAR_REPR_IMPL_H */

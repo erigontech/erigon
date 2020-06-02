@@ -96,7 +96,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 		tr,
 		common.Hashes{}, []*accounts.Account{}, [][]byte{},
 		common.StorageKeys{}, [][]byte{},
-		32,
+		40,
 		&stream, // Streams that will be reused for old and new stream
 		hb,      // HashBuilder will be reused
 		false,
@@ -164,7 +164,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 		tr,
 		common.Hashes{insertKey}, []*accounts.Account{&insertA}, [][]byte{nil},
 		common.StorageKeys{}, [][]byte{},
-		32,
+		40,
 		&stream, // Streams that will be reused for old and new stream
 		hb,      // HashBuilder will be reused
 		false,

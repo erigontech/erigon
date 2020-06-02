@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 
@@ -165,7 +166,11 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if it.trace {
 				fmt.Printf("shortNode %x\n", hex)
 			}
-			hex = append(hex, n.Key...)
+			nKey := n.Key
+			if nKey[len(nKey)-1] == 16 {
+				nKey = nKey[:len(nKey)-1]
+			}
+			hex = append(hex, nKey...)
 			switch v := n.Val.(type) {
 			case hashNode:
 				it.top--
@@ -181,11 +186,17 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					fmt.Printf("accountNode %x\n", hex)
 				}
 				if v.storage != nil {
-					it.hex = hex
+					binary.BigEndian.PutUint64(bytes8[:], ^v.Incarnation)
+					// Add decompressed incarnation to the hex
+					for i, b := range bytes8[:] {
+						bytes16[i*2] = b / 16
+						bytes16[i*2+1] = b % 16
+					}
+					it.hex = append(hex, bytes16[:]...)
 					it.nodeStack[l] = v.storage
 					it.iStack[l] = 0
 					it.goDeepStack[l] = true
-					it.lenStack[l] = len(hex)
+					it.lenStack[l] = len(it.hex)
 					it.accountStack[l] = false
 				} else {
 					it.top--
@@ -401,11 +412,17 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("accountNode %x\n", hex)
 			}
 			if n.storage != nil {
-				it.hex = hex
+				binary.BigEndian.PutUint64(bytes8[:], ^n.Incarnation)
+				// Add decompressed incarnation to the hex
+				for i, b := range bytes8[:] {
+					bytes16[i*2] = b / 16
+					bytes16[i*2+1] = b % 16
+				}
+				it.hex = append(hex, bytes16[:]...)
 				it.nodeStack[l] = n.storage
 				it.iStack[l] = 0
 				it.goDeepStack[l] = true
-				it.lenStack[l] = len(hex)
+				it.lenStack[l] = len(it.hex)
 				it.accountStack[l] = false
 			} else {
 				it.top--
@@ -650,6 +667,9 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			curr.Write(succ.Bytes())
 			succ.Reset()
 			succ.Write(hex)
+			if newItemType == AccountStreamItem {
+				succ.WriteByte(16)
+			}
 			if curr.Len() > 0 {
 				isAccount = true
 				var err error
@@ -695,7 +715,10 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			currStorage.Reset()
 			currStorage.Write(succStorage.Bytes())
 			succStorage.Reset()
-			succStorage.Write(hex[2*storagePrefixLen+1:])
+			succStorage.Write(hex[2*storagePrefixLen:])
+			if newItemType == StorageStreamItem {
+				succStorage.WriteByte(16)
+			}
 			if currStorage.Len() > 0 {
 				isAccount = false
 				var err error
@@ -777,7 +800,7 @@ func HashWithModifications(
 ) (common.Hash, error) {
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
-		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength+1)+len(sKeys)*(4*common.HashLength+2)),
+		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength)+len(sKeys)*(4*common.HashLength+2*common.IncarnationLength)),
 		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),
 		aValues:   aValues,
@@ -793,10 +816,12 @@ func HashWithModifications(
 	for ki < keyCount {
 		if accountKeyHex == nil && ai < len(aKeys) {
 			accountKeyHex = keybytesToHex(aKeys[ai][:])
+			accountKeyHex = accountKeyHex[:len(accountKeyHex)-1]
 			ai++
 		}
 		if storageKeyHex == nil && si < len(sKeys) {
-			storageKeyHex = concat(keybytesToHex(sKeys[si][:storagePrefixLen]), keybytesToHex(sKeys[si][storagePrefixLen:])...)
+			storageKeyHex = keybytesToHex(sKeys[si][:])
+			storageKeyHex = storageKeyHex[:len(storageKeyHex)-1]
 			si++
 		}
 		if accountKeyHex == nil {
