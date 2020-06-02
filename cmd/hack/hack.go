@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/mgr"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -2471,6 +2472,24 @@ func testSeek(chaindata string) {
 	}
 }
 
+func testStage5(chaindata string) error {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CurrentStateBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.ContractCodeBucket)
+	stage4progress, err1 := stages.GetStageProgress(db, stages.Execution)
+	check(err1)
+	log.Info("Stage4", "progress", stage4progress)
+	core.UsePlainStateExecution = true
+	if err2 := stagedsync.SpawnCheckFinalHashStage(db, stage4progress, "", make(chan struct{})); err2 != nil {
+		return err2
+	}
+	return nil
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2622,5 +2641,10 @@ func main() {
 	}
 	if *action == "seek" {
 		testSeek(*chaindata)
+	}
+	if *action == "stage5" {
+		if err := testStage5(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 }

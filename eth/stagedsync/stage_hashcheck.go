@@ -19,7 +19,7 @@ import (
 
 var cbor codec.CborHandle
 
-func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
+func SpawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
 	hashProgress, err := stages.GetStageProgress(stateDB, stages.HashCheck)
 	if err != nil {
 		return err
@@ -36,11 +36,6 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		if err != nil {
 			return err
 		}
-	}
-
-	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress > 0 {
-		return nil
 	}
 
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
