@@ -165,6 +165,7 @@ func extractBucketIntoFiles(
 	quit chan struct{},
 ) error {
 	if err := db.Walk(bucket, startkey, len(startkey), func(k, v []byte) (bool, error) {
+		fmt.Printf("k %x\n")
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
