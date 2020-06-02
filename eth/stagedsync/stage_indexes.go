@@ -1,16 +1,18 @@
-package downloader
+package stagedsync
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
 	var blockNum uint64
-	if lastProcessedBlockNumber, err := GetStageProgress(db, AccountHistoryIndex); err == nil {
+	if lastProcessedBlockNumber, err := stages.GetStageProgress(db, stages.AccountHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
 			blockNum = lastProcessedBlockNumber + 1
 		}
@@ -31,7 +33,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return err
 	}
 
-	if err := SaveStageProgress(db, AccountHistoryIndex, blockNum); err != nil {
+	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, blockNum); err != nil {
 		return err
 	}
 	return nil
@@ -40,7 +42,7 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 
 func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
 	var blockNum uint64
-	if lastProcessedBlockNumber, err := GetStageProgress(db, StorageHistoryIndex); err == nil {
+	if lastProcessedBlockNumber, err := stages.GetStageProgress(db, stages.StorageHistoryIndex); err == nil {
 		if lastProcessedBlockNumber > 0 {
 			blockNum = lastProcessedBlockNumber + 1
 		}
@@ -59,7 +61,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return err
 	}
 
-	if err = SaveStageProgress(db, StorageHistoryIndex, blockNum); err != nil {
+	if err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, blockNum); err != nil {
 		return err
 	}
 
