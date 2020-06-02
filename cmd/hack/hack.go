@@ -37,8 +37,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/mgr"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -2166,7 +2166,7 @@ func resetState(chaindata string) {
 	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = downloader.SaveStageProgress(db, downloader.Execution, 0)
+	err = stages.SaveStageProgress(db, stages.Execution, 0)
 	check(err)
 	fmt.Printf("Reset state done\n")
 }
@@ -2193,7 +2193,7 @@ func resetHashedState(chaindata string) {
 		return nil
 	})
 	check(err)
-	err = downloader.SaveStageProgress(db, downloader.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
@@ -2206,11 +2206,11 @@ func resetHistoryIndex(chaindata string) {
 	db.DeleteBucket(dbutils.AccountsHistoryBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageHistoryBucket)
-	err = downloader.SaveStageProgress(db, downloader.AccountHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0)
 	check(err)
-	err = downloader.SaveStageProgress(db, downloader.StorageHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0)
 	check(err)
-	err = downloader.SaveStageProgress(db, downloader.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }

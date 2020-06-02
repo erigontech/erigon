@@ -1,4 +1,4 @@
-package downloader
+package stagedsync
 
 import (
 	"io/ioutil"
