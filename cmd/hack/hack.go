@@ -2250,14 +2250,14 @@ func (r *Receiver) Receive(
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
-			if c <= 0 && len(v) > 0 {
+			if len(v) > 0 {
 				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
-			if c <= 0 && v != nil {
+			if v != nil {
 				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
@@ -2418,7 +2418,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	loader = trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	if err = loader.Reset(db, unfurl, unfurl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
