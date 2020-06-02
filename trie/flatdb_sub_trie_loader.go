@@ -340,6 +340,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		return nil
 	}
 
+	if fstl.trace {
+		fmt.Printf("fstl.ihK %x, fstl.accAddrHashWithInc %x\n", fstl.ihK, fstl.accAddrHashWithInc[:])
+	}
 	if len(fstl.ihK) > common.HashLength && !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
 		if bytes.Compare(fstl.ihK, fstl.accAddrHashWithInc[:]) < 0 {
 			// Skip all the irrelevant storage in the middle
