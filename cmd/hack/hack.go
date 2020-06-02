@@ -2502,9 +2502,11 @@ func testStage5(chaindata string) error {
 	}
 	log.Info("Stage4", "progress", stage4progress)
 	core.UsePlainStateExecution = true
-	if err = stagedsync.SpawnCheckFinalHashStage(db, stage4progress, "", make(chan struct{})); err != nil {
+	ch := make(chan struct{})
+	if err = stagedsync.SpawnCheckFinalHashStage(db, stage4progress, "", ch); err != nil {
 		return err
 	}
+	close(ch)
 	return nil
 }
 
