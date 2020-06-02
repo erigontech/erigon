@@ -2394,10 +2394,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	for ks := range storageMap {
 		unfurlList[i] = ks
 		i++
-		var sk [64]byte
-		copy(sk[:], []byte(ks)[:common.HashLength])
-		copy(sk[common.HashLength:], []byte(ks)[common.HashLength+common.IncarnationLength:])
-		unfurl.AddKey(sk[:])
+		unfurl.AddKey([]byte(ks))
 	}
 	rl := trie.NewRetainList(0)
 	addrHash, err := common.HashData(address[:])
