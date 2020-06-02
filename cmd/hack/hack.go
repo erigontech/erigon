@@ -2474,27 +2474,36 @@ func testSeek(chaindata string) {
 
 func testStage5(chaindata string) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.CurrentStateBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.ContractCodeBucket)
-	err = db.KV().Update(func(tx *bolt.Tx) error {
+	if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
+		return err
+	}
+	if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
+		return err
+	}
+	if err = db.KV().Update(func(tx *bolt.Tx) error {
 		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
 		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
 		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
 		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
 		return nil
-	})
-	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
-	stage4progress, err1 := stages.GetStageProgress(db, stages.Execution)
-	check(err1)
+	}); err != nil {
+		return err
+	}
+	if err = stages.SaveStageProgress(db, stages.HashCheck, 0); err != nil {
+		return err
+	}
+	var stage4progress uint64
+	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
 	log.Info("Stage4", "progress", stage4progress)
 	core.UsePlainStateExecution = true
-	if err2 := stagedsync.SpawnCheckFinalHashStage(db, stage4progress, "", make(chan struct{})); err2 != nil {
-		return err2
+	if err = stagedsync.SpawnCheckFinalHashStage(db, stage4progress, "", make(chan struct{})); err != nil {
+		return err
 	}
 	return nil
 }
