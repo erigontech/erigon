@@ -2316,11 +2316,11 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 			return err
 		}
 	}
-	ts := dbutils.EncodeTimestamp(block)
+	ts := dbutils.EncodeTimestamp(block+1)
 	accountMap := make(map[string]*accounts.Account)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
 		timestamp, _ := dbutils.DecodeTimestamp(k)
-		if timestamp >= *headNumber {
+		if timestamp > *headNumber {
 			return false, nil
 		}
 		if changeset.Len(v) > 0 {
@@ -2353,7 +2353,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 	storageMap := make(map[string][]byte)
 	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
 		timestamp, _ := dbutils.DecodeTimestamp(k)
-		if timestamp >= *headNumber {
+		if timestamp > *headNumber {
 			return false, nil
 		}
 		if changeset.Len(v) > 0 {
@@ -2377,13 +2377,11 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
-	unfurl1 := trie.NewRetainList(0)
 	i := 0
 	for ks, acc := range accountMap {
 		unfurlList[i] = ks
 		i++
 		unfurl.AddKey([]byte(ks))
-		unfurl1.AddKey([]byte(ks))
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
@@ -2399,7 +2397,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 		unfurlList[i] = ks
 		i++
 		unfurl.AddKey([]byte(ks))
-		unfurl1.AddKey([]byte(ks))
 	}
 	rl := trie.NewRetainList(0)
 	addrHash, err := common.HashData(address[:])
@@ -2415,7 +2412,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 			trieKey := append(addrHash[:], keyHash[:]...)
 			rl.AddKey(trieKey)
 			unfurl.AddKey(trieKey)
-			unfurl1.AddKey(trieKey)
 		} else {
 			return err1
 		}
@@ -2425,11 +2421,11 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, unfurl1, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	r.defaultReceiver.Reset(unfurl1, nil /* HashCollector */, false)
+	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
 	subTries, err1 := loader.LoadSubTries()
 	if err1 != nil {
