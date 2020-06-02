@@ -8,11 +8,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
+// externsions for downloader needed for staged sync
+func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, error) {
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -20,11 +22,6 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	d.cancelLock.Unlock()
 
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
-	// Figure out how many blocks have already been downloaded
-	origin, err := GetStageProgress(d.stateDB, Bodies)
-	if err != nil {
-		return false, fmt.Errorf("getting Bodies stage progress: %w", err)
-	}
 	// Figure out how many headers we have
 	currentNumber := origin + 1
 	var missingHeader uint64
@@ -33,8 +30,8 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 	var hashes [N]common.Hash                         // Canonical hashes of the blocks
 	var headers = make(map[common.Hash]*types.Header) // We use map because there might be more than one header by block number
 	var hashCount = 0
-	err = d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
-		if err = common.Stopped(d.quitCh); err != nil {
+	err := d.stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(currentNumber), 0, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(d.quitCh); err != nil {
 			return false, err
 		}
 
@@ -72,7 +69,7 @@ func (d *Downloader) spawnBodyDownloadStage(id string) (bool, error) {
 		return false, fmt.Errorf("walking over canonical hashes: %w", err)
 	}
 	if missingHeader != 0 {
-		if err1 := SaveStageProgress(d.stateDB, Headers, missingHeader); err1 != nil {
+		if err1 := stages.SaveStageProgress(d.stateDB, stages.Headers, missingHeader); err1 != nil {
 			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
 		}
 		// This will cause the sync return to the header stage
@@ -131,31 +128,6 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 	}
 }
 
-func (d *Downloader) unwindBodyDownloadStage(unwindPoint uint64) error {
-	// Here we may want to remove all blocks if we wanted to
-	lastProcessedBlockNumber, err := GetStageProgress(d.stateDB, Bodies)
-	if err != nil {
-		return fmt.Errorf("unwind Bodies: get stage progress: %v", err)
-	}
-	unwindPoint, err1 := GetStageUnwind(d.stateDB, Bodies)
-	if err1 != nil {
-		return err1
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = SaveStageUnwind(d.stateDB, Bodies, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Bodies: reset: %v", err)
-		}
-		return nil
-	}
-	mutation := d.stateDB.NewBatch()
-	err = SaveStageUnwind(mutation, Bodies, 0)
-	if err != nil {
-		return fmt.Errorf("unwind Bodies: reset: %v", err)
-	}
-	_, err = mutation.Commit()
-	if err != nil {
-		return fmt.Errorf("unwind Bodies: failed to write db commit: %v", err)
-	}
-	return nil
+func (d *Downloader) SpawnSync(fetchers []func() error) error {
+	return d.spawnSync(fetchers)
 }
