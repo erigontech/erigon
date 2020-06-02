@@ -28,7 +28,7 @@ type State interface {
 	Stopped() error
 }
 
-type ExtractNextFunc func(k []byte, v interface{}) error
+type ExtractNextFunc func(originalK, k []byte, v interface{}) error
 type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 
 type LoadNextFunc func(k []byte, v []byte) error
@@ -71,7 +71,7 @@ func NewCollector(datadir string) *Collector {
 		return nil
 	}
 
-	c.extractNextFunc = func(k []byte, v interface{}) error {
+	c.extractNextFunc = func(originalK, k []byte, v interface{}) error {
 		buffer.Reset()
 		encoder.Reset(buffer)
 		if err := encoder.Encode(v); err != nil {
@@ -80,7 +80,7 @@ func NewCollector(datadir string) *Collector {
 		encodedValue := buffer.Bytes()
 		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
 		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
-			if err := c.flushBuffer(k, false); err != nil {
+			if err := c.flushBuffer(originalK, false); err != nil {
 				return err
 			}
 		}
@@ -90,7 +90,7 @@ func NewCollector(datadir string) *Collector {
 }
 
 func (c *Collector) Collect(k, v []byte) error {
-	return c.extractNextFunc(k, v)
+	return c.extractNextFunc(k, k, v)
 }
 
 func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, args TransformArgs) error {

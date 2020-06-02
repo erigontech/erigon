@@ -32,6 +32,7 @@ func SpawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	}
 
 	if core.UsePlainStateExecution {
+		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
 		err = promoteHashedState(stateDB, hashProgress, datadir, quit)
 		if err != nil {
 			return err
@@ -128,7 +129,7 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 		if err != nil {
 			return err
 		}
-		return next(newK, v)
+		return next(k, newK, v)
 	}
 }
 
