@@ -89,6 +89,7 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 
 func promoteHashedState(db ethdb.Database, progress uint64, datadir string, quit chan struct{}) error {
 	if progress == 0 {
+		log.Info("Promoting plain state cleanly", "from", progress)
 		return promoteHashedStateCleanly(db, datadir, quit)
 	}
 	return errors.New("incremental state promotion not implemented")
@@ -98,6 +99,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 	if err := common.Stopped(quit); err != nil {
 		return err
 	}
+	log.Info("Promoting plain state cleanly, after stopped check")
 	err := etl.Transform(
 		db,
 		dbutils.PlainStateBucket,
@@ -111,6 +113,7 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 	if err != nil {
 		return err
 	}
+	log.Info("Promoting plain state cleanly, after 1st transform")
 
 	return etl.Transform(
 		db,
