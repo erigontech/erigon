@@ -391,7 +391,7 @@ func (hashes Hashes) Swap(i, j int) {
 // It consists of two parts, each of which are 32-byte hashes:
 // 1. Hash of the contract's address
 // 2. Hash of the item's key
-type StorageKey [2 * HashLength]byte
+type StorageKey [2*HashLength + IncarnationLength]byte
 
 // StorageKeys is a slice of StorageKey, implementing sort.Interface
 type StorageKeys []StorageKey

@@ -366,10 +366,15 @@ func TestApiDetails(t *testing.T) {
 	{ // storage loader
 		loader := NewSubTrieLoader(0)
 		rl := NewRetainList(0)
-		rl.AddHex(append(hexf("000101%0122x", 0), hexf("%0128x", 0)...))
-		rl.AddHex(append(hexf("000201%0122x", 0), hexf("%0128x", 0)...))
-		rl.AddHex(append(hexf("000202%0122x", 0), hexf("%0128x", 0)...))
-		rl.AddHex(append(hexf("0f0f0f%0122x", 0), hexf("%0128x", 0)...))
+		binary.BigEndian.PutUint64(bytes8[:], ^uint64(2))
+		for i, b := range bytes8[:] {
+			bytes16[i*2] = b / 16
+			bytes16[i*2+1] = b % 16
+		}
+		rl.AddHex(append(append(hexf("000101%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
+		rl.AddHex(append(append(hexf("000201%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
+		rl.AddHex(append(append(hexf("000202%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
+		rl.AddHex(append(append(hexf("0f0f0f%0122x", 0), bytes16[:]...), hexf("%0128x", 0)...))
 		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
 		rl.Rewind()
 		subTries, err := loader.LoadSubTries(db, 0, rl, nil /* HashCollector */, dbPrefixes, fixedbits, false)
@@ -534,6 +539,8 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 
 	tr := New(common.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
+	kInc := make([]byte, 8)
+	binary.BigEndian.PutUint64(kInc, ^uint64(1))
 	ks1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(12345)
@@ -558,9 +565,9 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	tr.EvictNode(keybytesToHex(kAcc1))
 	tr.EvictNode(keybytesToHex(kAcc2))
 	rs := NewRetainList(0)
-	rs.AddKey(concat(kAcc1, ks1...))
-	rs.AddKey(concat(kAcc2, ks2...))
-	rs.AddKey(concat(kAcc2, ks22...))
+	rs.AddKey(concat(concat(kAcc1, kInc...), ks1...))
+	rs.AddKey(concat(concat(kAcc2, kInc...), ks2...))
+	rs.AddKey(concat(concat(kAcc2, kInc...), ks22...))
 	dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
 	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe]", fmt.Sprintf("%x", dbPrefixes))
 	assert.Equal("[320 320]", fmt.Sprintf("%d", fixedbits))
