@@ -332,6 +332,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	if fstl.trace {
 		fmt.Printf("fstl.rl.Retain(%x)=%t\n", fstl.minKeyAsNibbles.Bytes(), retain)
 	}
+	retain = true
 
 	if retain { // can't use ih as is, need go to children
 		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {

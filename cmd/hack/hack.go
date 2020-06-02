@@ -2276,7 +2276,7 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
-func testGetProof(chaindata string, address common.Address, rewind int) error {
+func testGetProof(chaindata string, address common.Address, rewind int, regenerate bool) error {
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -2289,30 +2289,32 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
-	collector := etl.NewCollector(".")
-	hashCollector := func(keyHex []byte, hash []byte) error {
-		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
-			return nil
+	if regenerate {
+		collector := etl.NewCollector(".")
+		hashCollector := func(keyHex []byte, hash []byte) error {
+			if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+				return nil
+			}
+			var k []byte
+			trie.CompressNibbles(keyHex, &k)
+			return collector.Collect(k, common.CopyBytes(hash))
 		}
-		var k []byte
-		trie.CompressNibbles(keyHex, &k)
-		return collector.Collect(k, common.CopyBytes(hash))
-	}
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
-		return err
-	}
-	if subTries, err := loader.LoadSubTries(); err == nil {
-		runtime.ReadMemStats(&m)
-		log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
-			"expected root", fmt.Sprintf("%x", headHeader.Root),
-			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	} else {
-		return err
-	}
-	quitCh := make(chan struct{})
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-		return err
+		loader := trie.NewFlatDbSubTrieLoader()
+		if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+			return err
+		}
+		if subTries, err := loader.LoadSubTries(); err == nil {
+			runtime.ReadMemStats(&m)
+			log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
+				"expected root", fmt.Sprintf("%x", headHeader.Root),
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		} else {
+			return err
+		}
+		quitCh := make(chan struct{})
+		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+			return err
+		}
 	}
 	ts := dbutils.EncodeTimestamp(block)
 	accountMap := make(map[string]*accounts.Account)
@@ -2375,11 +2377,13 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
+	unfurl1 := trie.NewRetainList(0)
 	i := 0
 	for ks, acc := range accountMap {
 		unfurlList[i] = ks
 		i++
 		unfurl.AddKey([]byte(ks))
+		unfurl1.AddKey([]byte(ks))
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
@@ -2395,6 +2399,7 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 		unfurlList[i] = ks
 		i++
 		unfurl.AddKey([]byte(ks))
+		unfurl1.AddKey([]byte(ks))
 	}
 	rl := trie.NewRetainList(0)
 	addrHash, err := common.HashData(address[:])
@@ -2406,9 +2411,11 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	for _, key := range storageKeys {
 		keyAsHash := common.HexToHash(key)
 		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
+			//TODO Add incarnation in the middle of this
 			trieKey := append(addrHash[:], keyHash[:]...)
 			rl.AddKey(trieKey)
 			unfurl.AddKey(trieKey)
+			unfurl1.AddKey(trieKey)
 		} else {
 			return err1
 		}
@@ -2417,12 +2424,12 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	loader = trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, unfurl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	loader := trie.NewFlatDbSubTrieLoader()
+	if err = loader.Reset(db, unfurl, unfurl1, nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
+	r.defaultReceiver.Reset(unfurl1, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
 	subTries, err1 := loader.LoadSubTries()
 	if err1 != nil {
@@ -2437,6 +2444,9 @@ func testGetProof(chaindata string, address common.Address, rewind int) error {
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		fmt.Printf("Error hooking: %v\n", err)
 	}
+	runtime.ReadMemStats(&m)
+	log.Info("Constructed trie", "nodes", tr.NumberOfAccounts(),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	fmt.Printf("Resulting root: %x (subTrie %x), expected root: %x\n", tr.Hash(), subTries.Hashes[0], header.Root)
 	return nil
 }
@@ -2610,7 +2620,7 @@ func main() {
 		resetHistoryIndex(*chaindata)
 	}
 	if *action == "getProof" {
-		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind); err != nil {
+		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
