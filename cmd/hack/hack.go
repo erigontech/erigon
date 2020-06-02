@@ -2480,6 +2480,15 @@ func testStage5(chaindata string) error {
 	db.DeleteBucket(dbutils.CurrentStateBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.ContractCodeBucket)
+	err = db.KV().Update(func(tx *bolt.Tx) error {
+		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
+		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
+		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
+		return nil
+	})
+	check(err)
+	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
 	stage4progress, err1 := stages.GetStageProgress(db, stages.Execution)
 	check(err1)
 	log.Info("Stage4", "progress", stage4progress)
