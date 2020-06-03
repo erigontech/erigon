@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sort"
 
 	"github.com/ugorji/go/codec"
 
@@ -56,6 +57,7 @@ func NewCollector(datadir string) *Collector {
 		}
 		var provider dataProvider
 		var err error
+		sort.Sort(sortableBuffer)
 		if canStoreInRam && len(c.dataProviders) == 0 {
 			provider = KeepInRAM(sortableBuffer)
 			c.allFlushed = true
