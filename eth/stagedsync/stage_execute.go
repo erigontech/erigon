@@ -73,11 +73,8 @@ func (l *progressLogger) Stop() {
 const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 
-func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}) (uint64, error) {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Execution)
-	if err != nil {
-		return 0, err
-	}
+func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}) (uint64, error) {
+	lastProcessedBlockNumber := s.BlockNumber
 
 	nextBlockNumber := uint64(0)
 
@@ -110,7 +107,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
 	for {
-		if err = common.Stopped(quit); err != nil {
+		if err := common.Stopped(quit); err != nil {
 			return 0, err
 		}
 
@@ -154,7 +151,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
-		err = core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
+		err := core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return 0, err
 		}
@@ -188,7 +185,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 	// the last processed block
 	syncHeadNumber := atomic.LoadUint64(&nextBlockNumber) - 1
 
-	_, err = stateBatch.Commit()
+	_, err := stateBatch.Commit()
 	if err != nil {
 		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
 	}
@@ -196,7 +193,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 	if err != nil {
 		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
-	return syncHeadNumber, nil
+	return syncHeadNumber, s.Done(stateDB.NewBatch(), 0)
 }
 
 func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {

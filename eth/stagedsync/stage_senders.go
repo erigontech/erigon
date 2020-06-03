@@ -34,12 +34,8 @@ func init() {
 	}
 }
 
-func spawnRecoverSendersStage(stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Senders)
-	if err != nil {
-		return err
-	}
-
+func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
+	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
 	mutation := stateDB.NewBatch()
@@ -117,7 +113,7 @@ func spawnRecoverSendersStage(stateDB ethdb.Database, config *params.ChainConfig
 		}
 	}
 
-	return nil
+	return s.Done(stateDB.NewBatch(), 0) // just to go to the next step
 }
 
 type senderRecoveryJob struct {

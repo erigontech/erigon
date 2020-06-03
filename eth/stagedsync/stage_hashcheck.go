@@ -19,11 +19,8 @@ import (
 
 var cbor codec.CborHandle
 
-func SpawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
-	hashProgress, err := stages.GetStageProgress(stateDB, stages.HashCheck)
-	if err != nil {
-		return err
-	}
+func spawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
+	hashProgress := s.BlockNumber
 
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
@@ -33,7 +30,7 @@ func SpawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 
 	if core.UsePlainStateExecution {
 		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
-		err = promoteHashedState(stateDB, hashProgress, datadir, quit)
+		err := promoteHashedState(stateDB, hashProgress, datadir, quit)
 		if err != nil {
 			return err
 		}
@@ -58,7 +55,7 @@ func SpawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	return stages.SaveStageProgress(stateDB, stages.HashCheck, blockNr)
+	return s.Done(stateDB, blockNr)
 }
 
 func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {

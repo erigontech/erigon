@@ -22,92 +22,112 @@ func DoStagedSyncWithFetchers(
 	var err error
 	defer log.Info("Staged sync finished")
 
-	/*
-	* Stage 1. Download Headers
-	 */
-	log.Info("Sync stage 1/7. Downloading headers...")
-	err = DownloadHeaders(d, stateDB, headersFetchers, quitCh)
-	if err != nil {
-		return err
+	var syncHeadNumber uint64
+
+	stages := []*Stage{
+		{
+			ID:          stages.Headers,
+			Description: "Downloading headers",
+			ExecFunc: func(s *StageState) error {
+				return DownloadHeaders(s, d, stateDB, headersFetchers, quitCh)
+			},
+		},
+		{
+			ID:          stages.Bodies,
+			Description: "Downloading block bodiess",
+			ExecFunc: func(s *StageState) error {
+				cont := true
+				for cont && err == nil {
+					cont, err = spawnBodyDownloadStage(s, stateDB, d, pid)
+					if err != nil {
+						return err
+					}
+				}
+				s.Done(stateDB.NewBatch(), 0) // just to proceed to the next stage
+				return nil
+			},
+		},
+		{
+			ID:          stages.Senders,
+			Description: "Recovering senders from tx signatures",
+			ExecFunc: func(s *StageState) error {
+				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
+			},
+		},
+		{
+			ID:          stages.Execution,
+			Description: "Executing blocks w/o hash checks",
+			ExecFunc: func(s *StageState) error {
+				// TODO: Get rid of a global variable
+				syncHeadNumber, err = spawnExecuteBlocksStage(s, stateDB, blockchain, quitCh)
+				return err
+			},
+		},
+		{
+			ID:          stages.HashCheck,
+			Description: "Validating final hashs",
+			ExecFunc: func(s *StageState) error {
+				return spawnCheckFinalHashStage(s, stateDB, syncHeadNumber, datadir, quitCh)
+			},
+		},
+		{
+			ID:          stages.AccountHistoryIndex,
+			Description: "Generating account history index",
+			ExecFunc: func(s *StageState) error {
+				if history {
+					return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				}
+				log.Info("Generating account history index is disabled. Enable by adding `h` to --storage-mode")
+				return nil
+			},
+		},
+		{
+			ID:          stages.StorageHistoryIndex,
+			Description: "Generating storage history index",
+			ExecFunc: func(s *StageState) error {
+				if history {
+					return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				}
+				log.Info("Generating storage history index is disabled. Enable by adding `h` to --storage-mode")
+				return nil
+			},
+		},
 	}
 
-	/*
-	* Stage 2. Download Block bodies
-	 */
-	log.Info("Sync stage 2/7. Downloading block bodies...")
-	cont := true
+	state := NewState(stages)
 
-	for cont && err == nil {
-		cont, err = spawnBodyDownloadStage(stateDB, d, pid)
+	i := 1
+
+	for !state.IsDone() {
+		stage := state.CurrentStage()
+
+		stageState, err := state.StageState(stage.ID, stateDB)
 		if err != nil {
 			return err
 		}
-	}
 
-	log.Info("Sync stage 2/7. Downloading block bodies... Complete!")
+		message := fmt.Sprintf("Sync stage %d/%d. %v...", i, state.Len(), stage.Description)
+		log.Info(message)
 
-	/*
-	* Stage 3. Recover senders from tx signatures
-	 */
-	log.Info("Sync stage 3/7. Recovering senders from tx signatures...")
-
-	if err = spawnRecoverSendersStage(stateDB, blockchain.Config(), quitCh); err != nil {
-		return err
-	}
-	log.Info("Sync stage 3/7. Recovering senders from tx signatures... Complete!")
-
-	/*
-	* Stage 4. Execute block bodies w/o calculating trie roots
-	 */
-	log.Info("Sync stage 4/7. Executing blocks w/o hash checks...")
-	syncHeadNumber, err := spawnExecuteBlocksStage(stateDB, blockchain, quitCh)
-	if err != nil {
-		return err
-	}
-
-	log.Info("Sync stage 4/7. Executing blocks w/o hash checks... Complete!")
-
-	// Further stages go there
-	log.Info("Sync stage 5/7. Validating final hash")
-	err = SpawnCheckFinalHashStage(stateDB, syncHeadNumber, datadir, quitCh)
-	if err != nil {
-		return err
-	}
-
-	log.Info("Sync stage 5/7. Validating final hash... Complete!")
-
-	if history {
-		log.Info("Sync stage 6/7. Generating account history index")
-		err = spawnAccountHistoryIndex(stateDB, datadir, core.UsePlainStateExecution, quitCh)
+		err = stage.ExecFunc(stageState)
 		if err != nil {
 			return err
 		}
-		log.Info("Sync stage 6/7. Generating account history index... Complete!")
-	} else {
-		log.Info("Sync stage 6/7, generating account history index is disabled. Enable by adding `h` to --storage-mode")
+
+		log.Info(fmt.Sprintf("%s DONE!", message))
+
+		i++
 	}
 
-	if history {
-		log.Info("Sync stage 7/7. Generating storage history index")
-		err = spawnStorageHistoryIndex(stateDB, datadir, core.UsePlainStateExecution, quitCh)
-		if err != nil {
-			return err
-		}
-		log.Info("Sync stage 7/7. Generating storage history index... Complete!")
-	} else {
-		log.Info("Sync stage 7/7, generating storage history index is disabled. Enable by adding `h` to --storage-mode")
-	}
-
-	return err
+	return nil
 }
 
-func DownloadHeaders(d DownloaderGlue, stateDB ethdb.Database, headersFetchers []func() error, quitCh chan struct{}) error {
+func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, headersFetchers []func() error, quitCh chan struct{}) error {
 	err := d.SpawnSync(headersFetchers)
 	if err != nil {
 		return err
 	}
 
-	log.Info("Sync stage 1/7. Downloading headers... Complete!")
 	log.Info("Checking for unwinding...")
 	// Check unwinds backwards and if they are outstanding, invoke corresponding functions
 	for stage := stages.Finish - 1; stage > stages.Headers; stage-- {
@@ -142,5 +162,6 @@ func DownloadHeaders(d DownloaderGlue, stateDB ethdb.Database, headersFetchers [
 		}
 	}
 	log.Info("Checking for unwinding... Complete!")
-	return nil
+
+	return s.Done(stateDB.NewBatch(), 0) // just temporary to go to the next step
 }

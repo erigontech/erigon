@@ -1,24 +1,19 @@
 package stagedsync
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
+func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
 	var blockNum uint64
-	if lastProcessedBlockNumber, err := stages.GetStageProgress(db, stages.AccountHistoryIndex); err == nil {
-		if lastProcessedBlockNumber > 0 {
-			blockNum = lastProcessedBlockNumber + 1
-		}
-	} else {
-		return fmt.Errorf("reading account history process: %v", err)
+	lastProcessedBlockNumber := s.BlockNumber
+	if lastProcessedBlockNumber > 0 {
+		blockNum = lastProcessedBlockNumber + 1
 	}
+
 	log.Info("Account history index generation started", "from", blockNum)
 
 	ig := core.NewIndexGenerator(db, quitCh)
@@ -33,21 +28,14 @@ func spawnAccountHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return err
 	}
 
-	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, blockNum); err != nil {
-		return err
-	}
-	return nil
-
+	return s.Done(db, blockNum)
 }
 
-func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
+func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
 	var blockNum uint64
-	if lastProcessedBlockNumber, err := stages.GetStageProgress(db, stages.StorageHistoryIndex); err == nil {
-		if lastProcessedBlockNumber > 0 {
-			blockNum = lastProcessedBlockNumber + 1
-		}
-	} else {
-		return fmt.Errorf("reading storage history process: %v", err)
+	lastProcessedBlockNumber := s.BlockNumber
+	if lastProcessedBlockNumber > 0 {
+		blockNum = lastProcessedBlockNumber + 1
 	}
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
@@ -61,11 +49,7 @@ func spawnStorageHistoryIndex(db ethdb.Database, datadir string, plainState bool
 		return err
 	}
 
-	if err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, blockNum); err != nil {
-		return err
-	}
-
-	return nil
+	return s.Done(db, blockNum)
 }
 
 func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
