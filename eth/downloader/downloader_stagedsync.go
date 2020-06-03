@@ -23,7 +23,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
 	// Figure out how many headers we have
-	currentNumber := origin + 1
+	currentNumber := origin
 	var missingHeader uint64
 	// Go over canonical headers and insert them into the queue
 	const N = 65536
