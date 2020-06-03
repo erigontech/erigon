@@ -25,6 +25,7 @@ func spawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, syncHeadNum
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
+		s.Done()
 		return nil
 	}
 
