@@ -1433,12 +1433,12 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 	// Create transaction (both pending and queued) with a linearly growing gasprice
 	for i := uint64(0); i < 500; i++ {
 		// Add pending transaction.
-		pendingTx := pricedTransaction(i, 100000, uint256.NewInt().SetUint64(uint64(i)), keys[2])
+		pendingTx := pricedTransaction(i, 100000, uint256.NewInt().SetUint64(i), keys[2])
 		if err := pool.AddLocal(pendingTx); err != nil {
 			t.Fatal(err)
 		}
 		// Add queued transaction.
-		queuedTx := pricedTransaction(i+501, 100000, uint256.NewInt().SetUint64(uint64(i)), keys[2])
+		queuedTx := pricedTransaction(i+501, 100000, uint256.NewInt().SetUint64(i), keys[2])
 		if err := pool.AddLocal(queuedTx); err != nil {
 			t.Fatal(err)
 		}

@@ -16,7 +16,7 @@ func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
 	for i := uint64(0); i < n; i++ {
-		tx := NewTransaction(i, common.Address{}, uint256.NewInt().SetUint64(1000+uint64(i)), 10+i, uint256.NewInt().SetUint64(1000+uint64(i)), []byte(fmt.Sprintf("hello%d", i)))
+		tx := NewTransaction(i, common.Address{}, uint256.NewInt().SetUint64(1000+i), 10+i, uint256.NewInt().SetUint64(1000+i), []byte(fmt.Sprintf("hello%d", i)))
 		txs = append(txs, tx)
 	}
 
