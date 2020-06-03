@@ -370,14 +370,14 @@ func generateTestData(t *testing.T, db ethdb.Putter, bucket []byte, count int) {
 func testExtractToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = v
-	return next(k, valueMap)
+	return next(k, k, valueMap)
 }
 
 func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
 	k1 := append(k, 0xAA)
-	err := next(k1, valueMap)
+	err := next(k, k1, valueMap)
 	if err != nil {
 		return err
 	}
@@ -385,7 +385,7 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
-	return next(k2, valueMap)
+	return next(k, k2, valueMap)
 }
 
 func testLoadFromMapFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) error {
