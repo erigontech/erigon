@@ -1742,7 +1742,7 @@ func TestTransactionReplacement(t *testing.T) {
 
 	// Add pending transactions, ensuring the minimum price bump is enforced for replacement (for ultra low prices too)
 	price := uint64(100)
-	threshold := (price * (100 + uint64(testTxPoolConfig.PriceBump))) / 100
+	threshold := (price * (100 + testTxPoolConfig.PriceBump)) / 100
 
 	if err := pool.addRemoteSync(pricedTransaction(0, 100000, common.Num1, key)); err != nil {
 		t.Fatalf("failed to add original cheap pending transaction: %v", err)
