@@ -97,6 +97,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+		case evm.chainRules.IsYoloV1:
+			jt = yoloV1InstructionSet
 	case evm.chainRules.IsIstanbul:
 		jt = &istanbulInstructionSet
 	case evm.chainRules.IsConstantinople:
