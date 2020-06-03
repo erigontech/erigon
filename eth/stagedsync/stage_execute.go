@@ -1,4 +1,4 @@
-package downloader
+package stagedsync
 
 import (
 	"fmt"
@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -73,7 +74,7 @@ const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 
 func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}) (uint64, error) {
-	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
+	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Execution)
 	if err != nil {
 		return 0, err
 	}
@@ -158,7 +159,7 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 			return 0, err
 		}
 
-		if err = SaveStageProgress(stateBatch, Execution, blockNum); err != nil {
+		if err = stages.SaveStageProgress(stateBatch, stages.Execution, blockNum); err != nil {
 			return 0, err
 		}
 
@@ -199,13 +200,13 @@ func spawnExecuteBlocksStage(stateDB ethdb.Database, blockchain BlockChain, quit
 }
 
 func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
-	lastProcessedBlockNumber, err := GetStageProgress(stateDB, Execution)
+	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Execution)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
 	}
 
 	if unwindPoint >= lastProcessedBlockNumber {
-		err = SaveStageUnwind(stateDB, Execution, 0)
+		err = stages.SaveStageUnwind(stateDB, stages.Execution, 0)
 		if err != nil {
 			return fmt.Errorf("unwind Execution: reset: %v", err)
 		}
@@ -275,7 +276,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		}
 	}
 
-	err = SaveStageUnwind(mutation, Execution, 0)
+	err = stages.SaveStageUnwind(mutation, stages.Execution, 0)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}

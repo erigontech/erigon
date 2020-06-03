@@ -1,4 +1,4 @@
-package downloader
+package stagedsync
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -19,7 +20,7 @@ import (
 var cbor codec.CborHandle
 
 func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
-	hashProgress, err := GetStageProgress(stateDB, HashCheck)
+	hashProgress, err := stages.GetStageProgress(stateDB, stages.HashCheck)
 	if err != nil {
 		return err
 	}
@@ -61,25 +62,25 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	return SaveStageProgress(stateDB, HashCheck, blockNr)
+	return stages.SaveStageProgress(stateDB, stages.HashCheck, blockNr)
 }
 
 func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
-	lastProcessedBlockNumber, err := GetStageProgress(stateDB, HashCheck)
+	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.HashCheck)
 	if err != nil {
 		return fmt.Errorf("unwind HashCheck: get stage progress: %v", err)
 	}
 	if unwindPoint >= lastProcessedBlockNumber {
-		err = SaveStageUnwind(stateDB, HashCheck, 0)
+		err = stages.SaveStageUnwind(stateDB, stages.HashCheck, 0)
 		if err != nil {
 			return fmt.Errorf("unwind HashCheck: reset: %v", err)
 		}
 		return nil
 	}
 	mutation := stateDB.NewBatch()
-	err = SaveStageUnwind(mutation, HashCheck, 0)
+	err = stages.SaveStageUnwind(mutation, stages.HashCheck, 0)
 	if err != nil {
 		return fmt.Errorf("unwind HashCheck: reset: %v", err)
 	}

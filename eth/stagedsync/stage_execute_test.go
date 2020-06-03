@@ -1,10 +1,11 @@
-package downloader
+package stagedsync
 
 import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -15,7 +16,7 @@ func TestUnwindExecutionStageHashedStatic(t *testing.T) {
 	mutation := ethdb.NewMemDatabase()
 	generateBlocks(t, 1, 100, hashedWriterGen(mutation), staticCodeStaticIncarnations)
 
-	err := SaveStageProgress(mutation, Execution, 100)
+	err := stages.SaveStageProgress(mutation, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestUnwindExecutionStageHashedWithIncarnationChanges(t *testing.T) {
 	mutation := ethdb.NewMemDatabase()
 	generateBlocks(t, 1, 100, hashedWriterGen(mutation), changeCodeWithIncarnations)
 
-	err := SaveStageProgress(mutation, Execution, 100)
+	err := stages.SaveStageProgress(mutation, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestUnwindExecutionStageHashedWithCodeChanges(t *testing.T) {
 	mutation := ethdb.NewMemDatabase()
 	generateBlocks(t, 1, 100, hashedWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
 
-	err := SaveStageProgress(mutation, Execution, 100)
+	err := stages.SaveStageProgress(mutation, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	mutation := ethdb.NewMemDatabase()
 	generateBlocks(t, 1, 100, plainWriterGen(mutation), staticCodeStaticIncarnations)
 
-	err := SaveStageProgress(mutation, Execution, 100)
+	err := stages.SaveStageProgress(mutation, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	mutation := ethdb.NewMemDatabase()
 	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeWithIncarnations)
 
-	err := SaveStageProgress(mutation, Execution, 100)
+	err := stages.SaveStageProgress(mutation, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	mutation := ethdb.NewMemDatabase()
 	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
 
-	err := SaveStageProgress(mutation, Execution, 100)
+	err := stages.SaveStageProgress(mutation, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
