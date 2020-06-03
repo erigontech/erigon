@@ -33,7 +33,7 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
 			ExecFunc: func(s *StageState) error {
-				return spawnBodyDownloadStage(s, stateDB, d, pid)
+				return spawnBodyDownloadStage(s, d, pid)
 			},
 		},
 		{
