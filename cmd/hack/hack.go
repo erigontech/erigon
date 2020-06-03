@@ -2546,6 +2546,18 @@ func testStage4(chaindata string, block uint64) error {
 	return nil
 }
 
+func testStageLoop(chaindata string) error {
+	for block := uint64(3400000); block < uint64(10000000); block += uint64(100000) {
+		if err := testStage4(chaindata, block); err != nil {
+			return err
+		}
+		if err := testStage5(chaindata); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2705,6 +2717,11 @@ func main() {
 	}
 	if *action == "stage4" {
 		if err := testStage4(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stageLoop" {
+		if err := testStageLoop(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
