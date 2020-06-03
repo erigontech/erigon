@@ -218,8 +218,12 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *BoltDatabase) DiskSize() uint64 {
-	return uint64(db.db.Size())
+func (db *BoltDatabase) DiskSize(_ context.Context) (common.StorageSize, error) {
+	return common.StorageSize(db.db.Size()), nil
+}
+
+func (db *BoltDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return db.AbstractKV().(HasStats).BucketsStat(ctx)
 }
 
 // Get returns the value for a given key if it's present.

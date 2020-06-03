@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -157,13 +158,17 @@ func (db *lmdbKV) Close() {
 		os.RemoveAll(db.opts.path) // lmdb creates file in this mode, just doesn't fsync in it
 	}
 }
-func (db *lmdbKV) Size() uint64 {
+
+func (db *lmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
 	stats, err := db.env.Stat()
 	if err != nil {
-		log.Error("could not read database size", "err", err)
-		return 0
+		return 0, fmt.Errorf("could not read database size: %w", err)
 	}
-	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages)
+	return common.StorageSize(uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages)), nil
+}
+
+func (db *lmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
 func (db *lmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {

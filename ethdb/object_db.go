@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -98,8 +99,12 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize() uint64 {
-	return db.kv.Size()
+func (db *ObjectDatabase) DiskSize(ctx context.Context) (common.StorageSize, error) {
+	return db.kv.(HasStats).DiskSize(ctx)
+}
+
+func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return db.kv.(HasStats).BucketsStat(ctx)
 }
 
 // Get returns the value for a given key if it's present.

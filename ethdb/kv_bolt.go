@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -119,8 +120,24 @@ func (db *BoltKV) Close() {
 	}
 }
 
-func (db *BoltKV) Size() uint64 {
-	return uint64(db.bolt.Size())
+func (db *BoltKV) DiskSize(_ context.Context) (common.StorageSize, error) {
+	return common.StorageSize(db.bolt.Size()), nil
+}
+
+func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	res := map[string]common.StorageBucketWriteStats{}
+	for name, stats := range db.bolt.WriteStats() {
+		res[name] = common.StorageBucketWriteStats{
+			KeyN:             common.StorageCounter(stats.KeyN),
+			KeyBytesN:        common.StorageSize(stats.KeyBytesN),
+			ValueBytesN:      common.StorageSize(stats.ValueBytesN),
+			TotalPut:         common.StorageCounter(stats.TotalPut),
+			TotalDelete:      common.StorageCounter(stats.TotalDelete),
+			TotalBytesPut:    common.StorageSize(stats.TotalBytesPut),
+			TotalBytesDelete: common.StorageSize(stats.TotalBytesDelete),
+		}
+	}
+	return res, nil
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
