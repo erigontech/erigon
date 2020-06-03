@@ -451,8 +451,14 @@ func writeUint256NoPtr(val reflect.Value, w *encbuf) error {
 func writeUint256(i *uint256.Int, w *encbuf) error {
 	if i.IsZero() {
 		w.str = append(w.str, EmptyStringCode)
+	} else if i.LtUint64(0x80) {
+		w.str = append(w.str, byte(i.Uint64()))
 	} else {
-		w.encodeString(i.Bytes())
+		n := i.ByteLen()
+		w.str = append(w.str, EmptyStringCode+byte(n))
+		pos := len(w.str)
+		w.str = append(w.str, make([]byte, n)...)
+		i.WriteToSlice(w.str[pos:])
 	}
 	return nil
 }
