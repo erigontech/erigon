@@ -247,8 +247,6 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			return fmt.Errorf("error while reading next element from disk: %v", err)
-		} else {
-			log.Info("Provider exhausted", "index", element.TimeIdx)
 		}
 	}
 	_, err := batch.Commit()
