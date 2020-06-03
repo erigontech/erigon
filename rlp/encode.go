@@ -469,16 +469,19 @@ func writeBytes(val reflect.Value, w *encbuf) error {
 }
 
 func writeByteArray(val reflect.Value, w *encbuf) error {
-	if !val.CanAddr() {
-		// Slice requires the value to be addressable.
-		// Make it addressable by copying.
-		copy := reflect.New(val.Type()).Elem()
-		copy.Set(val)
-		val = copy
-	}
 	size := val.Len()
-	slice := val.Slice(0, size).Bytes()
-	w.encodeString(slice)
+	if size == 1 {
+		b := val.Index(0).Uint()
+		if b <= 0x7f {
+			w.str = append(w.str, byte(b))
+			return nil
+		}
+	}
+	w.encodeStringHeader(size)
+	pos := len(w.str)
+	w.str = append(w.str, make([]byte, size)...)
+	slice := w.str[pos:]
+	reflect.Copy(reflect.ValueOf(slice), val)
 	return nil
 }
 

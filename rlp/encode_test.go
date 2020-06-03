@@ -74,8 +74,6 @@ func (e *encodableReader) Read(b []byte) (int, error) {
 	panic("called")
 }
 
-type namedByteType byte
-
 var (
 	_ = Encoder(&testEncoder{})
 	_ = Encoder(byteEncoder(0))
@@ -170,9 +168,6 @@ var encTests = []encTest{
 	{val: []byte{0x7F}, output: "7F"},
 	{val: []byte{0x80}, output: "8180"},
 	{val: []byte{1, 2, 3}, output: "83010203"},
-
-	{val: []namedByteType{1, 2, 3}, output: "83010203"},
-	{val: [...]namedByteType{1, 2, 3}, output: "83010203"},
 
 	{val: "", output: "80"},
 	{val: "\x7E", output: "7E"},
