@@ -78,7 +78,7 @@ func DoStagedSyncWithFetchers(
 					return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
 				}
 				log.Info("Generating account history index is disabled. Enable by adding `h` to --storage-mode")
-				return nil
+				return s.Done(stateDB.NewBatch(), 0)
 			},
 		},
 		{
@@ -89,7 +89,7 @@ func DoStagedSyncWithFetchers(
 					return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
 				}
 				log.Info("Generating storage history index is disabled. Enable by adding `h` to --storage-mode")
-				return nil
+				return s.Done(stateDB.NewBatch(), 0)
 			},
 		},
 	}
