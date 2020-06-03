@@ -19,7 +19,6 @@ func DoStagedSyncWithFetchers(
 	quitCh chan struct{},
 	headersFetchers []func() error,
 ) error {
-	var err error
 	defer log.Info("Staged sync finished")
 
 	stages := []*Stage{
@@ -34,17 +33,7 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
 			ExecFunc: func(s *StageState) error {
-				cont := true
-				for cont && err == nil {
-					fmt.Printf("cont=%v\n", cont)
-					cont, err = spawnBodyDownloadStage(s, stateDB, d, pid)
-					if err != nil {
-						return err
-					}
-				}
-				fmt.Printf("return s.Done\n")
-				s.Done()
-				return nil
+				return spawnBodyDownloadStage(s, stateDB, d, pid)
 			},
 		},
 		{
@@ -90,15 +79,13 @@ func DoStagedSyncWithFetchers(
 
 	state := NewState(stages)
 
-	i := 1
-
 	for !state.IsDone() {
-		stage := state.CurrentStage()
+		index, stage := state.CurrentStage()
 
 		if stage.Disabled {
 			message := fmt.Sprintf(
 				"Sync stage %d/%d. %v disabled. %s",
-				i,
+				index+1,
 				state.Len(),
 				stage.Description,
 				stage.DisabledDescription,
@@ -107,7 +94,6 @@ func DoStagedSyncWithFetchers(
 			log.Info(message)
 
 			state.NextStage()
-			i++
 			continue
 		}
 
@@ -116,7 +102,7 @@ func DoStagedSyncWithFetchers(
 			return err
 		}
 
-		message := fmt.Sprintf("Sync stage %d/%d. %v...", i, state.Len(), stage.Description)
+		message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, state.Len(), stage.Description)
 		log.Info(message)
 
 		err = stage.ExecFunc(stageState)
@@ -125,8 +111,6 @@ func DoStagedSyncWithFetchers(
 		}
 
 		log.Info(fmt.Sprintf("%s DONE!", message))
-
-		i++
 	}
 
 	return nil

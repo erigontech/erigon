@@ -22,8 +22,8 @@ func (s *State) IsDone() bool {
 	return s.currentStage >= uint(len(s.stages))
 }
 
-func (s *State) CurrentStage() *Stage {
-	return s.stages[s.currentStage]
+func (s *State) CurrentStage() (uint, *Stage) {
+	return s.currentStage, s.stages[s.currentStage]
 }
 
 func NewState(stages []*Stage) *State {
