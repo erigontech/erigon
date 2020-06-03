@@ -22,6 +22,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -100,8 +102,8 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	// "input" is (hash, v, r, s), each 32 bytes
 	// but for ecrecover we want (r, s, v)
 
-	r := new(big.Int).SetBytes(input[64:96])
-	s := new(big.Int).SetBytes(input[96:128])
+	r := new(uint256.Int).SetBytes(input[64:96])
+	s := new(uint256.Int).SetBytes(input[96:128])
 	v := input[63] - 27
 
 	// tighter sig s values input homestead only apply to tx sigs

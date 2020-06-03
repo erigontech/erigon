@@ -21,14 +21,16 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"testing"
+
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
-	"math/big"
-	"testing"
 )
 
 // Tests block header storage and retrieval operations.
@@ -274,8 +276,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), big.NewInt(1), 1, big.NewInt(1), nil)
-	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), big.NewInt(2), 2, big.NewInt(2), nil)
+	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), common.Num1, 1, common.Num1, nil)
+	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), common.Num2, 2, common.Num2, nil)
 
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
 

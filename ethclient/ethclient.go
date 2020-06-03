@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -62,13 +64,14 @@ func (ec *Client) Close() {
 // Blockchain Access
 
 // ChainId retrieves the current chain ID for transaction replay protection.
-func (ec *Client) ChainID(ctx context.Context) (*big.Int, error) {
+func (ec *Client) ChainID(ctx context.Context) (*uint256.Int, error) {
 	var result hexutil.Big
 	err := ec.c.CallContext(ctx, &result, "eth_chainId")
 	if err != nil {
 		return nil, err
 	}
-	return (*big.Int)(&result), err
+	x, _ := uint256.FromBig((*big.Int)(&result))
+	return x, err
 }
 
 // BlockByHash returns the given full block.
@@ -526,13 +529,13 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 		arg["data"] = hexutil.Bytes(msg.Data)
 	}
 	if msg.Value != nil {
-		arg["value"] = (*hexutil.Big)(msg.Value)
+		arg["value"] = (*hexutil.Big)(msg.Value.ToBig())
 	}
 	if msg.Gas != 0 {
 		arg["gas"] = hexutil.Uint64(msg.Gas)
 	}
 	if msg.GasPrice != nil {
-		arg["gasPrice"] = (*hexutil.Big)(msg.GasPrice)
+		arg["gasPrice"] = (*hexutil.Big)(msg.GasPrice.ToBig())
 	}
 	return arg
 }

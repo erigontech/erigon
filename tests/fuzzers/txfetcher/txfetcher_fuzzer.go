@@ -19,9 +19,10 @@ package txfetcher
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"math/rand"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
@@ -44,7 +45,7 @@ func init() {
 	}
 	txs = make([]*types.Transaction, 65536) // We need to bump enough to hit all the limits
 	for i := 0; i < len(txs); i++ {
-		txs[i] = types.NewTransaction(rand.Uint64(), common.Address{byte(rand.Intn(256))}, new(big.Int), 0, new(big.Int), nil)
+		txs[i] = types.NewTransaction(rand.Uint64(), common.Address{byte(rand.Intn(256))}, new(uint256.Int), 0, new(uint256.Int), nil)
 	}
 }
 

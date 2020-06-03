@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -138,7 +140,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 		// Include transactions to the miner to make blocks more interesting.
 		if parent == tc.genesis && i%22 == 0 {
 			signer := types.MakeSigner(params.TestChainConfig, block.Number())
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, big.NewInt(1000), params.TxGas, nil, nil), signer, testKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
 			if err != nil {
 				panic(err)
 			}

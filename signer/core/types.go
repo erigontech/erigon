@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -93,8 +95,10 @@ func (args *SendTxArgs) toTransaction() *types.Transaction {
 	} else if args.Input != nil {
 		input = *args.Input
 	}
+	value, _ := uint256.FromBig((*big.Int)(&args.Value))
+	gasPrice, _ := uint256.FromBig((*big.Int)(&args.GasPrice))
 	if args.To == nil {
-		return types.NewContractCreation(uint64(args.Nonce), (*big.Int)(&args.Value), uint64(args.Gas), (*big.Int)(&args.GasPrice), input)
+		return types.NewContractCreation(uint64(args.Nonce), value, uint64(args.Gas), gasPrice, input)
 	}
-	return types.NewTransaction(uint64(args.Nonce), args.To.Address(), (*big.Int)(&args.Value), (uint64)(args.Gas), (*big.Int)(&args.GasPrice), input)
+	return types.NewTransaction(uint64(args.Nonce), args.To.Address(), value, (uint64)(args.Gas), gasPrice, input)
 }

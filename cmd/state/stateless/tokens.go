@@ -13,13 +13,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/bolt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -240,9 +241,9 @@ func makeTokenBalances() {
 			caller,
 			&token,
 			0,
-			big.NewInt(0),    // value
+			uint256.NewInt(), // value
 			math.MaxUint64/2, // gaslimit
-			big.NewInt(100000),
+			uint256.NewInt().SetUint64(100000),
 			common.FromHex(fmt.Sprintf("0x70a08231000000000000000000000000%x", common.HexToAddress("0xe477292f1b3268687a29376116b0ed27a9c76170"))),
 			false, // checkNonce
 		)
@@ -460,9 +461,9 @@ func makeTokenAllowances() {
 			caller,
 			&token,
 			0,
-			big.NewInt(0),    // value
+			uint256.NewInt(), // value
 			math.MaxUint64/2, // gaslimit
-			big.NewInt(100000),
+			uint256.NewInt().SetUint64(100000),
 			common.FromHex(fmt.Sprintf("0xdd62ed3e000000000000000000000000%x000000000000000000000000%x",
 				common.HexToAddress("0xe477292f1b3268687a29376116b0ed27a9c76170"),
 				common.HexToAddress("0xe477292f1b3268687a29376116b0ed25a9c76170"),

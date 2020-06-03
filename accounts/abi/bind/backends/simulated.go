@@ -461,16 +461,16 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		balance := b.pendingState.GetBalance(call.From) // from can't be nil
 		available := balance.ToBig()
 		if call.Value != nil {
-			if call.Value.Cmp(available) >= 0 {
+			if call.Value.ToBig().Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
 			}
-			available.Sub(available, call.Value)
+			available.Sub(available, call.Value.ToBig())
 		}
-		allowance := new(big.Int).Div(available, call.GasPrice)
+		allowance := new(big.Int).Div(available, call.GasPrice.ToBig())
 		if hi > allowance.Uint64() {
 			transfer := call.Value
 			if transfer == nil {
-				transfer = new(big.Int)
+				transfer = new(uint256.Int)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer, "gasprice", call.GasPrice, "fundable", allowance)
@@ -543,13 +543,13 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
-		call.GasPrice = big.NewInt(1)
+		call.GasPrice = common.Num1
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
 	}
 	if call.Value == nil {
-		call.Value = new(big.Int)
+		call.Value = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
 	from := statedb.GetOrNewStateObject(call.From)
@@ -727,14 +727,14 @@ type callmsg struct {
 	ethereum.CallMsg
 }
 
-func (m callmsg) From() common.Address { return m.CallMsg.From }
-func (m callmsg) Nonce() uint64        { return 0 }
-func (m callmsg) CheckNonce() bool     { return false }
-func (m callmsg) To() *common.Address  { return m.CallMsg.To }
-func (m callmsg) GasPrice() *big.Int   { return m.CallMsg.GasPrice }
-func (m callmsg) Gas() uint64          { return m.CallMsg.Gas }
-func (m callmsg) Value() *big.Int      { return m.CallMsg.Value }
-func (m callmsg) Data() []byte         { return m.CallMsg.Data }
+func (m callmsg) From() common.Address   { return m.CallMsg.From }
+func (m callmsg) Nonce() uint64          { return 0 }
+func (m callmsg) CheckNonce() bool       { return false }
+func (m callmsg) To() *common.Address    { return m.CallMsg.To }
+func (m callmsg) GasPrice() *uint256.Int { return m.CallMsg.GasPrice }
+func (m callmsg) Gas() uint64            { return m.CallMsg.Gas }
+func (m callmsg) Value() *uint256.Int    { return m.CallMsg.Value }
+func (m callmsg) Data() []byte           { return m.CallMsg.Data }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
