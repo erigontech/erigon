@@ -19,8 +19,10 @@ import (
 
 var cbor codec.CborHandle
 
-func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
-	hashProgress, err := stages.GetStageProgress(stateDB, stages.HashCheck)
+func SpawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+	hashProgress := s.BlockNumber
+
+	syncHeadNumber, err := s.ExecutionAt(stateDB)
 	if err != nil {
 		return err
 	}
@@ -28,19 +30,16 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
+		s.Done()
 		return nil
 	}
 
 	if core.UsePlainStateExecution {
-		err = promoteHashedState(stateDB, hashProgress, datadir, quit)
+		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
+		err := promoteHashedState(stateDB, hashProgress, datadir, quit)
 		if err != nil {
 			return err
 		}
-	}
-
-	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress > 0 {
-		return nil
 	}
 
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
@@ -62,7 +61,7 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	return stages.SaveStageProgress(stateDB, stages.HashCheck, blockNr)
+	return s.DoneAndUpdate(stateDB, blockNr)
 }
 
 func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
@@ -133,7 +132,7 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 		if err != nil {
 			return err
 		}
-		return next(newK, v)
+		return next(k, newK, v)
 	}
 }
 

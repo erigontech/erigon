@@ -7,13 +7,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func spawnBodyDownloadStage(db ethdb.Getter, d DownloaderGlue, pid string) (bool, error) {
-	// Figure out how many blocks have already been downloaded
-	origin, err := stages.GetStageProgress(db, stages.Bodies)
+func spawnBodyDownloadStage(s *StageState, d DownloaderGlue, pid string) error {
+	cont, err := d.SpawnBodyDownloadStage(pid, s.BlockNumber)
 	if err != nil {
-		return false, fmt.Errorf("getting Bodies stage progress: %w", err)
+		return err
 	}
-	return d.SpawnBodyDownloadStage(pid, origin)
+	if !cont {
+		s.Done()
+	}
+	return nil
+
 }
 
 func unwindBodyDownloadStage(db ethdb.Database, unwindPoint uint64) error {

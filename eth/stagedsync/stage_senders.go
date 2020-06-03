@@ -34,12 +34,8 @@ func init() {
 	}
 }
 
-func spawnRecoverSendersStage(stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Senders)
-	if err != nil {
-		return err
-	}
-
+func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
+	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
 	mutation := stateDB.NewBatch()
@@ -71,7 +67,7 @@ func spawnRecoverSendersStage(stateDB ethdb.Database, config *params.ChainConfig
 
 	needExit := false
 	for !needExit {
-		if err = common.Stopped(quitCh); err != nil {
+		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -104,19 +100,20 @@ func spawnRecoverSendersStage(stateDB ethdb.Database, config *params.ChainConfig
 			rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
 		}
 
-		if err = stages.SaveStageProgress(mutation, stages.Senders, nextBlockNumber); err != nil {
+		if err := s.Update(mutation, nextBlockNumber); err != nil {
 			return err
 		}
 		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if _, err = mutation.Commit(); err != nil {
+			if _, err := mutation.Commit(); err != nil {
 				return err
 			}
 			mutation = stateDB.NewBatch()
 		}
 	}
 
+	s.Done()
 	return nil
 }
 
