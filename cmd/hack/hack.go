@@ -2532,9 +2532,13 @@ func testStage4(chaindata string, block uint64) error {
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
 	}
+	var stage4progress uint64
+	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.Execution}
+	stageState := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
 	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch); err != nil {
 		return err
