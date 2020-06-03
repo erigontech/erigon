@@ -449,6 +449,9 @@ func (db *BoltDatabase) Keys() ([][]byte, error) {
 	var keys [][]byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			if bolt.IsSystemBucket(name) {
+				return nil
+			}
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
 			return b.ForEach(func(k, _ []byte) error {
