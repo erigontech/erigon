@@ -55,7 +55,7 @@ func (s *StageState) Done() {
 	s.state.NextStage()
 }
 
-func ExecutionAt(db ethdb.Getter) (uint64, error) {
+func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
 	return stages.GetStageProgress(db, stages.Execution)
 }
 

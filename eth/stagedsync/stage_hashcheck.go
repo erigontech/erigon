@@ -19,8 +19,13 @@ import (
 
 var cbor codec.CborHandle
 
-func spawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
+func spawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	hashProgress := s.BlockNumber
+
+	syncHeadNumber, err := s.ExecutionAt(stateDB)
+	if err != nil {
+		return err
+	}
 
 	if hashProgress == syncHeadNumber {
 		// we already did hash check for this block

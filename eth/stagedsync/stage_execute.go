@@ -73,7 +73,7 @@ func (l *progressLogger) Stop() {
 const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 
-func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}) (uint64, error) {
+func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}) error {
 	lastProcessedBlockNumber := s.BlockNumber
 
 	nextBlockNumber := uint64(0)
@@ -108,7 +108,7 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	vmConfig := blockchain.GetVMConfig()
 	for {
 		if err := common.Stopped(quit); err != nil {
-			return 0, err
+			return err
 		}
 
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
@@ -153,11 +153,11 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		// where the magic happens
 		err := core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		if err = s.Update(stateBatch, blockNum); err != nil {
-			return 0, err
+			return err
 		}
 
 		atomic.AddUint64(&nextBlockNumber, 1)
@@ -165,13 +165,13 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		if stateBatch.BatchSize() >= StateBatchSize {
 			start := time.Now()
 			if _, err = stateBatch.Commit(); err != nil {
-				return 0, err
+				return err
 			}
 			log.Info("State batch committed", "in", time.Since(start))
 		}
 		if changeBatch.BatchSize() >= ChangeBatchSize {
 			if _, err = changeBatch.Commit(); err != nil {
-				return 0, err
+				return err
 			}
 		}
 		/*
@@ -182,19 +182,16 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		*/
 	}
 
-	// the last processed block
-	syncHeadNumber := atomic.LoadUint64(&nextBlockNumber) - 1
-
 	_, err := stateBatch.Commit()
 	if err != nil {
-		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
+		return fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
 	}
 	_, err = changeBatch.Commit()
 	if err != nil {
-		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
+		return fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
 	s.Done()
-	return syncHeadNumber, nil
+	return nil
 }
 
 func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {

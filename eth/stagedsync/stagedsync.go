@@ -22,8 +22,6 @@ func DoStagedSyncWithFetchers(
 	var err error
 	defer log.Info("Staged sync finished")
 
-	var syncHeadNumber uint64
-
 	stages := []*Stage{
 		{
 			ID:          stages.Headers,
@@ -60,16 +58,14 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState) error {
-				// TODO: Get rid of a global variable
-				syncHeadNumber, err = spawnExecuteBlocksStage(s, stateDB, blockchain, quitCh)
-				return err
+				return spawnExecuteBlocksStage(s, stateDB, blockchain, quitCh)
 			},
 		},
 		{
 			ID:          stages.HashCheck,
 			Description: "Validating final hash",
 			ExecFunc: func(s *StageState) error {
-				return spawnCheckFinalHashStage(s, stateDB, syncHeadNumber, datadir, quitCh)
+				return spawnCheckFinalHashStage(s, stateDB, datadir, quitCh)
 			},
 		},
 		{
