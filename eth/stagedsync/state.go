@@ -55,6 +55,10 @@ func (s *StageState) Done() {
 	s.state.NextStage()
 }
 
+func ExecutionAt(db ethdb.Getter) (uint64, error) {
+	return stages.GetStageProgress(db, stages.Execution)
+}
+
 func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
 	err := stages.SaveStageProgress(db, s.Stage, newBlockNum)
 	s.state.NextStage()
