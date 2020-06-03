@@ -69,7 +69,7 @@ func DoStagedSyncWithFetchers(
 
 	// Further stages go there
 	log.Info("Sync stage 5/7. Validating final hash")
-	err = spawnCheckFinalHashStage(stateDB, syncHeadNumber, datadir, quitCh)
+	err = SpawnCheckFinalHashStage(stateDB, syncHeadNumber, datadir, quitCh)
 	if err != nil {
 		return err
 	}

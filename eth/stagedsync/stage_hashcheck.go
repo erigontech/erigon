@@ -19,7 +19,7 @@ import (
 
 var cbor codec.CborHandle
 
-func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
+func SpawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, datadir string, quit chan struct{}) error {
 	hashProgress, err := stages.GetStageProgress(stateDB, stages.HashCheck)
 	if err != nil {
 		return err
@@ -32,15 +32,11 @@ func spawnCheckFinalHashStage(stateDB ethdb.Database, syncHeadNumber uint64, dat
 	}
 
 	if core.UsePlainStateExecution {
+		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
 		err = promoteHashedState(stateDB, hashProgress, datadir, quit)
 		if err != nil {
 			return err
 		}
-	}
-
-	//REMOVE THE FOLLOWING LINE WHEN PLAIN => HASHED TRANSFORMATION IS READY
-	if hashProgress > 0 {
-		return nil
 	}
 
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
@@ -133,7 +129,7 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 		if err != nil {
 			return err
 		}
-		return next(newK, v)
+		return next(k, newK, v)
 	}
 }
 

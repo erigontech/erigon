@@ -554,7 +554,7 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 		}
 
 		for k, v := range bufferMap {
-			err = next([]byte(k), v)
+			err = next(dbKey, []byte(k), v)
 			if err != nil {
 				return err
 			}
