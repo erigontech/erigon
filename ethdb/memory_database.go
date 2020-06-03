@@ -90,8 +90,11 @@ func (db *BoltDatabase) MemCopy() Database {
 
 	if err := db.db.View(func(readTx *bolt.Tx) error {
 		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			if bolt.IsSystemBucket(name) {
+				return nil
+			}
 			return mem.Update(func(writeTx *bolt.Tx) error {
-				newBucketToWrite, err := writeTx.CreateBucketIfNotExists(name, true)
+				newBucketToWrite, err := writeTx.CreateBucket(name, true)
 				if err != nil {
 					return err
 				}
