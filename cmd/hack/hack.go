@@ -2157,11 +2157,19 @@ func resetState(chaindata string) {
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageChangeSetBucket)
 	//nolint:errcheck
+	db.DeleteBucket(dbutils.ContractCodeBucket)
+	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainStateBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainContractCodeBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.IncarnationMapBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CodeBucket)
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	core.UsePlainStateExecution = true
