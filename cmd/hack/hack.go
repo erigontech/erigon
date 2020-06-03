@@ -2511,7 +2511,7 @@ func testStage5(chaindata string) error {
 	return nil
 }
 
-func fixStage5(chaindata string) error {
+func testStage4(chaindata string, block uint64) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
@@ -2523,6 +2523,13 @@ func fixStage5(chaindata string) error {
 			return err
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+	}
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.Execution}
+	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch); err != nil {
+		return err
 	}
 	return nil
 }
@@ -2684,8 +2691,8 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "fixStage5" {
-		if err := fixStage5(*chaindata); err != nil {
+	if *action == "stage4" {
+		if err := testStage4(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

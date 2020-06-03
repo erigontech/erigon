@@ -47,14 +47,14 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState) error {
-				return spawnExecuteBlocksStage(s, stateDB, blockchain, quitCh)
+				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh)
 			},
 		},
 		{
 			ID:          stages.HashCheck,
 			Description: "Validating final hash",
 			ExecFunc: func(s *StageState) error {
-				return SpawnCheckFinalHashStage(s, stateDB, datadir, quitCh)
+				return SpawnCheckFinalHashStage(s, stateDB, datadir,  quitCh)
 			},
 		},
 		{
