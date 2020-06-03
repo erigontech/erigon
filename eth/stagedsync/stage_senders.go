@@ -146,7 +146,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 				break
 			}
 			tx.SetFrom(from)
-			if tx.Protected() && tx.ChainId().Cmp(job.signer.ChainId()) != 0 {
+			if tx.Protected() && tx.ChainID().Cmp(job.signer.ChainID()) != 0 {
 				job.err = errors.New("invalid chainId")
 				break
 			}

@@ -93,12 +93,12 @@ type Signer interface {
 	// Equal returns true if the given signer is the same as the receiver.
 	Equal(Signer) bool
 	// Return 0 for pre-EIP155 signers
-	ChainId() *uint256.Int
+	ChainID() *uint256.Int
 }
 
 // EIP155Transaction implements Signer using the EIP155 rules.
 type EIP155Signer struct {
-	chainId, chainIdMul *uint256.Int
+	chainID, chainIDMul *uint256.Int
 }
 
 func NewEIP155Signer(chainId *big.Int) EIP155Signer {
@@ -107,14 +107,14 @@ func NewEIP155Signer(chainId *big.Int) EIP155Signer {
 		x.SetFromBig(chainId)
 	}
 	return EIP155Signer{
-		chainId:    x,
-		chainIdMul: new(uint256.Int).Mul(x, common.Num2),
+		chainID:    x,
+		chainIDMul: new(uint256.Int).Mul(x, common.Num2),
 	}
 }
 
 func (s EIP155Signer) Equal(s2 Signer) bool {
 	eip155, ok := s2.(EIP155Signer)
-	return ok && eip155.chainId.Cmp(s.chainId) == 0
+	return ok && eip155.chainID.Cmp(s.chainID) == 0
 }
 
 func (s EIP155Signer) Sender(tx *Transaction) (common.Address, error) {
@@ -125,10 +125,10 @@ func (s EIP155Signer) SenderWithContext(context *secp256k1.Context, tx *Transact
 	if !tx.Protected() {
 		return HomesteadSigner{}.Sender(tx)
 	}
-	if !tx.ChainId().Eq(s.chainId) {
+	if !tx.ChainID().Eq(s.chainID) {
 		return common.Address{}, ErrInvalidChainId
 	}
-	V := new(uint256.Int).Sub(&tx.data.V, s.chainIdMul)
+	V := new(uint256.Int).Sub(&tx.data.V, s.chainIDMul)
 	V.Sub(V, common.Num8)
 	return recoverPlain(context, s.Hash(tx), &tx.data.R, &tx.data.S, V, true)
 }
@@ -140,9 +140,9 @@ func (s EIP155Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *uin
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if s.chainId.Sign() != 0 {
+	if s.chainID.Sign() != 0 {
 		V = uint256.NewInt().SetUint64(uint64(sig[64] + 35))
-		V.Add(V, s.chainIdMul)
+		V.Add(V, s.chainIDMul)
 	}
 	return R, S, V, nil
 }
@@ -157,12 +157,12 @@ func (s EIP155Signer) Hash(tx *Transaction) common.Hash {
 		tx.data.Recipient,
 		tx.data.Amount,
 		tx.data.Payload,
-		s.chainId, uint(0), uint(0),
+		s.chainID, uint(0), uint(0),
 	})
 }
 
-func (s EIP155Signer) ChainId() *uint256.Int {
-	return s.chainId
+func (s EIP155Signer) ChainID() *uint256.Int {
+	return s.chainID
 }
 
 // HomesteadTransaction implements TransactionInterface using the
@@ -228,7 +228,7 @@ func (fs FrontierSigner) SenderWithContext(context *secp256k1.Context, tx *Trans
 	return recoverPlain(context, fs.Hash(tx), &tx.data.R, &tx.data.S, &tx.data.V, false)
 }
 
-func (fs FrontierSigner) ChainId() *uint256.Int {
+func (fs FrontierSigner) ChainID() *uint256.Int {
 	return common.Num0
 }
 
@@ -259,8 +259,8 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uin
 	return addr, nil
 }
 
-// deriveChainId derives the chain id from the given v parameter
-func deriveChainId(v *uint256.Int) *uint256.Int {
+// deriveChainID derives the chain id from the given v parameter
+func deriveChainID(v *uint256.Int) *uint256.Int {
 	if v.IsUint64() {
 		v := v.Uint64()
 		if v == 27 || v == 28 {

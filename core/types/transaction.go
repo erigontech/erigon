@@ -101,9 +101,9 @@ func newTransaction(nonce uint64, to *common.Address, amount *uint256.Int, gasLi
 	return &Transaction{data: d}
 }
 
-// ChainId returns which chain id this transaction was signed for (if at all)
-func (tx *Transaction) ChainId() *uint256.Int {
-	return deriveChainId(&tx.data.V)
+// ChainID returns which chain id this transaction was signed for (if at all)
+func (tx *Transaction) ChainID() *uint256.Int {
+	return deriveChainID(&tx.data.V)
 }
 
 // Protected returns whether the transaction is protected from replay protection.
@@ -155,7 +155,7 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 	if withSignature {
 		var V byte
 		if isProtectedV(&dec.V) {
-			chainID := deriveChainId(&dec.V).Uint64()
+			chainID := deriveChainID(&dec.V).Uint64()
 			V = byte(dec.V.Uint64() - 35 - 2*chainID)
 		} else {
 			V = byte(dec.V.Uint64() - 27)
@@ -227,7 +227,7 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 
 	var err error
 	msg.from, err = Sender(s, tx)
-	if tx.Protected() && tx.ChainId().Cmp(s.ChainId()) != 0 {
+	if tx.Protected() && tx.ChainID().Cmp(s.ChainID()) != 0 {
 		return msg, ErrInvalidChainId
 	}
 	return msg, err
