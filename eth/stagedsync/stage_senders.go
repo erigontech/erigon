@@ -100,7 +100,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 			rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
 		}
 
-		if err := stages.SaveStageProgress(mutation, stages.Senders, nextBlockNumber); err != nil {
+		if err := s.Update(mutation, nextBlockNumber); err != nil {
 			return err
 		}
 		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
@@ -113,7 +113,8 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 		}
 	}
 
-	return s.Done(stateDB.NewBatch(), 0) // just to go to the next step
+	s.Done()
+	return nil
 }
 
 type senderRecoveryJob struct {

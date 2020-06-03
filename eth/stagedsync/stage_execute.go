@@ -156,7 +156,7 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			return 0, err
 		}
 
-		if err = stages.SaveStageProgress(stateBatch, stages.Execution, blockNum); err != nil {
+		if err = s.Update(stateBatch, blockNum); err != nil {
 			return 0, err
 		}
 
@@ -193,7 +193,8 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	if err != nil {
 		return syncHeadNumber, fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
 	}
-	return syncHeadNumber, s.Done(stateDB.NewBatch(), 0)
+	s.Done()
+	return syncHeadNumber, nil
 }
 
 func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {

@@ -28,7 +28,7 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 		return err
 	}
 
-	return s.Done(db, blockNum)
+	return s.DoneAndUpdate(db, blockNum)
 }
 
 func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
@@ -49,7 +49,7 @@ func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 		return err
 	}
 
-	return s.Done(db, blockNum)
+	return s.DoneAndUpdate(db, blockNum)
 }
 
 func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool, quitCh chan struct{}) error {

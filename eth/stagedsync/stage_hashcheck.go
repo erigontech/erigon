@@ -55,7 +55,7 @@ func spawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, syncHeadNum
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
 	}
 
-	return s.Done(stateDB, blockNr)
+	return s.DoneAndUpdate(stateDB, blockNr)
 }
 
 func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {

@@ -47,7 +47,15 @@ type StageState struct {
 	BlockNumber uint64
 }
 
-func (s *StageState) Done(db ethdb.Putter, newBlockNum uint64) error {
+func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
+	return stages.SaveStageProgress(db, s.Stage, newBlockNum)
+}
+
+func (s *StageState) Done() {
+	s.state.NextStage()
+}
+
+func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
 	err := stages.SaveStageProgress(db, s.Stage, newBlockNum)
 	s.state.NextStage()
 	return err
