@@ -42,6 +42,10 @@ var (
 	ErrLocked  = accounts.NewAuthNeededError("password or unlock")
 	ErrNoMatch = errors.New("no key for given address or file")
 	ErrDecrypt = errors.New("could not decrypt key with given password")
+
+	// ErrAccountAlreadyExists is returned if an account attempted to import is
+	// already present in the keystore.
+	ErrAccountAlreadyExists = errors.New("account alreaady exists")
 )
 
 // KeyStoreType is the reflect type of a keystore backend.
@@ -440,7 +444,7 @@ func (ks *KeyStore) Import(keyJSON []byte, passphrase, newPassphrase string) (ac
 	ks.importMu.Lock()
 	defer ks.importMu.Unlock()
 	if ks.cache.hasAddress(key.Address) {
-		return accounts.Account{}, errors.New("account already exists")
+		return accounts.Account{}, ErrAccountAlreadyExists
 	}
 	return ks.importKey(key, newPassphrase)
 }
@@ -451,7 +455,7 @@ func (ks *KeyStore) ImportECDSA(priv *ecdsa.PrivateKey, passphrase string) (acco
 	ks.importMu.Lock()
 	defer ks.importMu.Unlock()
 	if ks.cache.hasAddress(key.Address) {
-		return accounts.Account{}, errors.New("account already exists")
+		return accounts.Account{}, ErrAccountAlreadyExists
 	}
 	return ks.importKey(key, passphrase)
 }
