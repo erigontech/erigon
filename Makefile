@@ -91,7 +91,13 @@ ios:
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
 test: semantics/z3/build/libz3.a all
-	$(GORUN) build/ci.go test
+	TEST_DB=lmdb $(GORUN) build/ci.go test -v ./tests
+
+test-lmdb: semantics/z3/build/libz3.a all
+	TEST_DB=lmdb $(GORUN) build/ci.go test
+
+test-badger: semantics/z3/build/libz3.a all
+	TEST_DB=badger $(GORUN) build/ci.go test
 
 lint: lintci
 
