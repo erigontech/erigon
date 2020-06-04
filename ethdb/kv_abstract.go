@@ -2,6 +2,8 @@ package ethdb
 
 import (
 	"context"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type KV interface {
@@ -10,7 +12,6 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
-	Size() uint64 // in bytes
 }
 
 type Tx interface {
@@ -38,6 +39,9 @@ type Cursor interface {
 	SeekTo(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
+
+	Put(key []byte, value []byte) error
+	Delete(key []byte) error
 }
 
 type NoValuesCursor interface {
@@ -45,6 +49,11 @@ type NoValuesCursor interface {
 	Seek(seek []byte) ([]byte, uint32, error)
 	Next() ([]byte, uint32, error)
 	Walk(walker func(k []byte, vSize uint32) (bool, error)) error
+}
+
+type HasStats interface {
+	DiskSize(context.Context) (common.StorageSize, error) // db size
+	BucketsStat(context.Context) (map[string]common.StorageBucketWriteStats, error)
 }
 
 type DbProvider uint8

@@ -18,11 +18,13 @@ package ethdb
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"runtime"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -373,9 +375,13 @@ func (db *BadgerDatabase) IdealBatchSize() int {
 }
 
 // DiskSize returns the total disk size of the database in bytes.
-func (db *BadgerDatabase) DiskSize() uint64 {
+func (db *BadgerDatabase) DiskSize(_ context.Context) (common.StorageSize, error) {
 	lsm, vlog := db.db.Size()
-	return uint64(lsm + vlog)
+	return common.StorageSize(lsm + vlog), nil
+}
+
+func (db *BadgerDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return nil, nil
 }
 
 // MemCopy creates a copy of the database in a temporary directory.

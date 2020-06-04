@@ -100,9 +100,13 @@ func (db *badgerDB) Close() {
 	}
 }
 
-func (db *badgerDB) Size() uint64 {
+func (db *badgerDB) DiskSize(_ context.Context) (common.StorageSize, error) {
 	lsm, vlog := db.badger.Size()
-	return uint64(lsm + vlog)
+	return common.StorageSize(lsm + vlog), nil
+}
+
+func (db *badgerDB) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
 func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {
@@ -351,6 +355,30 @@ func (c *badgerCursor) Next() ([]byte, []byte, error) {
 		c.v = []byte{}
 	}
 	return c.k, c.v, nil
+}
+
+func (c *badgerCursor) Delete(key []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	c.initCursor()
+
+	return c.bucket.Delete(key)
+}
+
+func (c *badgerCursor) Put(key []byte, value []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	c.initCursor()
+
+	return c.bucket.Put(key, value)
 }
 
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {

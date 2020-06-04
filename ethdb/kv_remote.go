@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -13,7 +14,7 @@ type remoteOpts struct {
 	Remote remote.DbOpts
 }
 
-type remoteDB struct {
+type RemoteKV struct {
 	opts   remoteOpts
 	remote *remote.DB
 	log    log.Logger
@@ -21,7 +22,7 @@ type remoteDB struct {
 
 type remoteTx struct {
 	ctx context.Context
-	db  *remoteDB
+	db  *RemoteKV
 
 	remote *remote.Tx
 }
@@ -85,7 +86,7 @@ func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
 		return nil, err
 	}
 
-	return &remoteDB{
+	return &RemoteKV{
 		opts:   opts,
 		remote: db,
 		log:    log.New("remote_db", opts.Remote.DialAddress),
@@ -106,7 +107,7 @@ func NewRemote() remoteOpts {
 
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
-func (db *remoteDB) Close() {
+func (db *RemoteKV) Close() {
 	if err := db.remote.Close(); err != nil {
 		db.log.Warn("failed to close remote DB", "err", err)
 	} else {
@@ -114,15 +115,19 @@ func (db *remoteDB) Close() {
 	}
 }
 
-func (db *remoteDB) Size() uint64 {
-	return 0
+func (db *RemoteKV) DiskSize(ctx context.Context) (common.StorageSize, error) {
+	return db.remote.DiskSize(ctx)
 }
 
-func (db *remoteDB) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *RemoteKV) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return db.remote.BucketsStat(ctx)
+}
+
+func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
 
-func (db *remoteDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &remoteTx{db: db, ctx: ctx}
 	return db.remote.View(ctx, func(tx *remote.Tx) error {
 		t.remote = tx
@@ -130,7 +135,7 @@ func (db *remoteDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	})
 }
 
-func (db *remoteDB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
@@ -187,6 +192,14 @@ func (b remoteBucket) Delete(key []byte) error {
 func (b remoteBucket) Cursor() Cursor {
 	c := &remoteCursor{bucket: b, ctx: b.tx.ctx, remote: b.remote.Cursor()}
 	return c
+}
+
+func (c *remoteCursor) Put(key []byte, value []byte) error {
+	panic("not supported")
+}
+
+func (c *remoteCursor) Delete(key []byte) error {
+	panic("not supported")
 }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {

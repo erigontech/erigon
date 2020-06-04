@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -119,8 +120,24 @@ func (db *BoltKV) Close() {
 	}
 }
 
-func (db *BoltKV) Size() uint64 {
-	return uint64(db.bolt.Size())
+func (db *BoltKV) DiskSize(_ context.Context) (common.StorageSize, error) {
+	return common.StorageSize(db.bolt.Size()), nil
+}
+
+func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	res := map[string]common.StorageBucketWriteStats{}
+	for name, stats := range db.bolt.WriteStats() {
+		res[name] = common.StorageBucketWriteStats{
+			KeyN:             common.StorageCounter(stats.KeyN),
+			KeyBytesN:        common.StorageSize(stats.KeyBytesN),
+			ValueBytesN:      common.StorageSize(stats.ValueBytesN),
+			TotalPut:         common.StorageCounter(stats.TotalPut),
+			TotalDelete:      common.StorageCounter(stats.TotalDelete),
+			TotalBytesPut:    common.StorageSize(stats.TotalBytesPut),
+			TotalBytesDelete: common.StorageSize(stats.TotalBytesDelete),
+		}
+	}
+	return res, nil
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
@@ -277,6 +294,30 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 		c.k, c.v = nil, nil
 	}
 	return c.k, c.v, nil
+}
+
+func (c *boltCursor) Delete(key []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	k, _ := c.bolt.SeekTo(key)
+	if !bytes.Equal(k, key) {
+		return nil
+	}
+	return c.bolt.Delete()
+}
+
+func (c *boltCursor) Put(key []byte, value []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	return c.bucket.Put(key, value)
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {

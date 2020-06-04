@@ -63,4 +63,24 @@ export default class API {
       },
     });
   }
+
+  dbSize(prefix) {
+    return axios({
+      url: this.endpoint('/api/v1/db/size'),
+      method: 'get',
+      params: {
+        prefix: prefix,
+      },
+    });
+  }
+
+  dbBucketsStat(prefix) {
+    return axios({
+      url: this.endpoint('/api/v1/db/buckets-stat'),
+      method: 'get',
+      params: {
+        prefix: prefix,
+      },
+    });
+  }
 }

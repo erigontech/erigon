@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -56,17 +57,18 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
 			b := tx.Bucket(tuples[bucketStart])
+			c := b.Cursor()
 			l := (bucketEnd - bucketStart) / 3
 			pairs := make([][]byte, 2*l)
 			for i := 0; i < l; i++ {
 				pairs[2*i] = tuples[bucketStart+3*i+1]
 				pairs[2*i+1] = tuples[bucketStart+3*i+2]
 				if pairs[2*i+1] == nil {
-					if err := b.Delete(pairs[2*i]); err != nil {
+					if err := c.Delete(pairs[2*i]); err != nil {
 						return err
 					}
 				} else {
-					if err := b.Put(pairs[2*i], pairs[2*i+1]); err != nil {
+					if err := c.Put(pairs[2*i], pairs[2*i+1]); err != nil {
 						return err
 					}
 				}
@@ -98,8 +100,12 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize() uint64 {
-	return db.kv.Size()
+func (db *ObjectDatabase) DiskSize(ctx context.Context) (common.StorageSize, error) {
+	return db.kv.(HasStats).DiskSize(ctx)
+}
+
+func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return db.kv.(HasStats).BucketsStat(ctx)
 }
 
 // Get returns the value for a given key if it's present.

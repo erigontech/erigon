@@ -871,7 +871,6 @@ func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.
 	return uncles
 }
 
-
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.
 func (bc *BlockChain) Stop() {
@@ -1848,7 +1847,11 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if bc.trieDbState != nil {
 				bc.trieDbState.EvictTries(false)
 			}
-			log.Info("Database", "size", bc.db.DiskSize(), "written", written)
+			size, err := bc.db.(ethdb.HasStats).DiskSize(context.Background())
+			if err != nil {
+				return k, err
+			}
+			log.Info("Database", "size", size, "written", written)
 		}
 	}
 
@@ -2224,17 +2227,17 @@ func (bc *BlockChain) InsertHeaderChainStaged(chain []*types.Header, checkFreq i
 	// Report some public statistics so the user has a clue what's going on
 	last := chain[len(chain)-1]
 
-	context := []interface{}{
+	ctx := []interface{}{
 		"count", processed, "elapsed", common.PrettyDuration(time.Since(start)),
 		"number", last.Number, "hash", last.Hash(),
 	}
 	if timestamp := time.Unix(int64(last.Time), 0); time.Since(timestamp) > time.Minute {
-		context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
+		ctx = append(ctx, []interface{}{"age", common.PrettyAge(timestamp)}...)
 	}
 	if ignored > 0 {
-		context = append(context, []interface{}{"ignored", ignored}...)
+		ctx = append(ctx, []interface{}{"ignored", ignored}...)
 	}
-	log.Info("Imported new block headers", context...)
+	log.Info("Imported new block headers", ctx...)
 
 	var written uint64
 	var err1 error
@@ -2242,7 +2245,11 @@ func (bc *BlockChain) InsertHeaderChainStaged(chain []*types.Header, checkFreq i
 		log.Error("Could not commit chainDb", "error", err1)
 		return 0, false, 0, err1
 	}
-	log.Info("Database", "size", bc.db.DiskSize(), "written", written)
+	size, err := bc.db.(ethdb.HasStats).DiskSize(context.Background())
+	if err != nil {
+		return 0, false, 0, err
+	}
+	log.Info("Database", "size", size, "written", written)
 	return n, newCanonical, lowestCanonicalNumber, err
 }
 
@@ -2280,7 +2287,11 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 		log.Error("Could not commit chainDb", "error", err1)
 		return 0, err1
 	}
-	log.Info("Database", "size", bc.db.DiskSize(), "written", written)
+	size, err := bc.db.(ethdb.HasStats).DiskSize(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	log.Info("Database", "size", size, "written", written)
 	return n, err
 }
 
