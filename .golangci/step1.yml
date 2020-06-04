@@ -6,7 +6,7 @@ linters:
     - errcheck
     - goconst
     - gofmt
-    - golint
+#    - golint
     - interfacer
 
   disable-all: true
