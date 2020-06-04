@@ -216,8 +216,7 @@ func (b boltBucket) Put(key []byte, value []byte) error {
 		return b.tx.ctx.Err()
 	default:
 	}
-	err := b.bolt.Put(key, value)
-	return err
+	return b.bolt.Put(key, value)
 }
 
 func (b boltBucket) Delete(key []byte) error {
