@@ -20,7 +20,7 @@ jobs:
       - run: go env
       - run: git submodule status semantics/z3 | awk '{ print $1 }'
 
-      - run: cat .git/modules/semantics/z3/HEAD
+      - run: cat /go/src/github.com/ledgerwatch/turbo-geth/.git/modules/semantics/z3/HEAD
 
       - restore_cache:
           keys:
