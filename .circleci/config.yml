@@ -51,13 +51,11 @@ jobs:
 
       - save_cache:
           key: v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
-          paths:
-            - "/go/pkg/mod"
+          paths: "/go/pkg/mod"
 
       - save_cache:
           key: v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
-          paths:
-            - "/go/src/github.com/ledgerwatch/turbo-geth/semantics/z3/build"
+          paths: "/go/src/github.com/ledgerwatch/turbo-geth/semantics/z3/build"
 
       - store_artifacts:
           path: /tmp/test-results
