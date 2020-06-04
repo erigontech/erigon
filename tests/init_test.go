@@ -289,7 +289,7 @@ func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value
 }
 
 func TestMatcherWhitelist(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	tm := new(testMatcher)
 	tm.whitelist("invalid*")
 	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
