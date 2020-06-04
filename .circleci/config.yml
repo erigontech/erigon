@@ -1,4 +1,4 @@
-version: 2
+version: 2.1
 jobs:
   build:
     docker:
@@ -18,20 +18,21 @@ jobs:
       - checkout
       - run: mkdir -p ${TEST_RESULTS}
       - run: go env
+      - run: git submodule update --init --recursive
+      - run: git submodule status semantics/z3 | awk '{ print $1 }' > /tmp/z3.version
 
       - restore_cache:
           keys:
-            - v1-pkg-cache-{{ checksum "go.sum" }}
-            - v1-pkg-cache
+            - v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
 
-      - run: git submodule update --init --recursive
+      - restore_cache:
+          keys:
+            - v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
+
       - run: go mod tidy && test -z "$(git status --porcelain)"
-
       - run: go mod download
       - run: go mod verify
-
       - run: go get github.com/jstemmer/go-junit-report
-
       - run: make lintci-deps
 
       - run:
@@ -49,10 +50,12 @@ jobs:
           no_output_timeout: 10m
 
       - save_cache:
-          key: v1-pkg-cache-{{ checksum "go.sum" }}
-          paths:
-            - "/go/pkg"
-            - "/go/pkg/mod"
+          key: v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
+          paths: "/go/pkg/mod"
+
+      - save_cache:
+          key: v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
+          paths: "/go/src/github.com/ledgerwatch/turbo-geth/semantics/z3/build"
 
       - store_artifacts:
           path: /tmp/test-results
@@ -60,4 +63,3 @@ jobs:
 
       - store_test_results:
           path: /tmp/test-results
-
