@@ -296,6 +296,25 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
+func (c *boltCursor) Delete(key []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	k, _ := c.bolt.SeekTo(key)
+	if !bytes.Equal(k, key) {
+		return nil
+	}
+	return c.bolt.Delete()
+}
+
+func (c *boltCursor) Put(key []byte, value []byte) error {
+	panic("not implemented yet")
+	//return c.cursor.Put(key, value, 0)
+}
+
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {

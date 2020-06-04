@@ -194,6 +194,14 @@ func (b remoteBucket) Cursor() Cursor {
 	return c
 }
 
+func (c *remoteCursor) Put(key []byte, value []byte) error {
+	panic("not supported")
+}
+
+func (c *remoteCursor) Delete(key []byte) error {
+	panic("not supported")
+}
+
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.First()
 	if c.err != nil {

@@ -119,7 +119,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		}
 	}
 
-	return &lmdbKV{
+	return &LmdbKV{
 		opts:    opts,
 		env:     env,
 		log:     logger,
@@ -135,7 +135,7 @@ func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 	return db
 }
 
-type lmdbKV struct {
+type LmdbKV struct {
 	opts    lmdbOpts
 	env     *lmdb.Env
 	log     log.Logger
@@ -148,7 +148,7 @@ func NewLMDB() lmdbOpts {
 
 // Close closes db
 // All transactions must be closed before closing the database.
-func (db *lmdbKV) Close() {
+func (db *LmdbKV) Close() {
 	if err := db.env.Close(); err != nil {
 		db.log.Warn("failed to close DB", "err", err)
 	} else {
@@ -159,7 +159,7 @@ func (db *lmdbKV) Close() {
 	}
 }
 
-func (db *lmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
+func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
 	stats, err := db.env.Stat()
 	if err != nil {
 		return 0, fmt.Errorf("could not read database size: %w", err)
@@ -167,11 +167,11 @@ func (db *lmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
 	return common.StorageSize(uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages)), nil
 }
 
-func (db *lmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
 	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
-func (db *lmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	flags := uint(0)
 	if !writable {
 		flags |= lmdb.Readonly
@@ -190,7 +190,7 @@ func (db *lmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 
 type lmdbTx struct {
 	ctx context.Context
-	db  *lmdbKV
+	db  *LmdbKV
 
 	tx      *lmdb.Txn
 	cursors []*lmdb.Cursor
@@ -213,7 +213,7 @@ type lmdbCursor struct {
 	err error
 }
 
-func (db *lmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.View(func(tx *lmdb.Txn) error {
 		defer t.cleanup()
@@ -222,7 +222,7 @@ func (db *lmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	})
 }
 
-func (db *lmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.cleanup()
@@ -298,7 +298,7 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 
 	err := b.tx.tx.Put(b.dbi, key, value, 0)
 	if err != nil {
-		return fmt.Errorf("failed lmdbKV.Put: %w", err)
+		return fmt.Errorf("failed LmdbKV.Put: %w", err)
 	}
 	return nil
 }
@@ -370,7 +370,7 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		return []byte{}, nil, fmt.Errorf("failed lmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
+		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
@@ -395,13 +395,49 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 		return nil, c.v, nil
 	}
 	if c.err != nil {
-		return []byte{}, nil, fmt.Errorf("failed lmdbKV cursor.Next(): %w", c.err)
+		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Next(): %w", c.err)
 	}
 	if !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 
 	return c.k, c.v, nil
+}
+
+func (c *lmdbCursor) Delete(key []byte) error {
+	if err := c.initCursor(); err != nil {
+		return err
+	}
+
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(k, key) {
+		return nil
+	}
+	return c.cursor.Del(0)
+}
+
+func (c *lmdbCursor) Put(key []byte, value []byte) error {
+	if err := c.initCursor(); err != nil {
+		return err
+	}
+
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	return c.cursor.Put(key, value, 0)
 }
 
 func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {

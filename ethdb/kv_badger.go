@@ -357,6 +357,14 @@ func (c *badgerCursor) Next() ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
+func (c *badgerCursor) Delete(key []byte) error {
+	panic("not implemented yet")
+}
+
+func (c *badgerCursor) Put(key []byte, value []byte) error {
+	panic("not implemented yet")
+}
+
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
