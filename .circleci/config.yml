@@ -23,6 +23,7 @@ jobs:
           keys:
             - v1-pkg-cache-{{ checksum "go.sum" }}
             - v1-pkg-cache
+            - v1-z3-cache-{{ checksum "semantics/z3/build/libz3.a" }}
 
       - run: git submodule update --init --recursive
       - run: go mod tidy && test -z "$(git status --porcelain)"
@@ -53,6 +54,11 @@ jobs:
           paths:
             - "/go/pkg"
             - "/go/pkg/mod"
+
+      - save_cache:
+          key: v1-z3-cache-{{ checksum "semantics/z3/build/libz3.a" }}
+          paths:
+            - "/go/src/github.com/ledgerwatch/turbo-geth/semantics/z3/build"
 
       - store_artifacts:
           path: /tmp/test-results
