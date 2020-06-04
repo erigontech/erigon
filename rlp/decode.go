@@ -27,6 +27,8 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/holiman/uint256"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -146,6 +148,7 @@ func addErrorContext(err error, ctx string) error {
 var (
 	decoderInterface = reflect.TypeOf(new(Decoder)).Elem()
 	bigInt           = reflect.TypeOf(big.Int{})
+	uint256Int       = reflect.TypeOf(uint256.Int{})
 )
 
 func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
@@ -157,6 +160,10 @@ func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
 		return decodeBigInt, nil
 	case typ.AssignableTo(bigInt):
 		return decodeBigIntNoPtr, nil
+	case typ.AssignableTo(reflect.PtrTo(uint256Int)):
+		return decodeUint256, nil
+	case typ.AssignableTo(uint256Int):
+		return decodeUint256NoPtr, nil
 	case kind == reflect.Ptr:
 		return makePtrDecoder(typ, tags)
 	case reflect.PtrTo(typ).Implements(decoderInterface):
@@ -227,6 +234,31 @@ func decodeBigInt(s *Stream, val reflect.Value) error {
 	i := val.Interface().(*big.Int)
 	if i == nil {
 		i = new(big.Int)
+		val.Set(reflect.ValueOf(i))
+	}
+	// Reject leading zero bytes
+	if len(b) > 0 && b[0] == 0 {
+		return wrapStreamError(ErrCanonInt, val.Type())
+	}
+	i.SetBytes(b)
+	return nil
+}
+
+func decodeUint256NoPtr(s *Stream, val reflect.Value) error {
+	return decodeUint256(s, val.Addr())
+}
+
+func decodeUint256(s *Stream, val reflect.Value) error {
+	b, err := s.Bytes()
+	if err != nil {
+		return wrapStreamError(err, val.Type())
+	}
+	if len(b) > 32 {
+		return wrapStreamError(errUintOverflow, val.Type())
+	}
+	i := val.Interface().(*uint256.Int)
+	if i == nil {
+		i = new(uint256.Int)
 		val.Set(reflect.ValueOf(i))
 	}
 	// Reject leading zero bytes

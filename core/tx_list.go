@@ -252,11 +252,11 @@ func (l *txList) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Tran
 	// If there's an older better transaction, abort
 	old := l.txs.Get(tx.Nonce())
 	if old != nil {
-		threshold := new(big.Int).Div(new(big.Int).Mul(old.GasPrice(), big.NewInt(100+int64(priceBump))), big.NewInt(100))
+		threshold := new(big.Int).Div(new(big.Int).Mul(old.GasPrice().ToBig(), big.NewInt(100+int64(priceBump))), big.NewInt(100))
 		// Have to ensure that the new gas price is higher than the old gas
 		// price as well as checking the percentage threshold to ensure that
 		// this is accurate for low (Wei-level) gas price replacements
-		if old.GasPrice().Cmp(tx.GasPrice()) >= 0 || threshold.Cmp(tx.GasPrice()) > 0 {
+		if old.GasPrice().Cmp(tx.GasPrice()) >= 0 || threshold.Cmp(tx.GasPrice().ToBig()) > 0 {
 			return false, nil
 		}
 	}
@@ -449,7 +449,7 @@ func (l *txPricedList) Cap(threshold *big.Int, local *accountSet) types.Transact
 			continue
 		}
 		// Stop the discards if we've reached the threshold
-		if tx.GasPrice().Cmp(threshold) >= 0 {
+		if tx.GasPrice().ToBig().Cmp(threshold) >= 0 {
 			save = append(save, tx)
 			break
 		}

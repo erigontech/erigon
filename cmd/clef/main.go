@@ -92,9 +92,9 @@ var (
 		Value: DefaultConfigDir(),
 		Usage: "Directory for Clef configuration",
 	}
-	chainIdFlag = cli.Int64Flag{
+	chainIDFlag = cli.Uint64Flag{
 		Name:  "chainid",
-		Value: params.MainnetChainConfig.ChainID.Int64(),
+		Value: params.MainnetChainConfig.ChainID.Uint64(),
 		Usage: "Chain id to use for signing (1=mainnet, 3=Ropsten, 4=Rinkeby, 5=Goerli)",
 	}
 	rpcPortFlag = cli.IntFlag{
@@ -218,7 +218,7 @@ func init() {
 		logLevelFlag,
 		keystoreFlag,
 		configdirFlag,
-		chainIdFlag,
+		chainIDFlag,
 		utils.LightKDFFlag,
 		utils.NoUSBFlag,
 		utils.SmartCardDaemonPathFlag,
@@ -547,17 +547,17 @@ func signer(c *cli.Context) error {
 		}
 	}
 	var (
-		chainId  = c.GlobalInt64(chainIdFlag.Name)
+		chainID  = c.GlobalUint64(chainIDFlag.Name)
 		ksLoc    = c.GlobalString(keystoreFlag.Name)
 		lightKdf = c.GlobalBool(utils.LightKDFFlag.Name)
 		advanced = c.GlobalBool(advancedMode.Name)
 		nousb    = c.GlobalBool(utils.NoUSBFlag.Name)
 		scpath   = c.GlobalString(utils.SmartCardDaemonPathFlag.Name)
 	)
-	log.Info("Starting signer", "chainid", chainId, "keystore", ksLoc,
+	log.Info("Starting signer", "chainid", chainID, "keystore", ksLoc,
 		"light-kdf", lightKdf, "advanced", advanced)
 	am := core.StartClefAccountManager(ksLoc, nousb, lightKdf, scpath)
-	apiImpl := core.NewSignerAPI(am, chainId, nousb, ui, db, advanced, pwStorage)
+	apiImpl := core.NewSignerAPI(am, chainID, nousb, ui, db, advanced, pwStorage)
 
 	// Establish the bidirectional communication, by creating a new UI backend and registering
 	// it with the UI.

@@ -694,14 +694,14 @@ func (args *CallArgs) ToMessage(globalGasCap *big.Int) types.Message {
 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
 		gas = globalGasCap.Uint64()
 	}
-	gasPrice := new(big.Int)
+	gasPrice := new(uint256.Int)
 	if args.GasPrice != nil {
-		gasPrice = args.GasPrice.ToInt()
+		gasPrice.SetFromBig(args.GasPrice.ToInt())
 	}
 
-	value := new(big.Int)
+	value := new(uint256.Int)
 	if args.Value != nil {
-		value = args.Value.ToInt()
+		value.SetFromBig(args.Value.ToInt())
 	}
 
 	var data []byte
@@ -1123,7 +1123,7 @@ type RPCTransaction struct {
 func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
 	var signer types.Signer = types.FrontierSigner{}
 	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainId())
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
 	}
 	from, _ := types.Sender(signer, tx)
 	v, r, s := tx.RawSignatureValues()
@@ -1131,15 +1131,15 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	result := &RPCTransaction{
 		From:     from,
 		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: (*hexutil.Big)(tx.GasPrice()),
+		GasPrice: (*hexutil.Big)(tx.GasPrice().ToBig()),
 		Hash:     tx.Hash(),
 		Input:    hexutil.Bytes(tx.Data()),
 		Nonce:    hexutil.Uint64(tx.Nonce()),
 		To:       tx.To(),
-		Value:    (*hexutil.Big)(tx.Value()),
-		V:        (*hexutil.Big)(v),
-		R:        (*hexutil.Big)(r),
-		S:        (*hexutil.Big)(s),
+		Value:    (*hexutil.Big)(tx.Value().ToBig()),
+		V:        (*hexutil.Big)(v.ToBig()),
+		R:        (*hexutil.Big)(r.ToBig()),
+		S:        (*hexutil.Big)(s.ToBig()),
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
@@ -1316,7 +1316,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 	var signer types.Signer = types.FrontierSigner{}
 	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainId())
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
 	}
 	from, _ := types.Sender(signer, tx)
 
@@ -1456,10 +1456,12 @@ func (args *SendTxArgs) toTransaction() *types.Transaction {
 	} else if args.Data != nil {
 		input = *args.Data
 	}
+	value, _ := uint256.FromBig((*big.Int)(args.Value))
+	gasPrice, _ := uint256.FromBig((*big.Int)(args.GasPrice))
 	if args.To == nil {
-		return types.NewContractCreation(uint64(*args.Nonce), (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
+		return types.NewContractCreation(uint64(*args.Nonce), value, uint64(*args.Gas), gasPrice, input)
 	}
-	return types.NewTransaction(uint64(*args.Nonce), *args.To, (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
+	return types.NewTransaction(uint64(*args.Nonce), *args.To, value, uint64(*args.Gas), gasPrice, input)
 }
 
 // SubmitTransaction is a helper function that submits tx to txPool and logs a message.
@@ -1614,7 +1616,7 @@ func (s *PublicTransactionPoolAPI) PendingTransactions() ([]*RPCTransaction, err
 	for _, tx := range pending {
 		var signer types.Signer = types.HomesteadSigner{}
 		if tx.Protected() {
-			signer = types.NewEIP155Signer(tx.ChainId())
+			signer = types.NewEIP155Signer(tx.ChainID().ToBig())
 		}
 		from, _ := types.Sender(signer, tx)
 		if _, exists := accounts[from]; exists {
@@ -1642,7 +1644,7 @@ func (s *PublicTransactionPoolAPI) Resend(ctx context.Context, sendArgs SendTxAr
 	for _, p := range pending {
 		var signer types.Signer = types.HomesteadSigner{}
 		if p.Protected() {
-			signer = types.NewEIP155Signer(p.ChainId())
+			signer = types.NewEIP155Signer(p.ChainID().ToBig())
 		}
 		wantSigHash := signer.Hash(matchTx)
 

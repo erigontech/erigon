@@ -21,10 +21,11 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"io/ioutil"
-	"math/big"
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -218,15 +219,15 @@ func TestSaveECDSA(t *testing.T) {
 }
 
 func TestValidateSignatureValues(t *testing.T) {
-	check := func(expected bool, v byte, r, s *big.Int) {
+	check := func(expected bool, v byte, r, s *uint256.Int) {
 		if ValidateSignatureValues(v, r, s, false) != expected {
 			t.Errorf("mismatch for v: %d r: %d s: %d want: %v", v, r, s, expected)
 		}
 	}
-	minusOne := big.NewInt(-1)
-	one := common.Big1
-	zero := common.Big0
-	secp256k1nMinus1 := new(big.Int).Sub(secp256k1N, common.Big1)
+	minusOne := uint256.NewInt().SetAllOne()
+	one := common.Num1
+	zero := common.Num0
+	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, common.Num1)
 
 	// correct v,r,s
 	check(true, 0, one, one)

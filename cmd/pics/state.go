@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"sort"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/bolt"
+
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
@@ -358,13 +360,13 @@ func initialState1() error {
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000000000000000), 21000, new(big.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000000000000000), 21000, new(big.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -382,7 +384,7 @@ func initialState1() error {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, big.NewInt(1000000000000000), 21000, new(big.Int), nil), signer, key)
+				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
 				if err != nil {
 					panic(err)
 				}
@@ -419,7 +421,7 @@ func initialState1() error {
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, big.NewInt(1000000000000000), 21000, new(big.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
 			if err != nil {
 				panic(err)
 			}

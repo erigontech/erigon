@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth"
+	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -208,9 +208,9 @@ func (api *ExternalSigner) SignTx(account accounts.Account, tx *types.Transactio
 	args := &core.SendTxArgs{
 		Data:     &data,
 		Nonce:    hexutil.Uint64(tx.Nonce()),
-		Value:    hexutil.Big(*tx.Value()),
+		Value:    hexutil.Big(*tx.Value().ToBig()),
 		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: hexutil.Big(*tx.GasPrice()),
+		GasPrice: hexutil.Big(*tx.GasPrice().ToBig()),
 		To:       to,
 		From:     common.NewMixedcaseAddress(account.Address),
 	}

@@ -113,7 +113,7 @@ func TestCreate2Revive(t *testing.T) {
 			}
 			block.AddTx(tx)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, big.NewInt(0), 1000000, new(big.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1076,7 +1076,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, big.NewInt(1000), 1000000, new(big.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1108,7 +1108,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, big.NewInt(1000), 1000000, new(big.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -20,8 +20,9 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -34,16 +35,16 @@ var (
 	emptyTx = NewTransaction(
 		0,
 		common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
-		big.NewInt(0), 0, big.NewInt(0),
+		uint256.NewInt(), 0, uint256.NewInt(),
 		nil,
 	)
 
 	rightvrsTx, _ = NewTransaction(
 		3,
 		common.HexToAddress("b94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
-		big.NewInt(10),
+		uint256.NewInt().SetUint64(10),
 		2000,
-		big.NewInt(1),
+		uint256.NewInt().SetUint64(1),
 		common.FromHex("5544"),
 	).WithSignature(
 		HomesteadSigner{},
@@ -134,7 +135,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		for i := 0; i < 25; i++ {
-			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, big.NewInt(100), 100, big.NewInt(int64(start+i)), nil), signer, key)
+			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt().SetUint64(100), 100, uint256.NewInt().SetUint64(uint64(start+i)), nil), signer, key)
 			groups[addr] = append(groups[addr], tx)
 		}
 	}
@@ -185,9 +186,9 @@ func TestTransactionJSON(t *testing.T) {
 		var tx *Transaction
 		switch i % 2 {
 		case 0:
-			tx = NewTransaction(i, common.Address{1}, common.Big0, 1, common.Big2, []byte("abcdef"))
+			tx = NewTransaction(i, common.Address{1}, common.Num0, 1, common.Num2, []byte("abcdef"))
 		case 1:
-			tx = NewContractCreation(i, common.Big0, 1, common.Big2, []byte("abcdef"))
+			tx = NewContractCreation(i, common.Num0, 1, common.Num2, []byte("abcdef"))
 		}
 		transactions = append(transactions, tx)
 
@@ -214,8 +215,8 @@ func TestTransactionJSON(t *testing.T) {
 		if tx.Hash() != parsedTx.Hash() {
 			t.Errorf("parsed tx differs from original tx, want %v, got %v", tx, parsedTx)
 		}
-		if tx.ChainId().Cmp(parsedTx.ChainId()) != 0 {
-			t.Errorf("invalid chain id, want %d, got %d", tx.ChainId(), parsedTx.ChainId())
+		if tx.ChainID().Cmp(parsedTx.ChainID()) != 0 {
+			t.Errorf("invalid chain id, want %d, got %d", tx.ChainID(), parsedTx.ChainID())
 		}
 	}
 }

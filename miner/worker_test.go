@@ -61,7 +61,7 @@ type testCase struct {
 
 	testUserKey     *ecdsa.PrivateKey
 	testUserAddress common.Address
-	testUserFunds   *big.Int
+	testUserFunds   *uint256.Int
 
 	// Test transactions
 	pendingTxs []*types.Transaction
@@ -88,7 +88,7 @@ func getTestCase() (*testCase, error) {
 
 		testUserKey:     testUserKey,
 		testUserAddress: crypto.PubkeyToAddress(testUserKey.PublicKey),
-		testUserFunds:   big.NewInt(1000),
+		testUserFunds:   uint256.NewInt().SetUint64(1000),
 
 		testConfig: &Config{
 			Recommit: time.Second,
@@ -339,9 +339,9 @@ func (b *testWorkerBackend) newRandomUncle() *types.Block {
 func (b *testWorkerBackend) newRandomTx(testCase *testCase, creation bool) *types.Transaction {
 	var tx *types.Transaction
 	if creation {
-		tx, _ = types.SignTx(types.NewContractCreation(b.txPool.Nonce(testCase.testBankAddress), big.NewInt(0), testGas, nil, common.FromHex(testCode)), types.HomesteadSigner{}, testCase.testBankKey)
+		tx, _ = types.SignTx(types.NewContractCreation(b.txPool.Nonce(testCase.testBankAddress), uint256.NewInt(), testGas, nil, common.FromHex(testCode)), types.HomesteadSigner{}, testCase.testBankKey)
 	} else {
-		tx, _ = types.SignTx(types.NewTransaction(b.txPool.Nonce(testCase.testBankAddress), testCase.testUserAddress, big.NewInt(1000), params.TxGas, nil, nil), types.HomesteadSigner{}, testCase.testBankKey)
+		tx, _ = types.SignTx(types.NewTransaction(b.txPool.Nonce(testCase.testBankAddress), testCase.testUserAddress, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), types.HomesteadSigner{}, testCase.testBankKey)
 	}
 	return tx
 }

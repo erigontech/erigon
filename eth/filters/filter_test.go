@@ -23,6 +23,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -122,7 +124,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(1, common.HexToAddress("0x1"), big.NewInt(1), 1, big.NewInt(1), nil))
+			gen.AddUncheckedTx(types.NewTransaction(1, common.HexToAddress("0x1"), common.Num1, 1, common.Num1, nil))
 		case 2:
 			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
@@ -132,7 +134,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(2, common.HexToAddress("0x2"), big.NewInt(2), 2, big.NewInt(2), nil))
+			gen.AddUncheckedTx(types.NewTransaction(2, common.HexToAddress("0x2"), common.Num2, 2, common.Num2, nil))
 
 		case 998:
 			receipt := types.NewReceipt(false, 0)
@@ -143,7 +145,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(998, common.HexToAddress("0x998"), big.NewInt(998), 998, big.NewInt(998), nil))
+			gen.AddUncheckedTx(types.NewTransaction(998, common.HexToAddress("0x998"), uint256.NewInt().SetUint64(998), 998, uint256.NewInt().SetUint64(998), nil))
 		case 999:
 			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
@@ -153,7 +155,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(999, common.HexToAddress("0x999"), big.NewInt(999), 999, big.NewInt(999), nil))
+			gen.AddUncheckedTx(types.NewTransaction(999, common.HexToAddress("0x999"), uint256.NewInt().SetUint64(999), 999, uint256.NewInt().SetUint64(999), nil))
 		}
 	})
 	for i, block := range chain {

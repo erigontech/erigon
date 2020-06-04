@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -91,7 +92,7 @@ func TestBasisAccountPruning(t *testing.T) {
 			addr = address2
 			k = key2
 		}
-		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, k)
+		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, uint256.NewInt().SetUint64(1000), 21000, new(uint256.Int), nil), signer, k)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
@@ -252,7 +253,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 			addr = address2
 			k = key2
 		}
-		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, k)
+		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, uint256.NewInt().SetUint64(1000), 21000, new(uint256.Int), nil), signer, k)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
@@ -599,7 +600,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 			addr = address2
 			k = key2
 		}
-		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, k)
+		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, uint256.NewInt().SetUint64(1000), 21000, new(uint256.Int), nil), signer, k)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}

@@ -26,6 +26,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/holiman/uint256"
 )
 
 func TestStreamKind(t *testing.T) {
@@ -370,10 +372,11 @@ type intField struct {
 }
 
 var (
-	veryBigInt = big.NewInt(0).Add(
-		big.NewInt(0).Lsh(big.NewInt(0xFFFFFFFFFFFFFF), 16),
-		big.NewInt(0xFFFF),
+	veryBigInt = uint256.NewInt().Add(
+		uint256.NewInt().Lsh(uint256.NewInt().SetUint64(0xFFFFFFFFFFFFFF), 16),
+		uint256.NewInt().SetUint64(0xFFFF),
 	)
+	realBigInt = big.NewInt(0).SetBytes(unhex("010000000000000000000000000000000000000000000000000000000000000000"))
 )
 
 type hasIgnoredField struct {
@@ -451,11 +454,21 @@ var decodeTests = []decodeTest{
 
 	// big ints
 	{input: "01", ptr: new(*big.Int), value: big.NewInt(1)},
-	{input: "89FFFFFFFFFFFFFFFFFF", ptr: new(*big.Int), value: veryBigInt},
+	{input: "89FFFFFFFFFFFFFFFFFF", ptr: new(*big.Int), value: veryBigInt.ToBig()},
+	{input: "A1010000000000000000000000000000000000000000000000000000000000000000", ptr: new(*big.Int), value: realBigInt},
 	{input: "10", ptr: new(big.Int), value: *big.NewInt(16)}, // non-pointer also works
 	{input: "C0", ptr: new(*big.Int), error: "rlp: expected input string or byte for *big.Int"},
 	{input: "820001", ptr: new(big.Int), error: "rlp: non-canonical integer (leading zero bytes) for *big.Int"},
 	{input: "8105", ptr: new(big.Int), error: "rlp: non-canonical size information for *big.Int"},
+
+	// uint256
+	{input: "01", ptr: new(*uint256.Int), value: uint256.NewInt().SetUint64(1)},
+	{input: "89FFFFFFFFFFFFFFFFFF", ptr: new(*uint256.Int), value: veryBigInt},
+	{input: "A1010000000000000000000000000000000000000000000000000000000000000000", ptr: new(*uint256.Int), error: "rlp: input string too long for *uint256.Int"},
+	{input: "10", ptr: new(uint256.Int), value: *uint256.NewInt().SetUint64(16)}, // non-pointer also works
+	{input: "C0", ptr: new(*uint256.Int), error: "rlp: expected input string or byte for *uint256.Int"},
+	{input: "820001", ptr: new(uint256.Int), error: "rlp: non-canonical integer (leading zero bytes) for *uint256.Int"},
+	{input: "8105", ptr: new(uint256.Int), error: "rlp: non-canonical size information for *uint256.Int"},
 
 	// structs
 	{

@@ -289,7 +289,7 @@ func TestSignTx(t *testing.T) {
 	rlp.Decode(bytes.NewReader(res.Raw), parsedTx)
 
 	//The tx should NOT be modified by the UI
-	if parsedTx.Value().Cmp(tx.Value.ToInt()) != 0 {
+	if parsedTx.Value().ToBig().Cmp(tx.Value.ToInt()) != 0 {
 		t.Errorf("Expected value to be unchanged, expected %v got %v", tx.Value, parsedTx.Value())
 	}
 	control.approveCh <- "Y"
@@ -315,7 +315,7 @@ func TestSignTx(t *testing.T) {
 	rlp.Decode(bytes.NewReader(res.Raw), parsedTx2)
 
 	//The tx should be modified by the UI
-	if parsedTx2.Value().Cmp(tx.Value.ToInt()) != 0 {
+	if parsedTx2.Value().ToBig().Cmp(tx.Value.ToInt()) != 0 {
 		t.Errorf("Expected value to be unchanged, got %v", parsedTx.Value())
 	}
 	if bytes.Equal(res.Raw, res2.Raw) {

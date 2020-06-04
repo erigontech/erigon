@@ -22,6 +22,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -116,8 +118,8 @@ type CallMsg struct {
 	From     common.Address  // the sender of the 'transaction'
 	To       *common.Address // the destination contract (nil for contract creation)
 	Gas      uint64          // if 0, the call executes with near-infinite gas
-	GasPrice *big.Int        // wei <-> gas exchange ratio
-	Value    *big.Int        // amount of wei sent along with the call
+	GasPrice *uint256.Int    // wei <-> gas exchange ratio
+	Value    *uint256.Int    // amount of wei sent along with the call
 	Data     []byte          // input data, usually an ABI-encoded contract method invocation
 }
 

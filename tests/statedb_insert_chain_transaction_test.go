@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -29,11 +31,11 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 
 	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
 			fromKey,
 		},
 	})
@@ -58,7 +60,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(data.addresses[1], to, big.NewInt(5000)),
+			getBlockTx(data.addresses[1], to, uint256.NewInt().SetUint64(5000)),
 			data.keys[1],
 		},
 	})
@@ -94,11 +96,11 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 
 	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
 			fromKey,
 		},
 	})
@@ -123,7 +125,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(5000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(5000)),
 			fromKey,
 		},
 	})
@@ -156,11 +158,11 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
 			fromKey,
 		},
 	})
@@ -182,7 +184,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 	})
@@ -215,11 +217,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
 			fromKey,
 		},
 	})
@@ -241,7 +243,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 	})
@@ -274,11 +276,11 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 
 	blockchain, _, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(3000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(3000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(data.addresses[1], to, big.NewInt(2000)),
+			getBlockTx(data.addresses[1], to, uint256.NewInt().SetUint64(2000)),
 			data.keys[1],
 		},
 	})
@@ -299,7 +301,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	var kv ethdb.KV
 	blockchain, kv, blocks, _, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
 		},
 	})
@@ -335,7 +337,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
 		},
 		1: {
@@ -405,7 +407,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
 		},
 		1: {
@@ -475,7 +477,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
 		},
 		1: {
@@ -554,7 +556,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	blockchain, kv, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10)),
+			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
 		},
 		1: {
@@ -729,9 +731,9 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)
 
-func getBlockTx(from common.Address, to common.Address, amount *big.Int) blockTx {
+func getBlockTx(from common.Address, to common.Address, amount *uint256.Int) blockTx {
 	return func(block *core.BlockGen, _ bind.ContractBackend) (*types.Transaction, bool) {
-		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(big.Int), nil), false
+		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(uint256.Int), nil), false
 	}
 }
 
