@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -114,8 +115,12 @@ func (db *remoteDB) Close() {
 	}
 }
 
-func (db *remoteDB) Size() uint64 {
-	return 0
+func (db *remoteDB) DiskSize(ctx context.Context) (common.StorageSize, error) {
+	return db.remote.DiskSize(ctx)
+}
+
+func (db *remoteDB) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return db.remote.BucketsStat(ctx)
 }
 
 func (db *remoteDB) Begin(ctx context.Context, writable bool) (Tx, error) {

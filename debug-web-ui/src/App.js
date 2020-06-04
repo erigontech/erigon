@@ -10,7 +10,8 @@ import IntermediateHashPage from './page/IntermediateHashPage';
 import { ReactComponent as Logo } from './logo.svg';
 import StoragePage from './page/Storage';
 import RemoteSidebar from './components/RemoteSidebar';
-import IntermediateDataLenPage from "./page/IntermediateDataLenPage";
+import IntermediateDataLenPage from './page/IntermediateDataLenPage';
+import DBPage from './page/DBPage';
 
 const sidebar = [
   {
@@ -28,6 +29,10 @@ const sidebar = [
   {
     url: '/intermediate-data-len',
     label: 'Data Len',
+  },
+  {
+    url: '/db',
+    label: 'DB',
   },
 ];
 
@@ -78,6 +83,9 @@ function App() {
                 </Route>
                 <Route path="/intermediate-data-len">
                   <IntermediateDataLenPage api={api} />
+                </Route>
+                <Route path="/db">
+                  <DBPage api={api} />
                 </Route>
               </Switch>
             </Col>

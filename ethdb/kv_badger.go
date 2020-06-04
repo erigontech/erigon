@@ -100,9 +100,13 @@ func (db *badgerDB) Close() {
 	}
 }
 
-func (db *badgerDB) Size() uint64 {
+func (db *badgerDB) DiskSize(_ context.Context) (common.StorageSize, error) {
 	lsm, vlog := db.badger.Size()
-	return uint64(lsm + vlog)
+	return common.StorageSize(lsm + vlog), nil
+}
+
+func (db *badgerDB) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
 func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {

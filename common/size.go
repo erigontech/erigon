@@ -39,6 +39,10 @@ func (s StorageSize) String() string {
 	}
 }
 
+func (s StorageSize) MarshalJSON() ([]byte, error) {
+	return []byte("\"" + s.String() + "\""), nil
+}
+
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
 func (s StorageSize) TerminalString() string {
@@ -53,4 +57,34 @@ func (s StorageSize) TerminalString() string {
 	} else {
 		return fmt.Sprintf("%.2fB", s)
 	}
+}
+
+// Counter
+type StorageCounter float64
+
+// String implements the stringer interface.
+func (s StorageCounter) String() string {
+	if s > 1_000_000_000 {
+		return fmt.Sprintf("%.2fB", s/1_000_000_000)
+	} else if s > 1_000_000 {
+		return fmt.Sprintf("%.2fM", s/1_000_000)
+	} else if s > 1_000 {
+		return fmt.Sprintf("%.2fK", s/1_000)
+	} else {
+		return fmt.Sprintf("%.2f", s)
+	}
+}
+
+func (s StorageCounter) MarshalJSON() ([]byte, error) {
+	return []byte("\"" + s.String() + "\""), nil
+}
+
+type StorageBucketWriteStats struct {
+	KeyN             StorageCounter // total number of keys
+	KeyBytesN        StorageSize    // total number of bytes owned by keys
+	ValueBytesN      StorageSize    // total number of bytes owned by values
+	TotalPut         StorageCounter
+	TotalDelete      StorageCounter
+	TotalBytesPut    StorageSize
+	TotalBytesDelete StorageSize
 }

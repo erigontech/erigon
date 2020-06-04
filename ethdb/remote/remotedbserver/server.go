@@ -423,10 +423,10 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 			}
 		case remote.CmdCursorSeekKey:
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+				return fmt.Errorf("could not decode cursorHandle for CmdCursorSeekKey: %w", err)
 			}
 			if err := decoder.Decode(&seekKey); err != nil {
-				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+				return fmt.Errorf("could not decode (key,vSize) for CmdCursorSeekKey: %w", err)
 			}
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
@@ -442,6 +442,28 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 			}
 			if err := encodeKey(encoder, k, uint32(len(v))); err != nil {
 				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+			}
+		case remote.CmdDBDiskSize:
+			size, err := db.(ethdb.HasStats).DiskSize(ctx)
+			if err != nil {
+				return fmt.Errorf("in CmdDBDiskSize: %w", err)
+			}
+			if err := encoder.Encode(remote.ResponseOk); err != nil {
+				return fmt.Errorf("could not encode responseCode for CmdCursorSeekKey: %w", err)
+			}
+			if err := encoder.Encode(size); err != nil {
+				return fmt.Errorf("could not encode remote.CmdDBDiskSize: %w", err)
+			}
+		case remote.CmdDBBucketsStat:
+			stats, err := db.(ethdb.HasStats).BucketsStat(ctx)
+			if err != nil {
+				return fmt.Errorf("in CmdDBBucketsStat: %w", err)
+			}
+			if err := encoder.Encode(remote.ResponseOk); err != nil {
+				return fmt.Errorf("could not encode responseCode for CmdDBBucketsStat: %w", err)
+			}
+			if err := encoder.Encode(stats); err != nil {
+				return fmt.Errorf("could not encode remote.CmdDBBucketsStat: %w", err)
 			}
 		default:
 			logger.Error("unknown", "remote.Command", c)

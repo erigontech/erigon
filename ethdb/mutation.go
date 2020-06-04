@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -85,11 +86,18 @@ func (m *mutation) Has(bucket, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) DiskSize() uint64 {
+func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	if m.db == nil {
-		return 0
+		return 0, nil
 	}
-	return m.db.DiskSize()
+	return m.db.(HasStats).DiskSize(ctx)
+}
+
+func (m *mutation) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	if m.db == nil {
+		return nil, nil
+	}
+	return m.db.(HasStats).BucketsStat(ctx)
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {
