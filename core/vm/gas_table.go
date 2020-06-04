@@ -193,6 +193,7 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	if current.Eq(value) { // noop (1)
 		return params.SstoreNoopGasEIP2200, nil
 	}
+
 	var original uint256.Int
 	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
