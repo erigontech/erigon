@@ -18,6 +18,7 @@ jobs:
       - checkout
       - run: mkdir -p ${TEST_RESULTS}
       - run: go env
+      - run: git submodule update --init --recursive
       - run: git submodule status semantics/z3 | awk '{ print $1 }' > ./z3.version
 
       - restore_cache:
@@ -28,14 +29,10 @@ jobs:
           keys:
             - v1-z3-cache-{{ arch }}-{{ checksum "z3.version" }}
 
-      - run: git submodule update --init --recursive
       - run: go mod tidy && test -z "$(git status --porcelain)"
-
       - run: go mod download
       - run: go mod verify
-
       - run: go get github.com/jstemmer/go-junit-report
-
       - run: make lintci-deps
 
       - run:
@@ -55,7 +52,6 @@ jobs:
       - save_cache:
           key: v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
           paths:
-            - "/go/pkg"
             - "/go/pkg/mod"
 
       - save_cache:
