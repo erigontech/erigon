@@ -114,10 +114,10 @@ func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
 }
 
 type encbuf struct {
-	str     []byte      // string data, contains everything except list headers
-	lheads  []*listhead // all list headers
-	lhsize  int         // sum of sizes of all encoded list headers
-	sizebuf []byte      // 9-byte auxiliary buffer for uint encoding
+	str     []byte     // string data, contains everything except list headers
+	lheads  []listhead // all list headers
+	lhsize  int        // sum of sizes of all encoded list headers
+	sizebuf []byte     // 9-byte auxiliary buffer for uint encoding
 }
 
 type listhead struct {
@@ -203,13 +203,15 @@ func (w *encbuf) encodeString(b []byte) {
 	}
 }
 
-func (w *encbuf) list() *listhead {
-	lh := &listhead{offset: len(w.str), size: w.lhsize}
+func (w *encbuf) list() int {
+	lh := listhead{offset: len(w.str), size: w.lhsize}
+	idx := len(w.lheads)
 	w.lheads = append(w.lheads, lh)
-	return lh
+	return idx
 }
 
-func (w *encbuf) listEnd(lh *listhead) {
+func (w *encbuf) listEnd(idx int) {
+	lh := &w.lheads[idx]
 	lh.size = w.size() - lh.offset - lh.size
 	if lh.size < 56 {
 		w.lhsize++ // length encoded into kind tag
