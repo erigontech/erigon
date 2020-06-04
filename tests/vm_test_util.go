@@ -82,6 +82,7 @@ type vmExecMarshaling struct {
 
 func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr)))
 	state, tds, err := MakePreState(ctx, db, t.json.Pre, blockNr)
 	if err != nil {
