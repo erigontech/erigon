@@ -62,8 +62,8 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database   ethdb.Database // In memory database to store our testing data
-	kv         ethdb.KV       // Same as database, but different interface
+	database   ethdb.DbWithPendingMutations // In memory database to store our testing data
+	kv         ethdb.KV                     // Same as database, but different interface
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
@@ -161,7 +161,7 @@ func (b *SimulatedBackend) Commit() {
 		panic(err)
 	}
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
-	if _, err := b.database.(ethdb.DbWithPendingMutations).Commit(); err != nil {
+	if _, err := b.database.Commit(); err != nil {
 		panic(err)
 	}
 	b.prependBlock = b.pendingBlock
@@ -173,6 +173,7 @@ func (b *SimulatedBackend) Rollback() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	b.database.Rollback()
 	b.emptyPendingBlock()
 }
 
