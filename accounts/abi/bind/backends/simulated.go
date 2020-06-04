@@ -62,7 +62,6 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	prependDb  ethdb.Database
 	database   ethdb.Database // In memory database to store our testing data
 	kv         ethdb.KV       // Same as database, but different interface
 	engine     consensus.Engine
@@ -99,8 +98,7 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		prependDb:    database.MemCopy(),
-		database:     database,
+		database:     database.NewBatch(),
 		kv:           kv,
 		engine:       engine,
 		blockchain:   blockchain,
@@ -125,8 +123,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	blockchain.EnableReceipts(true)
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		prependDb:    database.MemCopy(),
-		database:     database,
+		database:     database.NewBatch(),
 		kv:           database.AbstractKV(),
 		engine:       engine,
 		blockchain:   blockchain,
@@ -150,6 +147,7 @@ func (b *SimulatedBackend) KV() ethdb.KV {
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() error {
 	b.blockchain.Stop()
+	b.database.Close()
 	return nil
 }
 
@@ -163,7 +161,9 @@ func (b *SimulatedBackend) Commit() {
 		panic(err)
 	}
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
-	b.prependDb = b.database
+	if _, err := b.database.(ethdb.DbWithPendingMutations).Commit(); err != nil {
+		panic(err)
+	}
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
 }
@@ -178,17 +178,17 @@ func (b *SimulatedBackend) Rollback() {
 
 func (b *SimulatedBackend) emptyPendingBlock() {
 	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(int, *core.BlockGen) {})
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(int, *core.BlockGen) {})
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.database.NewBatch(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() *state.IntraBlockState {
-	tds := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	tds := state.NewTrieDbState(b.prependBlock.Root(), b.database.NewBatch(), b.prependBlock.NumberU64())
 	return state.New(tds)
 }
 
@@ -592,7 +592,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	ctx = b.blockchain.WithContext(ctx, big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
@@ -705,7 +705,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	defer b.mu.Unlock()
 
 	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
