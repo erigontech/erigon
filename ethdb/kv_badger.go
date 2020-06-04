@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -20,7 +22,7 @@ func (opts badgerOpts) Path(path string) badgerOpts {
 }
 
 func (opts badgerOpts) InMem() badgerOpts {
-	opts.Badger = opts.Badger.WithInMemory(true)
+	opts.Badger = opts.Badger.WithInMemory(true).WithNumCompactors(0).WithCompression(options.None).WithCompactL0OnClose(false)
 	return opts
 }
 
@@ -44,22 +46,25 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 		return nil, err
 	}
 
-	ticker := time.NewTicker(gcPeriod)
-	// Start GC in backround
-	go func() {
-		for range ticker.C {
-			err := db.RunValueLogGC(0.5)
-			if err != badger.ErrNoRewrite {
-				logger.Info("Badger GC run", "err", err)
+	var gcTicker *time.Ticker
+	if !opts.Badger.InMemory {
+		// Start GC in backround
+		go func() {
+			gcTicker = time.NewTicker(gcPeriod)
+			for range gcTicker.C {
+				err := db.RunValueLogGC(0.5)
+				if err != badger.ErrNoRewrite {
+					logger.Info("Badger GC run", "err", err)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	return &badgerDB{
 		opts:     opts,
 		badger:   db,
 		log:      logger,
-		gcTicker: ticker, // Garbage Collector
+		gcTicker: gcTicker,
 	}, nil
 }
 
@@ -179,8 +184,10 @@ func (tx *badgerTx) cleanup() {
 }
 
 func (c *badgerCursor) Prefix(v []byte) Cursor {
-	c.prefix = append(c.bucket.prefix[:c.bucket.nameLen], v...)
-	c.badgerOpts.Prefix = c.prefix
+	c.prefix = append(c.prefix[:0], c.bucket.prefix[:c.bucket.nameLen]...)
+	c.prefix = append(c.prefix, v...)
+
+	c.badgerOpts.Prefix = append(c.badgerOpts.Prefix[:0], c.prefix...)
 	return c
 }
 
@@ -208,14 +215,17 @@ func (b badgerBucket) Get(key []byte) (val []byte, err error) {
 	var item *badger.Item
 	b.prefix = append(b.prefix[:b.nameLen], key...)
 	item, err = b.tx.badger.Get(b.prefix)
-	if errors.Is(err, badger.ErrKeyNotFound) {
-		return nil, nil
-	}
 	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if item != nil {
 		val, err = item.ValueCopy(nil) // can improve this by using pool
+	}
+	if val == nil {
+		val = []byte{}
 	}
 	return val, err
 }
@@ -227,8 +237,8 @@ func (b badgerBucket) Put(key []byte, value []byte) error {
 	default:
 	}
 
-	b.prefix = append(b.prefix[:b.nameLen], key...)
-	return b.tx.badger.Set(b.prefix, value)
+	b.prefix = append(b.prefix[:b.nameLen], key...) // avoid passing buffer in Put, need copy bytes
+	return b.tx.badger.Set(common.CopyBytes(b.prefix), value)
 }
 
 func (b badgerBucket) Delete(key []byte) error {
@@ -244,8 +254,8 @@ func (b badgerBucket) Delete(key []byte) error {
 
 func (b badgerBucket) Cursor() Cursor {
 	c := &badgerCursor{bucket: b, ctx: b.tx.ctx, badgerOpts: badger.DefaultIteratorOptions}
-	c.prefix = append(c.prefix, b.prefix[:b.nameLen]...) // set dbi
-	c.badgerOpts.Prefix = c.prefix
+	c.prefix = append(c.prefix[:0], c.bucket.prefix[:c.bucket.nameLen]...)
+	c.badgerOpts.Prefix = append(c.badgerOpts.Prefix[:0], c.prefix...)
 	return c
 }
 
@@ -253,10 +263,6 @@ func (c *badgerCursor) initCursor() {
 	if c.badger != nil {
 		return
 	}
-
-	_ = c.bucket
-	_ = c.bucket.tx
-	_ = c.bucket.tx.badger
 
 	c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
 	// add to auto-cleanup on end of transactions
@@ -271,8 +277,8 @@ func (c *badgerCursor) First() ([]byte, []byte, error) {
 
 	c.badger.Rewind()
 	if !c.badger.Valid() {
-		c.k = nil
-		return c.k, c.v, c.err
+		c.k, c.v = nil, nil
+		return c.k, c.v, nil
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
@@ -281,6 +287,9 @@ func (c *badgerCursor) First() ([]byte, []byte, error) {
 	}
 	if c.err != nil {
 		return []byte{}, nil, c.err
+	}
+	if c.v == nil {
+		c.v = []byte{}
 	}
 	return c.k, c.v, nil
 }
@@ -294,10 +303,10 @@ func (c *badgerCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 	c.initCursor()
 
-	c.badger.Seek(append(c.bucket.prefix[:c.bucket.nameLen], seek...))
+	c.badger.Seek(append(c.prefix[:c.bucket.nameLen], seek...))
 	if !c.badger.Valid() {
-		c.k = nil
-		return c.k, c.v, c.err
+		c.k, c.v = nil, nil
+		return c.k, c.v, nil
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
@@ -307,8 +316,11 @@ func (c *badgerCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.err != nil {
 		return []byte{}, nil, c.err
 	}
+	if c.v == nil {
+		c.v = []byte{}
+	}
 
-	return c.k, c.v, c.err
+	return c.k, c.v, nil
 }
 
 func (c *badgerCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
@@ -324,7 +336,7 @@ func (c *badgerCursor) Next() ([]byte, []byte, error) {
 
 	c.badger.Next()
 	if !c.badger.Valid() {
-		c.k = nil
+		c.k, c.v = nil, nil
 		return c.k, c.v, nil
 	}
 	item := c.badger.Item()
@@ -335,7 +347,9 @@ func (c *badgerCursor) Next() ([]byte, []byte, error) {
 	if c.err != nil {
 		return []byte{}, nil, c.err // on error key should be != nil
 	}
-
+	if c.v == nil {
+		c.v = []byte{}
+	}
 	return c.k, c.v, nil
 }
 
@@ -379,7 +393,7 @@ func (c *badgerNoValuesCursor) First() ([]byte, uint32, error) {
 	c.initCursor()
 	c.badger.Rewind()
 	if !c.badger.Valid() {
-		c.k = nil
+		c.k, c.v = nil, nil
 		return c.k, 0, nil
 	}
 	item := c.badger.Item()
@@ -396,10 +410,10 @@ func (c *badgerNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 
 	c.initCursor()
 
-	c.badger.Seek(append(c.bucket.prefix[:c.bucket.nameLen], seek...))
+	c.badger.Seek(append(c.prefix[:c.bucket.nameLen], seek...))
 	if !c.badger.Valid() {
-		c.k = nil
-		return c.k, 0, c.err
+		c.k, c.v = nil, nil
+		return c.k, 0, nil
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
@@ -420,8 +434,8 @@ func (c *badgerNoValuesCursor) Next() ([]byte, uint32, error) {
 
 	c.badger.Next()
 	if !c.badger.Valid() {
-		c.k = nil
-		return c.k, 0, c.err
+		c.k, c.v = nil, nil
+		return c.k, 0, nil
 	}
 	item := c.badger.Item()
 	c.k = item.Key()[c.bucket.nameLen:]
