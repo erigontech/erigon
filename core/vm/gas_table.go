@@ -187,13 +187,14 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := stack.Back(1), stack.Back(0)
 	key := common.Hash(x.Bytes32())
-	var current, original uint256.Int
+	var current uint256.Int
 	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
 
 	if current.Eq(value) { // noop (1)
 		return params.SstoreNoopGasEIP2200, nil
 	}
 
+	var original uint256.Int
 	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)

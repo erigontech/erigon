@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 )
@@ -483,7 +484,16 @@ func writeByteArray(val reflect.Value, w *encbuf) error {
 	pos := len(w.str)
 	w.str = append(w.str, make([]byte, size)...)
 	slice := w.str[pos:]
-	reflect.Copy(reflect.ValueOf(slice), val)
+	if val.CanAddr() {
+		sh := &reflect.SliceHeader{
+			Data: val.UnsafeAddr(),
+			Len:  size,
+			Cap:  size,
+		}
+		copy(slice, *(*[]byte)(unsafe.Pointer(sh)))
+	} else {
+		reflect.Copy(reflect.ValueOf(slice), val)
+	}
 	return nil
 }
 
