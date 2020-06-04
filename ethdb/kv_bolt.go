@@ -311,8 +311,13 @@ func (c *boltCursor) Delete(key []byte) error {
 }
 
 func (c *boltCursor) Put(key []byte, value []byte) error {
-	panic("not implemented yet")
-	//return c.cursor.Put(key, value, 0)
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	return c.bucket.Put(key, value)
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {

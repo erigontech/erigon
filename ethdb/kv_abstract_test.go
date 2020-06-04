@@ -383,36 +383,41 @@ func TestReadAfterPut(t *testing.T) {
 
 					require.NoError(t, b2.Delete([]byte{255})) // delete non-existing key
 				}
-				// cursor put and delete
 
-				_, ok := db.(*ethdb.LmdbKV)
-				if !ok { // next tests only for lmdb yet
-					return nil
-				}
+				return nil
+			}); err != nil {
+				require.NoError(t, err)
+			}
+		})
 
+		t.Run("cursor put and delete"+msg, func(t *testing.T) {
+			if err := db.Update(ctx, func(tx ethdb.Tx) error {
 				b3 := tx.Bucket(dbutils.Buckets[2])
 				c3 := b3.Cursor()
 				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
 				}
-
 				for i := uint8(0); i < 10; i++ {
-					_, v, err := c3.Seek([]byte{i})
+					v, err := b3.Get([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
 
-				{
-					require.NoError(t, c3.Delete([]byte{5}))
-					v, err := b3.Get([]byte{5})
-					require.NoError(t, err)
-					require.Nil(t, v)
-
-					require.NoError(t, b2.Delete([]byte{255})) // delete non-existing key
-				}
+				require.NoError(t, c3.Delete([]byte{255})) // delete non-existing key
 				return nil
 			}); err != nil {
+				t.Error(err)
+			}
+
+			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+				b3 := tx.Bucket(dbutils.Buckets[2])
+				require.NoError(t, b3.Cursor().Delete([]byte{5}))
+				v, err := b3.Get([]byte{5})
 				require.NoError(t, err)
+				require.Nil(t, v)
+				return nil
+			}); err != nil {
+				t.Error(err)
 			}
 		})
 	}
