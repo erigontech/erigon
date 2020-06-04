@@ -25,12 +25,16 @@ func TestManagedTx(t *testing.T) {
 	for _, db := range writeDBs {
 		db := db
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
-			b := tx.Bucket(dbutils.CurrentStateBucket)
+			b := tx.Bucket(dbutils.Buckets[0])
+			b1 := tx.Bucket(dbutils.Buckets[1])
 			for i := uint8(0); i < 10; i++ {
 				require.NoError(t, b.Put([]byte{i}, []byte{1}))
+				require.NoError(t, b1.Put([]byte{i}, []byte{1}))
 			}
 			require.NoError(t, b.Put([]byte{0, 1}, []byte{1}))
+			require.NoError(t, b1.Put([]byte{0, 1}, []byte{1}))
 			require.NoError(t, b.Put([]byte{0, 0, 1}, []byte{1}))
+			require.NoError(t, b1.Put([]byte{0, 0, 1}, []byte{1}))
 			return nil
 		}); err != nil {
 			require.NoError(t, err)
@@ -50,6 +54,9 @@ func TestManagedTx(t *testing.T) {
 		})
 		t.Run("filter "+msg, func(t *testing.T) {
 			testPrefixFilter(t, db)
+		})
+		t.Run("multiple cursors "+msg, func(t *testing.T) {
+			testMultiCursor(t, db)
 		})
 	}
 }
@@ -100,7 +107,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 	assert := assert.New(t)
 
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket(dbutils.Buckets[0])
 		c := b.Cursor().Prefix([]byte{2})
 		counter := 0
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
@@ -158,7 +165,7 @@ func testCtxCancel(t *testing.T, db ethdb.KV) {
 	defer cancel()
 
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+		c := tx.Bucket(dbutils.Buckets[0]).Cursor()
 		for {
 			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -175,7 +182,7 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket(dbutils.Buckets[0])
 		c := b.Cursor()
 
 		k, _, err := c.First()
@@ -233,6 +240,40 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 	}
 }
 
+func testMultiCursor(t *testing.T, db ethdb.KV) {
+	assert, ctx := assert.New(t), context.Background()
+
+	if err := db.View(ctx, func(tx ethdb.Tx) error {
+		c1 := tx.Bucket(dbutils.Buckets[0]).Cursor()
+		c2 := tx.Bucket(dbutils.Buckets[1]).Cursor()
+
+		k1, v1, err := c1.First()
+		assert.NoError(err)
+		k2, v2, err := c2.First()
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Next()
+		assert.NoError(err)
+		k2, v2, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{2})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{2})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		return nil
+	}); err != nil {
+		assert.NoError(err)
+	}
+}
+
 func TestMultipleBuckets(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases()
 	defer closeAll()
@@ -244,11 +285,11 @@ func TestMultipleBuckets(t *testing.T) {
 		msg := fmt.Sprintf("%T", db)
 		t.Run("FillBuckets "+msg, func(t *testing.T) {
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-				b := tx.Bucket(dbutils.CurrentStateBucket)
+				b := tx.Bucket(dbutils.Buckets[0])
 				for i := uint8(0); i < 10; i++ {
 					require.NoError(t, b.Put([]byte{i}, []byte{i}))
 				}
-				b2 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+				b2 := tx.Bucket(dbutils.Buckets[1])
 				for i := uint8(0); i < 12; i++ {
 					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
 				}
@@ -266,7 +307,7 @@ func TestMultipleBuckets(t *testing.T) {
 			counter2, counter := 0, 0
 			var key, value []byte
 			err := db.View(ctx, func(tx ethdb.Tx) error {
-				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+				c := tx.Bucket(dbutils.Buckets[0]).Cursor()
 				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 					if err != nil {
 						return err
@@ -274,7 +315,7 @@ func TestMultipleBuckets(t *testing.T) {
 					counter++
 				}
 
-				c2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+				c2 := tx.Bucket(dbutils.Buckets[1]).Cursor()
 				for k, _, err := c2.First(); k != nil; k, _, err = c2.Next() {
 					if err != nil {
 						return err
@@ -282,7 +323,7 @@ func TestMultipleBuckets(t *testing.T) {
 					counter2++
 				}
 
-				c3 := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
+				c3 := tx.Bucket(dbutils.Buckets[0]).Cursor()
 				k, v, err := c3.Seek([]byte{5})
 				if err != nil {
 					return err
@@ -312,30 +353,71 @@ func TestReadAfterPut(t *testing.T) {
 		msg := fmt.Sprintf("%T", db)
 		t.Run("GetAfterPut "+msg, func(t *testing.T) {
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-				b := tx.Bucket(dbutils.CurrentStateBucket)
-				for i := uint8(0); i < 10; i++ {
+				b := tx.Bucket(dbutils.Buckets[0])
+				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 					require.NoError(t, b.Put([]byte{i}, []byte{i}))
+				}
+
+				for i := uint8(0); i < 10; i++ {
 					v, err := b.Get([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
 
-				b2 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+				b2 := tx.Bucket(dbutils.Buckets[1])
 				for i := uint8(0); i < 12; i++ {
 					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
+				}
+
+				for i := uint8(0); i < 12; i++ {
 					v, err := b2.Get([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
-				require.NoError(t, b2.Delete([]byte{5}))
-				v, err := b2.Get([]byte{5})
-				require.NoError(t, err)
-				require.Nil(t, v)
 
-				require.NoError(t, b2.Delete([]byte{255})) // delete non-existing key
+				{
+					require.NoError(t, b2.Delete([]byte{5}))
+					v, err := b2.Get([]byte{5})
+					require.NoError(t, err)
+					require.Nil(t, v)
+
+					require.NoError(t, b2.Delete([]byte{255})) // delete non-existing key
+				}
+
 				return nil
 			}); err != nil {
 				require.NoError(t, err)
+			}
+		})
+
+		t.Run("cursor put and delete"+msg, func(t *testing.T) {
+			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+				b3 := tx.Bucket(dbutils.Buckets[2])
+				c3 := b3.Cursor()
+				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
+					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
+				}
+				for i := uint8(0); i < 10; i++ {
+					v, err := b3.Get([]byte{i})
+					require.NoError(t, err)
+					require.Equal(t, []byte{i}, v)
+				}
+
+				require.NoError(t, c3.Delete([]byte{255})) // delete non-existing key
+				return nil
+			}); err != nil {
+				t.Error(err)
+			}
+
+			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+				b3 := tx.Bucket(dbutils.Buckets[2])
+				require.NoError(t, b3.Cursor().Delete([]byte{5}))
+				v, err := b3.Get([]byte{5})
+				require.NoError(t, err)
+				require.Nil(t, v)
+				return nil
+			}); err != nil {
+				t.Error(err)
 			}
 		})
 	}

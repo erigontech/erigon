@@ -57,17 +57,18 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
 			b := tx.Bucket(tuples[bucketStart])
+			c := b.Cursor()
 			l := (bucketEnd - bucketStart) / 3
 			pairs := make([][]byte, 2*l)
 			for i := 0; i < l; i++ {
 				pairs[2*i] = tuples[bucketStart+3*i+1]
 				pairs[2*i+1] = tuples[bucketStart+3*i+2]
 				if pairs[2*i+1] == nil {
-					if err := b.Delete(pairs[2*i]); err != nil {
+					if err := c.Delete(pairs[2*i]); err != nil {
 						return err
 					}
 				} else {
-					if err := b.Put(pairs[2*i], pairs[2*i+1]); err != nil {
+					if err := c.Put(pairs[2*i], pairs[2*i+1]); err != nil {
 						return err
 					}
 				}

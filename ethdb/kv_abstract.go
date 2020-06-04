@@ -39,6 +39,9 @@ type Cursor interface {
 	SeekTo(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
+
+	Put(key []byte, value []byte) error
+	Delete(key []byte) error
 }
 
 type NoValuesCursor interface {

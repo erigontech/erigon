@@ -357,6 +357,30 @@ func (c *badgerCursor) Next() ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
+func (c *badgerCursor) Delete(key []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	c.initCursor()
+
+	return c.bucket.Delete(key)
+}
+
+func (c *badgerCursor) Put(key []byte, value []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
+	c.initCursor()
+
+	return c.bucket.Put(key, value)
+}
+
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
