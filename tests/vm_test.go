@@ -23,7 +23,7 @@ import (
 )
 
 func TestVM(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	vmt := new(testMatcher)
 	vmt.slow("^vmPerformance")
 	vmt.fails("^vmSystemOperationsTest.json/createNameRegistrator$", "fails without parallel execution")

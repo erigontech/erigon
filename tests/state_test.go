@@ -31,7 +31,7 @@ import (
 var testVMConfig = vm.Config{}
 
 func TestState(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 
 	st := new(testMatcher)
 	// Long tests:
