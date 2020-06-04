@@ -19,7 +19,7 @@ jobs:
       - run: mkdir -p ${TEST_RESULTS}
       - run: go env
       - run: git submodule update --init --recursive
-      - run: git submodule status semantics/z3 | awk '{ print $1 }' > ./z3.version
+      - run: git submodule status semantics/z3 | awk '{ print $1 }' > /tmp/z3.version
 
       - restore_cache:
           keys:
@@ -27,7 +27,7 @@ jobs:
 
       - restore_cache:
           keys:
-            - v1-z3-cache-{{ arch }}-{{ checksum "z3.version" }}
+            - v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
 
       - run: go mod tidy && test -z "$(git status --porcelain)"
       - run: go mod download
@@ -55,7 +55,7 @@ jobs:
             - "/go/pkg/mod"
 
       - save_cache:
-          key: v1-z3-cache-{{ arch }}-{{ checksum "z3.version" }}
+          key: v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
           paths:
             - "/go/src/github.com/ledgerwatch/turbo-geth/semantics/z3/build"
 
