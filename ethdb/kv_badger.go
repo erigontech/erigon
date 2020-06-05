@@ -21,7 +21,7 @@ func (opts badgerOpts) Path(path string) badgerOpts {
 }
 
 func (opts badgerOpts) InMem() badgerOpts {
-	opts.Badger = opts.Badger.WithInMemory(true)
+	opts.Badger = opts.Badger.WithInMemory(true).WithNumCompactors(1)
 	return opts
 }
 

@@ -1531,7 +1531,7 @@ func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 // This test reproduces an issue where unexpected deliveries would
 // block indefinitely if they arrived at the right time.
 func TestDeliverHeadersHang(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 
 	testCases := []struct {
 		protocol int
