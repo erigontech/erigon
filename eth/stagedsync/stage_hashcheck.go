@@ -193,7 +193,7 @@ func keyTransformLoadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, n
     newK, err := transformPlainStateKey(k)
     if err != nil {
         return err
-    }
+	}
     return next(newK, v)
 }
 
@@ -320,7 +320,7 @@ func (p *Promoter) mergeFilesAndCollect(bufferFileNames []string, keyLength int,
 		element := (heap.Pop(h)).(etl.HeapElem)
 		if !bytes.Equal(element.Key, prevKey) {
 			// Ignore all the repeating keys
-			prevKey = element.Key
+			prevKey = common.CopyBytes(element.Key)
 			if v, err := p.db.Get(dbutils.PlainStateBucket, element.Key); err == nil || err == ethdb.ErrKeyNotFound {
 				if err1 := collector.Collect(element.Key, v); err1 != nil {
 					return err1
@@ -390,7 +390,6 @@ func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
 			return err
 		}
 	}
-
 	if len(offsets) > 0 {
 		collector := etl.NewCollector(p.TempDir)
 		if err := p.mergeFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
