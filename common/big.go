@@ -39,3 +39,29 @@ var (
 	Num32 = uint256.NewInt().SetUint64(32)
 	Num35 = uint256.NewInt().SetUint64(35)
 )
+
+func SetBytesRightPadded(z *uint256.Int, buf []byte, length int) *uint256.Int {
+	var d uint64
+	k := 0
+	s := uint64(0)
+	i := length
+	st := len(buf)
+	z[0], z[1], z[2], z[3] = 0, 0, 0, 0
+	for ; i > 0; i-- {
+		if i-1 < st {
+			d |= uint64(buf[i-1]) << s
+		}
+		if s += 8; s == 64 {
+			z[k] = d
+			k++
+			s, d = 0, 0
+			if k >= len(z) {
+				break
+			}
+		}
+	}
+	if k < len(z) {
+		z[k] = d
+	}
+	return z
+}
