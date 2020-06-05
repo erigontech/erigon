@@ -17,7 +17,6 @@
 package tests
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -52,10 +51,7 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongUncleHash.json`, "Validation happens in the fetcher")
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		err1 := test.Run(false)
-		if err := bt.checkFailure(t, err1); err != nil {
-			fmt.Printf("Error!!!!!!! %s, %s\n", err, err1)
-			panic(1)
+		if err := bt.checkFailure(t, test.Run(false)); err != nil {
 			t.Error(err)
 		}
 	})

@@ -33,12 +33,15 @@ func (opts badgerOpts) ReadOnly() badgerOpts {
 func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	logger := log.New("badger_db", opts.Badger.Dir)
 
-	oldMaxProcs := runtime.GOMAXPROCS(0)
-	if oldMaxProcs < minGoMaxProcs {
-		runtime.GOMAXPROCS(minGoMaxProcs)
-		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+	if opts.Badger.InMemory {
+		opts.Badger = opts.Badger.WithMaxTableSize(1 << 20) // 4MB
+	} else {
+		oldMaxProcs := runtime.GOMAXPROCS(0)
+		if oldMaxProcs < minGoMaxProcs {
+			runtime.GOMAXPROCS(minGoMaxProcs)
+			logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+		}
 	}
-	opts.Badger = opts.Badger.WithMaxTableSize(512 << 20)
 
 	db, err := badger.Open(opts.Badger)
 	if err != nil {

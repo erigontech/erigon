@@ -125,6 +125,7 @@ func stateTestCmd(ctx *cli.Context) error {
 					vm.WriteTrace(os.Stderr, debugger.StructLogs())
 				}
 			}
+			tds.Database().Close()
 		}
 	}
 	out, _ := json.MarshalIndent(results, "", "  ")

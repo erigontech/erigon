@@ -124,15 +124,19 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	tx = types.NewContractCreation(1, common.Num0, 3000000, common.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 
+	done := make(chan bool)
 	go func() {
+		defer close(done)
 		contextCanceled := errors.New("context canceled")
 		if _, err := bind.WaitDeployed(ctx, backend, tx); err.Error() != contextCanceled.Error() {
 			t.Errorf("error missmatch: want %q, got %q, ", contextCanceled, err)
 		}
+		done <- true
 	}()
 
 	if err := backend.SendTransaction(ctx, tx); err != nil {
 		t.Errorf("error when sending tx: %v", err)
 	}
 	cancel()
+	<-done
 }
