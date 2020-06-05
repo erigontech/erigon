@@ -132,21 +132,18 @@ func (db *BadgerDatabase) Close() {
 	}
 }
 
-const bucketSeparator = byte(0xA6) // broken bar '¦'
-
 func bucketKey(bucket, key []byte) []byte {
 	var composite []byte
 	composite = append(composite, bucket...)
-	composite = append(composite, bucketSeparator)
 	composite = append(composite, key...)
 	return composite
 }
 
 func keyWithoutBucket(key, bucket []byte) []byte {
-	if len(key) <= len(bucket) || !bytes.HasPrefix(key, bucket) || key[len(bucket)] != bucketSeparator {
+	if len(key) <= len(bucket) || !bytes.HasPrefix(key, bucket) {
 		return nil
 	}
-	return key[len(bucket)+1:]
+	return key[len(bucket):]
 }
 
 // Delete removes a single entry.
