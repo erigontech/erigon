@@ -303,11 +303,7 @@ func (c *boltCursor) Delete(key []byte) error {
 	default:
 	}
 
-	k, _ := c.bolt.SeekTo(key)
-	if !bytes.Equal(k, key) {
-		return nil
-	}
-	return c.bolt.Delete()
+	return c.bolt.Delete2(key)
 }
 
 func (c *boltCursor) Put(key []byte, value []byte) error {
@@ -317,7 +313,7 @@ func (c *boltCursor) Put(key []byte, value []byte) error {
 	default:
 	}
 
-	return c.bucket.Put(key, value)
+	return c.bolt.Put(key, value)
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
