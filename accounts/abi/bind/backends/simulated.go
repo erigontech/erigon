@@ -93,8 +93,8 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 	blockchain.EnableReceipts(true)
 
 	var kv ethdb.KV
-	if hasKV, ok := database.(ethdb.HasAbstractKV); ok {
-		kv = hasKV.AbstractKV()
+	if hasKV, ok := database.(ethdb.HasKV); ok {
+		kv = hasKV.KV()
 	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
@@ -124,7 +124,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database.NewBatch(),
-		kv:           database.AbstractKV(),
+		kv:           database.KV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,

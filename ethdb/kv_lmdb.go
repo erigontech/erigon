@@ -27,7 +27,6 @@ func (opts lmdbOpts) Path(path string) lmdbOpts {
 }
 
 func (opts lmdbOpts) InMem() lmdbOpts {
-	opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
 	opts.inMem = true
 	return opts
 }
@@ -51,12 +50,14 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		fmt.Printf("db.opts.path: %s\n", opts.path)
 		logger = log.New("lmdb", "inMem")
-		err = env.SetMapSize(1 << 26) // 64MB
+		err = env.SetMapSize(1 << 22) // 4MB
 		if err != nil {
 			return nil, err
 		}
+		opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
+		//opts.path = path.Join(os.TempDir(), "lmdb-in-memory")
+		//opts.path = "lmdb_tmp"
 	} else {
 		logger = log.New("lmdb", path.Base(opts.path))
 
@@ -64,7 +65,35 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = os.MkdirAll(opts.path, 0744); err != nil {
+	}
+
+	flags := uint(0)
+	if opts.readOnly {
+		flags |= lmdb.Readonly
+	}
+	if opts.inMem {
+		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
+	}
+	if err = os.MkdirAll(opts.path, 0744); err != nil {
+		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+	}
+	err = env.Open(opts.path, flags, 0664)
+	if err != nil {
+		return nil, err
+	}
+
+	buckets := map[string]lmdb.DBI{}
+	if !opts.readOnly {
+		if err := env.Update(func(tx *lmdb.Txn) error {
+			for _, name := range dbutils.Buckets {
+				dbi, createErr := tx.OpenDBI(string(name), lmdb.Create)
+				if createErr != nil {
+					return createErr
+				}
+				buckets[string(name)] = dbi
+			}
+			return nil
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -90,35 +119,6 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 			}
 		}
 	}()
-
-	flags := uint(0)
-	if opts.readOnly {
-		flags |= lmdb.Readonly
-	}
-	if opts.inMem {
-		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
-	}
-	err = env.Open(opts.path, flags, 0664)
-	if err != nil {
-		return nil, err
-	}
-
-	buckets := map[string]lmdb.DBI{}
-	if !opts.readOnly {
-		if err := env.Update(func(tx *lmdb.Txn) error {
-			for _, name := range dbutils.Buckets {
-				dbi, createErr := tx.OpenDBI(string(name), lmdb.Create)
-				if createErr != nil {
-					return createErr
-				}
-				buckets[string(name)] = dbi
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-
 	return &LmdbKV{
 		opts:    opts,
 		env:     env,
@@ -130,7 +130,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 	db, err := opts.Open(ctx)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("fail to open lmdb: %w", err))
 	}
 	return db
 }
@@ -149,13 +149,18 @@ func NewLMDB() lmdbOpts {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if err := db.env.Close(); err != nil {
-		db.log.Warn("failed to close DB", "err", err)
-	} else {
-		db.log.Info("database closed")
+	if db.env != nil {
+		if err := db.env.Close(); err != nil {
+			db.log.Warn("failed to close DB", "err", err)
+		} else {
+			db.log.Info("database closed")
+		}
 	}
+
 	if db.opts.inMem {
-		os.RemoveAll(db.opts.path) // lmdb creates file in this mode, just doesn't fsync in it
+		if err := os.RemoveAll(db.opts.path); err != nil {
+			db.log.Warn("failed to remove in-mem db file", "err", err)
+		}
 	}
 }
 

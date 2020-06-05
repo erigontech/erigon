@@ -65,3 +65,18 @@ func IsTrackWitnessSizeEnabled() bool {
 	})
 	return trackWitnessSize
 }
+
+var (
+	testDB    string
+	getTestDB sync.Once
+)
+
+func TestDB() string {
+	getTestDB.Do(func() {
+		testDB, _ = os.LookupEnv("TEST_DB")
+		if testDB == "" {
+			testDB = "bolt"
+		}
+	})
+	return testDB
+}

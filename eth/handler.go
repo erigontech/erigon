@@ -1028,7 +1028,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, tds, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 
-		remotedbserver.StartDeprecated(ethDb.AbstractKV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
+		remotedbserver.StartDeprecated(ethDb.KV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync
 		downloader.MaxHashFetch = 512 * 10

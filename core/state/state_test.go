@@ -102,7 +102,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := ethdb.NewMemDatabase()
 	s.db = db
-	s.kv = db.AbstractKV()
+	s.kv = db.KV()
 	s.tds = NewTrieDbState(common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
@@ -346,7 +346,7 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(db.AbstractKV(), 2).DefaultDump())
+	got := string(NewDumper(db.KV(), 2).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

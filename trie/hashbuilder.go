@@ -234,7 +234,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
 				accountCode, ok = stackTop.(codeNode)
 				if !ok {
-					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %t:%s", stackTop, stackTop)
+					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %T:%s", stackTop, stackTop)
 				}
 			}
 		}

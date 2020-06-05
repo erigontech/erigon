@@ -11,8 +11,6 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/bolt"
-
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
@@ -149,7 +147,7 @@ func hexPalette() error {
 	return nil
 }
 
-func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error {
+func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -161,15 +159,16 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 	noValues := make(map[int]struct{})
 	perBucketFiles := make(map[string]*os.File)
 
-	if err = second.View(func(readTx *bolt.Tx) error {
-		return first.View(func(firstTx *bolt.Tx) error {
-			return readTx.ForEach(func(bucketName []byte, b *bolt.Bucket) error {
+	if err = second.View(context.Background(), func(readTx ethdb.Tx) error {
+		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
+			for _, bucketName := range dbutils.Buckets {
+				b := readTx.Bucket(bucketName)
 				firstB := firstTx.Bucket(bucketName)
-				return b.ForEach(func(k, v []byte) error {
+				if err2 := b.Cursor().Walk(func(k, v []byte) (bool, error) {
 					if firstB != nil {
 						if firstV, _ := firstB.Get(k); firstV != nil && bytes.Equal(v, firstV) {
 							// Skip the record that is the same as in the first Db
-							return nil
+							return true, nil
 						}
 					}
 					// Produce pair of nodes
@@ -190,7 +189,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 					if f1, ok = perBucketFiles[string(bucketName)]; !ok {
 						f1, err = os.Create(fmt.Sprintf("changes_%d_%s_%d.dot", number, bucketName, len(perBucketFiles)))
 						if err != nil {
-							return err
+							return false, err
 						}
 						visual.StartGraph(f1, true)
 						var clusterLabel string
@@ -229,9 +228,12 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 					lst = append(lst, i)
 					m[string(common.CopyBytes(bucketName))] = lst
 					i++
-					return nil
-				})
-			})
+					return true, nil
+				}); err2 != nil {
+					return err2
+				}
+			}
+			return nil
 		})
 	}); err != nil {
 		return err
@@ -285,15 +287,15 @@ func initialState1() error {
 	fmt.Printf("Initial state 1\n")
 	// Configure and generate a sample block chain
 	var (
-		db, dbBolt = ethdb.NewMemDatabase2()
-		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _    = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _    = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address    = crypto.PubkeyToAddress(key.PublicKey)
-		address1   = crypto.PubkeyToAddress(key1.PublicKey)
-		address2   = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr    = common.Address{1}
-		gspec      = &core.Genesis{
+		db, kv   = ethdb.NewMemDatabase2()
+		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+		address  = crypto.PubkeyToAddress(key.PublicKey)
+		address1 = crypto.PubkeyToAddress(key1.PublicKey)
+		address2 = crypto.PubkeyToAddress(key2.PublicKey)
+		theAddr  = common.Address{1}
+		gspec    = &core.Genesis{
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
@@ -313,7 +315,7 @@ func initialState1() error {
 		signer = types.HomesteadSigner{}
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	snapshotDb := db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB := db.MemCopy().(ethdb.HasKV).KV()
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()
 
@@ -339,7 +341,7 @@ func initialState1() error {
 	if _, err = statePicture(t, 1, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 0); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 0); err != nil {
 		return err
 	}
 
@@ -452,12 +454,12 @@ func initialState1() error {
 	})
 
 	// BLOCK 1
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 1); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 1); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 2, 48, false, false, false, false, nil); err != nil {
@@ -465,12 +467,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 2
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 2); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 2); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 3, 48, false, false, false, false, nil); err != nil {
@@ -478,12 +480,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 3
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 3); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 3); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 4, 48, false, false, false, false, nil); err != nil {
@@ -497,12 +499,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 4
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 4); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 4); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 7, 48, true, true, false, false, nil); err != nil {
@@ -510,12 +512,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 5
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 5); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 8, 54, true, true, false, false, nil); err != nil {
@@ -523,12 +525,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 6
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 5); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 9, 54, true, true, false, false, nil); err != nil {
@@ -539,12 +541,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 7
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 7); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 7); err != nil {
 		return err
 	}
 	quadTrie, err := statePicture(t, 11, 110, true, true, true, true, nil)
@@ -554,12 +556,12 @@ func initialState1() error {
 
 	tds.SetResolveReads(true)
 	// BLOCK 8
-	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[7]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, dbBolt, 8); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 8); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 12, 110, true, true, true, true, nil); err != nil {
@@ -604,7 +606,8 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(ethdb.NewMemDatabase().KV(), dbBolt, 9); err != nil {
+	_, kv2 := ethdb.NewMemDatabase2()
+	if err = stateDatabaseComparison(kv2, kv, 9); err != nil {
 		return err
 	}
 	return nil

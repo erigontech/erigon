@@ -279,7 +279,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(db.AbstractKV(), 0).DefaultDump()))
+		fmt.Println(string(state.NewDumper(db.KV(), 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.GlobalString(MemProfileFlag.Name); memProfilePath != "" {

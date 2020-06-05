@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -22,7 +21,7 @@ func (opts badgerOpts) Path(path string) badgerOpts {
 }
 
 func (opts badgerOpts) InMem() badgerOpts {
-	opts.Badger = opts.Badger.WithInMemory(true).WithNumCompactors(0).WithCompression(options.None).WithCompactL0OnClose(false)
+	opts.Badger = opts.Badger.WithInMemory(true)
 	return opts
 }
 
@@ -34,12 +33,17 @@ func (opts badgerOpts) ReadOnly() badgerOpts {
 func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	logger := log.New("badger_db", opts.Badger.Dir)
 
-	oldMaxProcs := runtime.GOMAXPROCS(0)
-	if oldMaxProcs < minGoMaxProcs {
-		runtime.GOMAXPROCS(minGoMaxProcs)
-		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+	if opts.Badger.InMemory {
+		opts.Badger = opts.Badger.WithMaxTableSize(1 << 20) // 4MB
+		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
+	} else {
+		oldMaxProcs := runtime.GOMAXPROCS(0)
+		if oldMaxProcs < minGoMaxProcs {
+			runtime.GOMAXPROCS(minGoMaxProcs)
+			logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+		}
+		opts.Badger = opts.Badger.WithMaxTableSize(128 << 20) // 128MB, default 64Mb
 	}
-	opts.Badger = opts.Badger.WithMaxTableSize(512 << 20)
 
 	db, err := badger.Open(opts.Badger)
 	if err != nil {
@@ -69,6 +73,12 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			}
 		}()
 	}
+
+	go func() {
+		for range time.NewTicker(1 * time.Minute).C {
+			logger.Info("Badger Metrics", "BfCache", db.BfCacheMetrics().String(), "DataCache", db.DataCacheMetrics().String())
+		}
+	}()
 
 	return &badgerDB{
 		opts:     opts,
@@ -103,10 +113,12 @@ func (db *badgerDB) Close() {
 	if db.gcTicker != nil {
 		db.gcTicker.Stop()
 	}
-	if err := db.badger.Close(); err != nil {
-		db.log.Warn("failed to close badger DB", "err", err)
-	} else {
-		db.log.Info("badger database closed")
+	if db.badger != nil {
+		if err := db.badger.Close(); err != nil {
+			db.log.Warn("failed to close badger DB", "err", err)
+		} else {
+			db.log.Info("badger database closed")
+		}
 	}
 }
 
@@ -374,8 +386,6 @@ func (c *badgerCursor) Delete(key []byte) error {
 	default:
 	}
 
-	c.initCursor()
-
 	return c.bucket.Delete(key)
 }
 
@@ -385,8 +395,6 @@ func (c *badgerCursor) Put(key []byte, value []byte) error {
 		return c.ctx.Err()
 	default:
 	}
-
-	c.initCursor()
 
 	return c.bucket.Put(key, value)
 }

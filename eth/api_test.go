@@ -95,10 +95,10 @@ func TestAccountRange(t *testing.T) {
 
 	trie := tds.Trie()
 
-	accountRangeTest(t, trie, db.AbstractKV(), 0, sdb, common.Hash{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
+	accountRangeTest(t, trie, db.KV(), 0, sdb, common.Hash{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
 	// test pagination
-	firstResult := accountRangeTest(t, trie, db.AbstractKV(), 0, sdb, common.Hash{}, AccountRangeMaxResults, AccountRangeMaxResults)
-	secondResult := accountRangeTest(t, trie, db.AbstractKV(), 0, sdb, common.BytesToHash(firstResult.Next), AccountRangeMaxResults, AccountRangeMaxResults)
+	firstResult := accountRangeTest(t, trie, db.KV(), 0, sdb, common.Hash{}, AccountRangeMaxResults, AccountRangeMaxResults)
+	secondResult := accountRangeTest(t, trie, db.KV(), 0, sdb, common.BytesToHash(firstResult.Next), AccountRangeMaxResults, AccountRangeMaxResults)
 
 	hList := make(resultHash, 0)
 	for addr1 := range firstResult.Accounts {
@@ -116,7 +116,7 @@ func TestAccountRange(t *testing.T) {
 	// set and get an even split between the first and second sets.
 	sort.Sort(hList)
 	middleH := hList[AccountRangeMaxResults/2]
-	middleResult := accountRangeTest(t, trie, db.AbstractKV(), 0, sdb, middleH, AccountRangeMaxResults, AccountRangeMaxResults)
+	middleResult := accountRangeTest(t, trie, db.KV(), 0, sdb, middleH, AccountRangeMaxResults, AccountRangeMaxResults)
 	missing, infirst, insecond := 0, 0, 0
 	for h := range middleResult.Accounts {
 		if _, ok := firstResult.Accounts[h]; ok {
@@ -148,7 +148,7 @@ func TestEmptyAccountRange(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	results, err1 := state.NewDumper(db.AbstractKV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
+	results, err1 := state.NewDumper(db.KV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
 	if err1 != nil {
 		t.Fatal(err1)
 	}
@@ -233,7 +233,7 @@ func TestStorageRangeAt(t *testing.T) {
 			want: StorageRangeResult{StorageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
 		},
 	}
-	dbs := state.NewDbState(db.AbstractKV(), 1)
+	dbs := state.NewDbState(db.KV(), 1)
 	for i, test := range tests {
 		test := test
 		t.Run("test_"+strconv.Itoa(i), func(t *testing.T) {

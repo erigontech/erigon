@@ -107,11 +107,11 @@ func stateTestCmd(ctx *cli.Context) error {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					if hasKV, ok := tds.Database().(ethdb.HasAbstractKV); ok {
-						dump := state.NewDumper(hasKV.AbstractKV(), tds.GetBlockNr()).DefaultRawDump()
+					if hasKV, ok := tds.Database().(ethdb.HasKV); ok {
+						dump := state.NewDumper(hasKV.KV(), tds.GetBlockNr()).DefaultRawDump()
 						result.State = &dump
 					} else {
-						fmt.Fprintf(os.Stderr, "database does not implement AbstractKV: %T\n", tds.Database())
+						fmt.Fprintf(os.Stderr, "database does not implement KV: %T\n", tds.Database())
 					}
 				}
 			}
@@ -125,6 +125,7 @@ func stateTestCmd(ctx *cli.Context) error {
 					vm.WriteTrace(os.Stderr, debugger.StructLogs())
 				}
 			}
+			tds.Database().Close()
 		}
 	}
 	out, _ := json.MarshalIndent(results, "", "  ")

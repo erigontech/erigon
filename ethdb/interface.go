@@ -18,8 +18,6 @@ package ethdb
 
 import (
 	"errors"
-
-	"github.com/ledgerwatch/bolt"
 )
 
 // DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
@@ -112,11 +110,7 @@ type DbWithPendingMutations interface {
 }
 
 type HasKV interface {
-	KV() *bolt.DB
-}
-
-type HasAbstractKV interface {
-	AbstractKV() KV
+	KV() KV
 }
 
 type HasNetInterface interface {

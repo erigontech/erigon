@@ -63,7 +63,7 @@ func TestCmdVersion(t *testing.T) {
 	// ---------- End of boilerplate code
 	assert.Nil(encoder.Encode(remote.CmdVersion), "Could not encode CmdVersion")
 
-	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	var responseCode remote.ResponseCode
@@ -99,7 +99,7 @@ func TestCmdBeginEndError(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	var responseCode remote.ResponseCode
@@ -137,7 +137,7 @@ func TestCmdBucket(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -189,7 +189,7 @@ func TestCmdGet(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -250,7 +250,7 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -333,7 +333,7 @@ func TestCursorOperations(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -393,7 +393,7 @@ func TestTxYield(t *testing.T) {
 		}()
 
 		// Long read-only transaction
-		if err := db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
+		if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.CurrentStateBucket)
 			var keyBuf [8]byte
 			var i uint64
@@ -423,7 +423,7 @@ func TestTxYield(t *testing.T) {
 	}()
 
 	// Expand the database
-	err := db.AbstractKV().Update(context.Background(), func(tx ethdb.Tx) error {
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		var keyBuf, valBuf [8]byte
 		for i := uint64(0); i < 10000; i++ {
@@ -471,7 +471,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	go func() {
-		require.NoError(Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer))
+		require.NoError(Server(ctx, db.KV(), &inBuf, &outBuf, closer))
 	}()
 
 	var responseCode remote.ResponseCode
@@ -538,7 +538,7 @@ func BenchmarkKVCursorFirst(b *testing.B) {
 	var k, v []byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tx, err := db.AbstractKV().Begin(context.Background(), false)
+		tx, err := db.KV().Begin(context.Background(), false)
 		if err != nil {
 			panic(err)
 		}
