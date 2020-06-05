@@ -1,13 +1,19 @@
 package vm
 
 import (
-	"hash"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
+
+// saCallCtx contains the things that are per-call, such as stack and memory,
+// but not transients like pc and gas
+type saCallCtx struct {
+	memory   *Memory
+	stack    *SaStack
+	contract *Contract
+}
 
 // SaInterpreter is for static analysis
 type SaInterpreter struct {
@@ -92,7 +98,7 @@ func (in *SaInterpreter) Run(contract *Contract, input []byte, readOnly bool) (r
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		stack       = newSaStack()  // local stack
-		callContext = &callCtx{
+		callContext = &saCallCtx{
 			memory:   mem,
 			stack:    stack,
 			contract: contract,
@@ -101,26 +107,10 @@ func (in *SaInterpreter) Run(contract *Contract, input []byte, readOnly bool) (r
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc   = uint64(0) // program counter
-		cost uint64
-		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		gasCopy uint64 // for Tracer to log gas remaining before execution
-		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 	)
 	contract.Input = input
 
-	if in.cfg.Debug {
-		defer func() {
-			if err != nil {
-				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, stack, contract, in.evm.depth, err)
-				} else {
-					in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, stack, contract, in.evm.depth, err)
-				}
-			}
-		}()
-	}
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -130,10 +120,6 @@ func (in *SaInterpreter) Run(contract *Contract, input []byte, readOnly bool) (r
 		steps++
 		if steps%1000 == 0 && atomic.LoadInt32(&in.evm.abort) != 0 {
 			break
-		}
-		if in.cfg.Debug {
-			// Capture pre-execution values for tracing.
-			logged, pcCopy, gasCopy = false, pc, contract.Gas
 		}
 
 		// Get the operation from the jump table and validate the stack to ensure there are
@@ -157,54 +143,22 @@ func (in *SaInterpreter) Run(contract *Contract, input []byte, readOnly bool) (r
 			// for a call operation is the value. Transferring value from one
 			// account to the others means the state is modified and should also
 			// return with an error.
-			if operation.writes || (op == CALL && stack.Back(2).Sign() != 0) {
+			if operation.writes {
 				return nil, ErrWriteProtection
+			}
+			if op == CALL {
+				if v, kind := stack.Back(2); kind == Constant && v.Sign() != 0 {
+					return nil, ErrWriteProtection
+				}
 			}
 		}
 		// Static portion of gas
-		cost = operation.constantGas // For tracing
 		if !contract.UseGas(operation.constantGas) {
 			return nil, ErrOutOfGas
 		}
 
-		var memorySize uint64
-		// calculate the new memory size and expand the memory to fit
-		// the operation
-		// Memory check needs to be done prior to evaluating the dynamic gas portion,
-		// to detect calculation overflows
-		if operation.memorySize != nil {
-			memSize, overflow := operation.memorySize(stack)
-			if overflow {
-				return nil, ErrGasUintOverflow
-			}
-			// memory is expanded in words of 32 bytes. Gas
-			// is also calculated in words.
-			if memorySize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
-				return nil, ErrGasUintOverflow
-			}
-		}
-		// Dynamic portion of gas
-		// consume the gas and return an error if not enough gas is available.
-		// cost is explicitly set so that the capture state defer method can get the proper cost
-		if operation.dynamicGas != nil {
-			var dynamicCost uint64
-			dynamicCost, err = operation.dynamicGas(in.evm, contract, stack, mem, memorySize)
-			cost += dynamicCost // total cost, for debug tracing
-			if err != nil || !contract.UseGas(dynamicCost) {
-				return nil, ErrOutOfGas
-			}
-		}
-		if memorySize > 0 {
-			mem.Resize(memorySize)
-		}
-
-		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, stack, contract, in.evm.depth, err)
-			logged = true
-		}
-
 		// execute the operation
-		res, err = operation.execute(&pc, in, callContext)
+		res, err = operation.saExecute(&pc, in, callContext)
 
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
@@ -228,6 +182,6 @@ func (in *SaInterpreter) Run(contract *Contract, input []byte, readOnly bool) (r
 
 // CanRun tells if the contract, passed as an argument, can be
 // run by the current interpreter.
-func (in *EVMInterpreter) CanRun(code []byte) bool {
+func (in *SaInterpreter) CanRun(code []byte) bool {
 	return true
 }

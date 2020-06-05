@@ -22,15 +22,18 @@ import (
 )
 
 type (
-	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error)
-	gasFunc       func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	executionFunc   func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error)
+	saExecutionFunc func(pc *uint64, interpreter *SaInterpreter, callContext *saCallCtx) ([]byte, error)
+	gasFunc         func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
-	memorySizeFunc func(*stack.Stack) (size uint64, overflow bool)
+	memorySizeFunc  func(*Stack) (size uint64, overflow bool)
 )
 
 type operation struct {
 	// execute is the operation function
 	execute     executionFunc
+	// saExecute is the operation for static analysis
+	saExecute   saExecutionFunc
 	constantGas uint64
 	dynamicGas  gasFunc
 	// minStack tells how many stack items are required
@@ -208,6 +211,7 @@ func newFrontierInstructionSet() JumpTable {
 	return JumpTable{
 		STOP: {
 			execute:     opStop,
+			saExecute:   saStop,
 			constantGas: 0,
 			minStack:    minStack(0, 0),
 			maxStack:    maxStack(0, 0),
@@ -216,6 +220,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		ADD: {
 			execute:     opAdd,
+			saExecute:   saAdd,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -223,6 +228,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		MUL: {
 			execute:     opMul,
+			saExecute:   saMul,
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -230,6 +236,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SUB: {
 			execute:     opSub,
+			saExecute:   saSub,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -237,6 +244,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		DIV: {
 			execute:     opDiv,
+			saExecute:   saDiv,
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -244,6 +252,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SDIV: {
 			execute:     opSdiv,
+			saExecute:   saSdiv,
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -251,6 +260,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		MOD: {
 			execute:     opMod,
+			saExecute:   saMod,
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -258,6 +268,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SMOD: {
 			execute:     opSmod,
+			saExecute:   saSmod,
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -265,6 +276,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		ADDMOD: {
 			execute:     opAddmod,
+			saExecute:   saAddmod,
 			constantGas: GasMidStep,
 			minStack:    minStack(3, 1),
 			maxStack:    maxStack(3, 1),
@@ -272,6 +284,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		MULMOD: {
 			execute:     opMulmod,
+			saExecute:   saMulmod,
 			constantGas: GasMidStep,
 			minStack:    minStack(3, 1),
 			maxStack:    maxStack(3, 1),
@@ -279,6 +292,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		EXP: {
 			execute:    opExp,
+			saExecute:  saExp,
 			dynamicGas: gasExpFrontier,
 			minStack:   minStack(2, 1),
 			maxStack:   maxStack(2, 1),
@@ -286,6 +300,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SIGNEXTEND: {
 			execute:     opSignExtend,
+			saExecute:   saSignExtend,
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -293,6 +308,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		LT: {
 			execute:     opLt,
+			saExecute:   saLt,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -300,6 +316,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		GT: {
 			execute:     opGt,
+			saExecute:   saGt,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -307,6 +324,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SLT: {
 			execute:     opSlt,
+			saExecute:   saSlt,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -314,6 +332,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SGT: {
 			execute:     opSgt,
+			saExecute:   saSgt,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -321,6 +340,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		EQ: {
 			execute:     opEq,
+			saExecute:   saEq,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
@@ -328,6 +348,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		ISZERO: {
 			execute:     opIszero,
+			saExecute:   saIszero,
 			constantGas: GasFastestStep,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
@@ -335,6 +356,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		AND: {
 			execute:     opAnd,
+			saExecute:   saAnd,
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
