@@ -684,9 +684,9 @@ func mgrSchedule(chaindata string, block uint64) {
 		counter2 := 0
 		counter3 := 0
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		for k, v, err := c.SeekTo(tick.From); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				panic(err)
+		for k, v, err3 := c.SeekTo(tick.From); k != nil; k, v, err3 = c.Next() {
+			if err3 != nil {
+				panic(err3)
 			}
 			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
 				break

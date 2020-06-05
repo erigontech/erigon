@@ -374,8 +374,6 @@ func (c *badgerCursor) Delete(key []byte) error {
 	default:
 	}
 
-	c.initCursor()
-
 	return c.bucket.Delete(key)
 }
 
@@ -385,8 +383,6 @@ func (c *badgerCursor) Put(key []byte, value []byte) error {
 		return c.ctx.Err()
 	default:
 	}
-
-	c.initCursor()
 
 	return c.bucket.Put(key, value)
 }
