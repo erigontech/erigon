@@ -185,6 +185,18 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 	return compositeKey, nil
 }
 
+func keyTransformLoadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
+    var v []byte
+    if err := valueDecoder.Decode(&v); err != nil {
+        return err
+    }
+    newK, err := transformPlainStateKey(k)
+    if err != nil {
+        return err
+    }
+    return next(newK, v)
+}
+
 func NewPromoter(db ethdb.Database, quitCh chan struct{}) *Promoter {
 	return &Promoter{
 		db:               db,
@@ -384,7 +396,7 @@ func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
 		if err := p.mergeFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
 			return err
 		}
-		if err := collector.Load(p.db, dbutils.CurrentStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+		if err := collector.Load(p.db, dbutils.CurrentStateBucket, keyTransformLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 			return err
 		}
 	}
