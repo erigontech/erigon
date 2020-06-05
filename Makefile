@@ -243,3 +243,6 @@ simulator-genesis:
 
 prometheus:
 	@cd ./cmd/prometheus && docker-compose up prometheus grafana
+
+escape:
+	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out

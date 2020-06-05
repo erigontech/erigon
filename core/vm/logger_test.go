@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -55,11 +56,11 @@ func TestStoreCapture(t *testing.T) {
 		env      = NewEVM(Context{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
-		stack    = newstack()
+		stack    = stack.New()
 		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, NewJumpDestsTest())
 	)
-	stack.push(uint256.NewInt().SetOne())
-	stack.push(uint256.NewInt())
+	stack.Push(uint256.NewInt().SetOne())
+	stack.Push(uint256.NewInt())
 	var index common.Hash
 	logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, contract, 0, nil)
 	if len(logger.changedValues[contract.Address()]) == 0 {
