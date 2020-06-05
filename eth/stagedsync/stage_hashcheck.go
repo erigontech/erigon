@@ -310,7 +310,9 @@ func (p *Promoter) mergeFilesAndCollect(bufferFileNames []string, keyLength int,
 			// Ignore all the repeating keys
 			prevKey = element.Key
 			if v, err := p.db.Get(dbutils.PlainStateBucket, element.Key); err == nil || err == ethdb.ErrKeyNotFound {
-				collector.Collect(element.Key, v)
+				if err1 := collector.Collect(element.Key, v); err1 != nil {
+					return err1
+				}
 			} else {
 				return err
 			}
