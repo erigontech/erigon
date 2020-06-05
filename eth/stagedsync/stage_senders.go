@@ -67,10 +67,6 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 	needExit := false
 	for !needExit {
-		if err := common.Stopped(quitCh); err != nil {
-			return err
-		}
-
 		written := 0
 		for i := 0; i < batchSize; i++ {
 			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
@@ -128,10 +124,6 @@ type senderRecoveryJob struct {
 func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}) {
 	var job *senderRecoveryJob
 	for {
-		if err := common.Stopped(quit); err != nil {
-			return
-		}
-
 		job = <-in
 		if job == nil {
 			return
@@ -149,6 +141,11 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 			}
 		}
 		out <- job
+
+		if err := common.Stopped(quit); err != nil {
+			job.err = err
+			return
+		}
 	}
 }
 
