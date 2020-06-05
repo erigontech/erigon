@@ -42,7 +42,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			runtime.GOMAXPROCS(minGoMaxProcs)
 			logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
 		}
-		//opts.Badger = opts.Badger.WithMaxTableSize(1 << 27) // 128MB
+		opts.Badger = opts.Badger.WithMaxTableSize(128 << 20) // 128MB, default 64Mb
 	}
 
 	db, err := badger.Open(opts.Badger)
@@ -73,6 +73,12 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			}
 		}()
 	}
+
+	go func() {
+		for range time.NewTicker(1 * time.Minute).C {
+			logger.Info("Badger Metrics", "BfCache", db.BfCacheMetrics().String(), "DataCache", db.DataCacheMetrics().String())
+		}
+	}()
 
 	return &badgerDB{
 		opts:     opts,
