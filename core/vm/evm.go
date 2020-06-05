@@ -495,7 +495,7 @@ func (evm *EVM) ChainConfig() *params.ChainConfig { return evm.chainConfig }
 
 func (evm *EVM) GetJumpsDests() Cache {
 	if evm.vmConfig.Dests == nil {
-		evm.vmConfig.Dests = NewJumpDestsDefault()
+		evm.vmConfig.Dests = NewDestsCache(50000)
 	}
 	return evm.vmConfig.Dests
 }

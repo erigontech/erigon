@@ -17,37 +17,10 @@
 package vm
 
 import (
-	"fmt"
-	"sort"
-
 	"github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
-
-func NewJumpDestsDefault() *JumpDests {
-	return NewJumpDests(50000, 10, 5)
-}
-
-func NewJumpDestsTest() *JumpDests {
-	return NewJumpDests(20, 10, 5)
-}
-
-type JumpDests struct {
-	maps       map[common.Hash]*item
-	lru        []map[common.Hash]struct{}
-	chunks     []int
-	minToClear int // 1..100
-	maxSize    int
-
-	GcCount int
-	GcTotal int
-}
-
-type item struct {
-	m    *pool.ByteBuffer
-	used int
-}
 
 type Cache interface {
 	Len() int
@@ -91,106 +64,6 @@ func (d *DestsCache) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
 
 func (d *DestsCache) Len() int {
 	return d.Cache.Len()
-}
-
-func NewJumpDests(maxSize, nChunks, percentToClear int) *JumpDests {
-	lru := make([]map[common.Hash]struct{}, nChunks)
-	chunks := make([]int, nChunks)
-	chunkSize := maxSize / nChunks
-	for i := 0; i < nChunks; i++ {
-		lru[i] = make(map[common.Hash]struct{}, chunkSize)
-		chunks[i] = 1 << (1 + i*2)
-	}
-
-	return &JumpDests{
-		make(map[common.Hash]*item, maxSize),
-		lru,
-		chunks,
-		maxSize * percentToClear / 100,
-		maxSize,
-		0,
-		0,
-	}
-}
-
-func (j *JumpDests) Len() int {
-	return len(j.maps)
-}
-
-func (j *JumpDests) Set(hash common.Hash, v *pool.ByteBuffer) {
-	_, ok := j.maps[hash]
-	if ok {
-		return
-	}
-
-	if len(j.maps) >= j.maxSize {
-		j.GcCount++
-		j.gc()
-	}
-
-	j.maps[hash] = &item{v, 1}
-	j.lru[0][hash] = struct{}{}
-}
-
-func (j *JumpDests) Get(hash common.Hash) (*pool.ByteBuffer, bool) {
-	jumps, ok := j.maps[hash]
-	if !ok {
-		return nil, false
-	}
-
-	jumps.used++
-	idx := sort.SearchInts(j.chunks, jumps.used)
-
-	// everything greater than j.chunks[len(chunks)-1] should be stored in the last chunk
-	if idx >= 0 && idx < len(j.chunks)-1 {
-		max := j.chunks[idx]
-		if jumps.used >= max {
-			// moving to the next chunk
-			j.lru[idx+1][hash] = struct{}{}
-			delete(j.lru[idx], hash)
-		}
-	}
-
-	return jumps.m, true
-}
-
-func (j *JumpDests) gc() {
-	n := 0
-	for _, chunk := range j.lru {
-		for hash := range chunk {
-			delete(chunk, hash)
-			delete(j.maps, hash)
-
-			n++
-			if n >= j.minToClear {
-				j.GcTotal += n
-				return
-			}
-		}
-	}
-	j.GcTotal += n
-}
-
-func (j *JumpDests) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
-	if codeHash == (common.Hash{}) {
-		return
-	}
-	_, ok := j.maps[codeHash]
-	if ok {
-		return
-	}
-	// analysis is a local one
-	pool.PutBuffer(local)
-}
-
-func (j *JumpDests) String() string {
-	res := ""
-	for i, size := range j.chunks {
-		res += fmt.Sprintf("chunk %d:%d; ", size, len(j.lru[i]))
-	}
-
-	return fmt.Sprintf("cached %d, cacheGC %d, cacheGCCleaned %d, buckets: %s",
-		j.Len(), j.GcCount, j.GcTotal, res)
 }
 
 // codeBitmap collects data locations in code.
