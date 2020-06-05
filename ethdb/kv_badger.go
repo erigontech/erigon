@@ -34,6 +34,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	logger := log.New("badger_db", opts.Badger.Dir)
 
 	if opts.Badger.InMemory {
+		opts.Badger = opts.Badger.WithMaxTableSize(128 << 20) // 128MB, default 64Mb
 		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
 	} else {
 		oldMaxProcs := runtime.GOMAXPROCS(0)
