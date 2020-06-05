@@ -149,7 +149,6 @@ func (q *queue) Close() {
 	q.lock.Lock()
 	q.closed = true
 	q.lock.Unlock()
-	fmt.Printf("ALEX\n")
 	q.active.Broadcast()
 }
 

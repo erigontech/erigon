@@ -42,6 +42,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			runtime.GOMAXPROCS(minGoMaxProcs)
 			logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
 		}
+		//opts.Badger = opts.Badger.WithMaxTableSize(1 << 27) // 128MB
 	}
 
 	db, err := badger.Open(opts.Badger)
