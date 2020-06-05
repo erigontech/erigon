@@ -31,7 +31,7 @@ import (
 var testVMConfig = vm.Config{}
 
 func TestState(t *testing.T) {
-	//t.Parallel()
+	t.Parallel()
 
 	st := new(testMatcher)
 	// Long tests:
@@ -96,6 +96,8 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 		return
 	}
 
+	fmt.Printf("Error!!!!!!! %s\n", err)
+	panic(1)
 	// Test failed, re-run with tracing enabled.
 	t.Error(err)
 	if gasLimit > traceErrorLimit {

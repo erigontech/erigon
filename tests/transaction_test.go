@@ -23,7 +23,7 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
-	//t.Parallel()
+	t.Parallel()
 
 	txt := new(testMatcher)
 	// These can't be parsed, invalid hex in RLP
