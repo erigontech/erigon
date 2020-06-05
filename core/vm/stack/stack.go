@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package stack
 
 import (
 	"fmt"
@@ -26,59 +26,66 @@ import (
 // expected to be changed and modified. stack does not take care of adding newly
 // initialised objects.
 type Stack struct {
-	data []uint256.Int
+	Data []uint256.Int
 }
 
-func newstack() *Stack {
+func New(n ...int) *Stack {
+	if len(n) > 0 {
+		return &Stack{make([]uint256.Int, 0, n[0])}
+	}
 	return &Stack{}
 }
 
 // Data returns the underlying uint256.Int array.
-func (st *Stack) Data() []uint256.Int {
-	return st.data
+func (st *Stack) GetData() []uint256.Int {
+	return st.Data
 }
 
-func (st *Stack) push(d *uint256.Int) {
+func (st *Stack) Push(d *uint256.Int) {
 	// NOTE push limit (1024) is checked in baseCheck
-	st.data = append(st.data, *d)
+	st.Data = append(st.Data, *d)
 }
 
-func (st *Stack) pop() (ret uint256.Int) {
-	ret = st.data[len(st.data)-1]
-	st.data = st.data[:len(st.data)-1]
-	return
-}
-
-func (st *Stack) len() int {
-	return len(st.data)
+func (st *Stack) Pop() uint256.Int {
+	ret := st.Data[len(st.Data)-1]
+	st.Data = st.Data[:len(st.Data)-1]
+	return ret
 }
 
 func (st *Stack) Len() int {
-	return len(st.data)
+	return len(st.Data)
 }
 
-func (st *Stack) swap(n int) {
-	st.data[st.len()-n], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-n]
+func (st *Stack) Cap() int {
+	return cap(st.Data)
 }
 
-func (st *Stack) dup(n int) {
-	st.push(&st.data[st.len()-n])
+func (st *Stack) Swap(n int) {
+	st.Data[st.Len()-n], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-n]
 }
 
-func (st *Stack) peek() *uint256.Int {
-	return &st.data[st.len()-1]
+func (st *Stack) Dup(n int) {
+	st.Push(&st.Data[st.Len()-n])
+}
+
+func (st *Stack) Peek() *uint256.Int {
+	return &st.Data[st.Len()-1]
 }
 
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.data[st.len()-n-1]
+	return &st.Data[st.Len()-n-1]
+}
+
+func (st *Stack) Reset() {
+	st.Data = st.Data[:0]
 }
 
 // Print dumps the content of the stack
 func (st *Stack) Print() {
 	fmt.Println("### stack ###")
-	if len(st.data) > 0 {
-		for i, val := range st.data {
+	if len(st.Data) > 0 {
+		for i, val := range st.Data {
 			fmt.Printf("%-3d  %v\n", i, val)
 		}
 	} else {
