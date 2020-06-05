@@ -65,7 +65,7 @@ func NewMemDatabase2() (*BoltDatabase, KV) {
 		id:  id(),
 	}
 
-	return b, b.AbstractKV()
+	return b, b.KV()
 }
 
 func (db *BoltDatabase) MemCopy() Database {

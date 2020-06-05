@@ -745,7 +745,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 		db.Close()
 		genesisDb.Close()
 	}
-	return blockchain, db.AbstractKV(), blocks, receipts, clear, err
+	return blockchain, db.KV(), blocks, receipts, clear, err
 }
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)

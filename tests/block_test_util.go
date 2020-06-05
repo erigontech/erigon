@@ -134,7 +134,7 @@ func (t *BlockTest) Run(_ bool) error {
 	if common.Hash(t.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	newDB := state.New(state.NewDbState(db.AbstractKV(), chain.CurrentBlock().NumberU64()))
+	newDB := state.New(state.NewDbState(db.KV(), chain.CurrentBlock().NumberU64()))
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}

@@ -416,8 +416,8 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	api.author = chainParams.Genesis.Author
 	api.extraData = chainParams.Genesis.ExtraData
 	api.ethDb = ethDb
-	if hasKV, ok := api.ethDb.(ethdb.HasAbstractKV); ok {
-		api.kv = hasKV.AbstractKV()
+	if hasKV, ok := api.ethDb.(ethdb.HasKV); ok {
+		api.kv = hasKV.KV()
 	}
 	api.engine = engine
 	api.blockchain = blockchain

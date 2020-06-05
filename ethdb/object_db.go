@@ -295,7 +295,7 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 	return keys, err
 }
 
-func (db *ObjectDatabase) AbstractKV() KV {
+func (db *ObjectDatabase) KV() KV {
 	return db.kv
 }
 

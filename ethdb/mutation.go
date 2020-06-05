@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
@@ -17,17 +16,9 @@ type mutation struct {
 	db   Database
 }
 
-func (m *mutation) KV() *bolt.DB {
-	if casted, ok := m.db.(HasKV); !ok {
-		return nil
-	} else {
+func (m *mutation) KV() KV {
+	if casted, ok := m.db.(HasKV); ok {
 		return casted.KV()
-	}
-}
-
-func (m *mutation) AbstractKV() KV {
-	if casted, ok := m.db.(HasAbstractKV); ok {
-		return casted.AbstractKV()
 	}
 	return nil
 }

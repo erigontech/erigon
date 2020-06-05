@@ -152,7 +152,7 @@ func makeTokens(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.AbstractKV(), block.NumberU64()-1)
+		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -235,7 +235,7 @@ func makeTokenBalances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewDbState(ethDb.AbstractKV(), currentBlockNr)
+		dbstate := state.NewDbState(ethDb.KV(), currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
@@ -455,7 +455,7 @@ func makeTokenAllowances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewDbState(ethDb.AbstractKV(), currentBlockNr)
+		dbstate := state.NewDbState(ethDb.KV(), currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,

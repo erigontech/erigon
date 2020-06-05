@@ -671,7 +671,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	counters2 := []int{}
 	counters3 := []int{}
 	counters4 := []int{}
-	tx, _ := db.KV().Begin(false)
+	tx, _ := db.KV().Begin(context.Background(), false)
 	defer func() {
 		_ = tx.Rollback()
 	}()
@@ -684,7 +684,10 @@ func mgrSchedule(chaindata string, block uint64) {
 		counter2 := 0
 		counter3 := 0
 		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		for k, v := c.SeekTo(tick.From); k != nil; k, v = c.Next() {
+		for k, v, err := c.SeekTo(tick.From); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				panic(err)
+			}
 			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
 				break
 			}
@@ -764,138 +767,6 @@ func mgrSchedule(chaindata string, block uint64) {
 	//tr.EvictNode([]byte{})
 	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
 	//check(err)
-}
-
-func resetIH(chaindata string, fromScratch bool) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
-	if fromScratch {
-		err = db.KV().Update(func(tx *bolt.Tx) error {
-			_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
-			_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
-			_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
-			_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
-			return nil
-		})
-		check(err)
-	}
-
-	var before int
-	err = db.KV().View(func(tx *bolt.Tx) error {
-		before = tx.Bucket(dbutils.IntermediateTrieHashBucket).Stats().KeyN
-		return nil
-	})
-	check(err)
-	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-	check(err)
-	defer db.Close()
-	tds, err := bc.GetTrieDbState()
-	check(err)
-	loader := trie.NewFlatDbSubTrieLoader()
-	tr := tds.Trie()
-	for i := 0; i < 16; i++ {
-		for j := 0; j < 16; j++ {
-			prefix := []byte{uint8(i), uint8(j)}
-			t1 := time.Now()
-			err = db.KV().Update(func(tx *bolt.Tx) error {
-				b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-				b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
-				c := b.Cursor()
-				c2 := b2.Cursor()
-				for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
-					_ = b.Delete(k)
-				}
-				for k, _ := c2.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c2.Next() {
-					_ = b2.Delete(k)
-				}
-
-				return nil
-			})
-			check(err)
-			t1Duration := time.Since(t1)
-			rl := trie.NewRetainList(0)
-			rl.AddHex(prefix)
-			dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
-			t3 := time.Now()
-			rl2 := trie.NewRetainRange(prefix, prefix)
-			err = loader.Reset(db, rl2, rl2, nil /* HashCollector */, dbPrefixes, fixedbits, false)
-			check(err)
-			subTries, err2 := loader.LoadSubTries()
-			check(err2)
-			t3Duration := time.Since(t3)
-			t4 := time.Now()
-			err = tr.HookSubTries(subTries, hooks) // hook up to the root
-			check(err)
-			t4Duration := time.Since(t4)
-			t5 := time.Now()
-			tr.EvictNode(prefix)
-			t5Duration := time.Since(t5)
-			t6 := time.Now()
-			_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-			check(err)
-			t6Duration := time.Since(t6)
-			fmt.Printf("%x: Delete %s Load %s, Hook %s, Evict %s, Commit %s\n", i*16+j, t1Duration, t3Duration, t4Duration, t5Duration, t6Duration)
-		}
-	}
-	tr.EvictNode([]byte{})
-	_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-	check(err)
-
-	var after int
-	err = db.KV().View(func(tx *bolt.Tx) error {
-		after = tx.Bucket(dbutils.IntermediateTrieHashBucket).Stats().KeyN
-		return nil
-	})
-	check(err)
-	fmt.Printf("IH bucket changed from %d to %d records\n", before, after)
-
-	accs := map[uint64]int{}
-	accs2 := map[uint64]int{}
-	err = db.AbstractKV().View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.IntermediateWitnessSizeBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
-			i := binary.BigEndian.Uint64(v)
-			accs[i/10]++
-			if len(k) > 32 {
-				accs2[i/10]++
-			}
-			return true, nil
-		})
-	})
-	check(err)
-	for i := range accs {
-		if accs[i] < 1000 {
-			delete(accs, i)
-		}
-	}
-	for i := range accs2 {
-		if accs2[i] < 300 {
-			delete(accs2, i)
-		}
-	}
-
-	fmt.Printf("Agg IWS Stats1: %v\n", accs)
-	fmt.Printf("Agg IWS Stats2: %v\n", accs2)
-
-	// now can delete some IH
-	//err = db.KV().Update(func(tx *bolt.Tx) error {
-	//	defer func(t time.Time) { fmt.Println("Del", time.Since(t)) }(time.Now())
-	//	b := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-	//	b2 := tx.Bucket(dbutils.IntermediateWitnessSizeBucket)
-	//	c := b.Cursor()
-	//	c2 := b2.Cursor()
-	//	for k, _ := c.First(); k != nil; k, _ = c.Next() {
-	//		if len(k) < 2 {
-	//			_ = b.Delete(k)
-	//		}
-	//	}
-	//	for k, _ := c2.First(); k != nil; k, _ = c2.Next() {
-	//		if len(k) < 2 {
-	//			_ = b2.Delete(k)
-	//		}
-	//	}
-	//
-	//	return nil
-	//})
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
@@ -2186,7 +2057,7 @@ func resetHashedState(chaindata string) {
 		_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 		check(err)
 	*/
-	err = db.KV().Update(func(tx *bolt.Tx) error {
+	err = db.Bolt().Update(func(tx *bolt.Tx) error {
 		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
 		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
 		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
@@ -2484,7 +2355,7 @@ func testStage5(chaindata string) error {
 	if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
 		return err
 	}
-	if err = db.KV().Update(func(tx *bolt.Tx) error {
+	if err = db.Bolt().Update(func(tx *bolt.Tx) error {
 		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
 		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
 		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
@@ -2642,9 +2513,6 @@ func main() {
 	}
 	if *action == "mgrSchedule" {
 		mgrSchedule(*chaindata, uint64(*block))
-	}
-	if *action == "resetIH" {
-		resetIH(*chaindata, false)
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)

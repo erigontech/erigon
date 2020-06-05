@@ -112,7 +112,7 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 	}, nil
 }
 
-func (db *BadgerDatabase) AbstractKV() KV {
+func (db *BadgerDatabase) KV() KV {
 	return &badgerDB{badger: db.db}
 }
 

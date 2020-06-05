@@ -126,10 +126,10 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	if len(dbPrefixes) == 0 {
 		return nil
 	}
-	if hasKV, ok := db.(ethdb.HasAbstractKV); ok {
-		fstl.kv = hasKV.AbstractKV()
+	if hasKV, ok := db.(ethdb.HasKV); ok {
+		fstl.kv = hasKV.KV()
 	} else {
-		return fmt.Errorf("database doest not implement AbstractKV: %T", db)
+		return fmt.Errorf("database doest not implement KV: %T", db)
 	}
 	fixedbytes := make([]int, len(fixedbits))
 	masks := make([]byte, len(fixedbits))
