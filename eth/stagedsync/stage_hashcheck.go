@@ -186,15 +186,15 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 }
 
 func keyTransformLoadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
-    var v []byte
-    if err := valueDecoder.Decode(&v); err != nil {
-        return err
-    }
-    newK, err := transformPlainStateKey(k)
-    if err != nil {
-        return err
+	var v []byte
+	if err := valueDecoder.Decode(&v); err != nil {
+		return err
 	}
-    return next(newK, v)
+	newK, err := transformPlainStateKey(k)
+	if err != nil {
+		return err
+	}
+	return next(newK, v)
 }
 
 func NewPromoter(db ethdb.Database, quitCh chan struct{}) *Promoter {
