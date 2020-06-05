@@ -303,7 +303,7 @@ func (db *ObjectDatabase) MemCopy() Database {
 	var mem *ObjectDatabase
 	// Open the db and recover any potential corruptions
 	switch db.kv.(type) {
-	case *lmdbKV:
+	case *LmdbKV:
 		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
 	case *BoltKV:
 		mem = NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
