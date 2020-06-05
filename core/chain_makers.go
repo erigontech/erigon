@@ -22,6 +22,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -282,7 +283,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 	} else {
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
-	number := new(big.Int).Add(parent.Number(), common.Big1)
+	number := new(big.Int).Add(parent.Number(), u256.Big1)
 	//root, err := tds.IntermediateRoot(state, chain.Config().IsEIP158(number))
 	//if err != nil {
 	//	panic(err)

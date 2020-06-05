@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -2439,7 +2440,7 @@ func benchmarkLargeNumberOfValueToNonexisting(b *testing.B, numTxs, numBlocks in
 		for txi := 0; txi < numTxs; txi++ {
 			uniq := uint64(i*numTxs + txi)
 			recipient := recipientFn(uniq)
-			tx, err := types.SignTx(types.NewTransaction(uniq, recipient, common.Num1, params.TxGas, common.Num1, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(uniq, recipient, u256.Num1, params.TxGas, u256.Num1, nil), signer, testBankKey)
 			if err != nil {
 				b.Error(err)
 			}
@@ -2630,11 +2631,11 @@ func TestDeleteCreateRevert(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			common.Num0, 50000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 		// One transaction to BBBB
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			common.Num0, 100000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 	})
 	// Import the canonical chain
@@ -2742,11 +2743,11 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			common.Num0, 50000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 		// One transaction to BB, to recreate AA
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			common.Num0, 100000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 	})
 	// Import the canonical chain
@@ -2840,11 +2841,11 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			common.Num0, 50000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 		// One transaction to AA, to recreate it (but without storage
 		tx, _ = types.SignTx(types.NewTransaction(1, aa,
-			common.Num1, 100000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num1, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 	})
 	// Import the canonical chain
@@ -2976,7 +2977,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	var expectations []*expectation
 	var newDestruct = func(e *expectation) *types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, aa,
-			common.Num0, 50000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		nonce++
 		if e.exist {
 			e.exist = false
@@ -2987,7 +2988,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	var newResurrect = func(e *expectation) *types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
-			common.Num0, 100000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		nonce++
 		if !e.exist {
 			e.exist = true
@@ -3181,7 +3182,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
-			common.Num0, 100000, common.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
 		b.AddTx(tx)
 		nonce++
 	})

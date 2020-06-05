@@ -25,6 +25,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -57,7 +58,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 				// Add transactions and stuff on the last block
 				for i := 0; i < transactions; i++ {
 					tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
-						common.Num0, 50000, common.Num1, make([]byte, dataSize)), types.HomesteadSigner{}, key)
+						u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), types.HomesteadSigner{}, key)
 					b.AddTx(tx)
 				}
 				for i := 0; i < uncles; i++ {

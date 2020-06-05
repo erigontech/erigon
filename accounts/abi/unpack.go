@@ -23,13 +23,14 @@ import (
 	"reflect"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 )
 
 var (
 	// MaxUint256 is the maximum value that can be represented by a uint256
-	MaxUint256 = new(big.Int).Sub(new(big.Int).Lsh(common.Big1, 256), common.Big1)
+	MaxUint256 = new(big.Int).Sub(new(big.Int).Lsh(u256.Big1, 256), u256.Big1)
 	// MaxInt256 is the maximum value that can be represented by a int256
-	MaxInt256 = new(big.Int).Sub(new(big.Int).Lsh(common.Big1, 255), common.Big1)
+	MaxInt256 = new(big.Int).Sub(new(big.Int).Lsh(u256.Big1, 255), u256.Big1)
 )
 
 // ReadInteger reads the integer based on its kind and returns the appropriate value
@@ -66,7 +67,7 @@ func ReadInteger(typ Type, b []byte) interface{} {
 		ret := new(big.Int).SetBytes(b)
 		if ret.Bit(255) == 1 {
 			ret.Add(MaxUint256, new(big.Int).Neg(ret))
-			ret.Add(ret, common.Big1)
+			ret.Add(ret, u256.Big1)
 			ret.Neg(ret)
 		}
 		return ret
@@ -252,7 +253,7 @@ func toGoType(index int, t Type, output []byte) (interface{}, error) {
 // interprets a 32 byte slice as an offset and then determines which indice to look to decode the type.
 func lengthPrefixPointsTo(index int, output []byte) (start int, length int, err error) {
 	bigOffsetEnd := big.NewInt(0).SetBytes(output[index : index+32])
-	bigOffsetEnd.Add(bigOffsetEnd, common.Big32)
+	bigOffsetEnd.Add(bigOffsetEnd, u256.Big32)
 	outputLength := big.NewInt(int64(len(output)))
 
 	if bigOffsetEnd.Cmp(outputLength) > 0 {

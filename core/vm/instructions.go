@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -830,11 +831,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		}
 
 		integer := new(uint256.Int)
-		if endMin-startMin == pushByteSize {
-			callContext.stack.push(integer.SetBytes(callContext.contract.Code[startMin:endMin]))
-		} else {
-			callContext.stack.push(common.SetBytesRightPadded(integer, callContext.contract.Code[startMin:endMin], pushByteSize))
-		}
+		u256.SetBytes(integer, callContext.contract.Code[startMin:endMin], pushByteSize)
 
 		*pc += size
 		return nil, nil

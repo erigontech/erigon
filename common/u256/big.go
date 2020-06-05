@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package common
+package u256
 
 import (
 	"math/big"
@@ -39,6 +39,14 @@ var (
 	Num32 = uint256.NewInt().SetUint64(32)
 	Num35 = uint256.NewInt().SetUint64(35)
 )
+
+func SetBytes(z *uint256.Int, buf []byte, length int) *uint256.Int {
+	if len(buf) == length {
+		return z.SetBytes(buf)
+	} else {
+		return SetBytesRightPadded(z, buf, length)
+	}
+}
 
 func SetBytesRightPadded(z *uint256.Int, buf []byte, length int) *uint256.Int {
 	var d uint64

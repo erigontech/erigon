@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -125,7 +126,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if !config.SyncMode.IsValid() {
 		return nil, fmt.Errorf("invalid sync mode %d", config.SyncMode)
 	}
-	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
+	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(u256.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", DefaultConfig.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(DefaultConfig.Miner.GasPrice)
 	}

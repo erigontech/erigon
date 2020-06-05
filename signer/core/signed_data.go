@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -550,9 +551,9 @@ func (typedData *TypedData) EncodePrimitiveValue(encType string, encValue interf
 			return nil, dataMismatchError(encType, encValue)
 		}
 		if boolValue {
-			return math.PaddedBigBytes(common.Big1, 32), nil
+			return math.PaddedBigBytes(u256.Big1, 32), nil
 		}
-		return math.PaddedBigBytes(common.Big0, 32), nil
+		return math.PaddedBigBytes(u256.Big0, 32), nil
 	case "string":
 		strVal, ok := encValue.(string)
 		if !ok {

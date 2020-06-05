@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -179,16 +180,16 @@ func TestTransactionJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not generate key: %v", err)
 	}
-	signer := NewEIP155Signer(common.Big1)
+	signer := NewEIP155Signer(u256.Big1)
 
 	transactions := make([]*Transaction, 0, 50)
 	for i := uint64(0); i < 25; i++ {
 		var tx *Transaction
 		switch i % 2 {
 		case 0:
-			tx = NewTransaction(i, common.Address{1}, common.Num0, 1, common.Num2, []byte("abcdef"))
+			tx = NewTransaction(i, common.Address{1}, u256.Num0, 1, u256.Num2, []byte("abcdef"))
 		case 1:
-			tx = NewContractCreation(i, common.Num0, 1, common.Num2, []byte("abcdef"))
+			tx = NewContractCreation(i, u256.Num0, 1, u256.Num2, []byte("abcdef"))
 		}
 		transactions = append(transactions, tx)
 

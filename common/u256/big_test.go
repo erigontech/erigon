@@ -1,10 +1,12 @@
-package common
+package u256
 
 import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 func TestRightPadding(t *testing.T) {
@@ -30,7 +32,7 @@ func TestRightPadding(t *testing.T) {
 }
 
 func setUint256WithPadding(slice []byte, l int) *uint256.Int {
-	return new(uint256.Int).SetBytes(RightPadBytes(slice, l))
+	return new(uint256.Int).SetBytes(common.RightPadBytes(slice, l))
 }
 
 func setUint256(slice []byte, l int) *uint256.Int {

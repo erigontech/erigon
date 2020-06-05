@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +22,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = common.Big1
+	_ = u256.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 )
