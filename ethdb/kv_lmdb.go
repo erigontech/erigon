@@ -149,11 +149,14 @@ func NewLMDB() lmdbOpts {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if err := db.env.Close(); err != nil {
-		db.log.Warn("failed to close DB", "err", err)
-	} else {
-		db.log.Info("database closed")
+	if db.env != nil {
+		if err := db.env.Close(); err != nil {
+			db.log.Warn("failed to close DB", "err", err)
+		} else {
+			db.log.Info("database closed")
+		}
 	}
+
 	if db.opts.inMem {
 		if err := os.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)

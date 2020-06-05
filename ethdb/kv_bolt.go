@@ -113,10 +113,12 @@ func NewBolt() boltOpts {
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *BoltKV) Close() {
-	if err := db.bolt.Close(); err != nil {
-		db.log.Warn("failed to close bolt DB", "err", err)
-	} else {
-		db.log.Info("bolt database closed")
+	if db.bolt != nil {
+		if err := db.bolt.Close(); err != nil {
+			db.log.Warn("failed to close bolt DB", "err", err)
+		} else {
+			db.log.Info("bolt database closed")
+		}
 	}
 }
 

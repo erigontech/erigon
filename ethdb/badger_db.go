@@ -55,7 +55,7 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		runtime.GOMAXPROCS(minGoMaxProcs)
 		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
 	}
-	options := badger.DefaultOptions(dir).WithMaxTableSize(512 << 21)
+	options := badger.DefaultOptions(dir)
 
 	db, err := badger.Open(options)
 	if err != nil {

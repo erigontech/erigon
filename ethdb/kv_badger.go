@@ -21,7 +21,7 @@ func (opts badgerOpts) Path(path string) badgerOpts {
 }
 
 func (opts badgerOpts) InMem() badgerOpts {
-	opts.Badger = opts.Badger.WithInMemory(true).WithNumCompactors(1).WithEventLogging(false)
+	opts.Badger = opts.Badger.WithInMemory(true)
 	return opts
 }
 
@@ -35,6 +35,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 
 	if opts.Badger.InMemory {
 		opts.Badger = opts.Badger.WithMaxTableSize(1 << 20) // 4MB
+		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
 	} else {
 		oldMaxProcs := runtime.GOMAXPROCS(0)
 		if oldMaxProcs < minGoMaxProcs {
@@ -105,10 +106,12 @@ func (db *badgerDB) Close() {
 	if db.gcTicker != nil {
 		db.gcTicker.Stop()
 	}
-	if err := db.badger.Close(); err != nil {
-		db.log.Warn("failed to close badger DB", "err", err)
-	} else {
-		db.log.Info("badger database closed")
+	if db.badger != nil {
+		if err := db.badger.Close(); err != nil {
+			db.log.Warn("failed to close badger DB", "err", err)
+		} else {
+			db.log.Info("badger database closed")
+		}
 	}
 }
 
