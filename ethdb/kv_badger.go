@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -22,7 +21,7 @@ func (opts badgerOpts) Path(path string) badgerOpts {
 }
 
 func (opts badgerOpts) InMem() badgerOpts {
-	opts.Badger = opts.Badger.WithInMemory(true).WithNumCompactors(0).WithCompression(options.None).WithCompactL0OnClose(false)
+	opts.Badger = opts.Badger.WithInMemory(true)
 	return opts
 }
 

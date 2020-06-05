@@ -97,7 +97,7 @@ test-lmdb: semantics/z3/build/libz3.a all
 	TEST_DB=lmdb $(GORUN) build/ci.go test ./tests
 
 test-badger: semantics/z3/build/libz3.a all
-	TEST_DB=badger $(GORUN) build/ci.go test
+	TEST_DB=badger $(GORUN) build/ci.go test -v ./eth/downloader
 
 lint: lintci
 

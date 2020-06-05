@@ -315,7 +315,7 @@ func initialState1() error {
 		signer = types.HomesteadSigner{}
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	snapshotDb := db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB := db.MemCopy().(ethdb.HasKV).KV()
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()
 
@@ -341,7 +341,7 @@ func initialState1() error {
 	if _, err = statePicture(t, 1, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 0); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 0); err != nil {
 		return err
 	}
 
@@ -454,12 +454,12 @@ func initialState1() error {
 	})
 
 	// BLOCK 1
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 1); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 1); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 2, 48, false, false, false, false, nil); err != nil {
@@ -467,12 +467,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 2
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 2); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 2); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 3, 48, false, false, false, false, nil); err != nil {
@@ -480,12 +480,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 3
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 3); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 3); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 4, 48, false, false, false, false, nil); err != nil {
@@ -499,12 +499,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 4
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 4); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 4); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 7, 48, true, true, false, false, nil); err != nil {
@@ -512,12 +512,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 5
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 5); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 5); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 8, 54, true, true, false, false, nil); err != nil {
@@ -525,12 +525,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 6
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 5); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 5); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 9, 54, true, true, false, false, nil); err != nil {
@@ -541,12 +541,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 7
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 7); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 7); err != nil {
 		return err
 	}
 	quadTrie, err := statePicture(t, 11, 110, true, true, true, true, nil)
@@ -556,12 +556,12 @@ func initialState1() error {
 
 	tds.SetResolveReads(true)
 	// BLOCK 8
-	snapshotDb = db.MemCopy().(ethdb.HasKV).KV()
+	snapshotDB = db.MemCopy().(ethdb.HasKV).KV()
 
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[7]}); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDb, kv, 8); err != nil {
+	if err = stateDatabaseComparison(snapshotDB, kv, 8); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, 12, 110, true, true, true, true, nil); err != nil {
