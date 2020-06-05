@@ -108,10 +108,12 @@ func NewRemote() remoteOpts {
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *RemoteKV) Close() {
-	if err := db.remote.Close(); err != nil {
-		db.log.Warn("failed to close remote DB", "err", err)
-	} else {
-		db.log.Info("remote database closed")
+	if db.remote != nil {
+		if err := db.remote.Close(); err != nil {
+			db.log.Warn("failed to close remote DB", "err", err)
+		} else {
+			db.log.Info("remote database closed")
+		}
 	}
 }
 

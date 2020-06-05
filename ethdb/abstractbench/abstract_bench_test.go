@@ -20,16 +20,6 @@ var boltDb ethdb.KV
 var badgerDb ethdb.KV
 var lmdbKV ethdb.KV
 
-func TestMain(m *testing.M) {
-	setupDatabases()
-	result := m.Run()
-	os.Remove("test")
-	os.RemoveAll("test2")
-	os.Remove("test3")
-	os.RemoveAll("test4")
-	os.RemoveAll("test5")
-	os.Exit(result)
-}
 func setupDatabases() {
 	vsize := 10
 	keysAmount := 100_000
@@ -136,6 +126,13 @@ func setupDatabases() {
 }
 
 func BenchmarkCursor(b *testing.B) {
+	setupDatabases()
+	defer os.Remove("test")
+	defer os.RemoveAll("test2")
+	defer os.Remove("test3")
+	defer os.RemoveAll("test4")
+	defer os.RemoveAll("test5")
+
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -238,7 +235,4 @@ func BenchmarkCursor(b *testing.B) {
 	//		}
 	//	}
 	//})
-}
-
-func BenchmarkGet(b *testing.B) {
 }

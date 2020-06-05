@@ -55,7 +55,7 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		runtime.GOMAXPROCS(minGoMaxProcs)
 		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
 	}
-	options := badger.DefaultOptions(dir).WithMaxTableSize(512 << 21)
+	options := badger.DefaultOptions(dir).WithMaxTableSize(128 << 20) // 128Mb, default 64Mb
 
 	db, err := badger.Open(options)
 	if err != nil {
@@ -112,7 +112,7 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 	}, nil
 }
 
-func (db *BadgerDatabase) AbstractKV() KV {
+func (db *BadgerDatabase) KV() KV {
 	return &badgerDB{badger: db.db}
 }
 
@@ -132,21 +132,18 @@ func (db *BadgerDatabase) Close() {
 	}
 }
 
-const bucketSeparator = byte(0xA6) // broken bar '¦'
-
 func bucketKey(bucket, key []byte) []byte {
-	var composite []byte
+	composite := make([]byte, 0, len(bucket)+len(key))
 	composite = append(composite, bucket...)
-	composite = append(composite, bucketSeparator)
 	composite = append(composite, key...)
 	return composite
 }
 
 func keyWithoutBucket(key, bucket []byte) []byte {
-	if len(key) <= len(bucket) || !bytes.HasPrefix(key, bucket) || key[len(bucket)] != bucketSeparator {
+	if len(key) <= len(bucket) || !bytes.HasPrefix(key, bucket) {
 		return nil
 	}
-	return key[len(bucket)+1:]
+	return key[len(bucket):]
 }
 
 // Delete removes a single entry.
@@ -387,7 +384,7 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BadgerDatabase) IdealBatchSize() int {
-	return 50 * 1024 * 1024
+	return int(db.db.MaxBatchSize() / 2)
 }
 
 // DiskSize returns the total disk size of the database in bytes.

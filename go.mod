@@ -44,7 +44,7 @@ require (
 	github.com/julienschmidt/httprouter v1.2.0
 	github.com/karalabe/usb v0.0.0-20190919080040-51dc0efba356
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/ledgerwatch/bolt v1.4.5
+	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12

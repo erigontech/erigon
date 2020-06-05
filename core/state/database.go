@@ -117,7 +117,7 @@ type Buffer struct {
 	// include all the intermediate reads and write that happened. For example, if the storage of some contract has
 	// been modified, and then the contract has subsequently self-destructed, this structure will not contain any
 	// keys related to the storage of this contract, because they are irrelevant for the final state
-	storageUpdates map[common.Hash]map[common.Hash][]byte
+	storageUpdates     map[common.Hash]map[common.Hash][]byte
 	storageIncarnation map[common.Hash]uint64
 	// storageReads structure collects all the keys of items that have been modified (or also just read, if the
 	// tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
@@ -133,10 +133,10 @@ type Buffer struct {
 	accountUpdates map[common.Hash]*accounts.Account
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
-	accountReads map[common.Hash]struct{}
+	accountReads            map[common.Hash]struct{}
 	accountReadsIncarnation map[common.Hash]uint64
-	deleted      map[common.Hash]struct{}
-	created      map[common.Hash]struct{}
+	deleted                 map[common.Hash]struct{}
+	created                 map[common.Hash]struct{}
 }
 
 // Prepares buffer for work or clears previous data
@@ -1456,8 +1456,8 @@ func (tds *TrieDbState) TotalCumulativeWitnessSize() (uint64, error) {
 	defer tds.tMu.Unlock()
 
 	var kv ethdb.KV
-	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
-		kv = hasBolt.AbstractKV()
+	if hasBolt, ok := tds.db.(ethdb.HasKV); ok {
+		kv = hasBolt.KV()
 	} else {
 		return 0, fmt.Errorf("unexpected db type: %T", tds.db)
 	}
@@ -1480,8 +1480,8 @@ func (tds *TrieDbState) PrefixByCumulativeWitnessSize(from []byte, size uint64) 
 		return from, nil
 	}
 	var kv ethdb.KV
-	if hasBolt, ok := tds.db.(ethdb.HasAbstractKV); ok {
-		kv = hasBolt.AbstractKV()
+	if hasBolt, ok := tds.db.(ethdb.HasKV); ok {
+		kv = hasBolt.KV()
 	} else {
 		return nil, fmt.Errorf("unexpected db type: %T", tds.db)
 	}

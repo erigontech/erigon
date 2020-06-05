@@ -160,15 +160,25 @@ func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			if err != nil {
 				return err
 			}
+			c := b.Cursor()
 			l := (bucketEnd - bucketStart) / 3
 			pairs := make([][]byte, 2*l)
 			for i := 0; i < l; i++ {
 				pairs[2*i] = tuples[bucketStart+3*i+1]
 				pairs[2*i+1] = tuples[bucketStart+3*i+2]
+				if pairs[2*i+1] == nil {
+					if err := c.Delete2(pairs[2*i]); err != nil {
+						return err
+					}
+				} else {
+					if err := c.Put(pairs[2*i], pairs[2*i+1]); err != nil {
+						return err
+					}
+				}
 			}
-			if err := b.MultiPut(pairs...); err != nil {
-				return err
-			}
+			//if err := b.MultiPut(pairs...); err != nil {
+			//	return err
+			//}
 			bucketStart = bucketEnd
 		}
 		savedTx = tx
@@ -223,7 +233,7 @@ func (db *BoltDatabase) DiskSize(_ context.Context) (common.StorageSize, error) 
 }
 
 func (db *BoltDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return db.AbstractKV().(HasStats).BucketsStat(ctx)
+	return db.KV().(HasStats).BucketsStat(ctx)
 }
 
 // Get returns the value for a given key if it's present.
@@ -468,11 +478,11 @@ func (db *BoltDatabase) Keys() ([][]byte, error) {
 	return keys, err
 }
 
-func (db *BoltDatabase) KV() *bolt.DB {
+func (db *BoltDatabase) Bolt() *bolt.DB {
 	return db.db
 }
 
-func (db *BoltDatabase) AbstractKV() KV {
+func (db *BoltDatabase) KV() KV {
 	return &BoltKV{bolt: db.db}
 }
 

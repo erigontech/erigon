@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
@@ -86,7 +87,8 @@ func TestFileDataProviders(t *testing.T) {
 
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
+	sourceBucket := dbutils.Buckets[0]
+
 	generateTestData(t, db, sourceBucket, 10)
 
 	collector := NewCollector("")
@@ -116,7 +118,7 @@ func TestFileDataProviders(t *testing.T) {
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
+	sourceBucket := dbutils.Buckets[0]
 	generateTestData(t, db, sourceBucket, 10)
 
 	collector := NewCollector("")
@@ -135,8 +137,8 @@ func TestRAMDataProviders(t *testing.T) {
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 20)
 	err := Transform(
 		db,
@@ -154,8 +156,8 @@ func TestTransformRAMOnly(t *testing.T) {
 func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 20)
 
 	numberOfCalls := 0
@@ -188,8 +190,8 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 20)
 
 	numberOfCalls := 0
@@ -220,8 +222,8 @@ func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 
 func TestEmptySourceBucket(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	err := Transform(
 		db,
 		sourceBucket,
@@ -238,8 +240,8 @@ func TestEmptySourceBucket(t *testing.T) {
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
 		db,
@@ -257,8 +259,8 @@ func TestTransformExtractStartKey(t *testing.T) {
 func TestTransformLoadStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
 		db,
@@ -276,8 +278,8 @@ func TestTransformLoadStartKey(t *testing.T) {
 func TestTransformLoadStartKeyLexicography(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 
 	//      intentional to make key #5 not to be ignored-------v
@@ -304,8 +306,8 @@ func TestTransformThroughFiles(t *testing.T) {
 	}()
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
 		db,
@@ -323,8 +325,8 @@ func TestTransformThroughFiles(t *testing.T) {
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
 		db,
@@ -342,8 +344,8 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
 	db := ethdb.NewMemDatabase()
-	sourceBucket := []byte("source")
-	destBucket := []byte("dest")
+	sourceBucket := dbutils.Buckets[0]
+	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
 		db,

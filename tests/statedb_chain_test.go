@@ -39,8 +39,9 @@ import (
 
 func TestSelfDestructReceive(t *testing.T) {
 	// Configure and generate a sample block chain
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db      = ethdb.NewMemDatabase()
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -56,11 +57,12 @@ func TestSelfDestructReceive(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
+		genesis = gspec.MustCommit(db)
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
+	genesisDB := db.MemCopy()
+	defer genesisDB.Close()
 
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
@@ -82,7 +84,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 2, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDB, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -104,7 +106,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		contractBackend.Commit()
 	})
 
-	st := state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -133,7 +135,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// and that means that the state of the accounts written in the first block was correct.
 	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
-	st = state.New(state.NewDbState(db.AbstractKV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
