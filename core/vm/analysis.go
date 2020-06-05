@@ -16,30 +16,145 @@
 
 package vm
 
-// bitvec is a bit vector which maps bytes in a program.
-// An unset bit means the byte is an opcode, a set bit means
-// it's data (i.e. argument of PUSHxx).
-type bitvec []byte
+import (
+	"fmt"
+	"sort"
 
-func (bits *bitvec) set(pos uint64) {
-	(*bits)[pos/8] |= 0x80 >> (pos % 8)
-}
-func (bits *bitvec) set8(pos uint64) {
-	(*bits)[pos/8] |= 0xFF >> (pos % 8)
-	(*bits)[pos/8+1] |= ^(0xFF >> (pos % 8))
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+)
+
+func NewJumpDestsDefault() *JumpDests {
+	return NewJumpDests(50000, 10, 5)
 }
 
-// codeSegment checks if the position is in a code segment.
-func (bits *bitvec) codeSegment(pos uint64) bool {
-	return ((*bits)[pos/8] & (0x80 >> (pos % 8))) == 0
+func NewJumpDestsTest() *JumpDests {
+	return NewJumpDests(20, 10, 5)
+}
+
+type JumpDests struct {
+	maps       map[common.Hash]*item
+	lru        []map[common.Hash]struct{}
+	chunks     []int
+	minToClear int // 1..100
+	maxSize    int
+
+	GcCount int
+	GcTotal int
+}
+
+type item struct {
+	m    *pool.ByteBuffer
+	used int
+}
+
+func NewJumpDests(maxSize, nChunks, percentToClear int) *JumpDests {
+	lru := make([]map[common.Hash]struct{}, nChunks)
+	chunks := make([]int, nChunks)
+	chunkSize := maxSize / nChunks
+	for i := 0; i < nChunks; i++ {
+		lru[i] = make(map[common.Hash]struct{}, chunkSize)
+		chunks[i] = 1 << (1 + i*2)
+	}
+
+	return &JumpDests{
+		make(map[common.Hash]*item, maxSize),
+		lru,
+		chunks,
+		maxSize * percentToClear / 100,
+		maxSize,
+		0,
+		0,
+	}
+}
+
+func (j *JumpDests) Len() int {
+	return len(j.maps)
+}
+
+func (j *JumpDests) Set(hash common.Hash, v *pool.ByteBuffer) {
+	_, ok := j.maps[hash]
+	if ok {
+		return
+	}
+
+	if len(j.maps) >= j.maxSize {
+		j.GcCount++
+		j.gc()
+	}
+
+	j.maps[hash] = &item{v, 1}
+	j.lru[0][hash] = struct{}{}
+}
+
+func (j *JumpDests) Get(hash common.Hash) (*pool.ByteBuffer, bool) {
+	jumps, ok := j.maps[hash]
+	if !ok {
+		return nil, false
+	}
+
+	jumps.used++
+	idx := sort.SearchInts(j.chunks, jumps.used)
+
+	// everything greater than j.chunks[len(chunks)-1] should be stored in the last chunk
+	if idx >= 0 && idx < len(j.chunks)-1 {
+		max := j.chunks[idx]
+		if jumps.used >= max {
+			// moving to the next chunk
+			j.lru[idx+1][hash] = struct{}{}
+			delete(j.lru[idx], hash)
+		}
+	}
+
+	return jumps.m, true
+}
+
+func (j *JumpDests) gc() {
+	n := 0
+	for _, chunk := range j.lru {
+		for hash := range chunk {
+			delete(chunk, hash)
+			delete(j.maps, hash)
+
+			n++
+			if n >= j.minToClear {
+				j.GcTotal += n
+				return
+			}
+		}
+	}
+	j.GcTotal += n
+}
+
+func (j *JumpDests) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
+	if codeHash == (common.Hash{}) {
+		return
+	}
+	_, ok := j.maps[codeHash]
+	if ok {
+		return
+	}
+	// analysis is a local one
+	pool.PutBuffer(local)
+}
+
+func (j *JumpDests) String() string {
+	res := ""
+	for i, size := range j.chunks {
+		res += fmt.Sprintf("chunk %d:%d; ", size, len(j.lru[i]))
+	}
+
+	return fmt.Sprintf("cached %d, cacheGC %d, cacheGCCleaned %d, buckets: %s",
+		j.Len(), j.GcCount, j.GcTotal, res)
 }
 
 // codeBitmap collects data locations in code.
-func codeBitmap(code []byte) bitvec {
+func codeBitmap(code []byte) *pool.ByteBuffer {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
-	bits := make(bitvec, len(code)/8+1+4)
+	bits := pool.GetBufferZeroed(uint(len(code)/8 + 1 + 4))
+
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 
@@ -47,11 +162,11 @@ func codeBitmap(code []byte) bitvec {
 			numbits := op - PUSH1 + 1
 			pc++
 			for ; numbits >= 8; numbits -= 8 {
-				bits.set8(pc) // 8
+				bits.SetBit8Pos(pc) // 8
 				pc += 8
 			}
 			for ; numbits > 0; numbits-- {
-				bits.set(pc)
+				bits.SetBitPos(pc)
 				pc++
 			}
 		} else {

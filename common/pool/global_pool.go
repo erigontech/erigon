@@ -1,9 +1,5 @@
 package pool
 
-import (
-	"github.com/valyala/bytebufferpool"
-)
-
 var (
 	chunkSizeClasses = []uint{
 		8,
@@ -14,10 +10,16 @@ var (
 		1 << 8,
 		1 << 9,
 		1 << 10,
-		2 << 10,
-		4 << 10,
-		8 << 10,
-		16 << 10,
+		1 << 11,
+		1 << 12,
+		1 << 13,
+		1 << 14,
+		1 << 15,
+		1 << 16,
+		1 << 17,
+		1 << 18,
+		1 << 19,
+		1 << 20,
 	}
 	chunkPools []*pool
 )
@@ -30,11 +32,7 @@ func init() {
 
 	// preallocate some buffers
 	const preAlloc = 32
-	const lastSmallChunkIndex = 5
-	for i, n := range chunkSizeClasses {
-		if i > lastSmallChunkIndex {
-			break
-		}
+	for _, n := range chunkSizeClasses {
 
 		for i := 0; i < preAlloc; i++ {
 			PutBuffer(GetBuffer(n))
@@ -42,7 +40,7 @@ func init() {
 	}
 }
 
-func GetBuffer(size uint) *bytebufferpool.ByteBuffer {
+func GetBuffer(size uint) *ByteBuffer {
 	var i int
 	for i = 0; i < len(chunkSizeClasses)-1; i++ {
 		if size <= chunkSizeClasses[i] {
@@ -67,7 +65,15 @@ func GetBuffer(size uint) *bytebufferpool.ByteBuffer {
 	return pp
 }
 
-func PutBuffer(p *bytebufferpool.ByteBuffer) {
+func GetBufferZeroed(size uint) *ByteBuffer {
+	pp := GetBuffer(size)
+	for i := range pp.B {
+		pp.B[i] = 0
+	}
+	return pp
+}
+
+func PutBuffer(p *ByteBuffer) {
 	if p == nil || cap(p.B) == 0 {
 		return
 	}

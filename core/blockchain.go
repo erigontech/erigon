@@ -229,6 +229,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	badBlocks, _ := lru.New(badBlockLimit)
 	cdb := db.NewBatch()
 
+	vmConfig.Dests = vm.NewJumpDestsDefault()
+
 	bc := &BlockChain{
 		chainConfig:         chainConfig,
 		cacheConfig:         cacheConfig,
