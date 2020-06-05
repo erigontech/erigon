@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
@@ -225,9 +226,9 @@ func TestValidateSignatureValues(t *testing.T) {
 		}
 	}
 	minusOne := uint256.NewInt().SetAllOne()
-	one := common.Num1
-	zero := common.Num0
-	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, common.Num1)
+	one := u256.Num1
+	zero := u256.Num0
+	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, u256.Num1)
 
 	// correct v,r,s
 	check(true, 0, one, one)

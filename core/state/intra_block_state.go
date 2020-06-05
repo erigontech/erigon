@@ -29,6 +29,7 @@ import (
 	"github.com/petar/GoLLRB/llrb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -284,7 +285,7 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) *uint256.Int {
 	if stateObject != nil {
 		return stateObject.Balance()
 	}
-	return common.Num0
+	return u256.Num0
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account

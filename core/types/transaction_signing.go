@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -108,7 +109,7 @@ func NewEIP155Signer(chainId *big.Int) EIP155Signer {
 	}
 	return EIP155Signer{
 		chainID:    x,
-		chainIDMul: new(uint256.Int).Mul(x, common.Num2),
+		chainIDMul: new(uint256.Int).Mul(x, u256.Num2),
 	}
 }
 
@@ -129,7 +130,7 @@ func (s EIP155Signer) SenderWithContext(context *secp256k1.Context, tx *Transact
 		return common.Address{}, ErrInvalidChainId
 	}
 	V := new(uint256.Int).Sub(&tx.data.V, s.chainIDMul)
-	V.Sub(V, common.Num8)
+	V.Sub(V, u256.Num8)
 	return recoverPlain(context, s.Hash(tx), &tx.data.R, &tx.data.S, V, true)
 }
 
@@ -229,7 +230,7 @@ func (fs FrontierSigner) SenderWithContext(context *secp256k1.Context, tx *Trans
 }
 
 func (fs FrontierSigner) ChainID() *uint256.Int {
-	return common.Num0
+	return u256.Num0
 }
 
 func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uint256.Int, homestead bool) (common.Address, error) {
@@ -268,6 +269,6 @@ func deriveChainID(v *uint256.Int) *uint256.Int {
 		}
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
-	v = new(uint256.Int).Sub(v, common.Num35)
-	return v.Div(v, common.Num2)
+	v = new(uint256.Int).Sub(v, u256.Num35)
+	return v.Div(v, u256.Num2)
 }
