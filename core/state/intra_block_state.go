@@ -595,6 +595,9 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
+var nullLocation = common.Hash{}
+var nullValue = common.Big0
+
 // do not lock!!!
 // Retrieve a state object given my the address. Returns nil if not found.
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {

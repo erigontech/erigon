@@ -22,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
 )
 
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation
@@ -48,9 +47,9 @@ func packElement(t Type, reflectValue reflect.Value) []byte {
 		return common.LeftPadBytes(reflectValue.Bytes(), 32)
 	case BoolTy:
 		if reflectValue.Bool() {
-			return math.PaddedBigBytes(u256.Big1, 32)
+			return math.PaddedBigBytes(common.Big1, 32)
 		}
-		return math.PaddedBigBytes(u256.Big0, 32)
+		return math.PaddedBigBytes(common.Big0, 32)
 	case BytesTy:
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)
