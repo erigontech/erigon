@@ -133,7 +133,7 @@ func (db *BadgerDatabase) Close() {
 }
 
 func bucketKey(bucket, key []byte) []byte {
-	var composite []byte
+	composite := make([]byte, 0, len(bucket)+len(key))
 	composite = append(composite, bucket...)
 	composite = append(composite, key...)
 	return composite
