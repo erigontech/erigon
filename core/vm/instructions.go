@@ -830,7 +830,11 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		}
 
 		integer := new(uint256.Int)
-		callContext.stack.push(common.SetBytesRightPadded(integer, callContext.contract.Code[startMin:endMin], pushByteSize))
+		if endMin-startMin == pushByteSize {
+			callContext.stack.push(integer.SetBytes(callContext.contract.Code[startMin:endMin]))
+		} else {
+			callContext.stack.push(common.SetBytesRightPadded(integer, callContext.contract.Code[startMin:endMin], pushByteSize))
+		}
 
 		*pc += size
 		return nil, nil
