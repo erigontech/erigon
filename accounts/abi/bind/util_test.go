@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -63,7 +64,7 @@ func TestWaitDeployed(t *testing.T) {
 		defer backend.Close()
 
 		// Create the transaction.
-		tx := types.NewContractCreation(0, common.Num0, test.gas, common.Num1, common.FromHex(test.code))
+		tx := types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
 		tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 
 		// Wait for it to get mined in the background.
@@ -107,7 +108,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 
 	// Create a transaction to an account.
 	code := "6060604052600a8060106000396000f360606040526008565b00"
-	tx := types.NewTransaction(0, common.HexToAddress("0x01"), common.Num0, 3000000, common.Num1, common.FromHex(code))
+	tx := types.NewTransaction(0, common.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -121,7 +122,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	}
 
 	// Create a transaction that is not mined.
-	tx = types.NewContractCreation(1, common.Num0, 3000000, common.Num1, common.FromHex(code))
+	tx = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 
 	done := make(chan bool)

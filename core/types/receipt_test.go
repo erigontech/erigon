@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -41,7 +42,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		// Turbo-Geth: all the legacy formats are removed intentionally
 	}
 
-	tx := NewTransaction(1, common.HexToAddress("0x1"), common.Num1, 1, common.Num1, nil)
+	tx := NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
 	receipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
@@ -117,8 +118,8 @@ func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 func TestDeriveFields(t *testing.T) {
 	// Create a few transactions to have receipts for
 	txs := Transactions{
-		NewContractCreation(1, common.Num1, 1, common.Num1, nil),
-		NewTransaction(2, common.HexToAddress("0x2"), common.Num2, 2, common.Num2, nil),
+		NewContractCreation(1, u256.Num1, 1, u256.Num1, nil),
+		NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil),
 	}
 	// Create the corresponding receipts
 	receipts := Receipts{

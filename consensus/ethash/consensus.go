@@ -30,6 +30,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -626,13 +627,13 @@ func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 	headerNum, _ := uint256.FromBig(header.Number)
 	for _, uncle := range uncles {
 		uncleNum, _ := uint256.FromBig(uncle.Number)
-		r.Add(uncleNum, common.Num8)
+		r.Add(uncleNum, u256.Num8)
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
-		r.Div(r, common.Num8)
+		r.Div(r, u256.Num8)
 		state.AddBalance(uncle.Coinbase, r)
 
-		r.Div(blockReward, common.Num32)
+		r.Div(blockReward, u256.Num32)
 		reward.Add(reward, r)
 	}
 	state.AddBalance(header.Coinbase, reward)
