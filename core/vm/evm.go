@@ -493,7 +493,7 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 // ChainConfig returns the environment's chain configuration
 func (evm *EVM) ChainConfig() *params.ChainConfig { return evm.chainConfig }
 
-func (evm *EVM) GetJumpsDests() *JumpDests {
+func (evm *EVM) GetJumpsDests() Cache {
 	if evm.vmConfig.Dests == nil {
 		evm.vmConfig.Dests = NewJumpDestsDefault()
 	}

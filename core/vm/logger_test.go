@@ -57,7 +57,7 @@ func TestStoreCapture(t *testing.T) {
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
 		stack    = stack.New()
-		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, NewJumpDestsTest())
+		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, NewDestsCache(10))
 	)
 	stack.Push(uint256.NewInt().SetOne())
 	stack.Push(uint256.NewInt())

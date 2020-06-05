@@ -38,7 +38,7 @@ type Config struct {
 	EVMInterpreter   string // External EVM interpreter options
 
 	ExtraEips []int // Additional EIPS that are to be enabled
-	Dests     *JumpDests
+	Dests     Cache
 }
 
 // Interpreter is used to run Ethereum based contracts and will utilise the

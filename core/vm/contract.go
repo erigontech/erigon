@@ -51,7 +51,7 @@ type Contract struct {
 	self          ContractRef
 
 	analysis *pool.ByteBuffer // Locally cached result of JUMPDEST analysis
-	dests    *JumpDests
+	dests    Cache
 
 	Code     []byte
 	CodeHash common.Hash
@@ -63,7 +63,7 @@ type Contract struct {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, dests *JumpDests) *Contract {
+func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, dests Cache) *Contract {
 	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: object}
 
 	// Gas should be a pointer so it can safely be reduced through the run

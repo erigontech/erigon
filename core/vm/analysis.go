@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
@@ -46,6 +47,50 @@ type JumpDests struct {
 type item struct {
 	m    *pool.ByteBuffer
 	used int
+}
+
+type Cache interface {
+	Len() int
+	Set(hash common.Hash, v *pool.ByteBuffer)
+	Get(hash common.Hash) (*pool.ByteBuffer, bool)
+	Clear(codeHash common.Hash, local *pool.ByteBuffer)
+}
+
+type DestsCache struct {
+	*lru.Cache
+}
+
+func NewDestsCache(maxSize int) *DestsCache {
+	c, _ := lru.New(maxSize)
+	return &DestsCache{c}
+}
+
+func (d *DestsCache) Set(hash common.Hash, v *pool.ByteBuffer) {
+	d.Add(hash, v)
+}
+
+func (d DestsCache) Get(hash common.Hash) (*pool.ByteBuffer, bool) {
+	v, ok := d.Cache.Get(hash)
+	if !ok {
+		return nil, false
+	}
+	return v.(*pool.ByteBuffer), ok
+}
+
+func (d *DestsCache) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
+	if codeHash == (common.Hash{}) {
+		return
+	}
+	_, ok := d.Get(codeHash)
+	if ok {
+		return
+	}
+	// analysis is a local one
+	pool.PutBuffer(local)
+}
+
+func (d *DestsCache) Len() int {
+	return d.Cache.Len()
 }
 
 func NewJumpDests(maxSize, nChunks, percentToClear int) *JumpDests {

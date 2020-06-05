@@ -124,7 +124,7 @@ func BenchmarkJumpDest(b *testing.B) {
 	hash := common.Hash{1, 2, 3, 4, 5}
 
 	contractRef := dummyContractRef{}
-	dests := NewJumpDestsTest()
+	dests := NewDestsCache(10)
 
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
