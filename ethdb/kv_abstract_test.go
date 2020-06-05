@@ -274,40 +274,6 @@ func testMultiCursor(t *testing.T, db ethdb.KV) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db ethdb.KV) {
-	assert, ctx := assert.New(t), context.Background()
-
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		c1 := tx.Bucket(dbutils.Buckets[0]).Cursor()
-		c2 := tx.Bucket(dbutils.Buckets[1]).Cursor()
-
-		k1, v1, err := c1.First()
-		assert.NoError(err)
-		k2, v2, err := c2.First()
-		assert.NoError(err)
-		assert.Equal(k1, k2)
-		assert.Equal(v1, v2)
-
-		k1, v1, err = c1.Next()
-		assert.NoError(err)
-		k2, v2, err = c2.Next()
-		assert.NoError(err)
-		assert.Equal(k1, k2)
-		assert.Equal(v1, v2)
-
-		k1, v1, err = c1.Seek([]byte{2})
-		assert.NoError(err)
-		k2, v2, err = c2.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal(k1, k2)
-		assert.Equal(v1, v2)
-
-		return nil
-	}); err != nil {
-		assert.NoError(err)
-	}
-}
-
 func TestMultipleBuckets(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases()
 	defer closeAll()
