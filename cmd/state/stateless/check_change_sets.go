@@ -52,7 +52,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, nil)
+	dests := vm.NewDestsCache(100)
+	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, nil, dests)
 	if err != nil {
 		return err
 	}

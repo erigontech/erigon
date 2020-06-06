@@ -114,9 +114,9 @@ func NewPrivateMinerAPI(e *Ethereum) *PrivateMinerAPI {
 // transaction pool.
 func (api *PrivateMinerAPI) Start(threads *int) error {
 	if threads == nil {
-		return api.e.StartMining(runtime.NumCPU())
+		return api.e.StartMining(runtime.NumCPU(), api.e.blockchain.DestsCache)
 	}
-	return api.e.StartMining(*threads)
+	return api.e.StartMining(*threads, api.e.blockchain.DestsCache)
 }
 
 // Stop terminates the miner, both at the consensus engine level as well as at
@@ -397,7 +397,7 @@ type StorageEntry struct {
 
 // StorageRangeAt returns the storage at the given block height and transaction index.
 func (api *PrivateDebugAPI) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, dbstate, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainKV(), blockHash, txIndex)
+	_, _, _, dbstate, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainKV(), blockHash, txIndex, api.eth.blockchain.DestsCache)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}

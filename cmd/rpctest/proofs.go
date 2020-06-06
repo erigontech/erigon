@@ -179,7 +179,8 @@ func fixState(chaindata string, url string) {
 	defer stateDb.Close()
 	engine := ethash.NewFullFaker()
 	chainConfig := params.MainnetChainConfig
-	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(1000)
+	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		panic(err)
 	}

@@ -120,7 +120,7 @@ func (t *BlockTest) Run(_ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
-	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, nil)
+	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, nil, vm.NewDestsCache(100))
 	if err != nil {
 		return err
 	}

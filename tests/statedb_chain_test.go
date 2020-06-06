@@ -65,7 +65,8 @@ func TestSelfDestructReceive(t *testing.T) {
 	defer genesisDB.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,15 +94,15 @@ func TestSelfDestructReceive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 			tx, err = selfDestructorContract.SelfDestruct(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 			// Send 1 wei to contract after self-destruction
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt().SetUint64(1000), 21000, uint256.NewInt().SetUint64(1), nil), signer, key)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -120,7 +121,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}

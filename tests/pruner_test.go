@@ -69,7 +69,8 @@ func TestBasisAccountPruning(t *testing.T) {
 
 	numBlocks := 10
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestBasisAccountPruning(t *testing.T) {
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
-		block.AddTx(tx)
+		block.AddTx(tx, dests)
 	})
 
 	// Insert blocks
@@ -232,7 +233,8 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		NoHistory:           true,
 		ArchiveSyncInterval: 1,
 	}
-	blockchain, err := core.NewBlockChain(db, &cacheConfig, gspec.Config, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, &cacheConfig, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +263,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
-		block.AddTx(tx)
+		block.AddTx(tx, dests)
 	})
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
@@ -378,11 +380,12 @@ func TestStoragePruning(t *testing.T) {
 		}
 		genesis   = gspec.MustCommit(db)
 		genesisDb = db.MemCopy()
+		dests     = vm.NewDestsCache(100)
 	)
 	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,71 +411,71 @@ func TestStoragePruning(t *testing.T) {
 		case 0:
 			_, tx, eipContract, innerErr = contracts.DeployTestcontract(transactOpts, contractBackend)
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 		case 1:
 			tx, innerErr = eipContract.Create(transactOpts1, big.NewInt(1))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Create(transactOpts2, big.NewInt(2))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Create(transactOpts, big.NewInt(3))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 2:
 			tx, innerErr = eipContract.Update(transactOpts1, big.NewInt(0))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Update(transactOpts2, big.NewInt(0))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Update(transactOpts, big.NewInt(0))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 		case 3:
 			tx, innerErr = eipContract.Update(transactOpts1, big.NewInt(7))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Update(transactOpts2, big.NewInt(7))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Update(transactOpts, big.NewInt(7))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 		case 4:
 			tx, innerErr = eipContract.Update(transactOpts1, big.NewInt(5))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Update(transactOpts2, big.NewInt(5))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Update(transactOpts, big.NewInt(5))
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 		case 5:
 			tx, innerErr = eipContract.Remove(transactOpts1)
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Remove(transactOpts2)
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			tx, innerErr = eipContract.Remove(transactOpts)
 			assertNil(t, innerErr)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 		}
 
@@ -584,7 +587,8 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 
 	numBlocks := 25
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +616,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
-		block.AddTx(tx)
+		block.AddTx(tx, dests)
 	})
 
 	pruner, err := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1, BlocksToPrune: 10, PruneTimeout: time.Second})

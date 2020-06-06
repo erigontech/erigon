@@ -355,20 +355,21 @@ func testGetReceipt(t *testing.T, protocol int) {
 	acc2Addr := crypto.PubkeyToAddress(acc2Key.PublicKey)
 
 	signer := types.HomesteadSigner{}
+	dests := vm.NewDestsCache(100)
 	// Create a chain generator with some simple transactions (blatantly stolen from @fjl/chain_markets_test)
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, the test bank sends account #1 some ether.
 			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, uint256.NewInt().SetUint64(10000), params.TxGas, nil, nil), signer, testBankKey)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			// In block 2, the test bank sends some more ether to account #1.
 			// acc1Addr passes it on to account #2.
 			tx1, _ := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testBankKey)
 			tx2, _ := types.SignTx(types.NewTransaction(block.TxNonce(acc1Addr), acc2Addr, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, acc1Key)
-			block.AddTx(tx1)
-			block.AddTx(tx2)
+			block.AddTx(tx1, dests)
+			block.AddTx(tx2, dests)
 		case 2:
 			// Block 3 is empty but was mined by account #2.
 			block.SetCoinbase(acc2Addr)
@@ -468,7 +469,8 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 		}
 	}
 	// Create a checkpoint aware protocol manager
-	blockchain, err := core.NewBlockChain(db, nil, config, ethash.NewFaker(), vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, config, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
@@ -554,8 +556,9 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		config  = &params.ChainConfig{}
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
-	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
@@ -629,29 +632,30 @@ func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehos
 
 	signer := types.HomesteadSigner{}
 	numBlocks := 5
+	dests := vm.NewDestsCache(100)
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 2:
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 3:
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 4:
 			// top up account #3
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 	}
 
@@ -728,6 +732,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 
 	signer := types.HomesteadSigner{}
 	amount := uint256.NewInt().SetUint64(10)
+	dests := vm.NewDestsCache(100)
 	generator := func(i int, block *core.BlockGen) {
 		var rndAddr common.Address
 		// #nosec G404
@@ -735,7 +740,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 
 		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), rndAddr, amount, params.TxGas, nil, nil), signer, testBankKey)
 		assert.NoError(t, err)
-		block.AddTx(tx)
+		block.AddTx(tx, dests)
 	}
 
 	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
@@ -857,6 +862,7 @@ func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address) {
 
 	signer := types.HomesteadSigner{}
 	var addr common.Address
+	dests := vm.NewDestsCache(100)
 
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
@@ -865,13 +871,13 @@ func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address) {
 			// storage[0] = 0x2a, storage[1] = 0x01c9
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 2e5, nil, code), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 			addr = crypto.CreateAddress(testBank, nonce)
 		case 1:
 			// storage[0] = 0x15
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(uint256.Int), 2e5, nil, input), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 	}
 
@@ -954,6 +960,7 @@ func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address) {
 
 	signer := types.HomesteadSigner{}
 	var addr common.Address
+	dests := vm.NewDestsCache(100)
 
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
@@ -962,13 +969,13 @@ func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address) {
 			// storage[6] = 0x2a, storage[8] = 0x01c9
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 2e5, nil, code), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 			addr = crypto.CreateAddress(testBank, nonce)
 		case 1:
 			// storage[8] = 0x15
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(uint256.Int), 2e5, nil, input), signer, testBankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 	}
 
@@ -1265,23 +1272,24 @@ func TestFirehoseBytecode(t *testing.T) {
 
 	signer := types.HomesteadSigner{}
 	numBlocks := 2
+	dests := vm.NewDestsCache(100)
 	// Chain generator with a couple of dummy contracts
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
 			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, uint256.NewInt().SetUint64(2e5), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err1)
-			block.AddTx(tx1)
+			block.AddTx(tx1, dests)
 			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc1Addr), new(uint256.Int), 1e5, nil, contractCode1), signer, acc1Key)
 			assert.NoError(t, err2)
-			block.AddTx(tx2)
+			block.AddTx(tx2, dests)
 		case 1:
 			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc2Addr, uint256.NewInt().SetUint64(2e5), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err1)
-			block.AddTx(tx1)
+			block.AddTx(tx1, dests)
 			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc2Addr), new(uint256.Int), 1e5, nil, contractCode2), signer, acc2Key)
 			assert.NoError(t, err2)
-			block.AddTx(tx2)
+			block.AddTx(tx2, dests)
 		}
 	}
 
@@ -1323,8 +1331,9 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 		config  = &params.ChainConfig{}
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
-	blockchain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}

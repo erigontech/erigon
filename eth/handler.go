@@ -1013,7 +1013,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()
-		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil)
+		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, vm.NewDestsCache(10))
 		if err != nil {
 			return fmt.Errorf("fail in NewBlockChain: %w", err)
 		}

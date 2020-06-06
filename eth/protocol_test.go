@@ -159,6 +159,7 @@ func TestStatusMsgErrors64(t *testing.T) {
 func TestForkIDSplit(t *testing.T) {
 	var (
 		engine = ethash.NewFaker()
+		dests  = vm.NewDestsCache(100)
 
 		configNoFork  = &params.ChainConfig{HomesteadBlock: big.NewInt(1)}
 		configProFork = &params.ChainConfig{
@@ -177,8 +178,8 @@ func TestForkIDSplit(t *testing.T) {
 		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork)
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 
-		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil)
-		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil)
+		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil, dests)
+		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil, dests)
 
 		ctxNoFork  = chainNoFork.WithContext(context.Background(), big.NewInt(genesisNoFork.Number().Int64()+1))
 		ctxProFork = chainProFork.WithContext(context.Background(), big.NewInt(genesisProFork.Number().Int64()+1))

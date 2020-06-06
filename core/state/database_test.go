@@ -69,10 +69,11 @@ func TestCreate2Revive(t *testing.T) {
 		genesis   = gspec.MustCommit(db)
 		genesisDb = db.MemCopy()
 		signer    = types.HomesteadSigner{}
+		dests     = vm.NewDestsCache(100)
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,13 +106,13 @@ func TestCreate2Revive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			tx, err = revive.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 2:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
 			if err != nil {
@@ -121,13 +122,13 @@ func TestCreate2Revive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 3:
 			tx, err = revive.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -240,10 +241,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,19 +270,19 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			tx, err = selfDestruct.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 2:
 			tx, err = selfDestruct.Destruct(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -299,7 +301,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackendLonger.Commit()
 	})
@@ -348,7 +350,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,10 +384,11 @@ func TestReorgOverStateChange(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,13 +413,13 @@ func TestReorgOverStateChange(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			tx, err = selfDestruct.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 		fmt.Println("commited i=", i)
@@ -435,7 +438,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackendLonger.Commit()
 	})
@@ -480,7 +483,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,10 +535,11 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 			Alloc: alloc,
 		}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +563,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				block.AddTx(tx)
+				block.AddTx(tx, dests)
 			}
 		case numOfBlocks - 1:
 			for i := 0; i < numOfContracts; i++ {
@@ -568,7 +572,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					block.AddTx(tx)
+					block.AddTx(tx, dests)
 				}
 			}
 		default:
@@ -578,7 +582,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					block.AddTx(tx)
+					block.AddTx(tx, dests)
 				}
 			}
 
@@ -701,7 +705,8 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +731,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -836,10 +841,11 @@ func TestEip2200Gas(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -865,14 +871,14 @@ func TestEip2200Gas(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 
 			transactOpts.GasPrice = big.NewInt(1)
 			tx, err = selfDestruct.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -924,10 +930,11 @@ func TestWrongIncarnation(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
+		dests   = vm.NewDestsCache(100)
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -952,13 +959,13 @@ func TestWrongIncarnation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			tx, err = changer.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -996,7 +1003,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1050,12 +1057,13 @@ func TestWrongIncarnation2(t *testing.T) {
 		}
 		genesis = gspec.MustCommit(db)
 		signer  = types.HomesteadSigner{}
+		dests   = vm.NewDestsCache(100)
 	)
 
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1084,13 +1092,13 @@ func TestWrongIncarnation2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		case 1:
 			contractAddress, tx, _, err = contracts.DeployChanger(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackend.Commit()
 	})
@@ -1116,7 +1124,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		contractBackendLonger.Commit()
 	})

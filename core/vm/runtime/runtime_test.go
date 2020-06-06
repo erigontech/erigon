@@ -66,6 +66,7 @@ func TestEVM(t *testing.T) {
 			t.Fatalf("crashed with: %v", r)
 		}
 	}()
+	dests := vm.NewDestsCache(100)
 
 	Execute([]byte{
 		byte(vm.DIFFICULTY),
@@ -75,10 +76,11 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil, 0)
+	}, nil, nil, 0, dests)
 }
 
 func TestExecute(t *testing.T) {
+	dests := vm.NewDestsCache(100)
 	ret, _, err := Execute([]byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
@@ -86,7 +88,7 @@ func TestExecute(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, nil, nil, 0)
+	}, nil, nil, 0, dests)
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -110,8 +112,9 @@ func TestCall(t *testing.T) {
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
 	})
+	dests := vm.NewDestsCache(100)
 
-	ret, _, err := Call(address, nil, &Config{State: state})
+	ret, _, err := Call(address, nil, &Config{State: state}, dests)
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -145,12 +148,13 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	dests := vm.NewDestsCache(100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			Execute(code, cpurchase, nil, 0)
-			Execute(code, creceived, nil, 0)
-			Execute(code, refund, nil, 0)
+			_, _, _ = Execute(code, cpurchase, nil, 0, dests)
+			_, _, _ = Execute(code, creceived, nil, 0, dests)
+			_, _, _ = Execute(code, refund, nil, 0, dests)
 		}
 	}
 }
@@ -186,9 +190,10 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 		EVMConfig: vm.Config{},
 	}
 	// Warm up the intpools and stuff
+	dests := vm.NewDestsCache(100)
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		Call(receiver, []byte{}, &runtimeConfig)
+		_, _, _ = Call(receiver, []byte{}, &runtimeConfig, dests)
 	}
 	bench.StopTimer()
 }
@@ -292,10 +297,11 @@ func TestBlockhash(t *testing.T) {
 	// The method call to 'test()'
 	input := common.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
+	dests := vm.NewDestsCache(100)
 	ret, _, err := Execute(data, input, &Config{
 		GetHashFn:   core.GetHashFn(header, chain),
 		BlockNumber: new(big.Int).Set(header.Number),
-	}, header.Number.Uint64())
+	}, header.Number.Uint64(), dests)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -342,8 +348,9 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Debug:  true,
 	//		Tracer: tracer,
 	//	}})
+	dests := vm.NewDestsCache(100)
 
 	for i := 0; i < b.N; i++ {
-		Execute(code, nil, nil, 0)
+		_, _, _ = Execute(code, nil, nil, 0, dests)
 	}
 }

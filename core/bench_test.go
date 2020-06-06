@@ -85,12 +85,13 @@ var (
 // value-transfer transaction with n bytes of extra data in each
 // block.
 func genValueTx(nbytes int) func(int, *BlockGen) {
+	dests := vm.NewDestsCache(100)
 	return func(i int, gen *BlockGen) {
 		toaddr := common.Address{}
 		data := make([]byte, nbytes)
 		gas, _ := IntrinsicGas(data, false, false, false)
 		tx, _ := types.SignTx(types.NewTransaction(gen.TxNonce(benchRootAddr), toaddr, u256.Num1, gas, nil, data), types.HomesteadSigner{}, benchRootKey)
-		gen.AddTx(tx)
+		gen.AddTx(tx, dests)
 	}
 }
 
@@ -113,6 +114,7 @@ func init() {
 // and fills the blocks with many small transactions.
 func genTxRing(naccounts int) func(int, *BlockGen) {
 	from := 0
+	dests := vm.NewDestsCache(100)
 	return func(i int, gen *BlockGen) {
 		block := gen.PrevBlock(i - 1)
 		gas := CalcGasLimit(block, block.GasLimit(), block.GasLimit())
@@ -131,7 +133,7 @@ func genTxRing(naccounts int) func(int, *BlockGen) {
 				nil,
 			)
 			tx, _ = types.SignTx(tx, types.HomesteadSigner{}, ringKeys[from])
-			gen.AddTx(tx)
+			gen.AddTx(tx, dests)
 			from = to
 		}
 	}
@@ -175,7 +177,8 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	}
 	genesis := gspec.MustCommit(db)
 
-	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
 	ctx := chainman.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	defer chainman.Stop()
 	chain, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen)
@@ -286,6 +289,7 @@ func benchReadChain(b *testing.B, full bool, count uint64) {
 	makeChainForBench(db, full, count)
 	db.Close()
 
+	dests := vm.NewDestsCache(100)
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -294,7 +298,7 @@ func benchReadChain(b *testing.B, full bool, count uint64) {
 		if err != nil {
 			b.Fatalf("error opening database at %v: %v", dir, err)
 		}
-		chain, err := NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+		chain, err := NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
 		if err != nil {
 			b.Fatalf("error creating chain: %v", err)
 		}

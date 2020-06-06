@@ -133,11 +133,16 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+
+	dests Cache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config, dests Cache) *EVM {
+	if dests == nil {
+		dests = NewDestsCache(10)
+	}
 	evm := &EVM{
 		Context:         ctx,
 		IntraBlockState: state,
@@ -145,6 +150,7 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(ctx.BlockNumber),
 		interpreters:    make([]Interpreter, 0, 1),
+		dests:           dests,
 	}
 
 	if chainConfig.IsEWASM(ctx.BlockNumber) {
@@ -494,8 +500,8 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 func (evm *EVM) ChainConfig() *params.ChainConfig { return evm.chainConfig }
 
 func (evm *EVM) GetJumpsDests() Cache {
-	if evm.vmConfig.Dests == nil {
-		evm.vmConfig.Dests = NewDestsCache(50000)
+	if evm.dests == nil {
+		evm.dests = NewDestsCache(50000)
 	}
-	return evm.vmConfig.Dests
+	return evm.dests
 }

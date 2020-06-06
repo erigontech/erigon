@@ -179,6 +179,7 @@ func makeGenBlock(db ethdb.Database,
 	var reviveAddress common.Address
 	var phoenixAddress common.Address
 	backend := &NoopBackend{db: db, genesis: genesis}
+	dests := vm.NewDestsCache(100)
 
 	var store = func() *types.Transaction {
 		nonce++
@@ -242,7 +243,7 @@ func makeGenBlock(db ethdb.Database,
 			if err1 != nil {
 				panic(err1)
 			}
-			gen.AddTx(signedTx)
+			gen.AddTx(signedTx, dests)
 		case blockNr == 10002: // deploy factory
 			nonce++
 			txOpts.Nonce.SetInt64(nonce)
@@ -260,21 +261,21 @@ func makeGenBlock(db ethdb.Database,
 			if err != nil {
 				panic(err)
 			}
-			gen.AddTx(tx)
+			gen.AddTx(tx, dests)
 		case blockNr == 10003: // call .deploy() method on factory
-			gen.AddTx(deploy())
+			gen.AddTx(deploy(), dests)
 		case i >= 10004 && i <= 20000: // gen big storage
-			gen.AddTx(store())
+			gen.AddTx(store(), dests)
 		case blockNr == 20001: // kill contract with big storage
-			gen.AddTx(die())
+			gen.AddTx(die(), dests)
 		case blockNr == forkBase-1: // revive Phoenix and add to it some storage in same Tx
-			gen.AddTx(deploy())
-			gen.AddTx(store())
-			gen.AddTx(incr()) // last increment, set last value to 2
+			gen.AddTx(deploy(), dests)
+			gen.AddTx(store(), dests)
+			gen.AddTx(incr(), dests) // last increment, set last value to 2
 		case !isFork && blockNr == forkBase+1:
-			gen.AddTx(die())
-			gen.AddTx(deploy())
-			gen.AddTx(store())
+			gen.AddTx(die(), dests)
+			gen.AddTx(deploy(), dests)
+			gen.AddTx(store(), dests)
 		case isFork && blockNr == forkBase+1:
 			// skip self-destruct, deploy and store steps
 			// it means in fork we will have value=2, while in non-fork value=1
@@ -288,7 +289,7 @@ func makeGenBlock(db ethdb.Database,
 			if err1 != nil {
 				panic(err1)
 			}
-			gen.AddTx(signedTx)
+			gen.AddTx(signedTx, dests)
 		}
 	}
 }
@@ -392,7 +393,8 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		return nil, err
 	}
 
-	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, dests)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +476,8 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		return nil, err
 	}
 
-	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(10)
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, dests)
 	if err != nil {
 		return nil, err
 	}

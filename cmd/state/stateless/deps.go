@@ -133,7 +133,8 @@ func dataDependencies(blockNum uint64) {
 	defer w.Flush()
 	dt := NewDepTracer()
 	vmConfig := vm.Config{Tracer: dt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
+	dests := vm.NewDestsCache(10)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, dests)
 	check(err)
 	interrupt := false
 	for !interrupt {
@@ -160,7 +161,7 @@ func dataDependencies(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, dests)
 			if result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {

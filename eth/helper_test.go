@@ -70,7 +70,8 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	dests := vm.NewDestsCache(100)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		return nil, nil, err
 	}

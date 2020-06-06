@@ -51,8 +51,9 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	dests := vm.NewDestsCache(10)
 	for _, tx := range block.Transactions() {
-		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, dests)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
@@ -175,7 +176,8 @@ func Stateless(
 	check(err)
 	defer stats.Close()
 
-	blockProvider, err := BlockProviderForURI(blockSourceURI, createDb)
+	dests := vm.NewDestsCache(10000)
+	blockProvider, err := BlockProviderForURI(blockSourceURI, createDb, dests)
 	check(err)
 	defer blockProvider.Close()
 
@@ -301,7 +303,7 @@ func Stateless(
 		for i, tx := range block.Transactions() {
 			statedb.Prepare(tx.Hash(), block.Hash(), i)
 			var receipt *types.Receipt
-			receipt, err = core.ApplyTransaction(chainConfig, blockProvider, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
+			receipt, err = core.ApplyTransaction(chainConfig, blockProvider, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig, dests)
 			if err != nil {
 				fmt.Printf("tx %x failed: %v\n", tx.Hash(), err)
 				return

@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -51,6 +52,7 @@ var (
 func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common.Hash]*types.Block) {
 	db := ethdb.NewMemDatabase()
 	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
+	dests := vm.NewDestsCache(1000)
 	blocks, _ := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 
@@ -61,7 +63,7 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 			if err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(tx, dests)
 		}
 		// If the block number is a multiple of 5, add a bonus uncle to the block
 		if i%5 == 0 {

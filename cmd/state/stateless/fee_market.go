@@ -40,7 +40,8 @@ func feemarket(blockNum uint64) {
 	defer w.Flush()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil, nil)
+	dests := vm.NewDestsCache(10)
+	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil, nil, dests)
 	check(err)
 	interrupt := false
 	txCount := 0

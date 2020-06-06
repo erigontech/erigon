@@ -121,7 +121,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 //
 // PreProcess does not calculate receipt roots (required pre-Byzantium)
 // and does not update the TrieDbState. For those two call PostProcess afterwards.
-func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (
+func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config, dests vm.Cache) (
 	receipts types.Receipts, allLogs []*types.Log, usedGas uint64, root common.Hash, err error) {
 
 	header := block.Header()
@@ -147,7 +147,7 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 			writeTrace = true
 		}
 		var receipt *types.Receipt
-		receipt, err = ApplyTransaction(p.config, p.bc, nil, gp, ibs, tds.TrieStateWriter(), header, tx, &usedGas, cfg)
+		receipt, err = ApplyTransaction(p.config, p.bc, nil, gp, ibs, tds.TrieStateWriter(), header, tx, &usedGas, cfg, dests)
 		// This code is useful when debugging a certain transaction. If uncommented, together with the code
 		// at the end of this function, after the execution of transaction with given hash, the file
 		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
@@ -213,7 +213,7 @@ func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState,
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config, dests vm.Cache) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	context := NewEVMContext(msg, header, bc, author)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmenv := vm.NewEVM(context, statedb, config, cfg)
+	vmenv := vm.NewEVM(context, statedb, config, cfg, dests)
 	// Apply the transaction to the current state (included in the env)
 	result, err := ApplyMessage(vmenv, msg, gp)
 	if err != nil {

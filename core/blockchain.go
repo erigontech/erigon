@@ -199,12 +199,14 @@ type BlockChain struct {
 	enablePreimages     bool // Whether we store preimages into the database
 	resolveReads        bool
 	pruner              Pruner
+
+	DestsCache vm.Cache
 }
 
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64, dests vm.Cache) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -229,8 +231,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	badBlocks, _ := lru.New(badBlockLimit)
 	cdb := db.NewBatch()
 
-	vmConfig.Dests = vm.NewDestsCache(50000)
-
 	bc := &BlockChain{
 		chainConfig:         chainConfig,
 		cacheConfig:         cacheConfig,
@@ -250,6 +250,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		enableTxLookupIndex: true,
 		enableReceipts:      false,
 		enablePreimages:     true,
+		DestsCache:          dests,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
@@ -1764,7 +1765,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if !bc.cacheConfig.DownloadOnly && execute {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
-			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
+			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig, bc.DestsCache)
 			reuseTrieDbState := true
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
@@ -2483,6 +2484,7 @@ func ExecuteBlockEuphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
+	dests vm.Cache,
 ) error {
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -2496,7 +2498,7 @@ func ExecuteBlockEuphemerally(
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, dests)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}

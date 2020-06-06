@@ -94,7 +94,8 @@ func accountsReadWrites(blockNum uint64) {
 	defer w.Flush()
 	at := NewAccountsTracer()
 	vmConfig := vm.Config{Tracer: at, Debug: false}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
+	dests := vm.NewDestsCache(10)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, dests)
 	check(err)
 	interrupt := false
 	totalWrites := 0
@@ -120,7 +121,7 @@ func accountsReadWrites(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, dests)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}

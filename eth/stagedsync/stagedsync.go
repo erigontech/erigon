@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -18,6 +19,7 @@ func DoStagedSyncWithFetchers(
 	datadir string,
 	quitCh chan struct{},
 	headersFetchers []func() error,
+	dests vm.Cache,
 ) error {
 	defer log.Info("Staged sync finished")
 
@@ -47,7 +49,7 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState) error {
-				return spawnExecuteBlocksStage(s, stateDB, blockchain, quitCh)
+				return spawnExecuteBlocksStage(s, stateDB, blockchain, quitCh, dests)
 			},
 		},
 		{

@@ -99,7 +99,8 @@ func TestEIP2200(t *testing.T) {
 			CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
 			Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int) {},
 		}
-		vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
+		dests := NewDestsCache(100)
+		vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}}, dests)
 
 		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int))
 		if err != tt.failure {
