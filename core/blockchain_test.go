@@ -600,7 +600,12 @@ func testInsertNonceError(t *testing.T, full bool) {
 			if err != nil {
 				t.Fatalf("failed to create pristine chain: %v", err)
 			}
-			defer db.Close()
+
+			defer func(db ethdb.Database) {
+				// could not close db because .ValidateHeaderChain could not wait for ethash.VerifyHeaders finish
+				time.Sleep(time.Millisecond)
+				db.Close()
+			}(db)
 			defer blockchain.Stop()
 
 			// Create and insert a chain with a failing nonce
@@ -610,7 +615,7 @@ func testInsertNonceError(t *testing.T, full bool) {
 				failNum uint64
 			)
 			if full {
-				blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), i, ethash.NewFaker(), db.MemCopy(), 0)
+				blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), i, ethash.NewFaker(), db.NewBatch(), 0)
 
 				failAt = rand.Int() % len(blocks) // nolint:gosec
 				failNum = blocks[failAt].NumberU64()
@@ -618,14 +623,14 @@ func testInsertNonceError(t *testing.T, full bool) {
 				blockchain.engine = ethash.NewFakeFailer(failNum)
 				failRes, err = blockchain.InsertChain(context.Background(), blocks)
 			} else {
-				headers := makeHeaderChain(ctx, blockchain.CurrentHeader(), i, ethash.NewFaker(), db.MemCopy(), 0)
+				headers := makeHeaderChain(ctx, blockchain.CurrentHeader(), i, ethash.NewFaker(), db.NewBatch(), 0)
 
 				failAt = rand.Int() % len(headers) // nolint:gosec
 				failNum = headers[failAt].Number.Uint64()
 
 				blockchain.engine = ethash.NewFakeFailer(failNum)
 				blockchain.hc.engine = blockchain.engine
-				failRes, err = blockchain.InsertHeaderChain(headers, 1)
+				failRes, _, _, err = blockchain.InsertHeaderChainStaged(headers, 1)
 			}
 			// Check that the returned error indicates the failure
 			if failRes != failAt {
