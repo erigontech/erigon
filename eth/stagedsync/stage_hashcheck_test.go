@@ -18,7 +18,9 @@ func getDataDir() string {
 
 func TestPromoteHashedStateClearState(t *testing.T) {
 	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
 	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
 
 	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
 
@@ -40,7 +42,9 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 func TestPromoteHashedStateIncremental(t *testing.T) {
 	t.Skip("not implemented yet")
 	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
 	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
 
 	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
@@ -74,7 +78,9 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	t.Skip("not implemented yet")
 	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
 	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
 
 	generateBlocks(t, 1, 100, hashedWriterGen(db1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
@@ -90,6 +96,25 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while commiting state: %v", err)
 	}
+	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
+}
 
-	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket, dbutils.ContractCodeBucket)
+func TestUnwindHashed(t *testing.T) {
+	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
+	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
+
+	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
+	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
+
+	err := promoteHashedState(db2, 0, 100, getDataDir(), nil)
+	if err != nil {
+		t.Errorf("error while promoting state: %v", err)
+	}
+	err = unwindHashCheckStage(50, db2, getDataDir(), nil)
+	if err != nil {
+		t.Errorf("error while unwind state: %v", err)
+	}
+	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
 }
