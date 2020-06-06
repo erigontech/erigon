@@ -404,7 +404,7 @@ func (p *Promoter) mergeUnwindFilesAndCollect(bufferFileNames []string, keyLengt
 			valBuf := make([]byte, valLength)
 			if n, err := io.ReadFull(readers[i], valBuf); err != nil || n != valLength {
 				return fmt.Errorf("init reading from account buffer file: %d %v", n, err)
-			}			
+			}
 		}
 		heap.Push(h, etl.HeapElem{keyBuf, i, valBuf})
 	}
@@ -435,7 +435,7 @@ func (p *Promoter) mergeUnwindFilesAndCollect(bufferFileNames []string, keyLengt
 				valBuf := make([]byte, valLength)
 				if n1, err1 := io.ReadFull(reader, valBuf); err1 != nil || n1 != valLength {
 					return fmt.Errorf("reading from account buffer file: %d %v", n1, err1)
-				}			
+				}
 			}
 			element.Value = valBuf
 			heap.Push(h, element)
