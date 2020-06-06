@@ -15,6 +15,9 @@ func (s *State) Len() int {
 }
 
 func (s *State) NextStage() {
+	if s == nil {
+		return
+	}
 	s.currentStage++
 }
 
@@ -52,9 +55,7 @@ func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
 }
 
 func (s *StageState) Done() {
-	if s.state != nil {
-		s.state.NextStage()
-	}
+	s.state.NextStage()
 }
 
 func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
@@ -63,8 +64,6 @@ func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
 
 func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
 	err := stages.SaveStageProgress(db, s.Stage, newBlockNum)
-	if s.state != nil {
-		s.state.NextStage()
-	}
+	s.state.NextStage()
 	return err
 }
