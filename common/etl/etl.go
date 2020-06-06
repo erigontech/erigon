@@ -203,8 +203,14 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		if bytes.Compare(k, args.LoadStartKey) < 0 {
 			return nil
 		}
-		if err := batch.Put(bucket, k, v); err != nil {
-			return err
+		if len(v) == 0 {
+			if err := batch.Delete(bucket, k); err != nil {
+				return err
+			}
+		} else {
+			if err := batch.Put(bucket, k, v); err != nil {
+				return err
+			}
 		}
 		batchSize := batch.BatchSize()
 		if batchSize > batch.IdealBatchSize() || args.loadBatchSize > 0 && batchSize > args.loadBatchSize {

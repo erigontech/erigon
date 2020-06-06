@@ -266,6 +266,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 		chainConfig *params.ChainConfig
 		db          = ethdb.NewMemDatabase()
 	)
+	defer db.Close()
 	if isClique {
 		chainConfig = params.AllCliqueProtocolChanges
 		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
@@ -280,6 +281,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	defer w.close()
 
 	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
 	b.genesis.MustCommit(db2)
 	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil, vm.NewDestsCache(100))
 	defer chain.Stop()

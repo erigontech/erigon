@@ -188,7 +188,9 @@ func TestBoltDB_ParallelPutGet(t *testing.T) {
 }
 
 func TestMemoryDB_ParallelPutGet(t *testing.T) {
-	testParallelPutGet(NewMemDatabase())
+	db := NewMemDatabase()
+	defer db.Close()
+	testParallelPutGet(db)
 }
 
 func TestLMDB_ParallelPutGet(t *testing.T) {

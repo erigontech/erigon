@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, headersFetchers []func() error, quitCh chan struct{}) error {
+func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, headersFetchers []func() error, datadir string, quitCh chan struct{}) error {
 	err := d.SpawnSync(headersFetchers)
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, he
 		case stages.Execution:
 			err = unwindExecutionStage(unwindPoint, stateDB)
 		case stages.HashCheck:
-			err = unwindHashCheckStage(unwindPoint, stateDB)
+			err = unwindHashCheckStage(unwindPoint, stateDB, datadir, quitCh)
 		case stages.AccountHistoryIndex:
 			err = unwindAccountHistoryIndex(unwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
 		case stages.StorageHistoryIndex:

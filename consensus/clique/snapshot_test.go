@@ -507,5 +507,6 @@ func TestClique(t *testing.T) {
 				t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 			}
 		}
+		db.Close()
 	}
 }

@@ -28,7 +28,7 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Headers,
 			Description: "Downloading headers",
 			ExecFunc: func(s *StageState) error {
-				return DownloadHeaders(s, d, stateDB, headersFetchers, quitCh)
+				return DownloadHeaders(s, d, stateDB, headersFetchers, datadir, quitCh)
 			},
 		},
 		{

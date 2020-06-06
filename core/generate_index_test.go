@@ -4,22 +4,24 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"os"
 	"reflect"
 	"sort"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	test := func(blocksNum int, csBucket []byte) func(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
+			defer db.Close()
 			ig := NewIndexGenerator(db, make(chan struct{}))
 			log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 			csInfo, ok := mapper[string(csBucket)]
@@ -149,8 +151,8 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 				t.Fatal()
 			}
 		})
+		db.Close()
 	}
-
 }
 
 func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
