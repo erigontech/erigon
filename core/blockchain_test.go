@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"math/rand"
 	"os"
 	"strconv"
 	"sync"
