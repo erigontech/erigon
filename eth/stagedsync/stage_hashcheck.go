@@ -291,6 +291,42 @@ func (p *Promoter) writeBufferMapToTempFile(pattern string, bufferMap map[string
 	return filename, nil
 }
 
+func (p *Promoter) writeUnwindBufferMapToTempFile(pattern string, bufferMap map[string][]byte) (string, error) {
+	var filename string
+	keys := make([]string, len(bufferMap))
+	i := 0
+	for key := range bufferMap {
+		keys[i] = key
+		i++
+	}
+	sort.Strings(keys)
+	var w *bufio.Writer
+	if bufferFile, err := ioutil.TempFile(p.TempDir, pattern); err == nil {
+		//nolint:errcheck
+		defer bufferFile.Close()
+		filename = bufferFile.Name()
+		w = bufio.NewWriter(bufferFile)
+	} else {
+		return filename, fmt.Errorf("creating temp buf file %s: %v", pattern, err)
+	}
+	for _, key := range keys {
+		if _, err := w.Write([]byte(key)); err != nil {
+			return filename, err
+		}
+		value := bufferMap[key]
+		if err := w.WriteByte(byte(len(value))); err != nil {
+			return filename, err
+		}
+		if _, err := w.Write(value); err != nil {
+			return filename, err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return filename, fmt.Errorf("flushing file %s: %v", filename, err)
+	}
+	return filename, nil
+}
+
 func (p *Promoter) mergeFilesAndCollect(bufferFileNames []string, keyLength int, collector *etl.Collector) error {
 	h := &etl.Heap{}
 	heap.Init(h)
@@ -332,6 +368,76 @@ func (p *Promoter) mergeFilesAndCollect(bufferFileNames []string, keyLength int,
 		reader := readers[element.TimeIdx]
 		// Try to read the next key (reuse the element)
 		if n, err := io.ReadFull(reader, element.Key); err == nil && n == keyLength {
+			heap.Push(h, element)
+		} else if err != io.EOF {
+			// If it is EOF, we simply do not return anything into the heap
+			return fmt.Errorf("next reading from account buffer file: %d %x %v", n, element.Key[:n], err)
+		}
+	}
+	return nil
+}
+
+func (p *Promoter) mergeUnwindFilesAndCollect(bufferFileNames []string, keyLength int, collector *etl.Collector) error {
+	h := &etl.Heap{}
+	heap.Init(h)
+	readers := make([]io.Reader, len(bufferFileNames))
+	for i, fileName := range bufferFileNames {
+		if f, err := os.Open(fileName); err == nil {
+			readers[i] = bufio.NewReader(f)
+			//nolint:errcheck
+			defer f.Close()
+		} else {
+			return err
+		}
+		// Read first key
+		keyBuf := make([]byte, keyLength)
+		if n, err := io.ReadFull(readers[i], keyBuf); err != nil || n != keyLength {
+			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
+		}
+		var l [1]byte
+		if n, err := io.ReadFull(readers[i], l[:]); err != nil || n != 1 {
+			return fmt.Errorf("init reading from account buffer file: %d %v", n, err)
+		}
+		var valBuf []byte
+		valLength := int(l[0])
+		if valLength > 0 {
+			valBuf := make([]byte, valLength)
+			if n, err := io.ReadFull(readers[i], valBuf); err != nil || n != valLength {
+				return fmt.Errorf("init reading from account buffer file: %d %v", n, err)
+			}			
+		}
+		heap.Push(h, etl.HeapElem{keyBuf, i, valBuf})
+	}
+	// By now, the heap has one element for each buffer file
+	var prevKey []byte
+	for h.Len() > 0 {
+		if err := common.Stopped(p.quitCh); err != nil {
+			return err
+		}
+		element := (heap.Pop(h)).(etl.HeapElem)
+		if !bytes.Equal(element.Key, prevKey) {
+			// Ignore all the repeating keys, and take the earlist
+			prevKey = common.CopyBytes(element.Key)
+			if err := collector.Collect(element.Key, element.Value); err != nil {
+				return err
+			}
+		}
+		reader := readers[element.TimeIdx]
+		// Try to read the next key (reuse the element)
+		if n, err := io.ReadFull(reader, element.Key); err == nil && n == keyLength {
+			var l [1]byte
+			if n1, err1 := io.ReadFull(reader, l[:]); err1 != nil || n1 != 1 {
+				return fmt.Errorf("reading from account buffer file: %d %v", n1, err1)
+			}
+			var valBuf []byte
+			valLength := int(l[0])
+			if valLength > 0 {
+				valBuf := make([]byte, valLength)
+				if n1, err1 := io.ReadFull(reader, valBuf); err1 != nil || n1 != valLength {
+					return fmt.Errorf("reading from account buffer file: %d %v", n1, err1)
+				}			
+			}
+			element.Value = valBuf
 			heap.Push(h, element)
 		} else if err != io.EOF {
 			// If it is EOF, we simply do not return anything into the heap
@@ -393,6 +499,71 @@ func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
 	if len(offsets) > 0 {
 		collector := etl.NewCollector(p.TempDir)
 		if err := p.mergeFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
+			return err
+		}
+		if err := collector.Load(p.db, dbutils.CurrentStateBucket, keyTransformLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Promoter) Unwind(from, to uint64, changeSetBucket []byte) error {
+	v, ok := promoterMapper[string(changeSetBucket)]
+	if !ok {
+		return fmt.Errorf("unknown bucket type: %s", changeSetBucket)
+	}
+	log.Info("Unwinding started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	var m runtime.MemStats
+	var bufferFileNames []string
+	changesets := make([]byte, p.ChangeSetBufSize) // 256 Mb buffer by default
+	var offsets []int
+	var done = false
+	blockNum := to + 1
+	for !done {
+		if newDone, newBlockNum, newOffsets, err := p.fillChangeSetBuffer(changeSetBucket, blockNum, from, changesets, offsets); err == nil {
+			done = newDone
+			blockNum = newBlockNum
+			offsets = newOffsets
+		} else {
+			return err
+		}
+		if len(offsets) == 0 {
+			break
+		}
+
+		bufferMap := make(map[string][]byte)
+		prevOffset := 0
+		for _, offset := range offsets {
+			if err := v.WalkerAdapter(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
+				ks := string(k)
+				if _, ok := bufferMap[ks]; !ok {
+					// Do not replace the existing values, so we end up with the earlier possible values
+					bufferMap[string(k)] = v
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			prevOffset = offset
+		}
+
+		if filename, err := p.writeUnwindBufferMapToTempFile(v.Template, bufferMap); err == nil {
+			defer func() {
+				//nolint:errcheck
+				os.Remove(filename)
+			}()
+			bufferFileNames = append(bufferFileNames, filename)
+			runtime.ReadMemStats(&m)
+			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		} else {
+			return err
+		}
+	}
+	if len(offsets) > 0 {
+		collector := etl.NewCollector(p.TempDir)
+		if err := p.mergeUnwindFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
 			return err
 		}
 		if err := collector.Load(p.db, dbutils.CurrentStateBucket, keyTransformLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
