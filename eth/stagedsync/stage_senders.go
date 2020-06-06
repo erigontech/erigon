@@ -131,7 +131,7 @@ type senderRecoveryJob struct {
 func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for job := range in{
+	for job := range in {
 		if job == nil {
 			return
 		}
