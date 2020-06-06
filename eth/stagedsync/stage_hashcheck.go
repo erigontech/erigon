@@ -94,7 +94,7 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database, datadir st
 	}
 	if err := prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return err
-	}	
+	}
 	mutation := stateDB.NewBatch()
 	err = stages.SaveStageUnwind(mutation, stages.HashCheck, 0)
 	if err != nil {
