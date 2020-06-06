@@ -154,6 +154,7 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	var db ethdb.Database
 	if !disk {
 		db = ethdb.NewMemDatabase()
+		defer db.Close()
 	} else {
 		dir, err := ioutil.TempDir("", "eth-core-bench")
 		if err != nil {

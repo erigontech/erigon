@@ -167,5 +167,6 @@ func TestSetupGenesis(t *testing.T) {
 				t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)
 			}
 		}
+		db.Close()
 	}
 }
