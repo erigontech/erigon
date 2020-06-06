@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -49,9 +50,6 @@ import (
 var (
 	canonicalSeed = 1
 	forkSeed      = 2
-
-	// TODO [Issue 144] run tests with BadgerDB as well
-	useBadgerDB = false
 )
 
 // newCanonical creates a chain database, and injects a deterministic canonical
@@ -595,54 +593,57 @@ func TestBlocksInsertNonceError(t *testing.T)  { testInsertNonceError(t, true) }
 
 func testInsertNonceError(t *testing.T, full bool) {
 	for i := 1; i < 25 && !t.Failed(); i++ {
-		// Create a pristine chain and database
-		ctx, db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
-		if err != nil {
-			t.Fatalf("failed to create pristine chain: %v", err)
-		}
+		i := i
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			// Create a pristine chain and database
+			ctx, db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
+			if err != nil {
+				t.Fatalf("failed to create pristine chain: %v", err)
+			}
+			defer db.Close()
+			defer blockchain.Stop()
 
-		// Create and insert a chain with a failing nonce
-		var (
-			failAt  int
-			failRes int
-			failNum uint64
-		)
-		if full {
-			blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), i, ethash.NewFaker(), db.MemCopy(), 0)
-
-			failAt = rand.Int() % len(blocks)
-			failNum = blocks[failAt].NumberU64()
-
-			blockchain.engine = ethash.NewFakeFailer(failNum)
-			failRes, err = blockchain.InsertChain(context.Background(), blocks)
-		} else {
-			headers := makeHeaderChain(ctx, blockchain.CurrentHeader(), i, ethash.NewFaker(), db.MemCopy(), 0)
-
-			failAt = rand.Int() % len(headers)
-			failNum = headers[failAt].Number.Uint64()
-
-			blockchain.engine = ethash.NewFakeFailer(failNum)
-			blockchain.hc.engine = blockchain.engine
-			failRes, err = blockchain.InsertHeaderChain(headers, 1)
-		}
-		// Check that the returned error indicates the failure
-		if failRes != failAt {
-			t.Errorf("test %d: failure (%v) index mismatch: have %d, want %d", i, err, failRes, failAt)
-		}
-		// Check that all blocks after the failing block have been inserted
-		for j := 0; j < i-failAt; j++ {
+			// Create and insert a chain with a failing nonce
+			var (
+				failAt  int
+				failRes int
+				failNum uint64
+			)
 			if full {
-				if block := blockchain.GetBlockByNumber(failNum + uint64(j)); block != nil {
-					t.Errorf("test %d: invalid block in chain: %v", i, block)
-				}
+				blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), i, ethash.NewFaker(), db.MemCopy(), 0)
+
+				failAt = rand.Int() % len(blocks)
+				failNum = blocks[failAt].NumberU64()
+
+				blockchain.engine = ethash.NewFakeFailer(failNum)
+				failRes, err = blockchain.InsertChain(context.Background(), blocks)
 			} else {
-				if header := blockchain.GetHeaderByNumber(failNum + uint64(j)); header != nil {
-					t.Errorf("test %d: invalid header in chain: %v", i, header)
+				headers := makeHeaderChain(ctx, blockchain.CurrentHeader(), i, ethash.NewFaker(), db.MemCopy(), 0)
+
+				failAt = rand.Int() % len(headers)
+				failNum = headers[failAt].Number.Uint64()
+
+				blockchain.engine = ethash.NewFakeFailer(failNum)
+				blockchain.hc.engine = blockchain.engine
+				failRes, err = blockchain.InsertHeaderChain(headers, 1)
+			}
+			// Check that the returned error indicates the failure
+			if failRes != failAt {
+				t.Errorf("test %d: failure (%v) index mismatch: have %d, want %d", i, err, failRes, failAt)
+			}
+			// Check that all blocks after the failing block have been inserted
+			for j := 0; j < i-failAt; j++ {
+				if full {
+					if block := blockchain.GetBlockByNumber(failNum + uint64(j)); block != nil {
+						t.Errorf("test %d: invalid block in chain: %v", i, block)
+					}
+				} else {
+					if header := blockchain.GetHeaderByNumber(failNum + uint64(j)); header != nil {
+						t.Errorf("test %d: invalid header in chain: %v", i, header)
+					}
 				}
 			}
-		}
-		blockchain.Stop()
-		db.Close()
+		})
 	}
 }
 
