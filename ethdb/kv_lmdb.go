@@ -50,7 +50,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		err = env.SetMapSize(32 << 20) // 32MB
+		err = env.SetMapSize(16 << 20) // 16MB
 		logger = log.New("lmdb", "inMem")
 		if err != nil {
 			return nil, err
