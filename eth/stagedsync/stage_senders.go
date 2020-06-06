@@ -58,8 +58,8 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	wg := &sync.WaitGroup{}
 	wg.Add(numOfGoroutines)
 	defer func() {
-		wg.Wait()
 		close(jobs)
+		wg.Wait()
 		close(out)
 	}()
 	for i := 0; i < numOfGoroutines; i++ {
@@ -131,9 +131,7 @@ type senderRecoveryJob struct {
 func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	var job *senderRecoveryJob
-	for {
-		job = <-in
+	for job := range in{
 		if job == nil {
 			return
 		}
