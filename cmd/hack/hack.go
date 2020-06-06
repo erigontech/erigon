@@ -2351,26 +2351,28 @@ func testSeek(chaindata string) {
 	}
 }
 
-func testStage5(chaindata string) error {
+func testStage5(chaindata string, reset bool) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
-		return err
-	}
-	if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
-		return err
-	}
-	if err = db.Bolt().Update(func(tx *bolt.Tx) error {
-		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
-		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
-		return nil
-	}); err != nil {
-		return err
+	if reset {
+		if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
+			return err
+		}
+		if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
+			return err
+		}
+		if err = db.Bolt().Update(func(tx *bolt.Tx) error {
+			_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+			_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 	if err = stages.SaveStageProgress(db, stages.HashCheck, 0); err != nil {
 		return err
@@ -2422,7 +2424,7 @@ func testStageLoop(chaindata string) error {
 		if err := testStage4(chaindata, block); err != nil {
 			return err
 		}
-		if err := testStage5(chaindata); err != nil {
+		if err := testStage5(chaindata, true /* reset */); err != nil {
 			return err
 		}
 	}
@@ -2579,7 +2581,7 @@ func main() {
 		testSeek(*chaindata)
 	}
 	if *action == "stage5" {
-		if err := testStage5(*chaindata); err != nil {
+		if err := testStage5(*chaindata, false /* reset */); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
