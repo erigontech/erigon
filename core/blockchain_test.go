@@ -58,18 +58,7 @@ var (
 // chain. Depending on the full flag, if creates either a full block chain or a
 // header only chain.
 func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, ethdb.Database, *BlockChain, error) {
-	var db ethdb.Database
-
-	if useBadgerDB {
-		var err error
-		db, err = ethdb.NewEphemeralBadger()
-		if err != nil {
-			panic("failed to create test database: " + err.Error())
-		}
-	} else {
-		db = ethdb.NewMemDatabase()
-	}
-
+	db := ethdb.NewMemDatabase()
 	genesis, _, err := new(Genesis).Commit(db, true /* history */)
 	if err != nil {
 		panic(err)
@@ -111,6 +100,7 @@ func testFork(t *testing.T, blockchain *BlockChain, i, n int, full bool, compara
 		t.Fatal("could not make new canonical in testFork", err)
 	}
 	defer blockchain2.Stop()
+	defer db.Close()
 
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 common.Hash
@@ -241,8 +231,9 @@ func TestLastBlock(t *testing.T) {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer blockchain.Stop()
+	defer db.Close()
 
-	dbCopy := db.MemCopy()
+	dbCopy := db.NewBatch()
 	blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), 1, ethash.NewFullFaker(), dbCopy, 0)
 	if _, err := blockchain.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
@@ -261,11 +252,12 @@ func testExtendCanonical(t *testing.T, full bool) {
 	length := 5
 
 	// Make first chain starting from genesis
-	_, _, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	_, db, processor, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
 	defer processor.Stop()
+	defer db.Close()
 
 	// Define the difficulty comparator
 	better := func(td1, td2 *big.Int) {
@@ -289,11 +281,12 @@ func testShorterFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	_, _, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	_, db, processor, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
 	defer processor.Stop()
+	defer db.Close()
 
 	// Define the difficulty comparator
 	worse := func(td1, td2 *big.Int) {
@@ -319,11 +312,12 @@ func testLongerFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	_, _, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	_, db, processor, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
 	defer processor.Stop()
+	defer db.Close()
 
 	// Define the difficulty comparator
 	better := func(td1, td2 *big.Int) {
@@ -349,11 +343,12 @@ func testEqualFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	_, _, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	_, db, processor, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
 	defer processor.Stop()
+	defer db.Close()
 
 	// Define the difficulty comparator
 	equal := func(td1, td2 *big.Int) {
@@ -381,6 +376,7 @@ func testBrokenChain(t *testing.T, full bool) {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
 	defer blockchain.Stop()
+	defer db.Close()
 
 	// Create a forked chain, and try to insert with a missing link
 	if full {
@@ -432,6 +428,7 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer blockchain.Stop()
+	defer db.Close()
 
 	// Insert an easy and a difficult chain afterwards
 	easyBlocks, _ := GenerateChain(ctx, params.TestChainConfig, blockchain.CurrentBlock(), ethash.NewFaker(), db.MemCopy(), len(first), func(i int, b *BlockGen) {
@@ -503,6 +500,7 @@ func testBadHashes(t *testing.T, full bool) {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer blockchain.Stop()
+	defer db.Close()
 
 	// Create a chain, ban a hash and try to import
 	if full {
@@ -536,6 +534,9 @@ func testReorgBadHashes(t *testing.T, full bool) {
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
+	defer blockchain.Stop()
+	defer db.Close()
+
 	// Create a chain, import and ban afterwards
 	headers := makeHeaderChain(ctx, blockchain.CurrentHeader(), 4, ethash.NewFaker(), db.MemCopy(), 10)
 	blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), 4, ethash.NewFaker(), db.MemCopy(), 10)
@@ -599,7 +600,6 @@ func testInsertNonceError(t *testing.T, full bool) {
 		if err != nil {
 			t.Fatalf("failed to create pristine chain: %v", err)
 		}
-		defer blockchain.Stop()
 
 		// Create and insert a chain with a failing nonce
 		var (
@@ -641,6 +641,8 @@ func testInsertNonceError(t *testing.T, full bool) {
 				}
 			}
 		}
+		blockchain.Stop()
+		db.Close()
 	}
 }
 
@@ -1020,17 +1022,19 @@ func TestChainTxReorgs(t *testing.T) {
 }
 
 func TestLogReorgs(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
-		db      = ethdb.NewMemDatabase()
 		// this code generates a log
-		code      = common.Hex2Bytes("60606040525b7f24ec1d3ff24c2f6ff210738839dbc339cd45a5294d85c79361016243157aae7b60405180905060405180910390a15b600a8060416000396000f360606040526008565b00")
-		gspec     = &Genesis{Config: params.TestChainConfig, Alloc: GenesisAlloc{addr1: {Balance: big.NewInt(10000000000000)}}}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-		signer    = types.NewEIP155Signer(gspec.Config.ChainID)
+		code    = common.Hex2Bytes("60606040525b7f24ec1d3ff24c2f6ff210738839dbc339cd45a5294d85c79361016243157aae7b60405180905060405180910390a15b600a8060416000396000f360606040526008565b00")
+		gspec   = &Genesis{Config: params.TestChainConfig, Alloc: GenesisAlloc{addr1: {Balance: big.NewInt(10000000000000)}}}
+		genesis = gspec.MustCommit(db)
+		signer  = types.NewEIP155Signer(gspec.Config.ChainID)
 	)
+	genesisDb := db.MemCopy()
+	defer genesisDb.Close()
 
 	cacheConfig := &CacheConfig{
 		TrieCleanLimit: 256,
@@ -1087,10 +1091,11 @@ var logCode = common.Hex2Bytes("60606040525b7f24ec1d3ff24c2f6ff210738839dbc339cd
 // This test checks that log events and RemovedLogsEvent are sent
 // when the chain reorganizes.
 func TestLogRebirth(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
 		key1, _       = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1         = crypto.PubkeyToAddress(key1.PublicKey)
-		db            = ethdb.NewMemDatabase()
 		gspec         = &Genesis{Config: params.TestChainConfig, Alloc: GenesisAlloc{addr1: {Balance: big.NewInt(10000000000000)}}}
 		genesis       = gspec.MustCommit(db)
 		signer        = types.NewEIP155Signer(gspec.Config.ChainID)
@@ -1772,9 +1777,11 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := (&Genesis{Config: params.TestChainConfig}).MustCommit(db)
 
 	diskdb := ethdb.NewMemDatabase()
+	defer diskdb.Close()
 	(&Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 
 	cacheConfig := &CacheConfig{
@@ -1835,6 +1842,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	diskdb := ethdb.NewMemDatabase()
+	defer diskdb.Close()
 	(&Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 	cacheConfig := &CacheConfig{
 		TrieCleanLimit: 256,
@@ -1850,6 +1858,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	ctx := chain.WithContext(context.Background(), big.NewInt(1))
 
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := (&Genesis{Config: params.TestChainConfig}).MustCommit(db)
 
 	shared, _ := GenerateChain(ctx, params.TestChainConfig, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
@@ -2008,6 +2017,7 @@ func TestLowDiffLongChain(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := new(Genesis).MustCommit(db)
 
 	var side ethdb.Database
@@ -2067,6 +2077,7 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := new(Genesis).MustCommit(db)
 
 	blocksNum := 2 * triesInMemory
@@ -2157,6 +2168,7 @@ func testInsertKnownChainData(t *testing.T, typ string) {
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := new(Genesis).MustCommit(db)
 
 	blocks, receipts := GenerateChain(context.Background(), params.TestChainConfig, genesis, engine, db, 32, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
@@ -2286,6 +2298,7 @@ func getLongAndShortChains() (*BlockChain, []*types.Block, []*types.Block, error
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := new(Genesis).MustCommit(db)
 
 	// Generate and import the canonical chain,
@@ -2433,6 +2446,7 @@ func benchmarkLargeNumberOfValueToNonexisting(b *testing.B, numTxs, numBlocks in
 	// Generate the original common chain segment and the two competing forks
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := gspec.MustCommit(db)
 
 	blockGenerator := func(i int, block *BlockGen) {
@@ -2449,6 +2463,7 @@ func benchmarkLargeNumberOfValueToNonexisting(b *testing.B, numTxs, numBlocks in
 	}
 
 	diskdb := ethdb.NewMemDatabase()
+	defer diskdb.Close()
 	gspec.MustCommit(diskdb)
 	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
 	if err != nil {
@@ -2541,6 +2556,7 @@ func TestSideImportPrunedBlocks(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	genesis := new(Genesis).MustCommit(db)
 
 	// Generate and import the canonical chain
@@ -2850,6 +2866,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	})
 	// Import the canonical chain
 	diskdb := ethdb.NewMemDatabase()
+	defer diskdb.Close()
 	gspec.MustCommit(diskdb)
 	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
 	if err != nil {
