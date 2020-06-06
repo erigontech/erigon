@@ -612,7 +612,7 @@ func testInsertNonceError(t *testing.T, full bool) {
 			if full {
 				blocks := makeBlockChain(ctx, blockchain.CurrentBlock(), i, ethash.NewFaker(), db.MemCopy(), 0)
 
-				failAt = rand.Int() % len(blocks)
+				failAt = rand.Int() % len(blocks) // nolint:gosec
 				failNum = blocks[failAt].NumberU64()
 
 				blockchain.engine = ethash.NewFakeFailer(failNum)
@@ -620,7 +620,7 @@ func testInsertNonceError(t *testing.T, full bool) {
 			} else {
 				headers := makeHeaderChain(ctx, blockchain.CurrentHeader(), i, ethash.NewFaker(), db.MemCopy(), 0)
 
-				failAt = rand.Int() % len(headers)
+				failAt = rand.Int() % len(headers) // nolint:gosec
 				failNum = headers[failAt].Number.Uint64()
 
 				blockchain.engine = ethash.NewFakeFailer(failNum)
