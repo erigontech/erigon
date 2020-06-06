@@ -19,6 +19,7 @@ package core
 import (
 	"context"
 	"math/big"
+	"strconv"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -68,7 +69,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	}
 	// Try to expand both pro-fork and non-fork chains iteratively with other camp's blocks
 	for i := int64(0); i < params.DAOForkExtraRange.Int64(); i++ {
-		func(i int64) {
+		t.Run(strconv.Itoa(int(i)), func(t *testing.T) {
+
 			// Create a pro-fork block, and try to feed into the no-fork chain
 			db = ethdb.NewMemDatabase()
 			defer db.Close()
@@ -119,7 +121,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			if _, err := proBc.InsertChain(context.Background(), blocks); err != nil {
 				t.Fatalf("pro-fork chain didn't accepted pro-fork block: %v", err)
 			}
-		}(i)
+		})
 	}
 	// Verify that contra-forkers accept pro-fork extra-datas after forking finishes
 	db = ethdb.NewMemDatabase()
