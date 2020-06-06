@@ -23,7 +23,7 @@ func ExportFile(filePath, chaindataPath string, dests vm.Cache) error {
 		return ethdb.NewBoltDatabase(path)
 	}
 
-	chaindata, err := stateless.NewBlockProviderFromDb(chaindataPath, createDb, dests)
+	chaindata, err := stateless.NewBlockProviderFromDB(chaindataPath, createDb, dests)
 	if err != nil {
 		return err
 	}
