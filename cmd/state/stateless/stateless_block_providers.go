@@ -34,7 +34,7 @@ type BlockProvider interface {
 	NextBlock() (*types.Block, error)
 }
 
-func BlockProviderForURI(uri string, createDBFunc CreateDbFunc, dests vm.Cache) (BlockProvider, error) {
+func BlockProviderForURI(uri string, createDBFunc CreateDbFunc) (BlockProvider, error) {
 	url, err := url.Parse(uri)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func BlockProviderForURI(uri string, createDBFunc CreateDbFunc, dests vm.Cache) 
 		fallthrough
 	default:
 		fmt.Println("Source of blocks: db @", url.Path)
-		return NewBlockProviderFromDB(url.Path, createDBFunc, dests)
+		return NewBlockProviderFromDB(url.Path, createDBFunc)
 	}
 }
 
@@ -57,14 +57,14 @@ type BlockChainBlockProvider struct {
 	db           ethdb.Database
 }
 
-func NewBlockProviderFromDB(path string, createDBFunc CreateDbFunc, dests vm.Cache) (BlockProvider, error) {
+func NewBlockProviderFromDB(path string, createDBFunc CreateDbFunc) (BlockProvider, error) {
 	ethDB, err := createDBFunc(path)
 	if err != nil {
 		return nil, err
 	}
 	chainConfig := params.MainnetChainConfig
 	engine := ethash.NewFullFaker()
-	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, nil, dests)
+	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}

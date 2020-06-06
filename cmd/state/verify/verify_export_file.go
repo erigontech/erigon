@@ -9,11 +9,10 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func ExportFile(filePath, chaindataPath string, dests vm.Cache) error {
+func ExportFile(filePath, chaindataPath string) error {
 	exportFile, err := stateless.NewBlockProviderFromExportFile(filePath)
 	if err != nil {
 		return err
@@ -23,7 +22,7 @@ func ExportFile(filePath, chaindataPath string, dests vm.Cache) error {
 		return ethdb.NewBoltDatabase(path)
 	}
 
-	chaindata, err := stateless.NewBlockProviderFromDB(chaindataPath, createDb, dests)
+	chaindata, err := stateless.NewBlockProviderFromDB(chaindataPath, createDb)
 	if err != nil {
 		return err
 	}

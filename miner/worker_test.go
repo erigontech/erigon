@@ -157,7 +157,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	genesis := gspec.MustCommit(db)
 
 	dbCopy := db.MemCopy()
-	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil, nil, vm.NewDestsCache(100))
+	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
 
 	// Generate a small n-block chain and an uncle block for it
@@ -283,7 +283,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
 	b.genesis.MustCommit(db2)
-	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil, vm.NewDestsCache(100))
+	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil, nil)
 	defer chain.Stop()
 
 	// Ignore empty commit here for less noise

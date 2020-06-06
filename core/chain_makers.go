@@ -88,8 +88,8 @@ func (b *BlockGen) SetDifficulty(diff *big.Int) {
 // further limitations on the content of transactions that can be
 // added. Notably, contract code relying on the BLOCKHASH instruction
 // will panic during execution.
-func (b *BlockGen) AddTx(tx *types.Transaction, dests vm.Cache) {
-	b.AddTxWithChain(nil, tx, dests)
+func (b *BlockGen) AddTx(tx *types.Transaction) {
+	b.AddTxWithChain(nil, tx)
 }
 
 // AddTxWithChain adds a transaction to the generated block. If no coinbase has
@@ -100,12 +100,12 @@ func (b *BlockGen) AddTx(tx *types.Transaction, dests vm.Cache) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(bc ChainContext, tx *types.Transaction, dests vm.Cache) {
+func (b *BlockGen) AddTxWithChain(bc ChainContext, tx *types.Transaction) {
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
 	b.statedb.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	receipt, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.triedbstate.TrieStateWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, dests)
+	receipt, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.triedbstate.TrieStateWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil)
 	if err != nil {
 		panic(err)
 	}

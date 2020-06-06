@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -51,7 +50,6 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 			Alloc:  GenesisAlloc{address: {Balance: funds}},
 		}
 		genesis = gspec.MustCommit(db)
-		dests   = vm.NewDestsCache(100)
 	)
 
 	// We need to generate as many blocks +1 as uncles
@@ -62,7 +60,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 				for i := 0; i < transactions; i++ {
 					tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
 						u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), types.HomesteadSigner{}, key)
-					b.AddTx(tx, dests)
+					b.AddTx(tx)
 				}
 				for i := 0; i < uncles; i++ {
 					b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})

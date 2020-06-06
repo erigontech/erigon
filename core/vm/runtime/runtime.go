@@ -95,7 +95,7 @@ func setDefaults(cfg *Config) {
 //
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
-func Execute(code, input []byte, cfg *Config, blockNr uint64, dests vm.Cache) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -108,7 +108,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64, dests vm.Cache) ([
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
-		vmenv   = NewEnv(cfg, dests)
+		vmenv   = NewEnv(cfg, nil)
 		sender  = vm.AccountRef(cfg.Origin)
 	)
 	cfg.State.CreateAccount(address, true)
@@ -127,7 +127,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64, dests vm.Cache) ([
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64, dests vm.Cache) ([]byte, common.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -139,7 +139,7 @@ func Create(input []byte, cfg *Config, blockNr uint64, dests vm.Cache) ([]byte, 
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
 	var (
-		vmenv  = NewEnv(cfg, dests)
+		vmenv  = NewEnv(cfg, nil)
 		sender = vm.AccountRef(cfg.Origin)
 	)
 
@@ -158,10 +158,10 @@ func Create(input []byte, cfg *Config, blockNr uint64, dests vm.Cache) ([]byte, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address common.Address, input []byte, cfg *Config, dests vm.Cache) ([]byte, uint64, error) {
+func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
-	vmenv := NewEnv(cfg, dests)
+	vmenv := NewEnv(cfg, nil)
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	// Call the code with the given configuration.

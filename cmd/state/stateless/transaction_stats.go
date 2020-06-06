@@ -195,8 +195,7 @@ func transactionStats(blockNum uint64) {
 	tt := NewTxTracer()
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	dests := vm.NewDestsCache(100)
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, dests)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
 	check(err)
 	interrupt := false
 	for !interrupt {
@@ -212,7 +211,7 @@ func transactionStats(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, dests)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
 			tt.ResetCounters()
 			tt.currentBlock = blockNum
 			tt.measureCreate = tx.To() == nil

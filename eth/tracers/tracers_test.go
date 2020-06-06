@@ -182,7 +182,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
-	evm := vm.NewEVM(evmContext, statedb, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer}, vm.NewDestsCache(100))
+	evm := vm.NewEVM(evmContext, statedb, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer}, nil)
 
 	msg, err := tx.AsMessage(signer)
 	if err != nil {
@@ -262,7 +262,7 @@ func TestCallTracer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(evmContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer}, vm.NewDestsCache(100))
+			evm := vm.NewEVM(evmContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer}, nil)
 
 			msg, err := tx.AsMessage(signer)
 			if err != nil {

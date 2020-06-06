@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -140,7 +139,6 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
-	dests := vm.NewDestsCache(100)
 
 	blocks, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
@@ -155,7 +153,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 			if err != nil {
 				panic(err)
 			}
-			block.AddTx(tx, dests)
+			block.AddTx(tx)
 		}
 		// if the block number is a multiple of 5, add a bonus uncle to the block
 		if i > 0 && i%5 == 0 {

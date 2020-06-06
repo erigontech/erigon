@@ -320,8 +320,7 @@ func initialState1() error {
 	genesisDb := db.MemCopy()
 
 	engine := ethash.NewFaker()
-	dests := vm.NewDestsCache(100)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, dests)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -449,7 +448,7 @@ func initialState1() error {
 		}
 
 		for _, tx := range txs {
-			block.AddTx(tx, dests)
+			block.AddTx(tx)
 		}
 		contractBackend.Commit()
 	})

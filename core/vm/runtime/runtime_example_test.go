@@ -20,12 +20,11 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/core/vm/runtime"
 )
 
 func ExampleExecute() {
-	ret, _, err := runtime.Execute(common.Hex2Bytes("6060604052600a8060106000396000f360606040526008565b00"), nil, nil, 0, vm.NewDestsCache(100))
+	ret, _, err := runtime.Execute(common.Hex2Bytes("6060604052600a8060106000396000f360606040526008565b00"), nil, nil, 0)
 	if err != nil {
 		fmt.Println(err)
 	}

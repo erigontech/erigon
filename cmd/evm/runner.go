@@ -251,12 +251,11 @@ func runCmd(ctx *cli.Context) error {
 	}
 	input := common.FromHex(string(bytes.TrimSpace(hexInput)))
 
-	dests := vm.NewDestsCache(100)
 	var execFunc func() ([]byte, uint64, error)
 	if ctx.GlobalBool(CreateFlag.Name) {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
-			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0, dests)
+			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
 			return output, gasLeft, err
 		}
 	} else {
@@ -264,7 +263,7 @@ func runCmd(ctx *cli.Context) error {
 			statedb.SetCode(receiver, code)
 		}
 		execFunc = func() ([]byte, uint64, error) {
-			return runtime.Call(receiver, input, &runtimeConfig, dests)
+			return runtime.Call(receiver, input, &runtimeConfig)
 		}
 	}
 
