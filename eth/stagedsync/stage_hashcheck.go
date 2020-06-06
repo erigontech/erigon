@@ -89,20 +89,14 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database, datadir st
 	}
 	prom := NewPromoter(stateDB, quit)
 	prom.TempDir = datadir
-	if err := prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
+	if err = prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
 		return err
 	}
-	if err := prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
+	if err = prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return err
 	}
-	mutation := stateDB.NewBatch()
-	err = stages.SaveStageUnwind(mutation, stages.HashCheck, 0)
-	if err != nil {
+	if err = stages.SaveStageUnwind(stateDB, stages.HashCheck, 0); err != nil {
 		return fmt.Errorf("unwind HashCheck: reset: %v", err)
-	}
-	_, err = mutation.Commit()
-	if err != nil {
-		return fmt.Errorf("unwind HashCheck: failed to write db commit: %v", err)
 	}
 	return nil
 }
@@ -409,7 +403,7 @@ func (p *Promoter) mergeUnwindFilesAndCollect(bufferFileNames []string, keyLengt
 		var valBuf []byte
 		valLength := int(l[0])
 		if valLength > 0 {
-			valBuf := make([]byte, valLength)
+			valBuf = make([]byte, valLength)
 			if n, err := io.ReadFull(readers[i], valBuf); err != nil || n != valLength {
 				return fmt.Errorf("init reading from account buffer file: %d %v", n, err)
 			}
@@ -440,7 +434,7 @@ func (p *Promoter) mergeUnwindFilesAndCollect(bufferFileNames []string, keyLengt
 			var valBuf []byte
 			valLength := int(l[0])
 			if valLength > 0 {
-				valBuf := make([]byte, valLength)
+				valBuf = make([]byte, valLength)
 				if n1, err1 := io.ReadFull(reader, valBuf); err1 != nil || n1 != valLength {
 					return fmt.Errorf("reading from account buffer file: %d %v", n1, err1)
 				}
