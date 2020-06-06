@@ -205,7 +205,7 @@ func (f *BlockFetcher) Start() {
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *BlockFetcher) Stop() {
-	close(f.quit)
+	common.SafeClose(f.quit)
 }
 
 // Notify announces the fetcher of the potential availability of a new block in

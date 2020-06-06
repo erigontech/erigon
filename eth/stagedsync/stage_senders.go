@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync"
 
 	"github.com/pkg/errors"
 
@@ -54,19 +55,25 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	jobs := make(chan *senderRecoveryJob, batchSize)
 	out := make(chan *senderRecoveryJob, batchSize)
 
+	wg := &sync.WaitGroup{}
+	wg.Add(numOfGoroutines)
 	defer func() {
+		wg.Wait()
 		close(jobs)
 		close(out)
 	}()
-
 	for i := 0; i < numOfGoroutines; i++ {
 		// each goroutine gets it's own crypto context to make sure they are really parallel
-		go recoverSenders(cryptoContexts[i], jobs, out, quitCh)
+		go recoverSenders(cryptoContexts[i], jobs, out, quitCh, wg)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
 	needExit := false
 	for !needExit {
+		if err := common.Stopped(quitCh); err != nil {
+			return err
+		}
+
 		written := 0
 		for i := 0; i < batchSize; i++ {
 			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
@@ -121,7 +128,9 @@ type senderRecoveryJob struct {
 	err             error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}) {
+func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	var job *senderRecoveryJob
 	for {
 		job = <-in
@@ -140,10 +149,14 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 				break
 			}
 		}
-		out <- job
 
+		// prevent sending to close channel
 		if err := common.Stopped(quit); err != nil {
 			job.err = err
+		}
+		out <- job
+
+		if job.err == common.ErrStopped {
 			return
 		}
 	}
