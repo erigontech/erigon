@@ -24,7 +24,7 @@ import (
 
 const (
 	fileSchemeExportfile = "exportfile"
-	fileSchemeDb         = "db"
+	fileSchemeDB         = "db"
 )
 
 type BlockProvider interface {
@@ -43,7 +43,7 @@ func BlockProviderForURI(uri string, createDBFunc CreateDbFunc, dests vm.Cache) 
 	case fileSchemeExportfile:
 		fmt.Println("Source of blocks: export file @", url.Path)
 		return NewBlockProviderFromExportFile(url.Path)
-	case fileSchemeDb:
+	case fileSchemeDB:
 		fallthrough
 	default:
 		fmt.Println("Source of blocks: db @", url.Path)
@@ -58,20 +58,20 @@ type BlockChainBlockProvider struct {
 }
 
 func NewBlockProviderFromDB(path string, createDBFunc CreateDbFunc, dests vm.Cache) (BlockProvider, error) {
-	ethDb, err := createDBFunc(path)
+	ethDB, err := createDBFunc(path)
 	if err != nil {
 		return nil, err
 	}
 	chainConfig := params.MainnetChainConfig
 	engine := ethash.NewFullFaker()
-	chain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, dests)
+	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, nil, dests)
 	if err != nil {
 		return nil, err
 	}
 
 	return &BlockChainBlockProvider{
 		bc: chain,
-		db: ethDb,
+		db: ethDB,
 	}, nil
 }
 
@@ -102,7 +102,7 @@ func (p *BlockChainBlockProvider) NextBlock() (*types.Block, error) {
 type ExportFileBlockProvider struct {
 	stream          *rlp.Stream
 	engine          consensus.Engine
-	headersDb       ethdb.Database
+	headersDB       ethdb.Database
 	batch           ethdb.DbWithPendingMutations
 	fh              *os.File
 	reader          io.Reader
@@ -125,8 +125,8 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 	stream := rlp.NewStream(reader, 0)
 	engine := ethash.NewFullFaker()
 	// keeping all the past block headers in memory
-	headersDb := mustCreateTempDatabase()
-	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh, reader, -1}, nil
+	headersDB := mustCreateTempDatabase()
+	return &ExportFileBlockProvider{stream, engine, headersDB, nil, fh, reader, -1}, nil
 }
 
 func getTempFileName() string {
@@ -153,7 +153,7 @@ func (p *ExportFileBlockProvider) Close() error {
 
 func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
 	if p.batch == nil {
-		p.batch = p.headersDb.NewBatch()
+		p.batch = p.headersDB.NewBatch()
 	}
 
 	rawdb.WriteHeader(context.TODO(), p.batch, h)
@@ -233,5 +233,5 @@ func (p *ExportFileBlockProvider) GetHeader(h common.Hash, i uint64) *types.Head
 	if p.batch != nil {
 		return rawdb.ReadHeader(p.batch, h, i)
 	}
-	return rawdb.ReadHeader(p.headersDb, h, i)
+	return rawdb.ReadHeader(p.headersDB, h, i)
 }
