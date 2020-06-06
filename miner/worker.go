@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -260,7 +261,7 @@ func (w *worker) pendingBlock() *types.Block {
 	return w.snapshotBlock
 }
 
-func (w *worker) init() {
+func (w *worker) init(dests vm.Cache) {
 	w.initOnce.Do(func() {
 		time.Sleep(5 * time.Second)
 		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
@@ -283,7 +284,7 @@ func (w *worker) init() {
 		// commit aborts in-flight transaction execution with given signal and resubmits a new one.
 		commit, timestamp := w.getCommit()
 
-		go w.mainLoop()
+		go w.mainLoop(dests)
 		go w.newWorkLoop(recommit)
 		go w.chainEvents(timestamp, commit)
 		go w.taskLoop()
@@ -291,10 +292,10 @@ func (w *worker) init() {
 }
 
 // start sets the running status as 1 and triggers new work submitting.
-func (w *worker) start() {
+func (w *worker) start(dests vm.Cache) {
 	if atomic.CompareAndSwapInt32(&w.running, 0, 1) {
 		log.Warn("worker start")
-		w.init()
+		w.init(dests)
 		w.startCh <- struct{}{}
 	}
 }
@@ -404,14 +405,14 @@ func (w *worker) getCommit() (func(ctx consensus.Cancel, noempty bool, s int32),
 }
 
 // mainLoop is a standalone goroutine to regenerate the sealing task based on the received event.
-func (w *worker) mainLoop() {
+func (w *worker) mainLoop(dests vm.Cache) {
 	defer w.txsSub.Unsubscribe()
 
 	for {
 		select {
 		case req := <-w.newWorkCh:
 			log.Warn("mining: a new work")
-			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp)
+			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp, dests)
 
 		case ev := <-w.txsCh:
 			//fixme can be removed?
@@ -437,7 +438,7 @@ func (w *worker) mainLoop() {
 				}
 				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, txs)
 				tcount := w.current.tcount
-				w.commitTransactions(txset, coinbase, nil)
+				w.commitTransactions(txset, coinbase, nil, dests)
 				// Only update the snapshot if any new transactons were added
 				// to the pending block
 				if tcount != w.current.tcount {
@@ -448,7 +449,7 @@ func (w *worker) mainLoop() {
 				// submit mining work here since all empty submission will be rejected
 				// by clique. Of course the advance sealing(empty submission) is disabled.
 				if w.chainConfig.Clique != nil && w.chainConfig.Clique.Period == 0 {
-					w.commitNewWork(consensus.StabCancel(), nil, true, time.Now().Unix())
+					w.commitNewWork(consensus.StabCancel(), nil, true, time.Now().Unix(), dests)
 				}
 			}
 			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
@@ -758,11 +759,11 @@ func (w *worker) updateSnapshot() {
 	w.snapshotTds = w.current.tds.WithNewBuffer()
 }
 
-func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
+func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address, dests vm.Cache) ([]*types.Log, error) {
 	snap := w.current.state.Snapshot()
 
 	header := w.current.GetHeader()
-	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.tds.TrieStateWriter(), header, tx, &header.GasUsed, *w.chain.GetVMConfig())
+	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.tds.TrieStateWriter(), header, tx, &header.GasUsed, *w.chain.GetVMConfig(), dests)
 	if err != nil {
 		w.current.state.RevertToSnapshot(snap)
 		return nil, err
@@ -777,7 +778,7 @@ func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Addres
 	return receipt.Logs, nil
 }
 
-func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coinbase common.Address, interrupt *int32) bool {
+func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coinbase common.Address, interrupt *int32, dests vm.Cache) bool {
 	// Short circuit if current is nil
 	if w.current == nil {
 		return true
@@ -838,7 +839,7 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 		// Start executing the transaction
 		w.current.state.Prepare(tx.Hash(), common.Hash{}, w.current.tcount)
 
-		logs, err := w.commitTransaction(tx, coinbase)
+		logs, err := w.commitTransaction(tx, coinbase, dests)
 		switch err {
 		case core.ErrGasLimitReached:
 			// Pop the current out-of-gas transaction without shifting in the next from the account
@@ -893,7 +894,7 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 }
 
 // commitNewWork generates several new sealing tasks based on the parent block.
-func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty bool, timestamp int64) {
+func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty bool, timestamp int64, dests vm.Cache) {
 	select {
 	case <-ctx.Done():
 		return
@@ -1034,13 +1035,13 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	}
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
-		if w.commitTransactions(txs, w.coinbase, interrupt) {
+		if w.commitTransactions(txs, w.coinbase, interrupt, dests) {
 			return
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, remoteTxs)
-		if w.commitTransactions(txs, w.coinbase, interrupt) {
+		if w.commitTransactions(txs, w.coinbase, interrupt, dests) {
 			return
 		}
 	}

@@ -45,7 +45,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	proConf := *params.TestChainConfig
 	proConf.DAOForkBlock = forkBlock
 	proConf.DAOForkSupport = true
-	proBc, _ := NewBlockChain(proDb, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil)
+	proBc, _ := NewBlockChain(proDb, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 	defer proBc.Stop()
 	ctx := proBc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
@@ -58,7 +58,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	conConf.DAOForkBlock = forkBlock
 	conConf.DAOForkSupport = false
 
-	conBc, _ := NewBlockChain(conDb, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil)
+	conBc, _ := NewBlockChain(conDb, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 	defer conBc.Stop()
 
 	if _, err := proBc.InsertChain(context.Background(), prefix); err != nil {
@@ -75,7 +75,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			db = ethdb.NewMemDatabase()
 			defer db.Close()
 			gspec.MustCommit(db)
-			bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil)
+			bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 			defer bc.Stop()
 			ctx = bc.WithContext(context.Background(), big.NewInt(conBc.CurrentBlock().Number().Int64()+1))
 
@@ -101,7 +101,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			defer db.Close()
 
 			gspec.MustCommit(db)
-			bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil)
+			bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 			defer bc.Stop()
 			ctx = bc.WithContext(context.Background(), big.NewInt(proBc.CurrentBlock().Number().Int64()+1))
 
@@ -127,7 +127,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	defer db.Close()
 	gspec.MustCommit(db)
-	bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 	defer bc.Stop()
 	ctx = bc.WithContext(context.Background(), big.NewInt(conBc.CurrentBlock().Number().Int64()+1))
 
@@ -146,7 +146,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	defer db.Close()
 	gspec.MustCommit(db)
-	bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 	defer bc.Stop()
 	ctx = bc.WithContext(context.Background(), big.NewInt(proBc.CurrentBlock().Number().Int64()+1))
 

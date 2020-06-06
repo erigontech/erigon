@@ -22,7 +22,7 @@ func ExportFile(filePath, chaindataPath string) error {
 		return ethdb.NewBoltDatabase(path)
 	}
 
-	chaindata, err := stateless.NewBlockProviderFromDb(chaindataPath, createDb)
+	chaindata, err := stateless.NewBlockProviderFromDB(chaindataPath, createDb)
 	if err != nil {
 		return err
 	}
