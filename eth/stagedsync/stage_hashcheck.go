@@ -73,7 +73,7 @@ func SpawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, datadir str
 	return s.DoneAndUpdate(stateDB, blockNr)
 }
 
-func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
+func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
 	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.HashCheck)
@@ -87,6 +87,14 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		}
 		return nil
 	}
+	prom := NewPromoter(stateDB, quit)
+	prom.TempDir = datadir
+	if err := prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
+		return err
+	}
+	if err := prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
+		return err
+	}	
 	mutation := stateDB.NewBatch()
 	err = stages.SaveStageUnwind(mutation, stages.HashCheck, 0)
 	if err != nil {
