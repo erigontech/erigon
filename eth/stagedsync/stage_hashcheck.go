@@ -541,7 +541,7 @@ func (p *Promoter) Unwind(from, to uint64, changeSetBucket []byte) error {
 				ks := string(k)
 				if _, ok := bufferMap[ks]; !ok {
 					// Do not replace the existing values, so we end up with the earlier possible values
-					bufferMap[string(k)] = v
+					bufferMap[ks] = v
 				}
 				return nil
 			}); err != nil {
