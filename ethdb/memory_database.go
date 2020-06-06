@@ -17,13 +17,29 @@
 package ethdb
 
 import (
+	"context"
+
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewMemDatabase() *BoltDatabase {
+func NewMemDatabase() *ObjectDatabase {
+	switch debug.TestDB() {
+	case "bolt":
+		return NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
+	case "badger":
+		return NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
+	case "lmdb":
+		return NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+	default:
+		return NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
+	}
+}
+
+func NewMemDatabase2() (*BoltDatabase, KV) {
 	logger := log.New("database", "in-memory")
 
 	// Open the db and recover any potential corruptions
@@ -49,34 +65,7 @@ func NewMemDatabase() *BoltDatabase {
 		id:  id(),
 	}
 
-	return b
-}
-
-func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
-	logger := log.New("database", "in-memory")
-
-	// Open the db and recover any potential corruptions
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		panic(err)
-	}
-
-	if err := db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range dbutils.Buckets {
-			if _, err := tx.CreateBucketIfNotExists(bucket, false); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
-	return &BoltDatabase{
-		db:  db,
-		log: logger,
-		id:  id(),
-	}, db
+	return b, b.KV()
 }
 
 func (db *BoltDatabase) MemCopy() Database {
@@ -90,6 +79,9 @@ func (db *BoltDatabase) MemCopy() Database {
 
 	if err := db.db.View(func(readTx *bolt.Tx) error {
 		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			if bolt.IsSystemBucket(name) {
+				return nil
+			}
 			return mem.Update(func(writeTx *bolt.Tx) error {
 				newBucketToWrite, err := writeTx.CreateBucket(name, true)
 				if err != nil {

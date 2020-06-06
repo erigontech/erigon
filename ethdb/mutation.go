@@ -1,12 +1,12 @@
 package ethdb
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
@@ -16,17 +16,9 @@ type mutation struct {
 	db   Database
 }
 
-func (m *mutation) KV() *bolt.DB {
-	if casted, ok := m.db.(HasKV); !ok {
-		return nil
-	} else {
+func (m *mutation) KV() KV {
+	if casted, ok := m.db.(HasKV); ok {
 		return casted.KV()
-	}
-}
-
-func (m *mutation) AbstractKV() KV {
-	if casted, ok := m.db.(HasAbstractKV); ok {
-		return casted.AbstractKV()
 	}
 	return nil
 }
@@ -85,11 +77,18 @@ func (m *mutation) Has(bucket, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) DiskSize() uint64 {
+func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	if m.db == nil {
-		return 0
+		return 0, nil
 	}
-	return m.db.DiskSize()
+	return m.db.(HasStats).DiskSize(ctx)
+}
+
+func (m *mutation) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	if m.db == nil {
+		return nil, nil
+	}
+	return m.db.(HasStats).BucketsStat(ctx)
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {

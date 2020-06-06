@@ -146,10 +146,10 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	var chainKV ethdb.KV
-	if hasKV, ok := chainDb.(ethdb.HasAbstractKV); ok {
-		chainKV = hasKV.AbstractKV()
+	if hasKV, ok := chainDb.(ethdb.HasKV); ok {
+		chainKV = hasKV.KV()
 	} else {
-		return nil, fmt.Errorf("database %T does not implement AbstractKV", chainDb)
+		return nil, fmt.Errorf("database %T does not implement KV", chainDb)
 	}
 	if ctx.Config.RemoteDbListenAddress != "" {
 		remotedbserver.StartDeprecated(chainKV, ctx.Config.RemoteDbListenAddress)

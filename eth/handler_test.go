@@ -360,13 +360,13 @@ func testGetReceipt(t *testing.T, protocol int) {
 		switch i {
 		case 0:
 			// In block 1, the test bank sends account #1 some ether.
-			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, uint256.NewInt().SetUint64(10000), params.TxGas, nil, nil), signer, testBankKey)
 			block.AddTx(tx)
 		case 1:
 			// In block 2, the test bank sends some more ether to account #1.
 			// acc1Addr passes it on to account #2.
-			tx1, _ := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, big.NewInt(1000), params.TxGas, nil, nil), signer, testBankKey)
-			tx2, _ := types.SignTx(types.NewTransaction(block.TxNonce(acc1Addr), acc2Addr, big.NewInt(1000), params.TxGas, nil, nil), signer, acc1Key)
+			tx1, _ := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testBankKey)
+			tx2, _ := types.SignTx(types.NewTransaction(block.TxNonce(acc1Addr), acc2Addr, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, acc1Key)
 			block.AddTx(tx1)
 			block.AddTx(tx2)
 		case 2:
@@ -632,24 +632,24 @@ func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehos
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 1:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 2:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 3:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 4:
 			// top up account #3
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt.ToBig(), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -727,7 +727,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	t.Skip()
 
 	signer := types.HomesteadSigner{}
-	amount := big.NewInt(10)
+	amount := uint256.NewInt().SetUint64(10)
 	generator := func(i int, block *core.BlockGen) {
 		var rndAddr common.Address
 		// #nosec G404
@@ -863,13 +863,13 @@ func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address) {
 		case 0:
 			nonce := block.TxNonce(testBank)
 			// storage[0] = 0x2a, storage[1] = 0x01c9
-			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 2e5, nil, code), signer, testBankKey)
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 2e5, nil, code), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			addr = crypto.CreateAddress(testBank, nonce)
 		case 1:
 			// storage[0] = 0x15
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, input), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(uint256.Int), 2e5, nil, input), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -960,13 +960,13 @@ func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address) {
 		case 0:
 			nonce := block.TxNonce(testBank)
 			// storage[6] = 0x2a, storage[8] = 0x01c9
-			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 2e5, nil, code), signer, testBankKey)
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 2e5, nil, code), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			addr = crypto.CreateAddress(testBank, nonce)
 		case 1:
 			// storage[8] = 0x15
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, input), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(uint256.Int), 2e5, nil, input), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -1269,17 +1269,17 @@ func TestFirehoseBytecode(t *testing.T) {
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
-			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, big.NewInt(2e5), params.TxGas, nil, nil), signer, testBankKey)
+			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, uint256.NewInt().SetUint64(2e5), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err1)
 			block.AddTx(tx1)
-			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc1Addr), new(big.Int), 1e5, nil, contractCode1), signer, acc1Key)
+			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc1Addr), new(uint256.Int), 1e5, nil, contractCode1), signer, acc1Key)
 			assert.NoError(t, err2)
 			block.AddTx(tx2)
 		case 1:
-			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc2Addr, big.NewInt(2e5), params.TxGas, nil, nil), signer, testBankKey)
+			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc2Addr, uint256.NewInt().SetUint64(2e5), params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err1)
 			block.AddTx(tx1)
-			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc2Addr), new(big.Int), 1e5, nil, contractCode2), signer, acc2Key)
+			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc2Addr), new(uint256.Int), 1e5, nil, contractCode2), signer, acc2Key)
 			assert.NoError(t, err2)
 			block.AddTx(tx2)
 		}

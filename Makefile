@@ -91,7 +91,13 @@ ios:
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
 test: semantics/z3/build/libz3.a all
-	$(GORUN) build/ci.go test
+	TEST_DB=bolt $(GORUN) build/ci.go test
+
+test-lmdb: semantics/z3/build/libz3.a all
+	TEST_DB=lmdb $(GORUN) build/ci.go test
+
+test-badger: semantics/z3/build/libz3.a all
+	TEST_DB=badger $(GORUN) build/ci.go test
 
 lint: lintci
 
@@ -116,7 +122,7 @@ lintci: semantics/z3/build/libz3.a all
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.23.8
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.27.0
 
 clean:
 	env GO111MODULE=on go clean -cache
@@ -237,3 +243,6 @@ simulator-genesis:
 
 prometheus:
 	@cd ./cmd/prometheus && docker-compose up prometheus grafana
+
+escape:
+	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out

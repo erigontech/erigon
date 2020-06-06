@@ -13,13 +13,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
+
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -67,10 +69,10 @@ func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Add
 	tt.startMode[depth] = true
 	return nil
 }
-func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
-func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (tt TokenTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
@@ -151,7 +153,7 @@ func makeTokens(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.AbstractKV(), block.NumberU64()-1)
+		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -234,15 +236,15 @@ func makeTokenBalances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewDbState(ethDb.AbstractKV(), currentBlockNr)
+		dbstate := state.NewDbState(ethDb.KV(), currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
 			&token,
 			0,
-			big.NewInt(0),    // value
+			uint256.NewInt(), // value
 			math.MaxUint64/2, // gaslimit
-			big.NewInt(100000),
+			uint256.NewInt().SetUint64(100000),
 			common.FromHex(fmt.Sprintf("0x70a08231000000000000000000000000%x", common.HexToAddress("0xe477292f1b3268687a29376116b0ed27a9c76170"))),
 			false, // checkNonce
 		)
@@ -454,15 +456,15 @@ func makeTokenAllowances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewDbState(ethDb.AbstractKV(), currentBlockNr)
+		dbstate := state.NewDbState(ethDb.KV(), currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
 			&token,
 			0,
-			big.NewInt(0),    // value
+			uint256.NewInt(), // value
 			math.MaxUint64/2, // gaslimit
-			big.NewInt(100000),
+			uint256.NewInt().SetUint64(100000),
 			common.FromHex(fmt.Sprintf("0xdd62ed3e000000000000000000000000%x000000000000000000000000%x",
 				common.HexToAddress("0xe477292f1b3268687a29376116b0ed27a9c76170"),
 				common.HexToAddress("0xe477292f1b3268687a29376116b0ed25a9c76170"),

@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/cmd/tester/contracts"
@@ -164,7 +166,7 @@ func makeGenBlock(db ethdb.Database,
 	r *rand.Rand,
 ) func(coinbase common.Address, i int, gen *core.BlockGen) {
 	var err error
-	amount := big.NewInt(1) // 1 wei
+	amount := uint256.NewInt().SetUint64(1) // 1 wei
 
 	var nonce int64 = -1
 	txOpts := bind.NewKeyedTransactor(coinbaseKey)
@@ -220,6 +222,7 @@ func makeGenBlock(db ethdb.Database,
 
 	return func(coinbase common.Address, i int, gen *core.BlockGen) {
 		blockNr := gen.Number().Uint64()
+		gasPrice, _ := uint256.FromBig(txOpts.GasPrice)
 
 		gen.SetCoinbase(coinbase)
 		if gen.GetHeader().GasLimit <= 40*params.TxGas { // ~700 blocks
@@ -228,12 +231,12 @@ func makeGenBlock(db ethdb.Database,
 		gen.SetExtra(extra)
 		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
 		var tx *types.Transaction
-		switch true {
+		switch {
 		case blockNr == 10001: // create 0 account
 			nonce++
 			txOpts.Nonce.SetInt64(nonce)
 			account0 := common.HexToAddress("0000000000000000000000000000000000000000")
-			tx = types.NewTransaction(txOpts.Nonce.Uint64(), account0, amount, params.TxGas, txOpts.GasPrice, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), account0, amount, params.TxGas, gasPrice, nil)
 			signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
@@ -279,7 +282,7 @@ func makeGenBlock(db ethdb.Database,
 			nonce++
 			txOpts.Nonce.SetInt64(nonce)
 			to := randAddress(r)
-			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, txOpts.GasPrice, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, gasPrice, nil)
 			signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {

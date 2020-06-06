@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 )
@@ -23,7 +25,7 @@ func (s stTransaction) MarshalJSON() ([]byte, error) {
 		PrivateKey hexutil.Bytes         `json:"secretKey"`
 	}
 	var enc stTransaction
-	enc.GasPrice = (*math.HexOrDecimal256)(s.GasPrice)
+	enc.GasPrice = (*math.HexOrDecimal256)(s.GasPrice.ToBig())
 	enc.Nonce = math.HexOrDecimal64(s.Nonce)
 	enc.To = s.To
 	enc.Data = s.Data
@@ -53,7 +55,7 @@ func (s *stTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if dec.GasPrice != nil {
-		s.GasPrice = (*big.Int)(dec.GasPrice)
+		s.GasPrice, _ = uint256.FromBig((*big.Int)(dec.GasPrice))
 	}
 	if dec.Nonce != nil {
 		s.Nonce = uint64(*dec.Nonce)

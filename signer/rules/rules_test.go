@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -453,10 +455,10 @@ func dummyTxWithV(value uint64) *core.SignTxRequest {
 	return dummyTx(h)
 }
 
-func dummySigned(value *big.Int) *types.Transaction {
+func dummySigned(value *uint256.Int) *types.Transaction {
 	to := common.HexToAddress("000000000000000000000000000000000000dead")
 	gas := uint64(21000)
-	gasPrice := big.NewInt(2000000)
+	gasPrice := uint256.NewInt().SetUint64(2000000)
 	data := make([]byte, 0)
 	return types.NewTransaction(3, to, value, gas, gasPrice, data)
 }
@@ -468,8 +470,8 @@ func TestLimitWindow(t *testing.T) {
 		return
 	}
 	// 0.3 ether: 429D069189E0000 wei
-	v := big.NewInt(0).SetBytes(common.Hex2Bytes("0429D069189E0000"))
-	h := hexutil.Big(*v)
+	v := uint256.NewInt().SetBytes(common.Hex2Bytes("0429D069189E0000"))
+	h := hexutil.Big(*v.ToBig())
 	// The first three should succeed
 	for i := 0; i < 3; i++ {
 		unsigned := dummyTx(h)

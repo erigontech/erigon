@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -62,9 +63,8 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	prependDb  ethdb.Database
-	database   ethdb.Database // In memory database to store our testing data
-	kv         ethdb.KV       // Same as database, but different interface
+	database   ethdb.DbWithPendingMutations // In memory database to store our testing data
+	kv         ethdb.KV                     // Same as database, but different interface
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
@@ -94,13 +94,12 @@ func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.Genesis
 	blockchain.EnableReceipts(true)
 
 	var kv ethdb.KV
-	if hasKV, ok := database.(ethdb.HasAbstractKV); ok {
-		kv = hasKV.AbstractKV()
+	if hasKV, ok := database.(ethdb.HasKV); ok {
+		kv = hasKV.KV()
 	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		prependDb:    database.MemCopy(),
-		database:     database,
+		database:     database.NewBatch(),
 		kv:           kv,
 		engine:       engine,
 		blockchain:   blockchain,
@@ -125,9 +124,8 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	blockchain.EnableReceipts(true)
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		prependDb:    database.MemCopy(),
-		database:     database,
-		kv:           database.AbstractKV(),
+		database:     database.NewBatch(),
+		kv:           database.KV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
@@ -150,6 +148,7 @@ func (b *SimulatedBackend) KV() ethdb.KV {
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() error {
 	b.blockchain.Stop()
+	b.database.Close()
 	return nil
 }
 
@@ -163,7 +162,9 @@ func (b *SimulatedBackend) Commit() {
 		panic(err)
 	}
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
-	b.prependDb = b.database
+	if _, err := b.database.Commit(); err != nil {
+		panic(err)
+	}
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
 }
@@ -173,22 +174,23 @@ func (b *SimulatedBackend) Rollback() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	b.database.Rollback()
 	b.emptyPendingBlock()
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
 	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(int, *core.BlockGen) {})
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(int, *core.BlockGen) {})
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.database.NewBatch(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() *state.IntraBlockState {
-	tds := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	tds := state.NewTrieDbState(b.prependBlock.Root(), b.database.NewBatch(), b.prependBlock.NumberU64())
 	return state.New(tds)
 }
 
@@ -461,16 +463,16 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		balance := b.pendingState.GetBalance(call.From) // from can't be nil
 		available := balance.ToBig()
 		if call.Value != nil {
-			if call.Value.Cmp(available) >= 0 {
+			if call.Value.ToBig().Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
 			}
-			available.Sub(available, call.Value)
+			available.Sub(available, call.Value.ToBig())
 		}
-		allowance := new(big.Int).Div(available, call.GasPrice)
+		allowance := new(big.Int).Div(available, call.GasPrice.ToBig())
 		if hi > allowance.Uint64() {
 			transfer := call.Value
 			if transfer == nil {
-				transfer = new(big.Int)
+				transfer = new(uint256.Int)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer, "gasprice", call.GasPrice, "fundable", allowance)
@@ -543,13 +545,13 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
-		call.GasPrice = big.NewInt(1)
+		call.GasPrice = u256.Num1
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
 	}
 	if call.Value == nil {
-		call.Value = new(big.Int)
+		call.Value = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
 	from := statedb.GetOrNewStateObject(call.From)
@@ -592,7 +594,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	ctx = b.blockchain.WithContext(ctx, big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
@@ -705,7 +707,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	defer b.mu.Unlock()
 
 	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
@@ -727,14 +729,14 @@ type callmsg struct {
 	ethereum.CallMsg
 }
 
-func (m callmsg) From() common.Address { return m.CallMsg.From }
-func (m callmsg) Nonce() uint64        { return 0 }
-func (m callmsg) CheckNonce() bool     { return false }
-func (m callmsg) To() *common.Address  { return m.CallMsg.To }
-func (m callmsg) GasPrice() *big.Int   { return m.CallMsg.GasPrice }
-func (m callmsg) Gas() uint64          { return m.CallMsg.Gas }
-func (m callmsg) Value() *big.Int      { return m.CallMsg.Value }
-func (m callmsg) Data() []byte         { return m.CallMsg.Data }
+func (m callmsg) From() common.Address   { return m.CallMsg.From }
+func (m callmsg) Nonce() uint64          { return 0 }
+func (m callmsg) CheckNonce() bool       { return false }
+func (m callmsg) To() *common.Address    { return m.CallMsg.To }
+func (m callmsg) GasPrice() *uint256.Int { return m.CallMsg.GasPrice }
+func (m callmsg) Gas() uint64            { return m.CallMsg.Gas }
+func (m callmsg) Value() *uint256.Int    { return m.CallMsg.Value }
+func (m callmsg) Data() []byte           { return m.CallMsg.Data }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.

@@ -117,9 +117,10 @@ func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.
 // AddrHash + incarnation + KeyHash
 // For contract storage (for plain state)
 func PlainGenerateCompositeStorageKey(address common.Address, incarnation uint64, key common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.AddressLength+8+common.HashLength)
-	compositeKey = append(compositeKey, PlainGenerateStoragePrefix(address, incarnation)...)
-	compositeKey = append(compositeKey, key[:]...)
+	compositeKey := make([]byte, common.AddressLength+8+common.HashLength)
+	copy(compositeKey, address[:])
+	binary.BigEndian.PutUint64(compositeKey[common.AddressLength:], ^incarnation)
+	copy(compositeKey[common.AddressLength+8:], key[:])
 	return compositeKey
 }
 

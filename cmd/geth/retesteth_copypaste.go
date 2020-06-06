@@ -47,7 +47,7 @@ type RPCTransaction struct {
 func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
 	var signer types.Signer = types.FrontierSigner{}
 	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainId())
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
 	}
 	from, _ := types.Sender(signer, tx)
 	v, r, s := tx.RawSignatureValues()
@@ -55,15 +55,15 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	result := &RPCTransaction{
 		From:     from,
 		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: (*hexutil.Big)(tx.GasPrice()),
+		GasPrice: (*hexutil.Big)(tx.GasPrice().ToBig()),
 		Hash:     tx.Hash(),
 		Input:    hexutil.Bytes(tx.Data()),
 		Nonce:    hexutil.Uint64(tx.Nonce()),
 		To:       tx.To(),
-		Value:    (*hexutil.Big)(tx.Value()),
-		V:        (*hexutil.Big)(v),
-		R:        (*hexutil.Big)(r),
-		S:        (*hexutil.Big)(s),
+		Value:    (*hexutil.Big)(tx.Value().ToBig()),
+		V:        (*hexutil.Big)(v.ToBig()),
+		R:        (*hexutil.Big)(r.ToBig()),
+		S:        (*hexutil.Big)(s.ToBig()),
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = blockHash

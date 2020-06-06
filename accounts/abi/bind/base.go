@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth"
+	"github.com/holiman/uint256"
+
+	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -198,9 +200,9 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	var err error
 
 	// Ensure a valid value field and resolve the account nonce
-	value := opts.Value
-	if value == nil {
-		value = new(big.Int)
+	value := uint256.NewInt()
+	if opts.Value != nil {
+		value.SetFromBig(opts.Value)
 	}
 	var nonce uint64
 	if opts.Nonce == nil {
@@ -212,13 +214,14 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 		nonce = opts.Nonce.Uint64()
 	}
 	// Figure out the gas allowance and gas price values
-	gasPrice := opts.GasPrice
-	if gasPrice == nil {
-		gasPrice, err = c.transactor.SuggestGasPrice(ensureContext(opts.Context))
+	gasPriceBig := opts.GasPrice
+	if gasPriceBig == nil {
+		gasPriceBig, err = c.transactor.SuggestGasPrice(ensureContext(opts.Context))
 		if err != nil {
 			return nil, fmt.Errorf("failed to suggest gas price: %v", err)
 		}
 	}
+	gasPrice, _ := uint256.FromBig(gasPriceBig)
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {
 		// Gas estimation cannot succeed without code for method invocations

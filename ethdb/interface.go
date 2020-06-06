@@ -18,8 +18,6 @@ package ethdb
 
 import (
 	"errors"
-
-	"github.com/ledgerwatch/bolt"
 )
 
 // DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
@@ -82,9 +80,6 @@ type Database interface {
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
 	IdealBatchSize() int
 
-	// DiskSize returns the total disk size of the database in bytes.
-	DiskSize() uint64
-
 	Keys() ([][]byte, error)
 
 	// MemCopy creates a copy of the database in memory.
@@ -115,11 +110,7 @@ type DbWithPendingMutations interface {
 }
 
 type HasKV interface {
-	KV() *bolt.DB
-}
-
-type HasAbstractKV interface {
-	AbstractKV() KV
+	KV() KV
 }
 
 type HasNetInterface interface {

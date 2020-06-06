@@ -6,14 +6,14 @@ linters:
     - errcheck
     - goconst
     - gofmt
-    - golint
+#    - golint
     - interfacer
 
   disable-all: true
 
 linters-settings:
   golint:
-    min-confidence: 0
+    min-confidence: 1
   goconst:
     min-len: 2
     min-occurrences: 2

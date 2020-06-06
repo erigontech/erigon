@@ -22,6 +22,9 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
+	"unsafe"
+
+	"github.com/holiman/uint256"
 )
 
 // https://github.com/ethereum/wiki/wiki/RLP
@@ -112,10 +115,10 @@ func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
 }
 
 type encbuf struct {
-	str     []byte      // string data, contains everything except list headers
-	lheads  []*listhead // all list headers
-	lhsize  int         // sum of sizes of all encoded list headers
-	sizebuf []byte      // 9-byte auxiliary buffer for uint encoding
+	str     []byte     // string data, contains everything except list headers
+	lheads  []listhead // all list headers
+	lhsize  int        // sum of sizes of all encoded list headers
+	sizebuf []byte     // 9-byte auxiliary buffer for uint encoding
 }
 
 type listhead struct {
@@ -201,13 +204,15 @@ func (w *encbuf) encodeString(b []byte) {
 	}
 }
 
-func (w *encbuf) list() *listhead {
-	lh := &listhead{offset: len(w.str), size: w.lhsize}
+func (w *encbuf) list() int {
+	lh := listhead{offset: len(w.str), size: w.lhsize}
+	idx := len(w.lheads)
 	w.lheads = append(w.lheads, lh)
-	return lh
+	return idx
 }
 
-func (w *encbuf) listEnd(lh *listhead) {
+func (w *encbuf) listEnd(idx int) {
+	lh := &w.lheads[idx]
 	lh.size = w.size() - lh.offset - lh.size
 	if lh.size < 56 {
 		w.lhsize++ // length encoded into kind tag
@@ -344,6 +349,10 @@ func makeWriter(typ reflect.Type, ts tags) (writer, error) {
 		return writeBigIntPtr, nil
 	case typ.AssignableTo(bigInt):
 		return writeBigIntNoPtr, nil
+	case typ.AssignableTo(reflect.PtrTo(uint256Int)):
+		return writeUint256Ptr, nil
+	case typ.AssignableTo(uint256Int):
+		return writeUint256NoPtr, nil
 	case kind == reflect.Ptr:
 		return makePtrWriter(typ, ts)
 	case reflect.PtrTo(typ).Implements(encoderInterface):
@@ -428,22 +437,63 @@ func writeBigInt(i *big.Int, w *encbuf) error {
 	return nil
 }
 
+func writeUint256Ptr(val reflect.Value, w *encbuf) error {
+	ptr := val.Interface().(*uint256.Int)
+	if ptr == nil {
+		w.str = append(w.str, EmptyStringCode)
+		return nil
+	}
+	return writeUint256(ptr, w)
+}
+
+func writeUint256NoPtr(val reflect.Value, w *encbuf) error {
+	i := val.Interface().(uint256.Int)
+	return writeUint256(&i, w)
+}
+
+func writeUint256(i *uint256.Int, w *encbuf) error {
+	if i.IsZero() {
+		w.str = append(w.str, EmptyStringCode)
+	} else if i.LtUint64(0x80) {
+		w.str = append(w.str, byte(i.Uint64()))
+	} else {
+		n := i.ByteLen()
+		w.str = append(w.str, EmptyStringCode+byte(n))
+		pos := len(w.str)
+		w.str = append(w.str, make([]byte, n)...)
+		i.WriteToSlice(w.str[pos:])
+	}
+	return nil
+}
+
 func writeBytes(val reflect.Value, w *encbuf) error {
 	w.encodeString(val.Bytes())
 	return nil
 }
 
 func writeByteArray(val reflect.Value, w *encbuf) error {
-	if !val.CanAddr() {
-		// Slice requires the value to be addressable.
-		// Make it addressable by copying.
-		copy := reflect.New(val.Type()).Elem()
-		copy.Set(val)
-		val = copy
-	}
 	size := val.Len()
-	slice := val.Slice(0, size).Bytes()
-	w.encodeString(slice)
+	if size == 1 {
+		b := val.Index(0).Uint()
+		if b <= 0x7f {
+			w.str = append(w.str, byte(b))
+			return nil
+		}
+	}
+	w.encodeStringHeader(size)
+	pos := len(w.str)
+	w.str = append(w.str, make([]byte, size)...)
+	slice := w.str[pos:]
+	if val.CanAddr() {
+		sh := &reflect.SliceHeader{
+			Data: val.UnsafeAddr(),
+			Len:  size,
+			Cap:  size,
+		}
+		copy(slice, *(*[]byte)(unsafe.Pointer(sh)))
+	} else {
+		reflect.Copy(reflect.ValueOf(slice), val)
+	}
 	return nil
 }
 

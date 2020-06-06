@@ -96,13 +96,13 @@ type stEnvMarshaling struct {
 //go:generate gencodec -type stTransaction -field-override stTransactionMarshaling -out gen_sttransaction.go
 
 type stTransaction struct {
-	GasPrice   *big.Int `json:"gasPrice"`
-	Nonce      uint64   `json:"nonce"`
-	To         string   `json:"to"`
-	Data       []string `json:"data"`
-	GasLimit   []uint64 `json:"gasLimit"`
-	Value      []string `json:"value"`
-	PrivateKey []byte   `json:"secretKey"`
+	GasPrice   *uint256.Int `json:"gasPrice"`
+	Nonce      uint64       `json:"nonce"`
+	To         string       `json:"to"`
+	Data       []string     `json:"data"`
+	GasLimit   []uint64     `json:"gasLimit"`
+	Value      []string     `json:"value"`
+	PrivateKey []byte       `json:"secretKey"`
 }
 
 type stTransactionMarshaling struct {
@@ -171,10 +171,11 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, _, err := t.genesis(config).ToBlock(nil, false)
+	block, _, tds1, err := t.genesis(config).ToBlock(nil, false)
 	if err != nil {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
+	defer tds1.Database().Close()
 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
@@ -315,13 +316,13 @@ func (tx *stTransaction) toMessage(ps stPostState) (core.Message, error) {
 	valueHex := tx.Value[ps.Indexes.Value]
 	gasLimit := tx.GasLimit[ps.Indexes.Gas]
 	// Value, Data hex encoding is messy: https://github.com/ethereum/tests/issues/203
-	value := new(big.Int)
+	value := new(uint256.Int)
 	if valueHex != "0x" {
 		v, ok := math.ParseBig256(valueHex)
 		if !ok {
 			return nil, fmt.Errorf("invalid tx value %q", valueHex)
 		}
-		value = v
+		value.SetFromBig(v)
 	}
 	data, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
 	if err != nil {

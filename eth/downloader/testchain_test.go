@@ -20,7 +20,11 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
+	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -45,7 +49,7 @@ var testChainBase = newTestChain(blockCacheItems+200, testDb, testGenesis)
 // Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
 
-func init() {
+func TestMain(m *testing.M) {
 	var forkLen = int(maxForkAncestry + 50)
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -53,6 +57,13 @@ func init() {
 	go func() { testChainForkLightB = testChainBase.makeFork(forkLen, false, 2); wg.Done() }()
 	go func() { testChainForkHeavy = testChainBase.makeFork(forkLen, true, 3); wg.Done() }()
 	wg.Wait()
+
+	result := m.Run()
+
+	// teardown
+	testDb.Close()
+
+	os.Exit(result)
 }
 
 type testChain struct {
@@ -67,7 +78,7 @@ type testChain struct {
 }
 
 // newTestChain creates a blockchain of the given length.
-func newTestChain(length int, db *ethdb.BoltDatabase, genesis *types.Block) *testChain {
+func newTestChain(length int, db ethdb.Database, genesis *types.Block) *testChain {
 	tc := new(testChain).copy(length)
 	tc.db = db
 	tc.genesis = genesis
@@ -138,7 +149,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 		// Include transactions to the miner to make blocks more interesting.
 		if parent == tc.genesis && i%22 == 0 {
 			signer := types.MakeSigner(params.TestChainConfig, block.Number())
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, big.NewInt(1000), params.TxGas, nil, nil), signer, testKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
 			if err != nil {
 				panic(err)
 			}

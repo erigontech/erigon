@@ -18,9 +18,11 @@ package ethclient
 
 import (
 	"errors"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 )
@@ -56,13 +58,13 @@ func (s *senderFromServer) SenderWithContext(_ *secp256k1.Context, tx *types.Tra
 	return s.addr, nil
 }
 
-func (s *senderFromServer) ChainId() *big.Int {
-	return big.NewInt(0)
+func (s *senderFromServer) ChainID() *uint256.Int {
+	return u256.Num0
 }
 
 func (s *senderFromServer) Hash(tx *types.Transaction) common.Hash {
 	panic("can't sign with senderFromServer")
 }
-func (s *senderFromServer) SignatureValues(tx *types.Transaction, sig []byte) (R, S, V *big.Int, err error) {
+func (s *senderFromServer) SignatureValues(tx *types.Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
 	panic("can't sign with senderFromServer")
 }

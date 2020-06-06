@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -56,17 +57,18 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
 			b := tx.Bucket(tuples[bucketStart])
+			c := b.Cursor()
 			l := (bucketEnd - bucketStart) / 3
 			pairs := make([][]byte, 2*l)
 			for i := 0; i < l; i++ {
 				pairs[2*i] = tuples[bucketStart+3*i+1]
 				pairs[2*i+1] = tuples[bucketStart+3*i+2]
 				if pairs[2*i+1] == nil {
-					if err := b.Delete(pairs[2*i]); err != nil {
+					if err := c.Delete(pairs[2*i]); err != nil {
 						return err
 					}
 				} else {
-					if err := b.Put(pairs[2*i], pairs[2*i+1]); err != nil {
+					if err := c.Put(pairs[2*i], pairs[2*i+1]); err != nil {
 						return err
 					}
 				}
@@ -98,8 +100,12 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize() uint64 {
-	return db.kv.Size()
+func (db *ObjectDatabase) DiskSize(ctx context.Context) (common.StorageSize, error) {
+	return db.kv.(HasStats).DiskSize(ctx)
+}
+
+func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
+	return db.kv.(HasStats).BucketsStat(ctx)
 }
 
 // Get returns the value for a given key if it's present.
@@ -269,15 +275,64 @@ func (db *ObjectDatabase) Close() {
 }
 
 func (db *ObjectDatabase) Keys() ([][]byte, error) {
-	panic("not implemented")
+	var keys [][]byte
+	err := db.kv.View(context.Background(), func(tx Tx) error {
+		for _, name := range dbutils.Buckets {
+			var nameCopy = make([]byte, len(name))
+			copy(nameCopy, name)
+			return tx.Bucket(name).Cursor().Walk(func(k, _ []byte) (bool, error) {
+				var kCopy = make([]byte, len(k))
+				copy(kCopy, k)
+				keys = append(append(keys, nameCopy), kCopy)
+				return true, nil
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, err
 }
 
-func (db *ObjectDatabase) AbstractKV() KV {
+func (db *ObjectDatabase) KV() KV {
 	return db.kv
 }
 
 func (db *ObjectDatabase) MemCopy() Database {
-	panic("not implemented")
+	var mem *ObjectDatabase
+	// Open the db and recover any potential corruptions
+	switch db.kv.(type) {
+	case *LmdbKV:
+		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+	case *BoltKV:
+		mem = NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
+	case *badgerDB:
+		mem = NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
+	}
+
+	if err := db.kv.View(context.Background(), func(readTx Tx) error {
+		for _, name := range dbutils.Buckets {
+			name := name
+			b := readTx.Bucket(name)
+			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
+				newBucketToWrite := writeTx.Bucket(name)
+				return b.Cursor().Walk(func(k, v []byte) (bool, error) {
+					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
+						return false, err
+					}
+					return true, nil
+				})
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
+	return mem
 }
 
 func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {

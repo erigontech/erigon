@@ -2,9 +2,9 @@ package stagedsync
 
 import (
 	"fmt"
-	// "os"
+	"os"
 	"runtime"
-	// "runtime/pprof"
+	"runtime/pprof"
 	"sync/atomic"
 	"time"
 
@@ -49,8 +49,14 @@ func (l *progressLogger) Start(numberRef *uint64) {
 			speed := float64(now-prev) / float64(l.interval)
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Executed blocks:", "currentBlock", now, "speed (blk/second)", speed, "state batch", common.StorageSize(l.batch.BatchSize()),
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+			log.Info("Executed blocks:",
+				"currentBlock", now,
+				"speed (blk/second)", speed,
+				"state batch", common.StorageSize(l.batch.BatchSize()),
+				"alloc", int(m.Alloc/1024),
+				"sys", int(m.Sys/1024),
+				"numGC", int(m.NumGC))
+
 			prev = now
 		}
 		for {
@@ -72,6 +78,7 @@ func (l *progressLogger) Stop() {
 
 const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
+const prof = false
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}) error {
 	lastProcessedBlockNumber := s.BlockNumber
@@ -79,18 +86,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	nextBlockNumber := uint64(0)
 
 	atomic.StoreUint64(&nextBlockNumber, lastProcessedBlockNumber+1)
-	/*
-		profileNumber := atomic.LoadUint64(&nextBlockNumber)
+	profileNumber := atomic.LoadUint64(&nextBlockNumber)
+	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
 		if err != nil {
 			log.Error("could not create CPU profile", "error", err)
-			return lastProcessedBlockNumber, err
+			return err
 		}
-		if err1 := pprof.StartCPUProfile(f); err1 != nil {
-			log.Error("could not start CPU profile", "error", err1)
-			return lastProcessedBlockNumber, err
+		if err = pprof.StartCPUProfile(f); err != nil {
+			log.Error("could not start CPU profile", "error", err)
+			return err
 		}
-	*/
+	}
+
 	stateBatch := stateDB.NewBatch()
 	changeBatch := stateDB.NewBatch()
 
@@ -177,12 +185,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				return err
 			}
 		}
-		/*
+
+		if prof {
 			if blockNum-profileNumber == 100000 {
 				// Flush the profiler
 				pprof.StopCPUProfile()
 			}
-		*/
+		}
 	}
 
 	_, err := stateBatch.Commit()

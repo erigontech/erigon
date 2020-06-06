@@ -126,10 +126,10 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	if len(dbPrefixes) == 0 {
 		return nil
 	}
-	if hasKV, ok := db.(ethdb.HasAbstractKV); ok {
-		fstl.kv = hasKV.AbstractKV()
+	if hasKV, ok := db.(ethdb.HasKV); ok {
+		fstl.kv = hasKV.KV()
 	} else {
-		return fmt.Errorf("database doest not implement AbstractKV: %T", db)
+		return fmt.Errorf("database doest not implement KV: %T", db)
 	}
 	fixedbytes := make([]int, len(fixedbits))
 	masks := make([]byte, len(fixedbits))
@@ -279,9 +279,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		fstl.itemPresent = true
 		if len(fstl.k) > common.HashLength {
 			fstl.itemType = StorageStreamItem
-			fstl.storageKey = fstl.k
+			fstl.storageKey = append(fstl.storageKey[:0], fstl.k...)
 			fstl.hashValue = nil
-			fstl.storageValue = fstl.v
+			fstl.storageValue = append(fstl.storageValue[:0], fstl.v...)
 			if fstl.k, fstl.v, err = c.Next(); err != nil {
 				return err
 			}
@@ -290,7 +290,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			}
 		} else {
 			fstl.itemType = AccountStreamItem
-			fstl.accountKey = fstl.k
+			fstl.accountKey = append(fstl.accountKey[:0], fstl.k...)
 			fstl.storageKey = nil
 			fstl.hashValue = nil
 			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
@@ -363,15 +363,15 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	fstl.itemPresent = true
 	if len(fstl.ihK) > common.HashLength {
 		fstl.itemType = SHashStreamItem
-		fstl.storageKey = fstl.ihK
-		fstl.hashValue = fstl.ihV
+		fstl.storageKey = append(fstl.storageKey[:0], fstl.ihK...)
+		fstl.hashValue = append(fstl.hashValue[:0], fstl.ihV...)
 		fstl.storageValue = nil
 		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	} else {
 		fstl.itemType = AHashStreamItem
-		fstl.accountKey = fstl.ihK
+		fstl.accountKey = append(fstl.accountKey[:0], fstl.ihK...)
 		fstl.storageKey = nil
-		fstl.hashValue = fstl.ihV
+		fstl.hashValue = append(fstl.hashValue[:0], fstl.ihV...)
 		fstl.witnessSize = fstl.getWitnessSize(fstl.ihK)
 	}
 

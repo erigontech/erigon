@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -104,10 +105,10 @@ func (b *SyncBloom) init(database ethdb.Database) {
 		//swap  = time.Now()
 	)
 	if atomic.LoadUint32(&b.closed) == 0 {
-		database.Walk(nil, []byte{}, 0, func(key, val []byte) (bool, error) {
+		_ = database.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(key, val []byte) (bool, error) {
 			// If the database entry is a trie node, add it to the bloom
 			if len(key) == common.HashLength {
-				b.bloom.Add(syncBloomHasher(key))
+				b.bloom.Add(syncBloomHasher(common.CopyBytes(key)))
 				bloomLoadMeter.Mark(1)
 			}
 			return true, nil

@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -62,6 +63,10 @@ func (db *RemoteBoltDatabase) Has(bucket, key []byte) (bool, error) {
 		return nil
 	})
 	return has, err
+}
+
+func (db *RemoteBoltDatabase) DiskSizeDiskSize(ctx context.Context) (common.StorageSize, error) {
+	return db.db.(HasStats).DiskSize(ctx)
 }
 
 // Get returns the value for a given key if it's present.

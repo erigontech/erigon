@@ -75,7 +75,9 @@ func TestBoltDB_PutGet(t *testing.T) {
 }
 
 func TestMemoryDB_PutGet(t *testing.T) {
-	testPutGet(NewMemDatabase(), t)
+	db := NewMemDatabase()
+	defer db.Close()
+	testPutGet(db, t)
 }
 
 func TestBadgerDB_PutGet(t *testing.T) {
@@ -94,7 +96,7 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	t.Parallel()
 
 	for _, k := range testValues {
-		err := db.Put(testBucket, []byte(k), nil)
+		err := db.Put(testBucket, []byte(k), []byte{})
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
@@ -186,7 +188,9 @@ func TestBoltDB_ParallelPutGet(t *testing.T) {
 }
 
 func TestMemoryDB_ParallelPutGet(t *testing.T) {
-	testParallelPutGet(NewMemDatabase())
+	db := NewMemDatabase()
+	defer db.Close()
+	testParallelPutGet(db)
 }
 
 func TestLMDB_ParallelPutGet(t *testing.T) {

@@ -66,7 +66,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		dbstate := state.NewDbState(historyDb.AbstractKV(), block.NumberU64()-1)
+		dbstate := state.NewDbState(historyDb.KV(), block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriter()
 		var blockWriter state.StateWriter

@@ -29,6 +29,7 @@ import (
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -87,7 +88,10 @@ func newTester() *downloadTester {
 		ancientChainTd:  map[common.Hash]*big.Int{testGenesis.Hash(): testGenesis.Difficulty()},
 	}
 	tester.stateDb = ethdb.NewMemDatabase()
-	tester.stateDb.Put(nil, testGenesis.Root().Bytes(), []byte{0x00})
+	err := tester.stateDb.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(testGenesis.NumberU64(), testGenesis.Root()), []byte{0x00})
+	if err != nil {
+		panic(err)
+	}
 	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, false)
 	return tester
 }
@@ -96,6 +100,7 @@ func newTester() *downloadTester {
 // held resources.
 func (dl *downloadTester) terminate() {
 	dl.downloader.Terminate()
+	dl.stateDb.Close()
 }
 
 // sync starts synchronizing with a remote peer, blocking until it completes.
@@ -190,7 +195,7 @@ func (dl *downloadTester) CurrentBlock() *types.Block {
 	for i := len(dl.ownHashes) - 1; i >= 0; i-- {
 		if block := dl.ancientBlocks[dl.ownHashes[i]]; block != nil {
 			// FIXME: Support ancients
-			if _, err := dl.stateDb.Get(nil, block.Root().Bytes()); err == nil {
+			if _, err := dl.stateDb.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(block.NumberU64(), block.Root())); err == nil {
 				return block
 			}
 			return block
@@ -298,7 +303,10 @@ func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i
 		}
 		dl.ownBlocks[block.Hash()] = block
 		dl.ownReceipts[block.Hash()] = make(types.Receipts, 0)
-		dl.stateDb.Put(nil, block.Root().Bytes(), []byte{0x00})
+		err := dl.stateDb.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(block.NumberU64(), block.Root()), []byte{0x00})
+		if err != nil {
+			panic(err)
+		}
 		dl.ownChainTd[block.Hash()] = new(big.Int).Add(dl.ownChainTd[block.ParentHash()], block.Difficulty())
 	}
 	return len(blocks), nil
@@ -509,6 +517,7 @@ func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Create a small enough block chain to download
 	chain := testChainBase.shorten(blockCacheItems - 15)
@@ -535,6 +544,7 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 	t.Parallel()
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Create a long block chain to download and the tester
 	targetBlocks := testChainBase.len() - 1
@@ -625,6 +635,7 @@ func testForkedSync(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chainA := testChainForkLightA.shorten(testChainBase.len() + 80)
 	chainB := testChainForkLightB.shorten(testChainBase.len() + 80)
@@ -660,6 +671,7 @@ func testHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chainA := testChainForkLightA.shorten(testChainBase.len() + 80)
 	chainB := testChainForkHeavy.shorten(testChainBase.len() + 80)
@@ -696,6 +708,7 @@ func testBoundedForkedSync(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chainA := testChainForkLightA
 	chainB := testChainForkLightB
@@ -731,6 +744,7 @@ func testBoundedHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Create a long enough forked chain
 	chainA := testChainForkLightA
@@ -757,6 +771,7 @@ func TestInactiveDownloader62(t *testing.T) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Check that neither block headers nor bodies are accepted
 	if err := tester.downloader.DeliverHeaders("bad peer", []*types.Header{}); err != errNoSyncActive {
@@ -774,6 +789,7 @@ func TestInactiveDownloader63(t *testing.T) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Check that neither block headers nor bodies are accepted
 	if err := tester.downloader.DeliverHeaders("bad peer", []*types.Header{}); err != errNoSyncActive {
@@ -802,6 +818,7 @@ func testCancel(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chain := testChainBase.shorten(MaxHeaderFetch)
 	tester.newPeer("peer", protocol, chain)
@@ -867,6 +884,7 @@ func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Create a small enough block chain to download
 	chain := testChainBase.shorten(blockCacheItems - 15)
@@ -962,6 +980,7 @@ func testMissingHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chain := testChainBase.shorten(blockCacheItems - 15)
 	brokenChain := chain.shorten(chain.len())
@@ -995,6 +1014,7 @@ func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chain := testChainBase.shorten(blockCacheItems - 15)
 
@@ -1028,6 +1048,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	// Create a small enough block chain to download
 	targetBlocks := 3*fsHeaderSafetyNet + 256 + fsMinFullBlocks
@@ -1125,6 +1146,7 @@ func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	chain := testChainBase.shorten(1)
 	tester.newPeer("attack", protocol, chain)
@@ -1165,6 +1187,7 @@ func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 	// Run the tests and check disconnection status
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 	chain := testChainBase.shorten(1)
 
 	for i, tt := range tests {
@@ -1202,6 +1225,7 @@ func testSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 	chain := testChainBase.shorten(blockCacheItems - 15)
 
 	// Set a sync init hook to catch progress changes
@@ -1287,6 +1311,7 @@ func testForkedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 	chainA := testChainForkLightA.shorten(testChainBase.len() + MaxHashFetch)
 	chainB := testChainForkLightB.shorten(testChainBase.len() + MaxHashFetch)
 
@@ -1364,6 +1389,8 @@ func testFailedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
+
 	chain := testChainBase.shorten(blockCacheItems - 15)
 
 	// Set a sync init hook to catch progress changes
@@ -1438,6 +1465,7 @@ func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 	chain := testChainBase.shorten(blockCacheItems - 15)
 
 	// Set a sync init hook to catch progress changes
@@ -1527,10 +1555,12 @@ func TestDeliverHeadersHang(t *testing.T) {
 func testDeliverHeadersHang(t *testing.T, protocol int, mode SyncMode) {
 	master := newTester()
 	defer master.terminate()
+	defer master.peerDb.Close()
 	chain := testChainBase.shorten(15)
 
 	for i := 0; i < 200; i++ {
 		tester := newTester()
+		tester.peerDb.Close()
 		tester.peerDb = master.peerDb
 		tester.newPeer("peer", protocol, chain)
 
@@ -1685,6 +1715,7 @@ func testCheckpointEnforcement(t *testing.T, protocol int, mode SyncMode) {
 	// Create a new tester with a particular hard coded checkpoint block
 	tester := newTester()
 	defer tester.terminate()
+	defer tester.peerDb.Close()
 
 	tester.downloader.checkpoint = uint64(fsMinFullBlocks) + 256
 	chain := testChainBase.shorten(int(tester.downloader.checkpoint) - 1)

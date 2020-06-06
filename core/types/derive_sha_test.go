@@ -3,8 +3,9 @@ package types
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -15,7 +16,7 @@ func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
 	for i := uint64(0); i < n; i++ {
-		tx := NewTransaction(i, common.Address{}, big.NewInt(1000+int64(i)), 10+i, big.NewInt(1000+int64(i)), []byte(fmt.Sprintf("hello%d", i)))
+		tx := NewTransaction(i, common.Address{}, uint256.NewInt().SetUint64(1000+i), 10+i, uint256.NewInt().SetUint64(1000+i), []byte(fmt.Sprintf("hello%d", i)))
 		txs = append(txs, tx)
 	}
 

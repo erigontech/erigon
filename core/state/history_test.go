@@ -155,7 +155,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := ethdb.GetAsOf(db.AbstractKV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, acc.Incarnation, k), 1)
+			res, err := ethdb.GetAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, acc.Incarnation, k), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -426,7 +426,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [72]byte
-	err = ethdb.WalkAsOf(db.AbstractKV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	err = ethdb.WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -438,7 +438,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = ethdb.WalkAsOf(db.AbstractKV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = ethdb.WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -450,7 +450,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = ethdb.WalkAsOf(db.AbstractKV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = ethdb.WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)

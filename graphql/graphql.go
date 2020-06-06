@@ -177,7 +177,7 @@ func (t *Transaction) GasPrice(ctx context.Context) (hexutil.Big, error) {
 	if err != nil || tx == nil {
 		return hexutil.Big{}, err
 	}
-	return hexutil.Big(*tx.GasPrice()), nil
+	return hexutil.Big(*tx.GasPrice().ToBig()), nil
 }
 
 func (t *Transaction) Value(ctx context.Context) (hexutil.Big, error) {
@@ -185,7 +185,7 @@ func (t *Transaction) Value(ctx context.Context) (hexutil.Big, error) {
 	if err != nil || tx == nil {
 		return hexutil.Big{}, err
 	}
-	return hexutil.Big(*tx.Value()), nil
+	return hexutil.Big(*tx.Value().ToBig()), nil
 }
 
 func (t *Transaction) Nonce(ctx context.Context) (hexutil.Uint64, error) {
@@ -219,7 +219,7 @@ func (t *Transaction) From(ctx context.Context, args BlockNumberArgs) (*Account,
 	}
 	var signer types.Signer = types.HomesteadSigner{}
 	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainId())
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
 	}
 	from, _ := types.Sender(signer, tx)
 
@@ -324,7 +324,7 @@ func (t *Transaction) R(ctx context.Context) (hexutil.Big, error) {
 		return hexutil.Big{}, err
 	}
 	_, r, _ := tx.RawSignatureValues()
-	return hexutil.Big(*r), nil
+	return hexutil.Big(*r.ToBig()), nil
 }
 
 func (t *Transaction) S(ctx context.Context) (hexutil.Big, error) {
@@ -333,7 +333,7 @@ func (t *Transaction) S(ctx context.Context) (hexutil.Big, error) {
 		return hexutil.Big{}, err
 	}
 	_, _, s := tx.RawSignatureValues()
-	return hexutil.Big(*s), nil
+	return hexutil.Big(*s.ToBig()), nil
 }
 
 func (t *Transaction) V(ctx context.Context) (hexutil.Big, error) {
@@ -342,7 +342,7 @@ func (t *Transaction) V(ctx context.Context) (hexutil.Big, error) {
 		return hexutil.Big{}, err
 	}
 	v, _, _ := tx.RawSignatureValues()
-	return hexutil.Big(*v), nil
+	return hexutil.Big(*v.ToBig()), nil
 }
 
 type BlockType int

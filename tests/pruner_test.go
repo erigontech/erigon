@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -32,8 +33,9 @@ func TestBasisAccountPruning(t *testing.T) {
 	t.Skip()
 
 	// Configure and generate a sample block chain
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db       = ethdb.NewMemDatabase()
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -63,6 +65,7 @@ func TestBasisAccountPruning(t *testing.T) {
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
+	defer genesisDb.Close()
 
 	numBlocks := 10
 	engine := ethash.NewFaker()
@@ -91,7 +94,7 @@ func TestBasisAccountPruning(t *testing.T) {
 			addr = address2
 			k = key2
 		}
-		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, k)
+		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, uint256.NewInt().SetUint64(1000), 21000, new(uint256.Int), nil), signer, k)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
@@ -188,8 +191,9 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 	t.Skip()
 
 	// Configure and generate a sample block chain
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db       = ethdb.NewMemDatabase()
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -219,6 +223,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
+	defer genesisDb.Close()
 
 	numBlocks := 10
 	engine := ethash.NewFaker()
@@ -252,7 +257,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 			addr = address2
 			k = key2
 		}
-		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, k)
+		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, uint256.NewInt().SetUint64(1000), 21000, new(uint256.Int), nil), signer, k)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
@@ -345,8 +350,9 @@ func TestStoragePruning(t *testing.T) {
 	t.Skip()
 
 	// Configure and generate a sample block chain
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db       = ethdb.NewMemDatabase()
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -373,6 +379,7 @@ func TestStoragePruning(t *testing.T) {
 		genesis   = gspec.MustCommit(db)
 		genesisDb = db.MemCopy()
 	)
+	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
@@ -541,8 +548,9 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 	t.Skip()
 
 	// Configure and generate a sample block chain
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db       = ethdb.NewMemDatabase()
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -572,6 +580,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
+	defer genesisDb.Close()
 
 	numBlocks := 25
 	engine := ethash.NewFaker()
@@ -599,7 +608,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 			addr = address2
 			k = key2
 		}
-		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, k)
+		tx, genErr = types.SignTx(types.NewTransaction(block.TxNonce(addr), theAddr, uint256.NewInt().SetUint64(1000), 21000, new(uint256.Int), nil), signer, k)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
