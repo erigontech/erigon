@@ -91,3 +91,21 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
 }
+
+func TestUnwindHashed(t *testing.T) {
+	db1 := ethdb.NewMemDatabase()
+	db2 := ethdb.NewMemDatabase()
+
+	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
+	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
+
+	err := promoteHashedState(db2, 0, 100, getDataDir(), nil)
+	if err != nil {
+		t.Errorf("error while promoting state: %v", err)
+	}
+	err = unwindHashCheckStage(50, db2, getDataDir(), nil)
+	if err != nil {
+		t.Errorf("error while unwind state: %v", err)
+	}
+	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
+}
