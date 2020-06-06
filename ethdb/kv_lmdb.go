@@ -9,7 +9,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/AskAlexSharov/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -50,18 +50,15 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
+		err = env.SetMapSize(32 << 20) // 32MB
 		logger = log.New("lmdb", "inMem")
-		err = env.SetMapSize(1 << 22) // 4MB
 		if err != nil {
 			return nil, err
 		}
 		opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
-		//opts.path = path.Join(os.TempDir(), "lmdb-in-memory")
-		//opts.path = "lmdb_tmp"
 	} else {
+		err = env.SetMapSize(32 << 40) // 32TB
 		logger = log.New("lmdb", path.Base(opts.path))
-
-		err = env.SetMapSize(1 << 45) // 1TB
 		if err != nil {
 			return nil, err
 		}
