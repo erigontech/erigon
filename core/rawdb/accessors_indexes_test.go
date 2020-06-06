@@ -46,6 +46,7 @@ func TestLookupStorage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
+			defer db.Close()
 			ctx := context.Background()
 
 			tx1 := types.NewTransaction(1, common.BytesToAddress([]byte{0x11}), uint256.NewInt().SetUint64(111), 1111, uint256.NewInt().SetUint64(11111), []byte{0x11, 0x11, 0x11})

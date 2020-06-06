@@ -195,6 +195,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 
 func generateTestChain() (*core.Genesis, []*types.Block) {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	config := params.AllEthashProtocolChanges
 	genesis := &core.Genesis{
 		Config:    config,
