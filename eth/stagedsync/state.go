@@ -25,6 +25,11 @@ func (s *State) NextStage() {
 	s.currentStage++
 }
 
+func (s *State) GetLocalHeight(db ethdb.Database) (uint64, error) {
+	state, err := s.StageState(stages.Headers, db)
+	return state.BlockNumber, err
+}
+
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 	for _, stage := range s.stages {
 		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, db); err != nil {

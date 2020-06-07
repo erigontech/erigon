@@ -1,11 +1,7 @@
 package stagedsync
 
-import (
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-)
-
-func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, headersFetchers []func() error, datadir string, u Unwinder, quitCh chan struct{}) error {
-	err := d.SpawnSync(headersFetchers)
+func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
+	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
 	if err == nil {
 		s.Done()
 	}

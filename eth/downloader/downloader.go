@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -160,6 +159,12 @@ type Downloader struct {
 	// generate history index, disable/enable pruning
 	history bool
 	datadir string
+
+	headersState    *stagedsync.StageState
+	headersUnwinder stagedsync.Unwinder
+
+	bodiesState    *stagedsync.StageState
+	bodiesUnwinder stagedsync.Unwinder
 
 	stagedSync *stagedsync.State
 }
@@ -753,7 +758,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	case FastSync:
 		localHeight = d.blockchain.CurrentFastBlock().NumberU64()
 	case StagedSync:
-		localHeight, err = stages.GetStageProgress(d.stateDB, stages.Headers)
+		localHeight, err = d.stagedSync.GetLocalHeight(d.stateDB)
 		if err != nil {
 			return 0, err
 		}
@@ -1525,21 +1530,17 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						var newCanonical bool
 						var lowestCanonicalNumber uint64
 						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
-						if newCanonical && d.stagedSync != nil {
+						if newCanonical && d.headersUnwinder != nil {
 							// Need to unwind further stages
-							if err1 := d.stagedSync.UnwindTo(lowestCanonicalNumber, d.stateDB); err1 != nil {
+							if err1 := d.headersUnwinder.UnwindTo(lowestCanonicalNumber, d.stateDB); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
 						}
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
-					if d.mode == StagedSync && n > 0 && d.stagedSync != nil {
-						state, err1 := d.stagedSync.StageState(stages.Headers, d.stateDB)
-						if err1 != nil {
-							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
-						}
-						if err1 = state.Update(d.stateDB, chunk[n-1].Number.Uint64()); err1 != nil {
+					if d.mode == StagedSync && n > 0 && d.headersState != nil {
+						if err1 := d.headersState.Update(d.stateDB, chunk[n-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
@@ -1647,8 +1648,8 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 		}
 		return 0, errInvalidChain
 	}
-	if d.mode == StagedSync && index > 0 {
-		if err1 := stages.SaveStageProgress(d.stateDB, stages.Bodies, blocks[index-1].NumberU64()); err1 != nil {
+	if d.mode == StagedSync && index > 0 && d.bodiesState != nil {
+		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
 			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
 		}
 		return blocks[index-1].NumberU64() + 1, nil

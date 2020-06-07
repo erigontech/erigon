@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func spawnBodyDownloadStage(s *StageState, d DownloaderGlue, pid string) error {
-	cont, err := d.SpawnBodyDownloadStage(pid, s.BlockNumber)
+func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid string) error {
+	cont, err := d.SpawnBodyDownloadStage(pid, s, u)
 	if err != nil {
 		return err
 	}

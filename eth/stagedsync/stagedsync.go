@@ -26,14 +26,17 @@ func PrepareStagedSync(
 			ID:          stages.Headers,
 			Description: "Downloading headers",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return DownloadHeaders(s, d, stateDB, headersFetchers, datadir, u, quitCh)
+				return SpawnHeaderDownloadStage(s, u, d, headersFetchers)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnBodyDownloadStage(s, d, pid)
+				return spawnBodyDownloadStage(s, u, d, pid)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindBodyDownloadStage(stateDB, u)
