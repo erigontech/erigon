@@ -2581,7 +2581,7 @@ func main() {
 		testSeek(*chaindata)
 	}
 	if *action == "stage5" {
-		if err := testStage5(*chaindata, false /* reset */); err != nil {
+		if err := testStage5(*chaindata, true /* reset */); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
