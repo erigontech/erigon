@@ -9,7 +9,7 @@ import (
 )
 
 //nolint:interfacer
-func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnIntermediateHashesStage(_ *StageState, stateDB ethdb.Database, _ string, _ chan struct{}) error {
 	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.IntermediateHashes)
 	if err != nil {
 		return fmt.Errorf("IntermediateHashes: get stage progress: %w", err)
@@ -22,7 +22,7 @@ func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir
 }
 
 //nolint:interfacer
-func unwindIntermediateHashesStage(unwindPoint uint64, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+func unwindIntermediateHashesStage(unwindPoint uint64, stateDB ethdb.Database, _ string, _ chan struct{}) error {
 	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.IntermediateHashes)
 	if err != nil {
 		return fmt.Errorf("unwind IntermediateHashes: get stage progress: %w", err)
