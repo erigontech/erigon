@@ -124,6 +124,8 @@ func TestGenerateTxLookup3_Experiment(t *testing.T) {
 	//loadTime 3m56.486721504s
 	//  (382.46s)
 	// from 7 to 8 loadTime 18m12.876813361s (1685.61s)
+	//full loadTime 1.50  (11283.24s)
+
 	t.Run("1", func(t *testing.T) {
 		err:=etl.Transform(db,dbutils.HeaderPrefix,txLookupBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 			if !dbutils.CheckCanonicalKey(k) {
@@ -161,6 +163,7 @@ func TestGenerateTxLookup3_Experiment(t *testing.T) {
 	//loadTime 2m47.481593132s
 	//--- PASS: TestGenerateTxLookup3_Experiment/2 (300.68s)
 	//from 7 to 8 loadTime 17m46.684844364s 1610.34s
+	// full loadTime 2h1m54.454463304s (11844.04s)
 	t.Run("2", func(t *testing.T) {
 		//startKey2:=dbutils.HeaderHashKey(7150000)
 		err:=etl.Transform2(db,dbutils.HeaderPrefix,txLookupBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc2) error {
@@ -191,7 +194,11 @@ func TestGenerateTxLookup3_Experiment(t *testing.T) {
 			}
 			vv:=new(big.Int).SetUint64(binary.BigEndian.Uint64(value))
 			return next(k,vv.Bytes())
-		}, etl.TransformArgs2{Quit: quit, ExtractStartKeys: [][]byte{ startKey}, ExtractEndKeys:[][]byte{endKey}})
+		}, etl.TransformArgs2{
+			Quit: quit,
+			//ExtractStartKeys: [][]byte{ startKey},
+			//ExtractEndKeys:[][]byte{endKey},
+		})
 		if err!=nil {
 			t.Fatal(err)
 		}
