@@ -183,10 +183,6 @@ func TestStateErroredStage(t *testing.T) {
 	assert.Equal(t, expectedFlow, flow)
 }
 
-func unwindOf(s stages.SyncStage) stages.SyncStage {
-	return stages.SyncStage(0xF - s)
-}
-
 func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	flow := make([]stages.SyncStage, 0)
@@ -229,7 +225,9 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			Description: "Recovering senders from tx signatures",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				if s.BlockNumber == 0 {
-					s.Update(db, 1700)
+					if err := s.Update(db, 1700); err != nil {
+						return err
+					}
 				}
 				flow = append(flow, stages.Senders)
 				if !unwound {
@@ -555,4 +553,8 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	// interrupt a stage that is too big to fit in one batch,
 	// so the db is in inconsitent state, so we have to restart with that
 	t.Error("implement me")
+}
+
+func unwindOf(s stages.SyncStage) stages.SyncStage {
+	return 0xF - s
 }

@@ -25,7 +25,7 @@ func (s *State) NextStage() {
 	s.currentStage++
 }
 
-func (s *State) GetLocalHeight(db ethdb.Database) (uint64, error) {
+func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 	state, err := s.StageState(stages.Headers, db)
 	return state.BlockNumber, err
 }
@@ -91,7 +91,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *State) Run(db ethdb.Database) error {
+func (s *State) Run(db ethdb.GetterPutter) error {
 	for !s.IsDone() {
 		if unwind := s.unwindStack.Pop(); unwind != nil {
 			log.Info("Unwinding...")
@@ -106,7 +106,9 @@ func (s *State) Run(db ethdb.Database) error {
 				}
 
 				if stageState.BlockNumber <= unwind.UnwindPoint {
-					unwind.Skip(db)
+					if err = unwind.Skip(db); err != nil {
+						return err
+					}
 					continue
 				}
 

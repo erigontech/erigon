@@ -25,7 +25,7 @@ func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, _ strin
 }
 
 //nolint:interfacer
-func unwindIntermediateHashesStage(u *UnwindState, s *StageState, stateDB ethdb.Database, _ string, _ chan struct{}) error {
+func unwindIntermediateHashesStage(u *UnwindState, _ *StageState, stateDB ethdb.Database, _ string, _ chan struct{}) error {
 	if err := u.Done(stateDB); err != nil {
 		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
 	}

@@ -137,7 +137,8 @@ func TestUnwindOverrideWithLower(t *testing.T) {
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	stack.Add(UnwindState{stages[0], 5}, db)
+	err := stack.Add(UnwindState{stages[0], 5}, db)
+	assert.NoError(t, err)
 
 	// we append if the next unwind is to the lower block
 	assert.Equal(t, 4, len(stack.unwindStack))
@@ -159,7 +160,8 @@ func TestUnwindOverrideWithHigher(t *testing.T) {
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	stack.Add(UnwindState{stages[0], 105}, db)
+	err := stack.Add(UnwindState{stages[0], 105}, db)
+	assert.NoError(t, err)
 
 	// we ignore if next unwind is to the higher block
 	assert.Equal(t, 3, len(stack.unwindStack))
@@ -181,7 +183,8 @@ func TestUnwindOverrideWithTheSame(t *testing.T) {
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	stack.Add(UnwindState{stages[0], 10}, db)
+	err := stack.Add(UnwindState{stages[0], 10}, db)
+	assert.NoError(t, err)
 
 	// we ignore if next unwind is to the higher block
 	assert.Equal(t, 3, len(stack.unwindStack))

@@ -50,7 +50,7 @@ func (s *PersistentUnwindStack) Empty() bool {
 	return len(s.unwindStack) == 0
 }
 
-func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.Database) error {
+func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error {
 	currentPoint, err := stages.GetStageUnwind(db, u.Stage)
 	if err != nil {
 		return err
