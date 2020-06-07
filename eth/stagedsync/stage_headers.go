@@ -34,8 +34,10 @@ func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, he
 			err = unwindSendersStage(stateDB, unwindPoint)
 		case stages.Execution:
 			err = unwindExecutionStage(unwindPoint, stateDB)
-		case stages.HashCheck:
-			err = unwindHashCheckStage(unwindPoint, stateDB, datadir, quitCh)
+		case stages.HashState:
+			err = unwindHashStateStage(unwindPoint, stateDB, datadir, quitCh)
+		case stages.IntermediateHashes:
+			err = unwindIntermediateHashesStage(unwindPoint, stateDB, datadir, quitCh)
 		case stages.AccountHistoryIndex:
 			err = unwindAccountHistoryIndex(unwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
 		case stages.StorageHistoryIndex:
