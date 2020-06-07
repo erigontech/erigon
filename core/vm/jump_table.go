@@ -634,6 +634,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		PUSH1: {
 			execute:     opPush1,
+			saExecute: 	 saPush1,
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),

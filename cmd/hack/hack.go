@@ -9,6 +9,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"github.com/holiman/uint256"
 	"io"
 	"io/ioutil"
 	"math"
@@ -2431,6 +2432,43 @@ func testStageLoop(chaindata string) error {
 	return nil
 }
 
+type dummyAccount struct{}
+
+func (dummyAccount) SubBalance(amount *big.Int)                          {}
+func (dummyAccount) AddBalance(amount *big.Int)                          {}
+func (dummyAccount) SetAddress(common.Address)                           {}
+func (dummyAccount) Value() *big.Int                                     { return nil }
+func (dummyAccount) SetBalance(*big.Int)                                 {}
+func (dummyAccount) SetNonce(uint64)                                     {}
+func (dummyAccount) Balance() *big.Int                                   { return nil }
+func (dummyAccount) Address() common.Address                             { return common.Address{} }
+func (dummyAccount) ReturnGas(*big.Int)                                  {}
+func (dummyAccount) SetCode(common.Hash, []byte)                         {}
+func (dummyAccount) ForEachStorage(cb func(key, value common.Hash) bool) {}
+
+type dummyStatedb struct {
+	state.IntraBlockState
+}
+
+func (*dummyStatedb) GetRefund() uint64 { return 1337 }
+
+func testGenCfg() error {
+	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig,
+				vm.Config{
+					EVMInterpreter: "SaInterpreter",
+				}, nil)
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
+	//contract.Code = []byte{byte(vm.ADD), 0x1, 0x1, 0x0}
+
+	_, err := env.Interpreter().Run(contract, []byte{}, false)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2592,6 +2630,11 @@ func main() {
 	}
 	if *action == "stageLoop" {
 		if err := testStageLoop(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "cfg" {
+		if err := testGenCfg(); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

@@ -23,6 +23,11 @@ func newSaStack() *SaStack {
 	return &SaStack{}
 }
 
+func (st *SaStack) Push(d *uint256.Int) {
+	// NOTE push limit (1024) is checked in baseCheck
+	st.data = append(st.data, *d)
+}
+
 func (st *SaStack) pop() (ret uint256.Int, kind SaStackItem) {
 	ret = st.data[len(st.data)-1]
 	kind = st.kinds[len(st.kinds)-1]

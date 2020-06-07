@@ -232,3 +232,18 @@ func saAnd(pc *uint64, interpreter *SaInterpreter, callContext *saCallCtx) ([]by
 		y.And(x, y)
 	})
 }
+
+// opPush1 is a specialized version of pushN
+func saPush1(pc *uint64, interpreter *SaInterpreter, callContext *saCallCtx) ([]byte, error) {
+	var (
+		codeLen = uint64(len(callContext.contract.Code))
+		integer = new(uint256.Int)
+	)
+	*pc++
+	if *pc < codeLen {
+		callContext.stack.Push(integer.SetUint64(uint64(callContext.contract.Code[*pc])))
+	} else {
+		callContext.stack.Push(integer)
+	}
+	return nil, nil
+}
