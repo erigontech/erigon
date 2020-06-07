@@ -47,6 +47,8 @@ const (
 var (
 	hashT    = reflect.TypeOf(Hash{})
 	addressT = reflect.TypeOf(Address{})
+
+	EmptyHash Hash = [HashLength]byte{}
 )
 
 // Hash represents the 32 byte Keccak256 hash of arbitrary data.
@@ -160,6 +162,10 @@ func (h *Hash) UnmarshalGraphQL(input interface{}) error {
 		err = fmt.Errorf("unexpected type %T for Hash", input)
 	}
 	return err
+}
+
+func (h *Hash) IsEmpty() bool {
+	return *h == EmptyHash
 }
 
 // UnprefixedHash allows marshaling a Hash without 0x prefix.

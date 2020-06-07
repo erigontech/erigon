@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 
@@ -40,22 +41,6 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 		return err
 	}
 
-	/*
-		err := etl.Transform(
-			stateDB,
-			dbutils.PlainStateBucket,
-			dbutils.CurrentStateBucket,
-			datadir,
-			keyTransformExtractFunc(transformPlainStateKey),
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{Quit: quitCh},
-		)
-
-		if err != nil {
-			return err
-		}
-	*/
-
 	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
@@ -66,7 +51,6 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 		}
 	}()
 
-	emptyHash := common.Hash{}
 	blockNumber := big.NewInt(0)
 
 	const batchSize = 1000
@@ -96,20 +80,14 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 			return err
 		}
 
-		hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
-		if hash == emptyHash {
+		job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
+		if job == nil {
 			break
 		}
-		body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
-		if body == nil {
-			break
-		}
-		blockNumber.SetUint64(nextBlockNumber)
-		s := types.MakeSigner(config, blockNumber)
 
-		jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
+		jobs <- job
 
-		nextBlockNumber++
+		atomic.AddUint64(&nextBlockNumber, 1)
 	}
 
 	fmt.Println("DONE?")
@@ -122,6 +100,23 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	s.Done()
 	fmt.Println("DONE!!!")
 	return nil
+}
+
+func getBlockBody(mutation *mutationSafe, config *params.ChainConfig, blockNumber *big.Int, nextBlockNumber uint64) *senderRecoveryJob {
+	hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
+	if hash.IsEmpty() {
+		return nil
+	}
+
+	body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
+	if body == nil {
+		return nil
+	}
+
+	blockNumber.SetUint64(nextBlockNumber)
+	s := types.MakeSigner(config, blockNumber)
+
+	return &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
 }
 
 type mutationSafe struct {
@@ -227,17 +222,9 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 		if job == nil {
 			return
 		}
-		for _, tx := range job.blockBody.Transactions {
-			from, err := job.signer.SenderWithContext(cryptoContext, tx)
-			if err != nil {
-				job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
-				break
-			}
-			tx.SetFrom(from)
-			if tx.Protected() && tx.ChainID().Cmp(job.signer.ChainID()) != 0 {
-				job.err = errors.New("invalid chainId")
-				break
-			}
+
+		if err := recoverFrom(cryptoContext, job.blockBody, job.signer); err != nil {
+			job.err = err
 		}
 
 		// prevent sending to close channel
@@ -250,6 +237,40 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 			return
 		}
 	}
+}
+
+func setFrom(blockNumber *big.Int, config *params.ChainConfig, mutation *mutationSafe, cryptoContext *secp256k1.Context) error {
+	number := blockNumber.Uint64()
+	hash := rawdb.ReadCanonicalHash(mutation, number)
+	if hash.IsEmpty() {
+		return nil
+	}
+
+	body := rawdb.ReadBody(mutation, hash, number)
+	if body == nil {
+		return nil
+	}
+
+	s := types.MakeSigner(config, blockNumber)
+
+	if err := recoverFrom(cryptoContext, body, s); err != nil {
+		return err
+	}
+	return nil
+}
+
+func recoverFrom(cryptoContext *secp256k1.Context, blockBody *types.Body, signer types.Signer) error {
+	for _, tx := range blockBody.Transactions {
+		from, err := signer.SenderWithContext(cryptoContext, tx)
+		if err != nil {
+			return errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
+		}
+		tx.SetFrom(from)
+		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
+			return errors.New("invalid chainId")
+		}
+	}
+	return nil
 }
 
 func unwindSendersStage(stateDB ethdb.Database, unwindPoint uint64) error {
