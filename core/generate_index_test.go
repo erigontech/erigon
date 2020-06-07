@@ -58,8 +58,8 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	buckets := [][]byte{dbutils.StorageChangeSetBucket}
-	//buckets:=[][]byte{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket, dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	//buckets := [][]byte{dbutils.StorageChangeSetBucket}
+	buckets:=[][]byte{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket, dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
 	for i := range buckets {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
@@ -180,12 +180,12 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 		}
 	}
 
-	expected1 := make([][]uint64, 0)
-	expected1 = append(expected1, make([]uint64, 0))
-	expected2 := make([][]uint64, 0)
-	expected2 = append(expected2, make([]uint64, 0))
-	expected3 := make([][]uint64, 0)
-	expected3 = append(expected3, make([]uint64, 0))
+	expected1 := make([]dbutils.HistoryIndexBytes, 0)
+	expected1 = append(expected1, dbutils.NewHistoryIndex())
+	expected2 := make([]dbutils.HistoryIndexBytes, 0)
+	expected2 = append(expected2, dbutils.NewHistoryIndex())
+	expected3 := make([]dbutils.HistoryIndexBytes, 0)
+	expected3 = append(expected3, dbutils.NewHistoryIndex())
 
 	for i := 0; i < numOfBlocks; i++ {
 		cs := csInfo.New()
@@ -194,31 +194,45 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 			t.Fatal(err)
 		}
 
-		if len(expected1[len(expected1)-1]) == dbutils.MaxChunkSize {
-			expected1 = append(expected1, make([]uint64, 0))
+		if dbutils.CheckNewIndexChunk(expected1[len(expected1)-1], uint64(i)) {
+			expected1 = append(expected1, dbutils.NewHistoryIndex())
 		}
-		expected1[len(expected1)-1] = append(expected1[len(expected1)-1], uint64(i))
+		expected1[len(expected1)-1] = expected1[len(expected1)-1].Append(uint64(i), false)
+
+		//if len() == dbutils.MaxChunkSize {
+		//
+		//}
+		//expected1[len(expected1)-1] = append(expected1[len(expected1)-1], uint64(i))
 
 		if i%2 == 0 {
 			err = cs.Add(addrs[1], []byte(strconv.Itoa(i)))
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			if len(expected2[len(expected2)-1]) == dbutils.MaxChunkSize {
-				expected2 = append(expected2, make([]uint64, 0))
+			if dbutils.CheckNewIndexChunk(expected2[len(expected2)-1], uint64(i)) {
+				expected2 = append(expected2, dbutils.NewHistoryIndex())
 			}
-			expected2[len(expected2)-1] = append(expected2[len(expected2)-1], uint64(i))
+			expected2[len(expected2)-1] = expected2[len(expected2)-1].Append(uint64(i), false)
+
+			//if len(expected2[len(expected2)-1]) == dbutils.MaxChunkSize {
+			//	expected2 = append(expected2, make([]uint64, 0))
+			//}
+			//expected2[len(expected2)-1] = append(expected2[len(expected2)-1], uint64(i))
 		}
 		if i%3 == 0 {
 			err = cs.Add(addrs[2], []byte(strconv.Itoa(i)))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(expected3[len(expected3)-1]) == dbutils.MaxChunkSize {
-				expected3 = append(expected3, make([]uint64, 0))
+			if dbutils.CheckNewIndexChunk(expected3[len(expected3)-1], uint64(i)) {
+				expected3 = append(expected3, dbutils.NewHistoryIndex())
 			}
-			expected3[len(expected3)-1] = append(expected3[len(expected3)-1], uint64(i))
+			expected3[len(expected3)-1] = expected3[len(expected3)-1].Append(uint64(i), false)
+
+			//if len(expected3[len(expected3)-1]) == dbutils.MaxChunkSize {
+			//	expected3 = append(expected3, make([]uint64, 0))
+			//}
+			//expected3[len(expected3)-1] = append(expected3[len(expected3)-1], uint64(i))
 
 		}
 		v, err := csInfo.Encode(cs)
@@ -230,10 +244,22 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 			t.Fatal(err)
 		}
 	}
+	res:=make([][]uint64,len(expected1))
+	for i:=range expected1 {
+		res[i], _, err = expected1[i].Decode()
+	}
+	res2:=make([][]uint64,len(expected2))
+	for i:=range expected2 {
+		res2[i], _, err = expected2[i].Decode()
+	}
+	res3:=make([][]uint64,len(expected3))
+	for i:=range expected3 {
+		res3[i], _, err = expected3[i].Decode()
+	}
 	return addrs, map[string][][]uint64{
-		string(addrs[0]): expected1,
-		string(addrs[1]): expected2,
-		string(addrs[2]): expected3,
+		string(addrs[0]): res,
+		string(addrs[1]): res2,
+		string(addrs[2]): res3,
 	}
 }
 

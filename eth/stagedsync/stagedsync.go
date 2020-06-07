@@ -75,6 +75,15 @@ func DoStagedSyncWithFetchers(
 				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
 			},
 		},
+		{
+			ID:                  stages.TxLookup,
+			Description:         "Generating tx lookup index",
+			Disabled:            !history,
+			DisabledDescription: "Enable by adding `t` to --storage-mode",
+			ExecFunc: func(s *StageState) error {
+				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+			},
+		},
 	}
 
 	state := NewState(stages)

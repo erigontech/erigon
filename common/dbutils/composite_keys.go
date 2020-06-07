@@ -43,6 +43,10 @@ func HeaderHashKey(number uint64) []byte {
 	return append(EncodeBlockNumber(number), HeaderHashSuffix...)
 }
 
+func CheckCanonicalKey(k []byte) bool  {
+	return len(k) == 8+len(HeaderHashSuffix) && bytes.Equal(k[8:], HeaderHashSuffix)
+}
+
 func IsHeaderHashKey(k []byte) bool {
 	l := common.BlockNumberLength + 1
 	return len(k) == l && bytes.Equal(k[l-1:], HeaderHashSuffix)

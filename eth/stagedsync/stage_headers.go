@@ -40,6 +40,8 @@ func DownloadHeaders(s *StageState, d DownloaderGlue, stateDB ethdb.Database, he
 			err = unwindAccountHistoryIndex(unwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
 		case stages.StorageHistoryIndex:
 			err = unwindStorageHistoryIndex(unwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
+		case stages.TxLookup:
+			err = unwindTxLookup(unwindPoint, stateDB, quitCh)
 		default:
 			return fmt.Errorf("unrecognized stage for unwinding: %d", stage)
 		}

@@ -92,6 +92,65 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 		return errors.New("unknown bucket type")
 	}
 	log.Info("Index generation started", "from", blockNum, "csbucket", string(changeSetBucket))
+
+	//err:=etl.Transform(ig.db,changeSetBucket,v.IndexBucket, os.TempDir(), getExtractFunc(v.WalkerAdapter), loadFunc, etl.TransformArgs{})
+	//if err!=nil {
+	//	return err
+	//}
+
+	err:=etl.Transform2(ig.db,changeSetBucket,v.IndexBucket, os.TempDir(), func(dbKey, dbValue []byte, next etl.ExtractNextFunc2) error {
+		bufferMap := make(map[string][][]byte)
+		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
+
+		err := v.WalkerAdapter(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
+			sKey := string(changesetKey)
+			list := bufferMap[sKey]
+			b := blockNum
+			v:=make([]byte, 9)
+			binary.BigEndian.PutUint64(v,b)
+			if len(changesetValue) == 0 {
+				v[8] = 1
+			}
+
+			list = append(list, v)
+			bufferMap[sKey] = list
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		for k, v := range bufferMap {
+			for i:=range v {
+				err = next(dbKey, []byte(k), v[i])
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}, loadFunc2, etl.TransformArgs2{})
+	//}, loadFunc2, etl.TransformArgs2{Quit: quit, ExtractStartKeys: [][]byte{ startKey,startKey2}, ExtractEndKeys:[][]byte{startKey2, endKey}})
+	if err!=nil {
+		return err
+	}
+
+
+	return nil
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	/*
 		todo make work using etl transform
 			err := etl.Transform(
@@ -438,6 +497,53 @@ func (ig *IndexGenerator) mergeFilesIntoBucket(bufferFileNames []string, bucket 
 	return nil
 }
 
+
+
+func loadFunc2(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error { //nolint
+	if len(value)%9 != 0 {
+		log.Error("Strange value", "ln", len(value), "k", common.Bytes2Hex(k))
+		return nil
+	}
+
+	currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
+	indexBytes, err1 := state.Get(currentChunkKey)
+	if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+		return fmt.Errorf("find chunk failed: %w", err1)
+	}
+
+	currentIndex:=dbutils.WrapHistoryIndex(indexBytes)
+
+
+	for i:=0;i<len(value); i+=9 {
+		b:=binary.BigEndian.Uint64(value[i:])
+		vzero := value[i+8]==1
+		blockNr := b
+		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("find chunk failed: %w", err1)
+		}
+
+		if dbutils.CheckNewIndexChunk(currentIndex, blockNr) {
+			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
+			indexKey, err3 := currentIndex.Key(k)
+			if err3 != nil {
+				return err3
+			}
+			// Flush the old chunk
+			if err4 := next(indexKey, currentIndex); err4 != nil {
+				return err4
+			}
+			// Start a new chunk
+			currentIndex = dbutils.NewHistoryIndex()
+		}
+		currentIndex = currentIndex.Append(blockNr, vzero)
+	}
+	err := next(currentChunkKey, currentIndex)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 /**
 
 startkey := dbutils.EncodeTimestamp(blockNum)
@@ -493,6 +599,7 @@ bytes2walker := func(b []byte) changeset.Walker {
 
 func loadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error { //nolint
 	var blockNumbers []uint64
+	fmt.Println(common.Bytes2Hex(k))
 	err := valueDecoder.Decode(&blockNumbers)
 	if err != nil {
 		return err
