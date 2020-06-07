@@ -81,7 +81,7 @@ const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 const prof = false
 
-func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, quit chan struct{}, dests vm.Cache) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache) error {
 	lastProcessedBlockNumber := s.BlockNumber
 
 	nextBlockNumber := uint64(0)
@@ -121,6 +121,9 @@ func spawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 
 		blockNum := atomic.LoadUint64(&nextBlockNumber)
+		if limit > 0 && blockNum >= limit {
+			break
+		}
 
 		block := blockchain.GetBlockByNumber(blockNum)
 		if block == nil {

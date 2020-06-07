@@ -2028,11 +2028,19 @@ func resetState(chaindata string) {
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageChangeSetBucket)
 	//nolint:errcheck
+	db.DeleteBucket(dbutils.ContractCodeBucket)
+	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainStateBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainContractCodeBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.IncarnationMapBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CodeBucket)
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	core.UsePlainStateExecution = true
@@ -2065,7 +2073,7 @@ func resetHashedState(chaindata string) {
 		return nil
 	})
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
@@ -2082,7 +2090,7 @@ func resetHistoryIndex(chaindata string) {
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2343,28 +2351,30 @@ func testSeek(chaindata string) {
 	}
 }
 
-func testStage5(chaindata string) error {
+func testStage5(chaindata string, reset bool) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
-		return err
+	if reset {
+		if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
+			return err
+		}
+		if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
+			return err
+		}
+		if err = db.Bolt().Update(func(tx *bolt.Tx) error {
+			_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+			_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
-	if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
-		return err
-	}
-	if err = db.Bolt().Update(func(tx *bolt.Tx) error {
-		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
-		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(db, stages.HashCheck, 0); err != nil {
+	if err = stages.SaveStageProgress(db, stages.HashState, 0); err != nil {
 		return err
 	}
 	var stage4progress uint64
@@ -2374,11 +2384,50 @@ func testStage5(chaindata string) error {
 	log.Info("Stage4", "progress", stage4progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashCheck}
-	if err = stagedsync.SpawnCheckFinalHashStage(stageState, db, "", ch); err != nil {
+	stageState := &stagedsync.StageState{Stage: stages.HashState}
+	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
+	return nil
+}
+
+func testStage4(chaindata string, block uint64) error {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var progress uint64
+	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+		if progress, err = stages.GetStageProgress(db, stage); err != nil {
+			return err
+		}
+		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+	}
+	var stage4progress uint64
+	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
+	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func testStageLoop(chaindata string) error {
+	for block := uint64(9600000); block < uint64(10000000); block += uint64(100000) {
+		if err := testStage4(chaindata, block); err != nil {
+			return err
+		}
+		if err := testStage5(chaindata, true /* reset */); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -2532,7 +2581,17 @@ func main() {
 		testSeek(*chaindata)
 	}
 	if *action == "stage5" {
-		if err := testStage5(*chaindata); err != nil {
+		if err := testStage5(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage4" {
+		if err := testStage4(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stageLoop" {
+		if err := testStageLoop(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
