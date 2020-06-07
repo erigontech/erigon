@@ -110,7 +110,7 @@ func TestUnwindHashed(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
-	err = unwindHashCheckStage(50, db2, getDataDir(), nil)
+	err = unwindHashStateStage(50, db2, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}

@@ -28,7 +28,7 @@ import (
 
 var cbor codec.CborHandle
 
-func SpawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	hashProgress := s.BlockNumber
 
 	syncHeadNumber, err := s.ExecutionAt(stateDB)
@@ -73,15 +73,13 @@ func SpawnCheckFinalHashStage(s *StageState, stateDB ethdb.Database, datadir str
 	return s.DoneAndUpdate(stateDB, blockNr)
 }
 
-func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
-	// Currently it does not require unwinding because it does not create any Intemediate Hash records
-	// and recomputes the state root from scratch
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.HashCheck)
+func unwindHashStateStage(unwindPoint uint64, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.HashState)
 	if err != nil {
 		return fmt.Errorf("unwind HashCheck: get stage progress: %v", err)
 	}
 	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.HashCheck, 0)
+		err = stages.SaveStageUnwind(stateDB, stages.HashState, 0)
 		if err != nil {
 			return fmt.Errorf("unwind HashCheck: reset: %v", err)
 		}
@@ -95,7 +93,7 @@ func unwindHashCheckStage(unwindPoint uint64, stateDB ethdb.Database, datadir st
 	if err = prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return err
 	}
-	if err = stages.SaveStageUnwind(stateDB, stages.HashCheck, 0); err != nil {
+	if err = stages.SaveStageUnwind(stateDB, stages.HashState, 0); err != nil {
 		return fmt.Errorf("unwind HashCheck: reset: %v", err)
 	}
 	return nil

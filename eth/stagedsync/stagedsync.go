@@ -53,10 +53,17 @@ func DoStagedSyncWithFetchers(
 			},
 		},
 		{
-			ID:          stages.HashCheck,
-			Description: "Validating final hash",
+			ID:          stages.HashState,
+			Description: "Hashing the key in the state",
 			ExecFunc: func(s *StageState) error {
-				return SpawnCheckFinalHashStage(s, stateDB, datadir, quitCh)
+				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
+			},
+		},
+		{
+			ID:          stages.IntermediateHashes,
+			Description: "Generating intermediate hashes and validating final hash",
+			ExecFunc: func(s *StageState) error {
+				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
 			},
 		},
 		{
