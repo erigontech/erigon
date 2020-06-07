@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -19,26 +18,12 @@ func spawnBodyDownloadStage(s *StageState, d DownloaderGlue, pid string) error {
 
 }
 
-func unwindBodyDownloadStage(db ethdb.Database, unwindPoint uint64) error {
-	// Here we may want to remove all blocks if we wanted to
-	lastProcessedBlockNumber, err := stages.GetStageProgress(db, stages.Bodies)
-	if err != nil {
-		return fmt.Errorf("unwind Bodies: get stage progress: %v", err)
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(db, stages.Bodies, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Bodies: reset: %v", err)
-		}
-		return nil
-	}
+func unwindBodyDownloadStage(db ethdb.Database, u *UnwindState) error {
 	mutation := db.NewBatch()
-	err = stages.SaveStageUnwind(mutation, stages.Bodies, 0)
-	if err != nil {
+	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind Bodies: reset: %v", err)
 	}
-	_, err = mutation.Commit()
-	if err != nil {
+	if _, err := mutation.Commit(); err != nil {
 		return fmt.Errorf("unwind Bodies: failed to write db commit: %v", err)
 	}
 	return nil

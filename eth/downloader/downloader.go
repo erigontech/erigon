@@ -160,6 +160,8 @@ type Downloader struct {
 	// generate history index, disable/enable pruning
 	history bool
 	datadir string
+
+	stagedSync *stagedsync.State
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -545,7 +547,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 
 	// Turbo-Geth's staged sync goes here
 	if d.mode == StagedSync {
-		return stagedsync.DoStagedSyncWithFetchers(
+		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
 			d.blockchain,
 			d.stateDB,
@@ -556,6 +558,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 			fetchers,
 			dests,
 		)
+		if err != nil {
+			return err
+		}
+		return d.stagedSync.Run(d.stateDB)
 	}
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
@@ -1519,17 +1525,21 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						var newCanonical bool
 						var lowestCanonicalNumber uint64
 						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
-						if newCanonical {
+						if newCanonical && d.stagedSync != nil {
 							// Need to unwind further stages
-							if err1 := stages.UnwindAllStages(d.stateDB, lowestCanonicalNumber); err1 != nil {
+							if err1 := d.stagedSync.UnwindTo(lowestCanonicalNumber, d.stateDB); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
 						}
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
-					if d.mode == StagedSync && n > 0 {
-						if err1 := stages.SaveStageProgress(d.stateDB, stages.Headers, chunk[n-1].Number.Uint64()); err1 != nil {
+					if d.mode == StagedSync && n > 0 && d.stagedSync != nil {
+						state, err1 := d.stagedSync.StageState(stages.Headers, d.stateDB)
+						if err1 != nil {
+							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
+						}
+						if err1 = state.Update(d.stateDB, chunk[n-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
