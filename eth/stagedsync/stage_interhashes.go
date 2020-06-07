@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-
+//nolint:interfacer
 func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.IntermediateHashes)
 	if err != nil {
@@ -21,6 +21,7 @@ func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir
 	return nil
 }
 
+//nolint:interfacer
 func unwindIntermediateHashesStage(unwindPoint uint64, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.IntermediateHashes)
 	if err != nil {
