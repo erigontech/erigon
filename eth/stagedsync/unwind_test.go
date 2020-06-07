@@ -24,7 +24,7 @@ func TestUnwindStackLoadFromDb(t *testing.T) {
 
 	stack2 := NewPersistentUnwindStack()
 	for i := range stages {
-		err := stack2.LoadFromDb(db, stages[i])
+		err := stack2.LoadFromDB(db, stages[i])
 		assert.NoError(t, err)
 	}
 
@@ -53,7 +53,7 @@ func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 
 	stack2 := NewPersistentUnwindStack()
 	for i := range stages {
-		err := stack2.LoadFromDb(db, stages[i])
+		err := stack2.LoadFromDB(db, stages[i])
 		assert.NoError(t, err)
 	}
 
@@ -80,7 +80,7 @@ func TestUnwindStackLoadFromDbNoDone(t *testing.T) {
 
 	stack2 := NewPersistentUnwindStack()
 	for i := range stages {
-		err := stack2.LoadFromDb(db, stages[i])
+		err := stack2.LoadFromDB(db, stages[i])
 		assert.NoError(t, err)
 	}
 

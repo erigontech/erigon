@@ -76,7 +76,7 @@ func NewState(stages []*Stage) *State {
 
 func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
 	for _, stage := range s.stages {
-		if err := s.unwindStack.LoadFromDb(db, stage.ID); err != nil {
+		if err := s.unwindStack.LoadFromDB(db, stage.ID); err != nil {
 			return err
 		}
 	}
