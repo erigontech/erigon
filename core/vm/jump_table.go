@@ -26,7 +26,7 @@ type (
 	saExecutionFunc func(pc *uint64, interpreter *SaInterpreter, callContext *saCallCtx) ([]byte, error)
 	gasFunc         func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
-	memorySizeFunc  func(*Stack) (size uint64, overflow bool)
+	memorySizeFunc  func(*stack.Stack) (size uint64, overflow bool)
 )
 
 type operation struct {
