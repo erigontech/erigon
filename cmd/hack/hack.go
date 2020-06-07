@@ -628,7 +628,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 
-	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	defer db.Close()
 	tds, err := bc.GetTrieDbState()
@@ -773,7 +773,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	defer blockDb.Close()
 	if fromScratch {
@@ -786,7 +786,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
 	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
@@ -842,7 +842,7 @@ func extractTrie(block int) {
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
@@ -861,7 +861,7 @@ func testRewind(chaindata string, block, rewind int) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -923,7 +923,7 @@ func testStartup() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -2412,8 +2412,8 @@ func testStage4(chaindata string, block uint64) error {
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
 	stageState := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
-	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch); err != nil {
+	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch, nil); err != nil {
 		return err
 	}
 	return nil

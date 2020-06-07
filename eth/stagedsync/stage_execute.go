@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -80,7 +81,7 @@ const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 const prof = false
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache) error {
 	lastProcessedBlockNumber := s.BlockNumber
 
 	nextBlockNumber := uint64(0)
@@ -162,7 +163,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
-		err := core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter)
+		err := core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
 		if err != nil {
 			return err
 		}

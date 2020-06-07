@@ -176,7 +176,7 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	}
 	genesis := gspec.MustCommit(db)
 
-	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil)
+	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	ctx := chainman.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	defer chainman.Stop()
 	chain, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen)
@@ -295,7 +295,7 @@ func benchReadChain(b *testing.B, full bool, count uint64) {
 		if err != nil {
 			b.Fatalf("error opening database at %v: %v", dir, err)
 		}
-		chain, err := NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+		chain, err := NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 		if err != nil {
 			b.Fatalf("error creating chain: %v", err)
 		}

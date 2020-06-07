@@ -209,7 +209,7 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
-		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig, b.eth.blockchain.DestsCache)
 		if err != nil {
 			return nil, err
 		}
@@ -256,7 +256,7 @@ func (b *EthAPIBackend) GetEVM(ctx context.Context, msg core.Message, state *sta
 	vmError := func() error { return nil }
 
 	context := core.NewEVMContext(msg, header, b.eth.BlockChain(), nil)
-	return vm.NewEVM(context, state, b.eth.blockchain.Config(), *b.eth.blockchain.GetVMConfig()), vmError, nil
+	return vm.NewEVM(context, state, b.eth.blockchain.Config(), *b.eth.blockchain.GetVMConfig(), b.eth.blockchain.DestsCache), vmError, nil
 }
 
 func (b *EthAPIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {

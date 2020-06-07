@@ -148,9 +148,9 @@ func BenchmarkCall(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			Execute(code, cpurchase, nil, 0)
-			Execute(code, creceived, nil, 0)
-			Execute(code, refund, nil, 0)
+			_, _, _ = Execute(code, cpurchase, nil, 0)
+			_, _, _ = Execute(code, creceived, nil, 0)
+			_, _, _ = Execute(code, refund, nil, 0)
 		}
 	}
 }
@@ -188,7 +188,7 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 	// Warm up the intpools and stuff
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		Call(receiver, []byte{}, &runtimeConfig)
+		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
 	}
 	bench.StopTimer()
 }
@@ -344,6 +344,6 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//	}})
 
 	for i := 0; i < b.N; i++ {
-		Execute(code, nil, nil, 0)
+		_, _, _ = Execute(code, nil, nil, 0)
 	}
 }

@@ -238,7 +238,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
+
+	dests := vm.NewDestsCache(50000)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, dests)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +284,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
 
 	if config.SyncMode != downloader.StagedSync {
-		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, dests)
 		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 	}
 
@@ -515,7 +517,7 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(threads int) error {
+func (s *Ethereum) StartMining(threads int, dests vm.Cache) error {
 	// Update the thread count within the consensus engine
 	type threaded interface {
 		SetThreads(threads int)
@@ -553,7 +555,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 
-		go s.miner.Start(eb)
+		go s.miner.Start(eb, dests)
 	}
 	return nil
 }

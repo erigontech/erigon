@@ -308,7 +308,7 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 		}
 	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
-	err := pm.downloader.Synchronise(op.peer.id, op.head, op.td, op.mode)
+	err := pm.downloader.Synchronise(op.peer.id, op.head, op.td, op.mode, pm.blockchain.DestsCache)
 	if err != nil {
 		return err
 	}

@@ -133,11 +133,16 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+
+	dests Cache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config, dests Cache) *EVM {
+	if dests == nil {
+		dests = NewDestsCache(10)
+	}
 	evm := &EVM{
 		Context:         ctx,
 		IntraBlockState: state,
@@ -145,6 +150,7 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(ctx.BlockNumber),
 		interpreters:    make([]Interpreter, 0, 1),
+		dests:           dests,
 	}
 
 	if chainConfig.IsEWASM(ctx.BlockNumber) {
@@ -235,8 +241,9 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	evm.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value)
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, to, value, gas)
+	contract := NewContract(caller, to, value, gas, evm.GetJumpsDests())
 	contract.SetCallCode(&addr, evm.IntraBlockState.GetCodeHash(addr), evm.IntraBlockState.GetCode(addr))
+	defer evm.GetJumpsDests().Clear(contract.CodeHash, contract.analysis)
 
 	// Even if the account has no code, we need to continue because it might be a precompile
 	start := time.Now()
@@ -291,8 +298,9 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	)
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, to, value, gas)
+	contract := NewContract(caller, to, value, gas, evm.GetJumpsDests())
 	contract.SetCallCode(&addr, evm.IntraBlockState.GetCodeHash(addr), evm.IntraBlockState.GetCode(addr))
+	defer evm.GetJumpsDests().Clear(contract.CodeHash, contract.analysis)
 
 	ret, err = run(evm, contract, input, false)
 	if err != nil {
@@ -322,8 +330,9 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		to       = AccountRef(caller.Address())
 	)
 	// Initialise a new contract and make initialise the delegate values
-	contract := NewContract(caller, to, nil, gas).AsDelegate()
+	contract := NewContract(caller, to, nil, gas, evm.GetJumpsDests()).AsDelegate()
 	contract.SetCallCode(&addr, evm.IntraBlockState.GetCodeHash(addr), evm.IntraBlockState.GetCode(addr))
+	defer evm.GetJumpsDests().Clear(contract.CodeHash, contract.analysis)
 
 	ret, err = run(evm, contract, input, false)
 	if err != nil {
@@ -353,8 +362,9 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	)
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, to, new(uint256.Int), gas)
+	contract := NewContract(caller, to, new(uint256.Int), gas, evm.GetJumpsDests())
 	contract.SetCallCode(&addr, evm.IntraBlockState.GetCodeHash(addr), evm.IntraBlockState.GetCode(addr))
+	defer evm.GetJumpsDests().Clear(contract.CodeHash, contract.analysis)
 
 	// We do an AddBalance of zero here, just in order to trigger a touch.
 	// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -415,8 +425,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, AccountRef(address), value, gas)
+	contract := NewContract(caller, AccountRef(address), value, gas, evm.GetJumpsDests())
 	contract.SetCodeOptionalHash(&address, codeAndHash)
+	defer evm.GetJumpsDests().Clear(contract.CodeHash, contract.analysis)
 
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
 		return nil, address, gas, nil
@@ -487,3 +498,10 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 
 // ChainConfig returns the environment's chain configuration
 func (evm *EVM) ChainConfig() *params.ChainConfig { return evm.chainConfig }
+
+func (evm *EVM) GetJumpsDests() Cache {
+	if evm.dests == nil {
+		evm.dests = NewDestsCache(50000)
+	}
+	return evm.dests
+}

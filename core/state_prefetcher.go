@@ -48,7 +48,7 @@ func newStatePrefetcher(config *params.ChainConfig, bc *BlockChain, engine conse
 // Prefetch processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to pre-cache transaction signatures and state trie nodes.
-func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.IntraBlockState, cfg vm.Config, interrupt *uint32) {
+func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.IntraBlockState, cfg vm.Config, interrupt *uint32, dests vm.Cache) {
 	var (
 		header  = block.Header()
 		gaspool = new(GasPool).AddGas(block.GasLimit())
@@ -60,7 +60,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.IntraBlock
 		}
 		// Block precaching permitted to continue, execute the transaction
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
-		if err := precacheTransaction(p.config, p.bc, nil, gaspool, statedb, header, tx, cfg); err != nil {
+		if err := precacheTransaction(p.config, p.bc, nil, gaspool, statedb, header, tx, cfg, dests); err != nil {
 			return // Ugh, something went horribly wrong, bail out
 		}
 	}
@@ -69,7 +69,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.IntraBlock
 // precacheTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. The goal is not to execute
 // the transaction successfully, rather to warm up touched data slots.
-func precacheTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gaspool *GasPool, statedb *state.IntraBlockState, header *types.Header, tx *types.Transaction, cfg vm.Config) error {
+func precacheTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gaspool *GasPool, statedb vm.IntraBlockState, header *types.Header, tx *types.Transaction, cfg vm.Config, dests vm.Cache) error {
 	// Convert the transaction into an executable message and pre-cache its sender
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
@@ -77,7 +77,7 @@ func precacheTransaction(config *params.ChainConfig, bc ChainContext, author *co
 	}
 	// Create the EVM and execute the transaction
 	context := NewEVMContext(msg, header, bc, author)
-	vm := vm.NewEVM(context, statedb, config, cfg)
+	vm := vm.NewEVM(context, statedb, config, cfg, dests)
 
 	_, err = ApplyMessage(vm, msg, gaspool)
 	return err
