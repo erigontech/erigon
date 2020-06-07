@@ -22,7 +22,6 @@ func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, _ strin
 	log.Info("Generating intermediate hashes (currently no-op)", "from", lastProcessedBlockNumber, "to", hashedStateBlockNumber)
 	// TODO: Actual work goes here
 	return s.DoneAndUpdate(stateDB, lastProcessedBlockNumber)
-	return nil
 }
 
 //nolint:interfacer
