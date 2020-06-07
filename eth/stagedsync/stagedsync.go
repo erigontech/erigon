@@ -42,7 +42,7 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
 			ExecFunc: func(s *StageState) error {
-				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
+				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), datadir, quitCh)
 			},
 		},
 		{

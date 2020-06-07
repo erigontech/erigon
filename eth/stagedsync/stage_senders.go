@@ -35,20 +35,39 @@ func init() {
 	}
 }
 
-func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
+func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
+	if err := common.Stopped(quitCh); err != nil {
+		return err
+	}
+
+	/*
+		err := etl.Transform(
+			stateDB,
+			dbutils.PlainStateBucket,
+			dbutils.CurrentStateBucket,
+			datadir,
+			keyTransformExtractFunc(transformPlainStateKey),
+			etl.IdentityLoadFunc,
+			etl.TransformArgs{Quit: quitCh},
+		)
+
+		if err != nil {
+			return err
+		}
+	*/
+
 	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
-	mutation := stateDB.NewBatch()
+	mutation := &mutationSafe{mutation: stateDB.NewBatch()}
 	defer func() {
-		_, dbErr := mutation.Commit()
-		if dbErr != nil {
+		if dbErr := mutation.Commit(); dbErr != nil {
 			log.Error("Sync (Senders): failed to write db commit", "err", dbErr)
 		}
 	}()
 
 	emptyHash := common.Hash{}
-	var blockNumber big.Int
+	blockNumber := big.NewInt(0)
 
 	const batchSize = 1000
 
@@ -64,60 +83,133 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	}()
 	for i := 0; i < numOfGoroutines; i++ {
 		// each goroutine gets it's own crypto context to make sure they are really parallel
-		go recoverSenders(cryptoContexts[i], jobs, out, quitCh, wg)
+		ctx := cryptoContexts[i]
+		go recoverSenders(ctx, jobs, out, quitCh, wg)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
-	needExit := false
-	for !needExit {
+	errCh := make(chan error)
+	go writeBatch(s, stateDB, out, mutation, errCh, quitCh, jobs)
+
+	for {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
 
-		written := 0
-		for i := 0; i < batchSize; i++ {
-			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
-			if hash == emptyHash {
-				needExit = true
-				break
-			}
-			body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
-			if body == nil {
-				needExit = true
-				break
-			}
-			blockNumber.SetUint64(nextBlockNumber)
-			s := types.MakeSigner(config, &blockNumber)
+		hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
+		if hash == emptyHash {
+			break
+		}
+		body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
+		if body == nil {
+			break
+		}
+		blockNumber.SetUint64(nextBlockNumber)
+		s := types.MakeSigner(config, blockNumber)
 
-			jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
-			written++
+		jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
 
-			nextBlockNumber++
+		nextBlockNumber++
+	}
+
+	fmt.Println("DONE?")
+
+	err := <-errCh
+	fmt.Println("DONE!")
+	if err != nil {
+		return err
+	}
+	s.Done()
+	fmt.Println("DONE!!!")
+	return nil
+}
+
+type mutationSafe struct {
+	mutation ethdb.DbWithPendingMutations
+	sync.RWMutex
+}
+
+func (m *mutationSafe) Has(bucket, key []byte) (bool, error) {
+	m.RLock()
+	defer m.RUnlock()
+	return m.mutation.Has(bucket, key)
+}
+func (m *mutationSafe) Get(bucket, key []byte) ([]byte, error) {
+	m.RLock()
+	defer m.RUnlock()
+	return m.mutation.Get(bucket, key)
+}
+func (m *mutationSafe) Put(bucket, key []byte, value []byte) error {
+	m.RLock()
+	defer m.RUnlock()
+	return m.mutation.Put(bucket, key, value)
+}
+func (m *mutationSafe) Delete(bucket, key []byte) error {
+	m.RLock()
+	defer m.RUnlock()
+	return m.mutation.Delete(bucket, key)
+}
+func (m *mutationSafe) Commit() error {
+	m.RLock()
+	defer m.RUnlock()
+	_, err := m.mutation.Commit()
+	return err
+}
+func (m *mutationSafe) BatchSize() int {
+	m.RLock()
+	defer m.RUnlock()
+	return m.mutation.BatchSize()
+}
+func (m *mutationSafe) IdealBatchSize() int {
+	m.RLock()
+	defer m.RUnlock()
+	return m.mutation.IdealBatchSize()
+}
+func (m *mutationSafe) Set(mutation ethdb.DbWithPendingMutations) {
+	m.Lock()
+	m.mutation = mutation
+	m.Unlock()
+}
+
+func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJob, mutation *mutationSafe, errCh chan error, quitCh chan struct{}, in chan *senderRecoveryJob) {
+	var nextBlockNumber uint64
+	defer close(errCh)
+
+	for j := range out {
+		if err := common.Stopped(quitCh); err != nil {
+			errCh <- err
+			return
 		}
 
-		for i := 0; i < written; i++ {
-			j := <-out
-			if j.err != nil {
-				return errors.Wrap(j.err, "could not extract senders")
-			}
-			rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
+		if j.err != nil {
+			errCh <- errors.Wrap(j.err, "could not extract senders")
+			return
 		}
 
-		if err := s.Update(mutation, nextBlockNumber); err != nil {
-			return err
+		if j.nextBlockNumber > nextBlockNumber {
+			nextBlockNumber = j.nextBlockNumber
 		}
-		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
+
+		rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if _, err := mutation.Commit(); err != nil {
-				return err
+			if err := s.Update(mutation, nextBlockNumber); err != nil {
+				errCh <- err
+				return
 			}
-			mutation = stateDB.NewBatch()
+
+			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "out", len(out), "in", len(in))
+
+			if err := mutation.Commit(); err != nil {
+				errCh <- err
+				return
+			}
+
+			mutation.Set(stateDB.NewBatch())
 		}
 	}
 
-	s.Done()
-	return nil
+	return
 }
 
 type senderRecoveryJob struct {
