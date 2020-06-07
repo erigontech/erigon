@@ -2073,7 +2073,7 @@ func resetHashedState(chaindata string) {
 		return nil
 	})
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
@@ -2090,7 +2090,7 @@ func resetHistoryIndex(chaindata string) {
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2374,7 +2374,7 @@ func testStage5(chaindata string, reset bool) error {
 			return err
 		}
 	}
-	if err = stages.SaveStageProgress(db, stages.HashCheck, 0); err != nil {
+	if err = stages.SaveStageProgress(db, stages.HashState, 0); err != nil {
 		return err
 	}
 	var stage4progress uint64
@@ -2384,8 +2384,8 @@ func testStage5(chaindata string, reset bool) error {
 	log.Info("Stage4", "progress", stage4progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashCheck}
-	if err = stagedsync.SpawnCheckFinalHashStage(stageState, db, "", ch); err != nil {
+	stageState := &stagedsync.StageState{Stage: stages.HashState}
+	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
