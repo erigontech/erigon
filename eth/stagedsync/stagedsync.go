@@ -65,15 +65,18 @@ func PrepareStagedSync(
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
 			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindHashStateStage(u, s, stateDB, datadir, quitCh)
+			},
 		},
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generating intermediate hashes and validating final hash",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
-}
+			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindHashCheckStage(u, s, stateDB, datadir, quitCh)
+				return unwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{

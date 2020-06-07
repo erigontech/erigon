@@ -72,7 +72,7 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 	return s.DoneAndUpdate(stateDB, blockNr)
 }
 
-func unwindHashCheckStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
