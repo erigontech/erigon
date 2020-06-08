@@ -41,8 +41,8 @@ type PlainDbState struct {
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainDbState(db ethdb.KV, blockNr uint64) *DbState {
-	return &DbState{
+func NewPlainDbState(db ethdb.KV, blockNr uint64) *PlainDbState {
+	return &PlainDbState{
 		db:      db,
 		blockNr: blockNr,
 		storage: make(map[common.Address]*llrb.LLRB),
