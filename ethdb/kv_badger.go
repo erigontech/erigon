@@ -3,7 +3,6 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sync"
 	"time"
 
@@ -42,12 +41,6 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 
 	if opts.Badger.InMemory {
 		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
-	} else {
-		oldMaxProcs := runtime.GOMAXPROCS(0)
-		if oldMaxProcs < minGoMaxProcs {
-			runtime.GOMAXPROCS(minGoMaxProcs)
-			logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
-		}
 	}
 
 	badgerDB, err := badger.Open(opts.Badger)
@@ -64,7 +57,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			i := 0
 			for range gcTicker.C {
 			nextFile:
-				err := badgerDB.RunValueLogGC(0.5)
+				err := badgerDB.RunValueLogGC(0.7)
 				if err == nil {
 					i++
 					goto nextFile
@@ -74,16 +67,9 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 					i = 0
 					continue
 				}
-				logger.Warn("Badger GC error", "err", err)
 			}
 		}()
 	}
-
-	go func() {
-		for range time.NewTicker(1 * time.Minute).C {
-			logger.Info("Badger Metrics", "BfCache", badgerDB.BfCacheMetrics().String(), "DataCache", badgerDB.DataCacheMetrics().String())
-		}
-	}()
 
 	db := &badgerKV{
 		opts:     opts,
