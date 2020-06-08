@@ -1,25 +1,24 @@
-package eth
+package ethdb
 
 import (
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	sm, err := ethdb.GetStorageModeFromDB(db)
+	db := NewMemDatabase()
+	sm, err := GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(sm, ethdb.StorageMode{}) {
+	if !reflect.DeepEqual(sm, StorageMode{}) {
 		t.Fatal()
 	}
 
-	err = setStorageModeIfNotExist(db, ethdb.StorageMode{
+	err = SetStorageModeIfNotExist(db, StorageMode{
 		true,
 		true,
 		true,
@@ -29,12 +28,12 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sm, err = ethdb.GetStorageModeFromDB(db)
+	sm, err = GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(sm, ethdb.StorageMode{
+	if !reflect.DeepEqual(sm, StorageMode{
 		true,
 		true,
 		true,

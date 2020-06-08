@@ -82,10 +82,50 @@ func GetStorageModeFromDB(db Database) (StorageMode, error) {
 	}
 	sm.TxIndex = len(v) > 0
 
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeThinHistory)
-	if err != nil && err != ErrKeyNotFound {
-		return StorageMode{}, err
+	return sm, nil
+}
+
+func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
+	var (
+		err error
+	)
+	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
+	if err != nil {
+		return err
 	}
 
-	return sm, nil
+	err = setModeOnEmpty(db, dbutils.StorageModePreImages, sm.Preimages)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeReceipts, sm.Receipts)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeTxIndex, sm.TxIndex)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func setModeOnEmpty(db Database, key []byte, currentValue bool) error {
+	_, err := db.Get(dbutils.DatabaseInfoBucket, key)
+	if err != nil && err != ErrKeyNotFound {
+		return err
+	}
+	if err == ErrKeyNotFound {
+		val := []byte{}
+		if currentValue {
+			val = []byte{1}
+		}
+		if err = db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

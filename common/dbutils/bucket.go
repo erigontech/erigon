@@ -142,8 +142,6 @@ var (
 	StorageModeTxIndex = []byte("smTxIndex")
 	//StorageModePreImages - does node save hash to value mapping
 	StorageModePreImages = []byte("smPreImages")
-	//StorageModeThinHistory - does thin history mode enabled
-	StorageModeThinHistory = []byte("smThinHistory")
 	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
 	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
 
@@ -192,7 +190,6 @@ var Buckets = [][]byte{
 	StorageModeReceipts,
 	StorageModeTxIndex,
 	StorageModePreImages,
-	StorageModeThinHistory,
 	CliqueBucket,
 	SyncStageProgress,
 	SyncStageUnwind,

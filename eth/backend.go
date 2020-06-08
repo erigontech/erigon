@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
@@ -194,7 +193,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	err = setStorageModeIfNotExist(chainDb, config.StorageMode)
+	err = ethdb.SetStorageModeIfNotExist(chainDb, config.StorageMode)
 	if err != nil {
 		return nil, err
 	}
@@ -660,50 +659,5 @@ func (s *Ethereum) Stop() error {
 	s.engine.Close()
 	s.chainDb.Close()
 	s.eventMux.Stop()
-	return nil
-}
-
-func setStorageModeIfNotExist(db ethdb.Database, sm ethdb.StorageMode) error {
-	var (
-		err error
-	)
-	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModePreImages, sm.Preimages)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModeReceipts, sm.Receipts)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModeTxIndex, sm.TxIndex)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func setModeOnEmpty(db ethdb.Database, key []byte, currentValue bool) error {
-	_, err := db.Get(dbutils.DatabaseInfoBucket, key)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return err
-	}
-	if err == ethdb.ErrKeyNotFound {
-		val := []byte{}
-		if currentValue {
-			val = []byte{1}
-		}
-		if err = db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
