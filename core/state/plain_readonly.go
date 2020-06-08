@@ -88,7 +88,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
-		if vs == nil || len(vs) == 0 {
+		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
@@ -136,7 +136,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
 	err := ethdb.WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if vs == nil || len(vs) == 0 {
+		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
