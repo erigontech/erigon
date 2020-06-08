@@ -101,7 +101,7 @@ type badgerDB struct {
 	badger   *badger.DB
 	gcTicker *time.Ticker
 	log      log.Logger
-	txPool   sync.Pool
+	txPool   sync.Pool // pool of ethdb.badgerTx objects
 }
 
 func NewBadger() badgerOpts {

@@ -19,7 +19,7 @@ type RemoteKV struct {
 	opts   remoteOpts
 	remote *remote.DB
 	log    log.Logger
-	txPool sync.Pool
+	txPool sync.Pool // pool of ethdb.remoteTx objects
 }
 
 type remoteTx struct {

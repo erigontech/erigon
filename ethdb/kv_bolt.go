@@ -20,7 +20,7 @@ type BoltKV struct {
 	opts   boltOpts
 	bolt   *bolt.DB
 	log    log.Logger
-	txPool sync.Pool
+	txPool sync.Pool // pool of ethdb.boltTx objects
 }
 type boltTx struct {
 	ctx context.Context
@@ -67,9 +67,9 @@ func (opts boltOpts) Path(path string) boltOpts {
 	return opts
 }
 
-// WrapBoltDb provides a way for the code to gradually migrate
+// WrapBoltDB provides a way for the code to gradually migrate
 // to the abstract interface
-func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (KV, error) {
+func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -100,7 +100,7 @@ func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return opts.WrapBoltDb(boltDB)
+	return opts.WrapBoltDB(boltDB)
 }
 
 func (opts boltOpts) MustOpen(ctx context.Context) KV {

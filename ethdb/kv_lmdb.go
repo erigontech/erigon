@@ -145,8 +145,8 @@ type LmdbKV struct {
 	env        *lmdb.Env
 	log        log.Logger
 	buckets    map[string]lmdb.DBI
-	lmdbTxPool *lmdbpool.TxnPool
-	txPool     sync.Pool
+	lmdbTxPool *lmdbpool.TxnPool // pool of lmdb.Txn objects
+	txPool     sync.Pool         // pool of ethdb.lmdbTx objects
 }
 
 func NewLMDB() lmdbOpts {
@@ -235,13 +235,7 @@ type lmdbCursor struct {
 	err error
 }
 
-var i int
-
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	i++
-	if i%10000 == 0 {
-		fmt.Printf("i: %d\n", i)
-	}
 	t := db.txPool.Get().(*lmdbTx)
 	defer db.txPool.Put(t)
 	defer t.closeCursors()
@@ -253,7 +247,6 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	i++
 	t := db.txPool.Get().(*lmdbTx)
 	defer db.txPool.Put(t)
 	defer t.closeCursors()
