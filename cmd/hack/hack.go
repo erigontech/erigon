@@ -780,8 +780,9 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	if fromScratch {
 		os.Remove("statedb")
 	}
-	stateDB, err := ethdb.NewBadgerDatabase("statedb")
-	check(err)
+	stateDB := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path("statedb").MustOpen(context.Background()))
+	//stateDB, err := ethdb.NewBadgerDatabase("statedb")
+	//check(err)
 	defer stateDB.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
@@ -807,7 +808,7 @@ Loop:
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 100 || i == block {
+		if len(blocks) >= 20000 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
 				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
@@ -822,7 +823,7 @@ Loop:
 			}
 			blocks = types.Blocks{}
 		}
-		if i%1000 == 0 {
+		if i%20000 == 0 {
 			fmt.Printf("Inserted %dK, %s \n", i/1000, time.Since(now))
 		}
 	}

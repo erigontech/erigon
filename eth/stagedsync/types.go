@@ -15,6 +15,6 @@ type BlockChain interface {
 }
 
 type DownloaderGlue interface {
-	SpawnSync([]func() error) error
-	SpawnBodyDownloadStage(string, uint64) (bool, error)
+	SpawnHeaderDownloadStage([]func() error, *StageState, Unwinder) error
+	SpawnBodyDownloadStage(string, *StageState, Unwinder) (bool, error)
 }

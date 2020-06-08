@@ -39,7 +39,7 @@ const (
 	Finish                               // Nominal stage after all other stages
 )
 
-// GetStageProcess retrieves saved progress of given sync stage from the database
+// GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
@@ -59,32 +59,7 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, encodeBigEndian(progress))
 }
 
-// UnwindAllStages marks all the stages after the Headers stage (where unwinding is initiated) to be unwound
-// unwinding needs to have in the reverse order of stages
-func UnwindAllStages(db ethdb.GetterPutter, unwindPoint uint64) error {
-	for stage := Headers + 1; stage < Finish; stage++ {
-		existingUnwindPoint, err := GetStageUnwind(db, stage)
-		if err != nil {
-			return err
-		}
-
-		progress, err := GetStageProgress(db, stage)
-		if err != nil {
-			return err
-		}
-
-		if (existingUnwindPoint == 0 || existingUnwindPoint > unwindPoint) && unwindPoint < progress {
-			// Only lower, not higher
-			err = SaveStageUnwind(db, stage, unwindPoint)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// GetStageInvalidation retrieves the invalidation for the given stage
+// GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
@@ -101,7 +76,7 @@ func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	return binary.BigEndian.Uint64(v), nil
 }
 
-// SaveStageInvalidation saves the progress of the given stage in the database
+// SaveStageUnwind saves the progress of the given stage in the database
 func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
 	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, encodeBigEndian(invalidation))
 }

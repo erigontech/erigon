@@ -8,13 +8,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // externsions for downloader needed for staged sync
-func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, error) {
+func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState, u stagedsync.Unwinder) (bool, error) {
+	d.bodiesState = s
+	d.bodiesUnwinder = u
+	defer func() {
+		d.bodiesState = nil
+		d.bodiesUnwinder = nil
+	}()
+
+	origin := s.BlockNumber
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -69,7 +77,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 		return false, fmt.Errorf("walking over canonical hashes: %w", err)
 	}
 	if missingHeader != 0 {
-		if err1 := stages.SaveStageProgress(d.stateDB, stages.Headers, missingHeader); err1 != nil {
+		if err1 := u.UnwindTo(missingHeader, d.stateDB); err1 != nil {
 			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
 		}
 		// This will cause the sync return to the header stage
@@ -102,7 +110,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 		return true, nil
 	}
 	log.Error("Trying to rollback 1 block due to error")
-	return true, stages.SaveStageProgress(d.stateDB, stages.Bodies, origin-1)
+	return true, s.Update(d.stateDB, origin-1)
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
@@ -132,6 +140,16 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 	}
 }
 
-func (d *Downloader) SpawnSync(fetchers []func() error) error {
+func (d *Downloader) SpawnHeaderDownloadStage(
+	fetchers []func() error,
+	s *stagedsync.StageState,
+	u stagedsync.Unwinder,
+) error {
+	d.bodiesState = s
+	d.bodiesUnwinder = u
+	defer func() {
+		d.bodiesState = nil
+		d.bodiesUnwinder = nil
+	}()
 	return d.spawnSync(fetchers)
 }
