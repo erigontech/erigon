@@ -48,7 +48,7 @@ type remoteCursor struct {
 }
 
 type remoteNoValuesCursor struct {
-	remoteCursor
+	*remoteCursor
 }
 
 func (opts remoteOpts) ReadOnly() remoteOpts {
@@ -179,7 +179,7 @@ func (c *remoteCursor) Prefetch(v uint) Cursor {
 
 func (c *remoteCursor) NoValues() NoValuesCursor {
 	c.remote = c.remote.NoValues()
-	return &remoteNoValuesCursor{remoteCursor: *c}
+	return &remoteNoValuesCursor{remoteCursor: c}
 }
 
 func (b remoteBucket) Get(key []byte) (val []byte, err error) {

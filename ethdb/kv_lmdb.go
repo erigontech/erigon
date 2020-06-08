@@ -81,15 +81,28 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		return nil, err
 	}
 
-	buckets := map[string]lmdb.DBI{}
-	if !opts.readOnly {
+	buckets := make([]lmdb.DBI, len(dbutils.Buckets))
+	if opts.readOnly {
+		if err := env.View(func(tx *lmdb.Txn) error {
+			for _, name := range dbutils.Buckets {
+				dbi, createErr := tx.OpenDBI(string(name), 0)
+				if createErr != nil {
+					return createErr
+				}
+				buckets[dbutils.BucketsIndex[string(name)]] = dbi
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	} else {
 		if err := env.Update(func(tx *lmdb.Txn) error {
 			for _, name := range dbutils.Buckets {
 				dbi, createErr := tx.OpenDBI(string(name), lmdb.Create)
 				if createErr != nil {
 					return createErr
 				}
-				buckets[string(name)] = dbi
+				buckets[dbutils.BucketsIndex[string(name)]] = dbi
 			}
 			return nil
 		}); err != nil {
@@ -120,15 +133,20 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	}()
 
 	db := &LmdbKV{
-		opts:       opts,
-		env:        env,
-		log:        logger,
-		buckets:    buckets,
-		lmdbTxPool: lmdbpool.NewTxnPool(env),
+		opts:            opts,
+		env:             env,
+		log:             logger,
+		buckets:         buckets,
+		lmdbTxPool:      lmdbpool.NewTxnPool(env),
+		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
 	}
 	db.txPool = &sync.Pool{
 		New: func() interface{} { return &lmdbTx{db: db} },
 	}
+	db.cursorPool = &sync.Pool{
+		New: func() interface{} { return &lmdbCursor{} },
+	}
+
 	return db, nil
 }
 
@@ -141,12 +159,14 @@ func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 }
 
 type LmdbKV struct {
-	opts       lmdbOpts
-	env        *lmdb.Env
-	log        log.Logger
-	buckets    map[string]lmdb.DBI
-	lmdbTxPool *lmdbpool.TxnPool // pool of lmdb.Txn objects
-	txPool     *sync.Pool        // pool of ethdb.lmdbTx objects
+	opts            lmdbOpts
+	env             *lmdb.Env
+	log             log.Logger
+	buckets         []lmdb.DBI
+	lmdbTxPool      *lmdbpool.TxnPool // pool of lmdb.Txn objects
+	txPool          *sync.Pool        // pool of ethdb.lmdbTx objects
+	lmdbCursorPools []sync.Pool       // pool of lmdb.Cursor objects
+	cursorPool      *sync.Pool        // pool of ethdb.lmdbCursor objects
 }
 
 func NewLMDB() lmdbOpts {
@@ -211,14 +231,14 @@ func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 }
 
 type lmdbTx struct {
-	ctx context.Context
-	db  *LmdbKV
-
 	tx      *lmdb.Txn
-	cursors []*lmdb.Cursor
+	ctx     context.Context
+	db      *LmdbKV
+	cursors []*lmdbCursor
 }
 
 type lmdbBucket struct {
+	id  int
 	tx  *lmdbTx
 	dbi lmdb.DBI
 }
@@ -258,11 +278,12 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
-	b, ok := tx.db.buckets[string(name)]
+	id, ok := dbutils.BucketsIndex[string(name)]
 	if !ok {
 		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
 	}
-	return lmdbBucket{tx: tx, dbi: b}
+
+	return lmdbBucket{tx: tx, dbi: tx.db.buckets[id], id: id}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -278,7 +299,14 @@ func (tx *lmdbTx) Rollback() error {
 
 func (tx *lmdbTx) closeCursors() {
 	for _, c := range tx.cursors {
-		c.Close()
+		if c.cursor != nil {
+			if tx.tx.Pooled {
+				tx.db.lmdbCursorPools[c.bucket.id].Put(c.cursor)
+			} else {
+				c.cursor.Close()
+			}
+		}
+		tx.db.cursorPool.Put(c)
 	}
 	tx.cursors = tx.cursors[:0]
 }
@@ -299,7 +327,7 @@ func (c *lmdbCursor) Prefetch(v uint) Cursor {
 
 func (c *lmdbCursor) NoValues() NoValuesCursor {
 	//c.cursorOpts.PrefetchValues = false
-	return &lmdbNoValuesCursor{lmdbCursor: *c}
+	return &lmdbNoValuesCursor{lmdbCursor: c}
 }
 
 func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
@@ -345,7 +373,19 @@ func (b lmdbBucket) Delete(key []byte) error {
 }
 
 func (b lmdbBucket) Cursor() Cursor {
-	c := &lmdbCursor{bucket: b, ctx: b.tx.ctx}
+	c := b.tx.db.cursorPool.Get().(*lmdbCursor)
+	c.ctx = b.tx.ctx
+	c.bucket = b
+	c.prefix = nil
+	c.k = nil
+	c.v = nil
+	c.err = nil
+	c.cursor = nil
+	// add to auto-close on end of transactions
+	if b.tx.cursors == nil {
+		b.tx.cursors = make([]*lmdbCursor, 0, 1)
+	}
+	b.tx.cursors = append(b.tx.cursors, c)
 	return c
 }
 
@@ -353,18 +393,26 @@ func (c *lmdbCursor) initCursor() error {
 	if c.cursor != nil {
 		return nil
 	}
+	tx := c.bucket.tx
 
-	var err error
-	c.cursor, err = c.bucket.tx.tx.OpenCursor(c.bucket.dbi)
-	if err != nil {
-		return err
+	if tx.tx.Pooled {
+		cur := tx.db.lmdbCursorPools[c.bucket.id].Get()
+		if cur != nil {
+			c.cursor = cur.(*lmdb.Cursor)
+			if err := c.cursor.Renew(tx.tx); err != nil {
+				return err
+			}
+		}
 	}
 
-	// add to auto-close on end of transactions
-	if c.bucket.tx.cursors == nil {
-		c.bucket.tx.cursors = make([]*lmdb.Cursor, 0, 1)
+	if c.cursor == nil {
+		var err error
+		c.cursor, err = tx.tx.OpenCursor(c.bucket.dbi)
+		if err != nil {
+			return err
+		}
 	}
-	c.bucket.tx.cursors = append(c.bucket.tx.cursors, c.cursor)
+
 	return nil
 }
 
@@ -484,7 +532,7 @@ func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 }
 
 type lmdbNoValuesCursor struct {
-	lmdbCursor
+	*lmdbCursor
 }
 
 func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {

@@ -1,6 +1,11 @@
 package dbutils
 
-import "github.com/ledgerwatch/turbo-geth/metrics"
+import (
+	"bytes"
+	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/metrics"
+)
 
 // The fields below define the low level database schema prefixing.
 var (
@@ -149,6 +154,9 @@ var (
 	CliqueBucket    = []byte("clique-")
 )
 
+// Buckets - list of all buckets. App will panic if some bucket is not in this list.
+// This list will be sorted in `init` method.
+// BucketsIndex - can be used to find index in sorted version of Buckets list by name
 var Buckets = [][]byte{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
@@ -192,4 +200,16 @@ var Buckets = [][]byte{
 	PlainContractCodeBucket,
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
+}
+
+var BucketsIndex = map[string]int{}
+
+func init() {
+	sort.SliceStable(Buckets, func(i, j int) bool {
+		return bytes.Compare(Buckets[i], Buckets[j]) < 0
+	})
+
+	for i := range Buckets {
+		BucketsIndex[string(Buckets[i])] = i
+	}
 }
