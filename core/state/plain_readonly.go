@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-
 // Implements StateReader by wrapping database only, without trie
 type PlainDbState struct {
 	db      ethdb.KV
