@@ -238,9 +238,9 @@ type lmdbCursor struct {
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := db.txPool.Get().(*lmdbTx)
 	defer db.txPool.Put(t)
-	defer t.closeCursors()
 	t.ctx = ctx
 	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
+		defer t.closeCursors()
 		t.tx = tx
 		return f(t)
 	})
@@ -249,9 +249,9 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := db.txPool.Get().(*lmdbTx)
 	defer db.txPool.Put(t)
-	defer t.closeCursors()
 	t.ctx = ctx
 	return db.env.Update(func(tx *lmdb.Txn) error {
+		defer t.closeCursors()
 		t.tx = tx
 		return f(t)
 	})
@@ -360,7 +360,7 @@ func (c *lmdbCursor) initCursor() error {
 		return err
 	}
 
-	// add to auto-closeCursors on end of transactions
+	// add to auto-close on end of transactions
 	if c.bucket.tx.cursors == nil {
 		c.bucket.tx.cursors = make([]*lmdb.Cursor, 0, 1)
 	}

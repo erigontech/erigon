@@ -297,7 +297,7 @@ func (c *badgerCursor) initCursor() {
 	}
 
 	c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
-	// add to auto-closeCursors on end of transactions
+	// add to auto-close on end of transactions
 	if c.bucket.tx.badgerIterators == nil {
 		c.bucket.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
 	}
