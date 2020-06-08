@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	boltTxPool     = &sync.Pool{New: func() interface{} { return &boltTx{} }}
-	boltCursorPool = &sync.Pool{New: func() interface{} { return &boltCursor{} }}
+	boltTxPool     = sync.Pool{New: func() interface{} { return &boltTx{} }}
+	boltCursorPool = sync.Pool{New: func() interface{} { return &boltCursor{} }}
 )
 
 type boltOpts struct {
@@ -87,13 +87,12 @@ func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 			return nil, err
 		}
 	}
-	db := &BoltKV{
+
+	return &BoltKV{
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-	}
-
-	return db, nil
+	}, nil
 }
 
 func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {

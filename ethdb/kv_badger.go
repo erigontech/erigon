@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	badgerTxPool     = &sync.Pool{New: func() interface{} { return &badgerTx{} }}     // pool of ethdb.badgerTx objects
-	badgerCursorPool = &sync.Pool{New: func() interface{} { return &badgerCursor{} }} // pool of ethdb.badgerCursor objects
+	badgerTxPool     = sync.Pool{New: func() interface{} { return &badgerTx{} }}     // pool of ethdb.badgerTx objects
+	badgerCursorPool = sync.Pool{New: func() interface{} { return &badgerCursor{} }} // pool of ethdb.badgerCursor objects
 )
 
 type badgerOpts struct {
@@ -71,14 +71,12 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 		}()
 	}
 
-	db := &badgerKV{
+	return &badgerKV{
 		opts:     opts,
 		badger:   badgerDB,
 		log:      logger,
 		gcTicker: gcTicker,
-	}
-
-	return db, nil
+	}, nil
 }
 
 func (opts badgerOpts) MustOpen(ctx context.Context) KV {

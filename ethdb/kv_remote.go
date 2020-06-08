@@ -11,6 +11,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+var (
+	remoteTxPool = sync.Pool{New: func() interface{} { return &remoteTx{} }}
+)
+
 type remoteOpts struct {
 	Remote remote.DbOpts
 }
@@ -19,7 +23,6 @@ type RemoteKV struct {
 	opts   remoteOpts
 	remote *remote.DB
 	log    log.Logger
-	txPool *sync.Pool // pool of ethdb.remoteTx objects
 }
 
 type remoteTx struct {
@@ -86,17 +89,11 @@ func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
 		return nil, err
 	}
 
-	db := &RemoteKV{
+	return &RemoteKV{
 		opts:   opts,
 		remote: remoteDB,
 		log:    log.New("remote_db", opts.Remote.DialAddress),
-	}
-
-	db.txPool = &sync.Pool{
-		New: func() interface{} { return &remoteTx{db: db} },
-	}
-
-	return db, nil
+	}, nil
 }
 
 func (opts remoteOpts) MustOpen(ctx context.Context) KV {
@@ -136,9 +133,10 @@ func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := db.txPool.Get().(*remoteTx)
-	defer db.txPool.Put(t)
+	t := remoteTxPool.Get().(*remoteTx)
+	defer remoteTxPool.Put(t)
 	t.ctx = ctx
+	t.db = db
 	return db.remote.View(ctx, func(tx *remote.Tx) error {
 		t.remote = tx
 		return f(t)

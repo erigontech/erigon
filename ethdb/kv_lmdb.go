@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	lmdbKvTxPool     = &sync.Pool{New: func() interface{} { return &lmdbTx{} }}
-	lmdbKvCursorPool = &sync.Pool{New: func() interface{} { return &lmdbCursor{} }}
+	lmdbKvTxPool     = sync.Pool{New: func() interface{} { return &lmdbTx{} }}
+	lmdbKvCursorPool = sync.Pool{New: func() interface{} { return &lmdbCursor{} }}
 )
 
 type lmdbOpts struct {
@@ -137,16 +137,14 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		}
 	}()
 
-	db := &LmdbKV{
+	return &LmdbKV{
 		opts:            opts,
 		env:             env,
 		log:             logger,
 		buckets:         buckets,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
-	}
-
-	return db, nil
+	}, nil
 }
 
 func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
