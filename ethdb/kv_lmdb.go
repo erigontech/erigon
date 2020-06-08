@@ -17,6 +17,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+var (
+	lmdbKvTxPool     = &sync.Pool{New: func() interface{} { return &lmdbTx{} }}
+	lmdbKvCursorPool = &sync.Pool{New: func() interface{} { return &lmdbCursor{} }}
+)
+
 type lmdbOpts struct {
 	path     string
 	inMem    bool
@@ -140,12 +145,6 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
 	}
-	db.txPool = &sync.Pool{
-		New: func() interface{} { return &lmdbTx{db: db} },
-	}
-	db.cursorPool = &sync.Pool{
-		New: func() interface{} { return &lmdbCursor{} },
-	}
 
 	return db, nil
 }
@@ -164,9 +163,7 @@ type LmdbKV struct {
 	log             log.Logger
 	buckets         []lmdb.DBI
 	lmdbTxPool      *lmdbpool.TxnPool // pool of lmdb.Txn objects
-	txPool          *sync.Pool        // pool of ethdb.lmdbTx objects
 	lmdbCursorPools []sync.Pool       // pool of lmdb.Cursor objects
-	cursorPool      *sync.Pool        // pool of ethdb.lmdbCursor objects
 }
 
 func NewLMDB() lmdbOpts {
@@ -224,7 +221,7 @@ func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 
 	tx.RawRead = true
 
-	t := db.txPool.Get().(*lmdbTx)
+	t := lmdbKvTxPool.Get().(*lmdbTx)
 	t.ctx = ctx
 	t.tx = tx
 	return t, nil
@@ -256,9 +253,10 @@ type lmdbCursor struct {
 }
 
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := db.txPool.Get().(*lmdbTx)
-	defer db.txPool.Put(t)
+	t := lmdbKvTxPool.Get().(*lmdbTx)
+	defer lmdbKvTxPool.Put(t)
 	t.ctx = ctx
+	t.db = db
 	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
 		t.tx = tx
@@ -267,9 +265,10 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := db.txPool.Get().(*lmdbTx)
-	defer db.txPool.Put(t)
+	t := lmdbKvTxPool.Get().(*lmdbTx)
+	defer lmdbKvTxPool.Put(t)
 	t.ctx = ctx
+	t.db = db
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
 		t.tx = tx
@@ -306,7 +305,7 @@ func (tx *lmdbTx) closeCursors() {
 				c.cursor.Close()
 			}
 		}
-		tx.db.cursorPool.Put(c)
+		lmdbKvCursorPool.Put(c)
 	}
 	tx.cursors = tx.cursors[:0]
 }
@@ -373,7 +372,7 @@ func (b lmdbBucket) Delete(key []byte) error {
 }
 
 func (b lmdbBucket) Cursor() Cursor {
-	c := b.tx.db.cursorPool.Get().(*lmdbCursor)
+	c := lmdbKvCursorPool.Get().(*lmdbCursor)
 	c.ctx = b.tx.ctx
 	c.bucket = b
 	c.prefix = nil
