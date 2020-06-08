@@ -90,8 +90,8 @@ func (st *stagedSyncTester) CurrentHeader() *types.Header {
 	return st.currentHeader
 }
 
-// ExecuteBlockEuphemerally is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) ExecuteBlockEuphemerally(_ *types.Block, _ state.StateReader, _ *state.DbStateWriter) error {
+// ExecuteBlockEphemerally is part of the implementation of BlockChain interface defined in downloader.go
+func (st *stagedSyncTester) ExecuteBlockEphemerally(_ *types.Block, _ state.StateReader, _ *state.DbStateWriter) error {
 	panic("")
 }
 
