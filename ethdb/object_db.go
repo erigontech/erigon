@@ -73,10 +73,6 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 					}
 				}
 			}
-			// TODO: Add MultiPut to abstraction
-			//if err := b.MultiPut(pairs...); err != nil {
-			//	return err
-			//}
 
 			bucketStart = bucketEnd
 		}
@@ -307,7 +303,7 @@ func (db *ObjectDatabase) MemCopy() Database {
 		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
 	case *BoltKV:
 		mem = NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
-	case *badgerDB:
+	case *badgerKV:
 		mem = NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
 	}
 
