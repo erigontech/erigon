@@ -2437,7 +2437,7 @@ func testStage4(chaindata string, block uint64) error {
 }
 
 func testStageLoop(chaindata string) error {
-	for block := uint64(9700000); block < uint64(10000000); block += uint64(100000) {
+	for block := uint64(9700000); block < uint64(11000000); block += uint64(100000) {
 		if err := testStage4(chaindata, block); err != nil {
 			return err
 		}

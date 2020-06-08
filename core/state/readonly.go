@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -38,13 +37,14 @@ var _ StateReader = (*DbState)(nil)
 var _ StateWriter = (*DbState)(nil)
 
 type storageItem struct {
-	key, seckey common.Hash
+	key 		common.Hash
+	seckey 		common.Hash
 	value       uint256.Int
 }
 
 func (a *storageItem) Less(b llrb.Item) bool {
 	bi := b.(*storageItem)
-	return bytes.Compare(a.seckey[:], bi.seckey[:]) < 0
+	return bytes.Compare(a.key[:], bi.key[:]) < 0
 }
 
 // Implements StateReader by wrapping database only, without trie
@@ -71,33 +71,26 @@ func (dbs *DbState) GetBlockNr() uint64 {
 }
 
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		log.Error("Error on hashing", "err", err)
-		return err
-	}
-
 	st := llrb.New()
-	var s [common.HashLength + common.IncarnationLength + common.HashLength]byte
-	copy(s[:], addrHash[:])
-	accData, _ := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
+	copy(s[:], addr[:])
+	accData, _ := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, addr[:], dbs.blockNr+1)
 	var acc accounts.Account
-	if err = acc.DecodeForStorage(accData); err != nil {
+	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
 		return err
 	}
-	binary.BigEndian.PutUint64(s[common.HashLength:], ^acc.Incarnation)
-	copy(s[common.HashLength+common.IncarnationLength:], start)
-	var lastSecKey common.Hash
+	binary.BigEndian.PutUint64(s[common.AddressLength:], ^acc.Incarnation)
+	copy(s[common.AddressLength+common.IncarnationLength:], start)
+	var lastKey common.Hash
 	overrideCounter := 0
-	emptyHash := common.Hash{}
-	min := &storageItem{seckey: common.BytesToHash(start)}
+	min := &storageItem{key: common.BytesToHash(start)}
 	if t, ok := dbs.storage[addr]; ok {
 		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
 			st.ReplaceOrInsert(item)
 			if !item.value.IsZero() {
-				copy(lastSecKey[:], item.seckey[:])
+				copy(lastKey[:], item.key[:])
 				// Only count non-zero items
 				overrideCounter++
 			}
@@ -105,30 +98,34 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	err = ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.HashLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if !bytes.HasPrefix(ks, addrHash[:]) {
+	if err := ethdb.WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
 		if vs == nil || len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
-		seckey := ks[common.HashLength:]
+		key := ks[common.AddressLength+common.IncarnationLength:]
+		keyHash, err1 := common.HashData(key)
+		if err1 != nil {
+			return false, err1
+		}
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
-		copy(si.seckey[:], seckey)
+		copy(si.key[:], key)
+		copy(si.seckey[:], keyHash[:])
 		if st.Has(&si) {
 			return true, nil
 		}
 		si.value.SetBytes(vs)
 		st.InsertNoReplace(&si)
-		if bytes.Compare(seckey[:], lastSecKey[:]) > 0 {
+		if bytes.Compare(key[:], lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
 		}
 		return st.Len() < maxResults+overrideCounter+numDeletes, nil
-	})
-	if err != nil {
+	}); err != nil {
 		log.Error("ForEachStorage walk error", "err", err)
 		return err
 	}
@@ -138,16 +135,6 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		item := i.(*storageItem)
 		if !item.value.IsZero() {
 			// Skip if value == 0
-			if item.key == emptyHash {
-				key, err := ethdb.Get(dbs.db, dbutils.PreimagePrefix, item.seckey[:])
-				if err == nil {
-					copy(item.key[:], key)
-				} else {
-					log.Error(fmt.Sprintf("Error getting preimage for %x", item.seckey[:]), "err", err)
-					innerErr = err
-					return false
-				}
-			}
 			cb(item.key, item.seckey, item.value)
 			results++
 		}
@@ -158,7 +145,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 
 func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
-	err := ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err := ethdb.WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if vs == nil || len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
