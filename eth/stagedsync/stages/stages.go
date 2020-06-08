@@ -39,7 +39,7 @@ const (
 	Finish                               // Nominal stage after all other stages
 )
 
-// GetStageProgressretrieves saved progress of given sync stage from the database
+// GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
