@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -18,6 +19,7 @@ type RemoteKV struct {
 	opts   remoteOpts
 	remote *remote.DB
 	log    log.Logger
+	txPool sync.Pool
 }
 
 type remoteTx struct {
@@ -58,8 +60,6 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
-//
-//
 // Example text code:
 //  writeDb, errOpen = ethdb.NewBolt().InMem().Open(ctx)
 //	require.NoError(t, errOpen)
@@ -81,16 +81,22 @@ func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
 }
 
 func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
-	db, err := remote.Open(ctx, opts.Remote)
+	remoteDB, err := remote.Open(ctx, opts.Remote)
 	if err != nil {
 		return nil, err
 	}
 
-	return &RemoteKV{
+	db := &RemoteKV{
 		opts:   opts,
-		remote: db,
+		remote: remoteDB,
 		log:    log.New("remote_db", opts.Remote.DialAddress),
-	}, nil
+	}
+
+	db.txPool = sync.Pool{
+		New: func() interface{} { return &remoteTx{db: db} },
+	}
+
+	return db, nil
 }
 
 func (opts remoteOpts) MustOpen(ctx context.Context) KV {
@@ -130,7 +136,9 @@ func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &remoteTx{db: db, ctx: ctx}
+	t := db.txPool.Get().(*remoteTx)
+	defer db.txPool.Put(t)
+	t.ctx = ctx
 	return db.remote.View(ctx, func(tx *remote.Tx) error {
 		t.remote = tx
 		return f(t)
@@ -153,10 +161,6 @@ func (tx *remoteTx) Bucket(name []byte) Bucket {
 	b := remoteBucket{tx: tx, nameLen: uint(len(name))}
 	b.remote = tx.remote.Bucket(name)
 	return b
-}
-
-func (tx *remoteTx) cleanup() {
-	// nothing to cleanup
 }
 
 func (c *remoteCursor) Prefix(v []byte) Cursor {

@@ -7,8 +7,10 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"sync"
 	"time"
 
+	"github.com/AskAlexSharov/lmdb-go/exp/lmdbpool"
 	"github.com/AskAlexSharov/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -116,12 +118,18 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 			}
 		}
 	}()
-	return &LmdbKV{
-		opts:    opts,
-		env:     env,
-		log:     logger,
-		buckets: buckets,
-	}, nil
+
+	db := &LmdbKV{
+		opts:       opts,
+		env:        env,
+		log:        logger,
+		buckets:    buckets,
+		lmdbTxPool: lmdbpool.NewTxnPool(env),
+	}
+	db.txPool = sync.Pool{
+		New: func() interface{} { return &lmdbTx{db: db} },
+	}
+	return db, nil
 }
 
 func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
@@ -133,10 +141,12 @@ func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 }
 
 type LmdbKV struct {
-	opts    lmdbOpts
-	env     *lmdb.Env
-	log     log.Logger
-	buckets map[string]lmdb.DBI
+	opts       lmdbOpts
+	env        *lmdb.Env
+	log        log.Logger
+	buckets    map[string]lmdb.DBI
+	lmdbTxPool *lmdbpool.TxnPool
+	txPool     sync.Pool
 }
 
 func NewLMDB() lmdbOpts {
@@ -146,6 +156,8 @@ func NewLMDB() lmdbOpts {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
+	db.lmdbTxPool.Close()
+
 	if db.env != nil {
 		if err := db.env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
@@ -175,19 +187,27 @@ func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 
 func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	flags := uint(0)
-	if !writable {
-		flags |= lmdb.Readonly
+	var tx *lmdb.Txn
+	if writable {
+		var err error
+		tx, err = db.env.BeginTxn(nil, flags)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		tx, err = db.lmdbTxPool.BeginTxn(flags | lmdb.Readonly)
+		if err != nil {
+			return nil, err
+		}
 	}
-	tx, err := db.env.BeginTxn(nil, flags)
-	if err != nil {
-		return nil, err
-	}
+
 	tx.RawRead = true
-	return &lmdbTx{
-		db:  db,
-		ctx: ctx,
-		tx:  tx,
-	}, nil
+
+	t := db.txPool.Get().(*lmdbTx)
+	t.ctx = ctx
+	t.tx = tx
+	return t, nil
 }
 
 type lmdbTx struct {
@@ -215,19 +235,30 @@ type lmdbCursor struct {
 	err error
 }
 
+var i int
+
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &lmdbTx{db: db, ctx: ctx}
-	return db.env.View(func(tx *lmdb.Txn) error {
-		defer t.cleanup()
+	i++
+	if i%10000 == 0 {
+		fmt.Printf("i: %d\n", i)
+	}
+	t := db.txPool.Get().(*lmdbTx)
+	defer db.txPool.Put(t)
+	defer t.closeCursors()
+	t.ctx = ctx
+	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
 		t.tx = tx
 		return f(t)
 	})
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &lmdbTx{db: db, ctx: ctx}
+	i++
+	t := db.txPool.Get().(*lmdbTx)
+	defer db.txPool.Put(t)
+	defer t.closeCursors()
+	t.ctx = ctx
 	return db.env.Update(func(tx *lmdb.Txn) error {
-		defer t.cleanup()
 		t.tx = tx
 		return f(t)
 	})
@@ -242,20 +273,21 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
-	tx.cleanup()
+	tx.closeCursors()
 	return tx.tx.Commit()
 }
 
 func (tx *lmdbTx) Rollback() error {
-	tx.cleanup()
+	tx.closeCursors()
 	tx.tx.Reset()
 	return nil
 }
 
-func (tx *lmdbTx) cleanup() {
+func (tx *lmdbTx) closeCursors() {
 	for _, c := range tx.cursors {
 		c.Close()
 	}
+	tx.cursors = tx.cursors[:0]
 }
 
 func (c *lmdbCursor) Prefix(v []byte) Cursor {
@@ -335,7 +367,7 @@ func (c *lmdbCursor) initCursor() error {
 		return err
 	}
 
-	// add to auto-cleanup on end of transactions
+	// add to auto-closeCursors on end of transactions
 	if c.bucket.tx.cursors == nil {
 		c.bucket.tx.cursors = make([]*lmdb.Cursor, 0, 1)
 	}

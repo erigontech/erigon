@@ -20,6 +20,8 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -50,6 +52,9 @@ func (db *ObjectDatabase) Put(bucket, key []byte, value []byte) error {
 }
 
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
+	defer func(t time.Time) { fmt.Println("object_db.go:54", time.Since(t)) }(time.Now())
+	defer fmt.Printf("ON: %d\n", len(tuples)/3)
+
 	//var savedTx Tx
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
@@ -73,10 +78,6 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 					}
 				}
 			}
-			// TODO: Add MultiPut to abstraction
-			//if err := b.MultiPut(pairs...); err != nil {
-			//	return err
-			//}
 
 			bucketStart = bucketEnd
 		}

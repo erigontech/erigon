@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"sync"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -16,9 +17,10 @@ type boltOpts struct {
 }
 
 type BoltKV struct {
-	opts boltOpts
-	bolt *bolt.DB
-	log  log.Logger
+	opts   boltOpts
+	bolt   *bolt.DB
+	log    log.Logger
+	txPool sync.Pool
 }
 type boltTx struct {
 	ctx context.Context
@@ -67,7 +69,7 @@ func (opts boltOpts) Path(path string) boltOpts {
 
 // WrapBoltDb provides a way for the code to gradually migrate
 // to the abstract interface
-func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
+func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (KV, error) {
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -81,11 +83,16 @@ func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
 			return nil, err
 		}
 	}
-	return &BoltKV{
+	db := &BoltKV{
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-	}, nil
+	}
+	db.txPool = sync.Pool{
+		New: func() interface{} { return &boltTx{db: db} },
+	}
+
+	return db, nil
 }
 
 func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
@@ -143,14 +150,17 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	t := db.txPool.Get().(*boltTx)
+	t.ctx = ctx
 	var err error
-	t := &boltTx{db: db, ctx: ctx}
 	t.bolt, err = db.bolt.Begin(writable)
 	return t, err
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &boltTx{db: db, ctx: ctx}
+	t := db.txPool.Get().(*boltTx)
+	defer db.txPool.Put(t)
+	t.ctx = ctx
 	return db.bolt.View(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -158,7 +168,9 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &boltTx{db: db, ctx: ctx}
+	t := db.txPool.Get().(*boltTx)
+	defer db.txPool.Put(t)
+	t.ctx = ctx
 	return db.bolt.Update(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -166,10 +178,12 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *boltTx) Commit(ctx context.Context) error {
+	// could not put tx back to pool, because tx can be used by app code after commit
 	return tx.bolt.Commit()
 }
 
 func (tx *boltTx) Rollback() error {
+	// could not put tx back to pool, because tx can be used by app code after rollback
 	return tx.bolt.Rollback()
 }
 

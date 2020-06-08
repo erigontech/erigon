@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
@@ -100,6 +101,7 @@ type badgerDB struct {
 	badger   *badger.DB
 	gcTicker *time.Ticker
 	log      log.Logger
+	txPool   sync.Pool
 }
 
 func NewBadger() badgerOpts {
@@ -168,18 +170,22 @@ type badgerCursor struct {
 }
 
 func (db *badgerDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &badgerTx{db: db, ctx: ctx}
+	t := db.txPool.Get().(*badgerTx)
+	defer db.txPool.Put(t)
+	t.ctx = ctx
 	return db.badger.View(func(tx *badger.Txn) error {
-		defer t.cleanup()
+		defer t.closeCursors()
 		t.badger = tx
 		return f(t)
 	})
 }
 
 func (db *badgerDB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &badgerTx{db: db, ctx: ctx}
+	t := db.txPool.Get().(*badgerTx)
+	defer db.txPool.Put(t)
+	t.ctx = ctx
 	return db.badger.Update(func(tx *badger.Txn) error {
-		defer t.cleanup()
+		defer t.closeCursors()
 		t.badger = tx
 		return f(t)
 	})
@@ -192,20 +198,21 @@ func (tx *badgerTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *badgerTx) Commit(ctx context.Context) error {
-	tx.cleanup()
+	tx.closeCursors()
 	return tx.badger.Commit()
 }
 
 func (tx *badgerTx) Rollback() error {
-	tx.cleanup()
+	tx.closeCursors()
 	tx.badger.Discard()
 	return nil
 }
 
-func (tx *badgerTx) cleanup() {
+func (tx *badgerTx) closeCursors() {
 	for _, it := range tx.badgerIterators {
 		it.Close()
 	}
+	tx.badgerIterators = tx.badgerIterators[:0]
 }
 
 func (c *badgerCursor) Prefix(v []byte) Cursor {
@@ -290,7 +297,7 @@ func (c *badgerCursor) initCursor() {
 	}
 
 	c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
-	// add to auto-cleanup on end of transactions
+	// add to auto-closeCursors on end of transactions
 	if c.bucket.tx.badgerIterators == nil {
 		c.bucket.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
 	}
