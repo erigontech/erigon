@@ -1,8 +1,6 @@
 package stagedsync
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -10,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func DoStagedSyncWithFetchers(
+func PrepareStagedSync(
 	d DownloaderGlue,
 	blockchain BlockChain,
 	stateDB ethdb.Database,
@@ -20,50 +18,68 @@ func DoStagedSyncWithFetchers(
 	quitCh chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
-) error {
+) (*State, error) {
 	defer log.Info("Staged sync finished")
 
 	stages := []*Stage{
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState) error {
-				return DownloadHeaders(s, d, stateDB, headersFetchers, datadir, quitCh)
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnHeaderDownloadStage(s, u, d, headersFetchers)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState) error {
-				return spawnBodyDownloadStage(s, d, pid)
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return spawnBodyDownloadStage(s, u, d, pid)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindBodyDownloadStage(stateDB, u)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindSendersStage(stateDB, u.UnwindPoint)
 			},
 		},
 		{
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindExecutionStage(u.UnwindPoint, stateDB)
 			},
 		},
 		{
 			ID:          stages.HashState,
 			Description: "Hashing the key in the state",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindHashStateStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generating intermediate hashes and validating final hash",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
@@ -71,8 +87,11 @@ func DoStagedSyncWithFetchers(
 			Description:         "Generating account history index",
 			Disabled:            !history,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindAccountHistoryIndex(u.UnwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
 			},
 		},
 		{
@@ -80,47 +99,19 @@ func DoStagedSyncWithFetchers(
 			Description:         "Generating storage history index",
 			Disabled:            !history,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindStorageHistoryIndex(u.UnwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
 			},
 		},
 	}
 
 	state := NewState(stages)
 
-	for !state.IsDone() {
-		index, stage := state.CurrentStage()
-
-		if stage.Disabled {
-			message := fmt.Sprintf(
-				"Sync stage %d/%d. %v disabled. %s",
-				index+1,
-				state.Len(),
-				stage.Description,
-				stage.DisabledDescription,
-			)
-
-			log.Info(message)
-
-			state.NextStage()
-			continue
-		}
-
-		stageState, err := state.StageState(stage.ID, stateDB)
-		if err != nil {
-			return err
-		}
-
-		message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, state.Len(), stage.Description)
-		log.Info(message)
-
-		err = stage.ExecFunc(stageState)
-		if err != nil {
-			return err
-		}
-
-		log.Info(fmt.Sprintf("%s DONE!", message))
+	if err := state.LoadUnwindInfo(stateDB); err != nil {
+		return nil, err
 	}
-
-	return nil
+	return state, nil
 }

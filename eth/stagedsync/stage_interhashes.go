@@ -25,19 +25,8 @@ func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, _ strin
 }
 
 //nolint:interfacer
-func unwindIntermediateHashesStage(unwindPoint uint64, stateDB ethdb.Database, _ string, _ chan struct{}) error {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.IntermediateHashes)
-	if err != nil {
-		return fmt.Errorf("unwind IntermediateHashes: get stage progress: %w", err)
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.IntermediateHashes, 0)
-		if err != nil {
-			return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
-		}
-		return nil
-	}
-	if err = stages.SaveStageUnwind(stateDB, stages.IntermediateHashes, 0); err != nil {
+func unwindIntermediateHashesStage(u *UnwindState, _ *StageState, stateDB ethdb.Database, _ string, _ chan struct{}) error {
+	if err := u.Done(stateDB); err != nil {
 		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
 	}
 	return nil
