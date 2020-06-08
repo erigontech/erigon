@@ -19,7 +19,7 @@ type RemoteKV struct {
 	opts   remoteOpts
 	remote *remote.DB
 	log    log.Logger
-	txPool sync.Pool // pool of ethdb.remoteTx objects
+	txPool *sync.Pool // pool of ethdb.remoteTx objects
 }
 
 type remoteTx struct {
@@ -92,7 +92,7 @@ func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
 		log:    log.New("remote_db", opts.Remote.DialAddress),
 	}
 
-	db.txPool = sync.Pool{
+	db.txPool = &sync.Pool{
 		New: func() interface{} { return &remoteTx{db: db} },
 	}
 

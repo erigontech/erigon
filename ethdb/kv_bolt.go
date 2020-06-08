@@ -20,7 +20,7 @@ type BoltKV struct {
 	opts   boltOpts
 	bolt   *bolt.DB
 	log    log.Logger
-	txPool sync.Pool // pool of ethdb.boltTx objects
+	txPool *sync.Pool // pool of ethdb.boltTx objects
 }
 type boltTx struct {
 	ctx context.Context
@@ -88,7 +88,7 @@ func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
 	}
-	db.txPool = sync.Pool{
+	db.txPool = &sync.Pool{
 		New: func() interface{} { return &boltTx{db: db} },
 	}
 

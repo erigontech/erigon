@@ -126,7 +126,7 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		buckets:    buckets,
 		lmdbTxPool: lmdbpool.NewTxnPool(env),
 	}
-	db.txPool = sync.Pool{
+	db.txPool = &sync.Pool{
 		New: func() interface{} { return &lmdbTx{db: db} },
 	}
 	return db, nil
@@ -146,7 +146,7 @@ type LmdbKV struct {
 	log        log.Logger
 	buckets    map[string]lmdb.DBI
 	lmdbTxPool *lmdbpool.TxnPool // pool of lmdb.Txn objects
-	txPool     sync.Pool         // pool of ethdb.lmdbTx objects
+	txPool     *sync.Pool        // pool of ethdb.lmdbTx objects
 }
 
 func NewLMDB() lmdbOpts {

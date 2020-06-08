@@ -303,7 +303,7 @@ func (db *ObjectDatabase) MemCopy() Database {
 		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
 	case *BoltKV:
 		mem = NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
-	case *badgerDB:
+	case *badgerKV:
 		mem = NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
 	}
 

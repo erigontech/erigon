@@ -113,7 +113,7 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 }
 
 func (db *BadgerDatabase) KV() KV {
-	return &badgerDB{badger: db.db}
+	return &badgerKV{badger: db.db}
 }
 
 // Close closes the database.

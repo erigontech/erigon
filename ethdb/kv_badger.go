@@ -45,7 +45,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 		}
 	}
 
-	db, err := badger.Open(opts.Badger)
+	badgerDB, err := badger.Open(opts.Badger)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			i := 0
 			for range gcTicker.C {
 			nextFile:
-				err := db.RunValueLogGC(0.5)
+				err := badgerDB.RunValueLogGC(0.5)
 				if err == nil {
 					i++
 					goto nextFile
@@ -76,16 +76,21 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 
 	go func() {
 		for range time.NewTicker(1 * time.Minute).C {
-			logger.Info("Badger Metrics", "BfCache", db.BfCacheMetrics().String(), "DataCache", db.DataCacheMetrics().String())
+			logger.Info("Badger Metrics", "BfCache", badgerDB.BfCacheMetrics().String(), "DataCache", badgerDB.DataCacheMetrics().String())
 		}
 	}()
 
-	return &badgerDB{
+	db := &badgerKV{
 		opts:     opts,
-		badger:   db,
+		badger:   badgerDB,
 		log:      logger,
 		gcTicker: gcTicker,
-	}, nil
+	}
+
+	db.txPool = &sync.Pool{
+		New: func() interface{} { return &badgerTx{db: db} },
+	}
+	return db, nil
 }
 
 func (opts badgerOpts) MustOpen(ctx context.Context) KV {
@@ -96,12 +101,12 @@ func (opts badgerOpts) MustOpen(ctx context.Context) KV {
 	return db
 }
 
-type badgerDB struct {
+type badgerKV struct {
 	opts     badgerOpts
 	badger   *badger.DB
 	gcTicker *time.Ticker
 	log      log.Logger
-	txPool   sync.Pool // pool of ethdb.badgerTx objects
+	txPool   *sync.Pool // pool of ethdb.badgerTx objects
 }
 
 func NewBadger() badgerOpts {
@@ -110,7 +115,7 @@ func NewBadger() badgerOpts {
 
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
-func (db *badgerDB) Close() {
+func (db *badgerKV) Close() {
 	if db.gcTicker != nil {
 		db.gcTicker.Stop()
 	}
@@ -123,16 +128,16 @@ func (db *badgerDB) Close() {
 	}
 }
 
-func (db *badgerDB) DiskSize(_ context.Context) (common.StorageSize, error) {
+func (db *badgerKV) DiskSize(_ context.Context) (common.StorageSize, error) {
 	lsm, vlog := db.badger.Size()
 	return common.StorageSize(lsm + vlog), nil
 }
 
-func (db *badgerDB) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+func (db *badgerKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
 	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
-func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *badgerKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	return &badgerTx{
 		db:     db,
 		ctx:    ctx,
@@ -142,7 +147,7 @@ func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {
 
 type badgerTx struct {
 	ctx context.Context
-	db  *badgerDB
+	db  *badgerKV
 
 	badger          *badger.Txn
 	badgerIterators []*badger.Iterator
@@ -169,7 +174,7 @@ type badgerCursor struct {
 	err error
 }
 
-func (db *badgerDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *badgerKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := db.txPool.Get().(*badgerTx)
 	defer db.txPool.Put(t)
 	t.ctx = ctx
@@ -180,7 +185,7 @@ func (db *badgerDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	})
 }
 
-func (db *badgerDB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := db.txPool.Get().(*badgerTx)
 	defer db.txPool.Put(t)
 	t.ctx = ctx
