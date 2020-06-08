@@ -300,6 +300,30 @@ func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]b
 	return dat, err
 }
 
+// getChangeSetByBlockNoLock returns changeset by block and dbi
+func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
+	key := dbutils.EncodeTimestamp(timestamp)
+
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.ChangeSetByIndexBucket(dbutils.PlainStateBucket, hBucket))
+		if b == nil {
+			return nil
+		}
+
+		v, _ := b.Get(key)
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dat, nil
+}
+
 func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byte, err error) {
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accNoRoot); err != nil {

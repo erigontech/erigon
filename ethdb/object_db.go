@@ -145,6 +145,25 @@ func (db *ObjectDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([
 	return dat, err
 }
 
+// getChangeSetByBlockNoLock returns changeset by block and dbi
+func (db *ObjectDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
+	key := dbutils.EncodeTimestamp(timestamp)
+
+	var dat []byte
+	err := db.kv.View(context.Background(), func(tx Tx) error {
+		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(dbutils.PlainStateBucket, hBucket)).Get(key)
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dat, nil
+}
+
 func (db *ObjectDatabase) Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.kv.View(context.Background(), func(tx Tx) error {
