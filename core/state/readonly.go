@@ -106,6 +106,10 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 			// Skip deleted entries
 			return true, nil
 		}
+		if len(ks) < common.AddressLength + common.IncarnationLength + common.HashLength {
+			// Skip non storage items
+			return true, nil
+		}
 		key := ks[common.AddressLength+common.IncarnationLength:]
 		keyHash, err1 := common.HashData(key)
 		if err1 != nil {
@@ -151,18 +155,15 @@ func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address
 			return true, nil
 		}
 
-		if len(ks) > 32 {
+		if len(ks) > 20 {
 			return true, nil
 		}
-		addrHash := common.BytesToHash(ks[:common.HashLength])
-		preimage, err := ethdb.Get(dbs.db, dbutils.PreimagePrefix, addrHash[:])
-		if err == nil {
-			addr := &common.Address{}
-			addr.SetBytes(preimage)
-			cb(addr, addrHash)
-		} else {
-			cb(nil, addrHash)
+		addr := common.BytesToAddress(ks)
+		addrHash, err1 := common.HashData(ks)
+		if err1 != nil {
+			return false, err1
 		}
+		cb(&addr, addrHash)
 		results++
 		return results < maxResults, nil
 	})
