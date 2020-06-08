@@ -10,16 +10,16 @@ import (
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	sm, err := GetStorageModeFromDB(db)
+	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(sm, StorageMode{}) {
+	if !reflect.DeepEqual(sm, ethdb.StorageMode{}) {
 		t.Fatal()
 	}
 
-	err = setStorageModeIfNotExist(db, StorageMode{
+	err = setStorageModeIfNotExist(db, ethdb.StorageMode{
 		true,
 		true,
 		true,
@@ -29,12 +29,12 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sm, err = GetStorageModeFromDB(db)
+	sm, err = ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(sm, StorageMode{
+	if !reflect.DeepEqual(sm, ethdb.StorageMode{
 		true,
 		true,
 		true,
@@ -43,5 +43,4 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		spew.Dump(sm)
 		t.Fatal("not equal")
 	}
-
 }

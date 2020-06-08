@@ -199,7 +199,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	sm, err := GetStorageModeFromDB(chainDb)
+	sm, err := ethdb.GetStorageModeFromDB(chainDb)
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +663,7 @@ func (s *Ethereum) Stop() error {
 	return nil
 }
 
-func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
+func setStorageModeIfNotExist(db ethdb.Database, sm ethdb.StorageMode) error {
 	var (
 		err error
 	)
@@ -706,42 +706,4 @@ func setModeOnEmpty(db ethdb.Database, key []byte, currentValue bool) error {
 	}
 
 	return nil
-}
-
-func GetStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
-	var (
-		sm  StorageMode
-		v   []byte
-		err error
-	)
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.History = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModePreImages)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.Preimages = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.Receipts = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.TxIndex = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeThinHistory)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-
-	return sm, nil
 }

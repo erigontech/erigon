@@ -92,7 +92,7 @@ func newTester() *downloadTester {
 	if err != nil {
 		panic(err)
 	}
-	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, false)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 
