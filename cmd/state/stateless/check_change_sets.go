@@ -8,11 +8,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -61,6 +63,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
+	batch := chainDb.NewBatch()
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)
 		if block == nil {
@@ -85,6 +88,13 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			receiptSha := types.DeriveSha(receipts)
 			if receiptSha != block.Header().ReceiptHash {
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			}
+		}
+		rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
+		if batch.BatchSize() >= chainDb.IdealBatchSize() {
+			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
+			if _, err := batch.Commit(); err != nil {
+				return err
 			}
 		}
 
