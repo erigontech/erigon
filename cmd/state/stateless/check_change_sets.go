@@ -24,7 +24,7 @@ import (
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, writeReceipts bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -70,7 +70,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		dbstate := state.NewDbState(historyDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDbState(historyDb.KV(), block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriter()
 		var blockWriter state.StateWriter
@@ -90,11 +90,13 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 			}
 		}
-		rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
-		if batch.BatchSize() >= chainDb.IdealBatchSize() {
-			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
-			if _, err := batch.Commit(); err != nil {
-				return err
+		if writeReceipts {
+			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
+			if batch.BatchSize() >= chainDb.IdealBatchSize() {
+				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
+				if _, err := batch.Commit(); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -155,7 +157,12 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		default:
 		}
 	}
-
+	if writeReceipts {
+		log.Info("Committing final receipts", "batch size", common.StorageSize(batch.BatchSize()))
+		if _, err := batch.Commit(); err != nil {
+			return err
+		}
+	}
 	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
 	return nil
 }
