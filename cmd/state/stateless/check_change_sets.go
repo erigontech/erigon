@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -76,8 +77,15 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		if err := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block); err != nil {
-			return err
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block)
+		if err1 != nil {
+			return err1
+		}
+		if chainConfig.IsByzantium(block.Number()) {
+			receiptSha := types.DeriveSha(receipts)
+			if receiptSha != block.Header().ReceiptHash {
+				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			}
 		}
 
 		if !nocheck {

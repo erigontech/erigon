@@ -41,7 +41,7 @@ var chartColors = []drawing.Color{
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
 	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block,
-) error {
+) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
@@ -54,20 +54,20 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	for _, tx := range block.Transactions() {
 		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
-			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
-		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	return nil
+	return receipts, nil
 }
 
 func statePicture(t *trie.Trie, number uint64) error {
@@ -398,7 +398,7 @@ func Stateless(
 			ibs := state.New(s)
 			ibs.SetTrace(trace)
 			s.SetBlockNr(blockNum)
-			if err = runBlock(ibs, s, s, chainConfig, blockProvider, block); err != nil {
+			if _, err = runBlock(ibs, s, s, chainConfig, blockProvider, block); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			} else if !binary {
