@@ -81,9 +81,9 @@ func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte,
 	var data []byte
 	switch {
 	case bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
-		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
+		data, err = changeset.AccountChangeSetPlainBytes(changeSetData).FindLast(key)
 	case bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
-		data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
+		data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
 	}
 	if err != nil {
 		return nil, ErrKeyNotFound
