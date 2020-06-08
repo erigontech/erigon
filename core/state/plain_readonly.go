@@ -34,29 +34,29 @@ import (
 )
 
 // Implements StateReader by wrapping database only, without trie
-type PlainDbState struct {
+type PlainDBState struct {
 	db      ethdb.KV
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainDbState(db ethdb.KV, blockNr uint64) *PlainDbState {
-	return &PlainDbState{
+func NewPlainDBState(db ethdb.KV, blockNr uint64) *PlainDBState {
+	return &PlainDBState{
 		db:      db,
 		blockNr: blockNr,
 		storage: make(map[common.Address]*llrb.LLRB),
 	}
 }
 
-func (dbs *PlainDbState) SetBlockNr(blockNr uint64) {
+func (dbs *PlainDBState) SetBlockNr(blockNr uint64) {
 	dbs.blockNr = blockNr
 }
 
-func (dbs *PlainDbState) GetBlockNr() uint64 {
+func (dbs *PlainDBState) GetBlockNr() uint64 {
 	return dbs.blockNr
 }
 
-func (dbs *PlainDbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
@@ -133,7 +133,7 @@ func (dbs *PlainDbState) ForEachStorage(addr common.Address, start []byte, cb fu
 	return innerErr
 }
 
-func (dbs *PlainDbState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
+func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
 	err := ethdb.WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if vs == nil || len(vs) == 0 {
@@ -158,7 +158,7 @@ func (dbs *PlainDbState) ForEachAccount(start []byte, cb func(address *common.Ad
 	}
 }
 
-func (dbs *PlainDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, address[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
@@ -170,7 +170,7 @@ func (dbs *PlainDbState) ReadAccountData(address common.Address) (*accounts.Acco
 	return &acc, nil
 }
 
-func (dbs *PlainDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
@@ -179,14 +179,14 @@ func (dbs *PlainDbState) ReadAccountStorage(address common.Address, incarnation 
 	return enc, nil
 }
 
-func (dbs *PlainDbState) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (dbs *PlainDBState) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
 	return ethdb.Get(dbs.db, dbutils.CodeBucket, codeHash[:])
 }
 
-func (dbs *PlainDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
+func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
 	code, err := dbs.ReadAccountCode(address, codeHash)
 	if err != nil {
 		return 0, err
@@ -194,25 +194,25 @@ func (dbs *PlainDbState) ReadAccountCodeSize(address common.Address, codeHash co
 	return len(code), nil
 }
 
-func (dbs *PlainDbState) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	// We do not need to know the accurate incarnation value when DbState is used, because correct incarnation
 	// is stored in the account record
 	return 0, nil
 }
 
-func (dbs *PlainDbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (dbs *PlainDBState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (dbs *PlainDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (dbs *PlainDBState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 
-func (dbs *PlainDbState) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (dbs *PlainDBState) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *PlainDbState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (dbs *PlainDBState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()
@@ -235,7 +235,7 @@ func (dbs *PlainDbState) WriteAccountStorage(_ context.Context, address common.A
 	return nil
 }
 
-func (dbs *PlainDbState) CreateContract(address common.Address) error {
+func (dbs *PlainDBState) CreateContract(address common.Address) error {
 	delete(dbs.storage, address)
 	return nil
 }
@@ -243,7 +243,7 @@ func (dbs *PlainDbState) CreateContract(address common.Address) error {
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
-func (dbs *PlainDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
+func (dbs *PlainDBState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	// TODO: [Issue 99] Support incarnations
@@ -275,7 +275,7 @@ func (dbs *PlainDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keyb
 // WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching accounts were traversed (provided there was no error).
-func (dbs *PlainDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walker func(common.Hash, *accounts.Account)) (bool, error) {
+func (dbs *PlainDBState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walker func(common.Hash, *accounts.Account)) (bool, error) {
 	startkey := make([]byte, common.HashLength)
 	copy(startkey, prefix.Data)
 
