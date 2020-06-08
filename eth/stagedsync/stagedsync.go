@@ -33,11 +33,12 @@ func DoStagedSyncWithFetchers(
 		},
 		{
 			ID:          stages.Bodies,
-			Description: "Downloading block bodiess",
+			Description: "Downloading block bodies",
 			ExecFunc: func(s *StageState) error {
 				return spawnBodyDownloadStage(s, d, pid)
 			},
 		},
+		/*
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
@@ -45,6 +46,7 @@ func DoStagedSyncWithFetchers(
 				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), datadir, quitCh)
 			},
 		},
+		*/
 		{
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
@@ -86,7 +88,7 @@ func DoStagedSyncWithFetchers(
 		},
 	}
 
-	state := NewState(stages)
+	state := NewState(stages[:2])
 
 	for !state.IsDone() {
 		index, stage := state.CurrentStage()

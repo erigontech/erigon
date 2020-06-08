@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -1600,6 +1601,8 @@ func (d *Downloader) processFullSyncContent() error {
 	}
 }
 
+var cryptoContext = secp256k1.NewContext()
+
 func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
@@ -1616,7 +1619,11 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	)
 	blocks := make([]*types.Block, len(results))
 	for i, result := range results {
-		blocks[i] = types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
+		if d.mode != StagedSync {
+			blocks[i] = types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
+		} else {
+			blocks[i] = types.NewBlockWithHeader(result.Header).WithBodyRecovered(result.Transactions, result.Uncles, d.blockchain.Config(), cryptoContext)
+		}
 	}
 	var index int
 	var err error
