@@ -37,9 +37,9 @@ var _ StateReader = (*DbState)(nil)
 var _ StateWriter = (*DbState)(nil)
 
 type storageItem struct {
-	key 		common.Hash
-	seckey 		common.Hash
-	value       uint256.Int
+	key    common.Hash
+	seckey common.Hash
+	value  uint256.Int
 }
 
 func (a *storageItem) Less(b llrb.Item) bool {
@@ -106,7 +106,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 			// Skip deleted entries
 			return true, nil
 		}
-		if len(ks) < common.AddressLength + common.IncarnationLength + common.HashLength {
+		if len(ks) < common.AddressLength+common.IncarnationLength+common.HashLength {
 			// Skip non storage items
 			return true, nil
 		}
