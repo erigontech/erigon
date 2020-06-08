@@ -163,8 +163,8 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 	// it in the local storage container.
 	if op == SSTORE && stack.Len() >= 2 {
 		var (
-			value   = common.Hash(stack.Data[stack.Len()-2].Bytes32())
-			address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+			value   = common.Hash(stack.data[stack.len()-2].Bytes32())
+			address = common.Hash(stack.data[stack.len()-1].Bytes32())
 		)
 		l.changedValues[contract.Address()][address] = value
 	}
@@ -177,9 +177,9 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 	// Copy a snapshot of the current stack state to a new buffer
 	var stck []*big.Int
 	if !l.cfg.DisableStack {
-		stck = make([]*big.Int, len(stack.GetData()))
-		for i, item := range stack.GetData() {
-			stck[i] = item.ToBig()
+		stck = make([]*big.Int, len(stack.Data()))
+		for i, item := range stack.Data() {
+			stck[i] = new(big.Int).Set(item.ToBig())
 		}
 	}
 	// Copy a snapshot of the current storage to a new container
