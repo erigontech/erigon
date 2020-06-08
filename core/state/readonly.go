@@ -173,11 +173,7 @@ func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address
 }
 
 func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
-	enc, err := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, address[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -189,18 +185,8 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 }
 
 func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	keyHash, err := common.HashData(key[:])
-	if err != nil {
-		return nil, err
-	}
-
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
-
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
+	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -266,11 +252,6 @@ func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Addres
 func (dbs *DbState) CreateContract(address common.Address) error {
 	delete(dbs.storage, address)
 	return nil
-}
-
-func (dbs *DbState) GetKey(shaKey []byte) []byte {
-	key, _ := ethdb.Get(dbs.db, dbutils.PreimagePrefix, shaKey)
-	return key
 }
 
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
