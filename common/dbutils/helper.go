@@ -36,10 +36,10 @@ func DecodeTimestamp(suffix []byte) (uint64, []byte) {
 
 func ChangeSetByIndexBucket(b []byte) []byte {
 	if bytes.Equal(b, AccountsHistoryBucket) {
-		return AccountChangeSetBucket
+		return PlainAccountChangeSetBucket
 	}
 	if bytes.Equal(b, StorageHistoryBucket) {
-		return StorageChangeSetBucket
+		return PlainStorageChangeSetBucket
 	}
 	panic("wrong bucket")
 }
