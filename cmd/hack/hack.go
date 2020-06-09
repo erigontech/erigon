@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AskAlexSharov/lmdb-go/lmdb"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -369,46 +370,51 @@ func accountSavings(db *bolt.DB) (int, int) {
 	return emptyRoots, emptyCodes
 }
 
-func allBuckets(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			n := make([]byte, len(name))
-			copy(n, name)
-			bucketList = append(bucketList, n)
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
 func printBuckets(db *bolt.DB) {
-	bucketList := allBuckets(db)
-	for _, bucket := range bucketList {
+	for _, bucket := range dbutils.Buckets {
 		fmt.Printf("%s\n", bucket)
 	}
 }
 
 func bucketStats(chaindata string) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	bucketList := allBuckets(db)
-	//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
-	fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
-	db.View(func(tx *bolt.Tx) error {
-		for _, bucket := range bucketList {
-			b := tx.Bucket(bucket)
-			bs := b.Stats()
-			fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-				bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-				bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-		}
-		return nil
-	})
+	t := "bolt"
+	bucketList := dbutils.Buckets
+
+	switch t {
+	case "bolt":
+		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+		check(err)
+		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
+		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
+		db.View(func(tx *bolt.Tx) error {
+			for _, bucket := range bucketList {
+				b := tx.Bucket(bucket)
+				bs := b.Stats()
+				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
+					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
+					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
+			}
+			return nil
+		})
+	case "lmdb":
+		env, err := lmdb.NewEnv()
+		check(err)
+		err = env.Open(chaindata, lmdb.Readonly, 0664)
+		check(err)
+
+		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
+		env.View(func(tx *lmdb.Txn) error {
+			for _, bucket := range bucketList {
+				dbi, bucketErr := tx.OpenDBI(string(bucket), lmdb.Readonly)
+				check(bucketErr)
+				bs, statErr := tx.Stat(dbi)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+			return nil
+		})
+	}
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
