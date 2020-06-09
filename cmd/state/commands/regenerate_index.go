@@ -18,7 +18,3 @@ var regenerateIndexCmd = &cobra.Command{
 		return generate.RegenerateIndex(chaindata, []byte(changeSetBucket))
 	},
 }
-
-/*
-
- */

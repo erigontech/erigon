@@ -30,7 +30,7 @@ type IndexGenerator struct {
 	quitCh           chan struct{}
 }
 
-var mapper = map[string]struct {
+var CSMapper = map[string]struct {
 	IndexBucket   []byte
 	WalkerAdapter func(v []byte) changeset.Walker
 	KeySize       int
@@ -81,7 +81,7 @@ var mapper = map[string]struct {
 }
 
 func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte) error {
-	v, ok := mapper[string(changeSetBucket)]
+	v, ok := CSMapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
@@ -111,7 +111,7 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 }
 
 func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) error {
-	vv, ok := mapper[string(changeSetBucket)]
+	vv, ok := CSMapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}

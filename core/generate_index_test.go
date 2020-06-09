@@ -23,7 +23,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			ig := NewIndexGenerator(db, make(chan struct{}))
-			csInfo, ok := mapper[string(csBucket)]
+			csInfo, ok := CSMapper[string(csBucket)]
 			if !ok {
 				t.Fatal("incorrect cs bucket")
 			}
@@ -65,7 +65,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
 		hashes, expected := generateTestData(t, db, csbucket, 2100)
-		mp := mapper[string(csbucket)]
+		mp := CSMapper[string(csbucket)]
 		indexBucket := mp.IndexBucket
 		ig := NewIndexGenerator(db, make(chan struct{}))
 		err := ig.GenerateIndex(0, csbucket)
@@ -155,7 +155,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 }
 
 func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
-	csInfo, ok := mapper[string(csBucket)]
+	csInfo, ok := CSMapper[string(csBucket)]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}

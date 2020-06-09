@@ -1,10 +1,12 @@
 package generate
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"errors"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"os"
+	"os/signal"
 	"time"
 )
 
@@ -13,9 +15,21 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	if err != nil {
 		return err
 	}
-	ig := core.NewIndexGenerator(db, make(chan struct{}))
+	ch := make(chan os.Signal, 1)
+	quitCh := make(chan struct{})
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		<-ch
+		close(quitCh)
+	}()
 
-	err = ig.DropIndex(dbutils.AccountsHistoryBucket)
+	ig := core.NewIndexGenerator(db, quitCh)
+	cs, ok := core.CSMapper[string(csBucket)]
+	if !ok {
+		return errors.New("unknown changeset")
+	}
+
+	err = ig.DropIndex(cs.IndexBucket)
 	if err != nil {
 		return err
 	}

@@ -23,36 +23,39 @@ func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan
 	}
 
 	startKey = dbutils.HeaderHashKey(blockNum)
-	err:=etl.Transform(db,dbutils.HeaderPrefix,dbutils.TxLookupPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			if !dbutils.CheckCanonicalKey(k) {
-				return nil
-			}
-			blocknum:=binary.BigEndian.Uint64(k)
-			body := rawdb.ReadBody(db, common.BytesToHash(v), blocknum)
-			if body == nil {
-				log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
-				return errors.New("empty block")
-			}
-
-			blockNumBytes:=new(big.Int).SetUint64(blockNum).Bytes()
-			for _, tx := range body.Transactions {
-				err:=next(k, tx.Hash().Bytes(), blockNumBytes)
-				if err!=nil {
-					return err
-				}
-			}
-			return nil
-		},  func(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
-			return next(k,value)
-		}, etl.TransformArgs{
-			Quit:            quitCh,
-			ExtractStartKey: startKey,
-		})
-		if err!=nil {
-			return err
-		}
+	err:=TxLookupTransform(db, startKey, quitCh, nil)
+	if err!=nil {
+		return err
+	}
 
 	return s.DoneAndUpdate(db, blockNum)
+}
+
+func TxLookupTransform(db ethdb.Database, startKey []byte, quitCh chan struct{}, chunks [][]byte) error  {
+	return etl.Transform(db,dbutils.HeaderPrefix,dbutils.TxLookupPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+		if !dbutils.CheckCanonicalKey(k) {
+			return nil
+		}
+		blocknum:=binary.BigEndian.Uint64(k)
+		body := rawdb.ReadBody(db, common.BytesToHash(v), blocknum)
+		if body == nil {
+			log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
+			return errors.New("empty block")
+		}
+
+		blockNumBytes:=new(big.Int).SetUint64(blocknum).Bytes()
+		for _, tx := range body.Transactions {
+			err:=next(k, tx.Hash().Bytes(), blockNumBytes)
+			if err!=nil {
+				return err
+			}
+		}
+		return nil
+	},  etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            quitCh,
+		ExtractStartKey: startKey,
+		Chunks: chunks,
+	})
 }
 
 func unwindTxLookup(unwindPoint uint64, db ethdb.Database, quitCh chan struct{}) error {

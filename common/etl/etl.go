@@ -91,13 +91,17 @@ func Transform(
 	numOfChunks:=1+len(args.Chunks)
 	if numOfChunks > 1 {
 		errg,_:=errgroup.WithContext(context.TODO())
-		errg.Go(func() error {
-			if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.Chunks[0], args.FixedBits, collector, extractFunc, args.Quit); err != nil {
-				disposeProviders(collector.dataProviders)
-				return err
+		f:= func(startKey, endKey []byte, collector *Collector,  i int) func() error {
+			return func() error {
+				if err := extractBucketIntoFiles(db, fromBucket, startKey, endKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+					disposeProviders(collector.dataProviders)
+					return err
+				}
+				log.Info("Main finished successfully","i",0)
+				return nil
 			}
-			return nil
-		})
+		}
+		errg.Go(f(args.ExtractStartKey, args.Chunks[0], collector, 0))
 
 		localCollectors:=make([]*Collector, len(args.Chunks))
 		for i:=range args.Chunks {
@@ -105,20 +109,12 @@ func Transform(
 			localCollectors[i] = NewCollector(datadir, newSortableBuffer(bufferOptimalSize))
 			extractStartKey :=args.Chunks[i]
 			var endKey []byte
-			if i==len(args.Chunks) {
+			if i==len(args.Chunks)-1 {
 				endKey = args.ExtractEndKey
 			} else {
 				endKey =args.Chunks[i+1]
 			}
-
-			errg.Go(func() error {
-				fmt.Println(i)
-				if err := extractBucketIntoFiles(db, fromBucket, extractStartKey, endKey, args.FixedBits, localCollectors[i], extractFunc, args.Quit); err != nil {
-					disposeProviders(localCollectors[i].dataProviders)
-					return err
-				}
-				return nil
-			})
+			errg.Go(f(extractStartKey, endKey, localCollectors[i], i+1))
 		}
 		err:=errg.Wait()
 		if err!=nil {
