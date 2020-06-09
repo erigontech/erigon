@@ -65,6 +65,11 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	numOfGoroutines := numOfGoroutines
 
 	numOfGoroutines = 16
+	if len(cryptoContexts) < numOfGoroutines {
+		for i := 0; i < numOfGoroutines-len(cryptoContexts); i++ {
+			cryptoContexts = append(cryptoContexts, secp256k1.NewContext())
+		}
+	}
 
 	wg.Add(numOfGoroutines)
 	for i := 0; i < numOfGoroutines; i++ {
