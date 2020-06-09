@@ -14,7 +14,7 @@ import (
 func GetAsOf(db KV, bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.View(context.Background(), func(tx Tx) error {
-		v, err := FindByHistory(tx, hBucket, key, timestamp)
+		v, err := FindByHistory(tx, bucket, hBucket, key, timestamp)
 		if err != nil {
 			log.Debug("FindByHistory err", "err", err)
 		} else {
@@ -36,7 +36,7 @@ func GetAsOf(db KV, bucket, hBucket, key []byte, timestamp uint64) ([]byte, erro
 	return dat, err
 }
 
-func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {
+func FindByHistory(tx Tx, bucket, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {
 	//check
 	hB := tx.Bucket(hBucket)
 	if hB == nil {
@@ -45,8 +45,13 @@ func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte,
 	var keyF []byte
 	if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
 		keyF = make([]byte, len(key)-common.IncarnationLength)
-		copy(keyF, key[:common.HashLength])
-		copy(keyF[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		if bytes.Equal(dbutils.CurrentStateBucket, bucket) {
+			copy(keyF, key[:common.HashLength])
+			copy(keyF[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		} else {
+			copy(keyF, key[:common.AddressLength])
+			copy(keyF[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
+		}
 	} else {
 		keyF = common.CopyBytes(key)
 	}
@@ -70,7 +75,7 @@ func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte,
 	if set {
 		return []byte{}, nil
 	}
-	csB := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
+	csB := tx.Bucket(dbutils.ChangeSetByIndexBucket(bucket, hBucket))
 	if csB == nil {
 		return nil, ErrKeyNotFound
 	}
@@ -79,11 +84,18 @@ func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte,
 	changeSetData, _ := csB.Get(csKey)
 
 	var data []byte
-	switch {
-	case bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
-		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
-	case bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
-		data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
+	if bytes.Equal(dbutils.AccountsHistoryBucket, hBucket) {
+		if bytes.Equal(dbutils.CurrentStateBucket, bucket) {
+			data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
+		} else {
+			data, err = changeset.AccountChangeSetPlainBytes(changeSetData).FindLast(key)
+		}
+	} else if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
+		if bytes.Equal(dbutils.CurrentStateBucket, bucket) {
+			data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
+		} else {
+			data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
+		}
 	}
 	if err != nil {
 		return nil, ErrKeyNotFound
@@ -96,8 +108,14 @@ func FindByHistory(tx Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte,
 			return nil, err
 		}
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-			codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-			codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(key, acc.Incarnation))
+			var codeHash []byte
+			if bytes.Equal(dbutils.CurrentStateBucket, bucket) {
+				codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+				codeHash, _ = codeBucket.Get(dbutils.GenerateStoragePrefix(key, acc.Incarnation))
+			} else {
+				codeBucket := tx.Bucket(dbutils.PlainContractCodeBucket)
+				codeHash, _ = codeBucket.Get(dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+			}
 			if len(codeHash) > 0 {
 				acc.CodeHash = common.BytesToHash(codeHash)
 			}

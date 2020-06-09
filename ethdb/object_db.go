@@ -151,7 +151,7 @@ func (db *ObjectDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) 
 
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket)).Get(key)
+		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(dbutils.PlainStateBucket, hBucket)).Get(key)
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)

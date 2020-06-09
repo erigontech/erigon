@@ -83,7 +83,7 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 	if err := w.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
-	return w.stateDb.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address, incarnation), codeHash[:])
+	return w.stateDb.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
 }
 
 func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {

@@ -324,7 +324,7 @@ func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) erro
 		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
 			return rawdb.PlainReadAccount(db, address, out)
 		},
-		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address, inc) },
+		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Getter, key string) {
 	var address common.Address
 	copy(address[:], []byte(key))
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address, acc.Incarnation)); err2 == nil {
+		if codeHash, err2 := db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
