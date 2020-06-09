@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -59,25 +60,25 @@ func GetStorageModeFromDB(db Database) (StorageMode, error) {
 		err error
 	)
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
-	if err != nil && err != ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
 	sm.History = len(v) > 0
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModePreImages)
-	if err != nil && err != ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
 	sm.Preimages = len(v) > 0
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
-	if err != nil && err != ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
 	sm.Receipts = len(v) > 0
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
-	if err != nil && err != ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
 	sm.TxIndex = len(v) > 0
@@ -114,10 +115,10 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 
 func setModeOnEmpty(db Database, key []byte, currentValue bool) error {
 	_, err := db.Get(dbutils.DatabaseInfoBucket, key)
-	if err != nil && err != ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return err
 	}
-	if err == ErrKeyNotFound {
+	if errors.Is(err, ErrKeyNotFound) {
 		val := []byte{}
 		if currentValue {
 			val = []byte{1}
