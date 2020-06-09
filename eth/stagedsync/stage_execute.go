@@ -200,7 +200,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", profileNumber))
 				defer f.Close()
 				runtime.GC()
-				_, pprof.WriteHeapProfile(f)
+				if err = pprof.WriteHeapProfile(f); err != nil {
+					log.Error("could not save memory profile", "error", err)
+				}
 			}
 		}
 	}
