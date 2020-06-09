@@ -18,7 +18,7 @@ func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid str
 
 }
 
-func unwindBodyDownloadStage(db ethdb.Database, u *UnwindState) error {
+func unwindBodyDownloadStage(u *UnwindState, db ethdb.Database) error {
 	mutation := db.NewBatch()
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind Bodies: reset: %v", err)

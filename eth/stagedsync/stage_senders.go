@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -160,21 +159,10 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 	}
 }
 
-func unwindSendersStage(stateDB ethdb.Database, unwindPoint uint64) error {
+func unwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
 	// Does not require any special processing
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Senders)
-	if err != nil {
-		return fmt.Errorf("unwind Senders: get stage progress: %v", err)
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.Senders, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Senders: reset: %v", err)
-		}
-		return nil
-	}
 	mutation := stateDB.NewBatch()
-	err = stages.SaveStageUnwind(mutation, stages.Senders, 0)
+	err := u.Done(mutation)
 	if err != nil {
 		return fmt.Errorf("unwind Senders: reset: %v", err)
 	}

@@ -32,7 +32,7 @@ func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 	for _, stage := range s.stages {
-		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, db); err != nil {
+		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
 			return err
 		}
 	}
@@ -84,14 +84,36 @@ func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
 }
 
 func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState, error) {
-	blockNum, err := stages.GetStageProgress(db, stage)
+	blockNum, stageData, err := stages.GetStageProgress(db, stage)
 	if err != nil {
 		return nil, err
 	}
-	return &StageState{s, stage, blockNum}, nil
+	return &StageState{s, stage, blockNum, stageData}, nil
+}
+
+func (s *State) findInterruptedStage(db ethdb.Getter) (*Stage, error) {
+	for _, stage := range s.stages {
+		_, stageData, err := stages.GetStageProgress(db, stage.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(stageData) > 0 {
+			return stage, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *State) Run(db ethdb.GetterPutter) error {
+	if interruptedStage, err := s.findInterruptedStage(db); err != nil {
+		return err
+	} else if interruptedStage != nil {
+		if err := s.runStage(interruptedStage, db, 0); err != nil {
+			return err
+		}
+		// restart from 0 after completing the missing stage
+		s.currentStage = 0
+	}
 	for !s.IsDone() {
 		if unwind := s.unwindStack.Pop(); unwind != nil {
 			log.Info("Unwinding...")
@@ -139,21 +161,29 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 				continue
 			}
 
-			stageState, err := s.StageState(stage.ID, db)
-			if err != nil {
+			if err := s.runStage(stage, db, index); err != nil {
 				return err
 			}
 
-			message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
-			log.Info(message)
-
-			err = stage.ExecFunc(stageState, s)
-			if err != nil {
-				return err
-			}
-
-			log.Info(fmt.Sprintf("%s DONE!", message))
 		}
 	}
+	return nil
+}
+
+func (s *State) runStage(stage *Stage, db ethdb.Getter, index uint) error {
+	stageState, err := s.StageState(stage.ID, db)
+	if err != nil {
+		return err
+	}
+
+	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
+	log.Info(message)
+
+	err = stage.ExecFunc(stageState, s)
+	if err != nil {
+		return err
+	}
+
+	log.Info(fmt.Sprintf("%s DONE!", message))
 	return nil
 }
