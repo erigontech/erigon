@@ -193,8 +193,14 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 
 		if prof {
 			if blockNum-profileNumber == 100000 {
-				// Flush the profiler
+				// Flush the CPU profiler
 				pprof.StopCPUProfile()
+
+				// And the memory profiler
+				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", profileNumber))
+				defer f.Close()
+				runtime.GC()
+				pprof.WriteHeapProfile(f)
 			}
 		}
 	}
