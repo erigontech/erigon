@@ -27,7 +27,6 @@ type Encoder interface {
 	Reset(writer io.Writer)
 }
 
-
 func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil

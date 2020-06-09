@@ -26,9 +26,9 @@ func ValidateTxLookups(chaindata string) error {
 		<-ch
 		close(quitCh)
 	}()
-	t:=time.Now()
+	t := time.Now()
 	defer func() {
-		log.Info("Validation ended","it took", time.Since(t))
+		log.Info("Validation ended", "it took", time.Since(t))
 	}()
 	var blockNum uint64
 	iterations := 0
@@ -36,7 +36,7 @@ func ValidateTxLookups(chaindata string) error {
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
-		if err:=common.Stopped(quitCh); err!=nil {
+		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
 		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
@@ -67,6 +67,3 @@ func ValidateTxLookups(chaindata string) error {
 	}
 	return nil
 }
-
-
-

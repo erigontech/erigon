@@ -14,8 +14,7 @@ import (
 )
 
 var (
-	cbor              codec.CborHandle
-	bufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
+	cbor codec.CborHandle
 )
 
 type Decoder interface {
@@ -29,8 +28,7 @@ type State interface {
 }
 
 type ExtractNextFunc func(originalK, k []byte, v []byte) error
-type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) (error)
-
+type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
 
 // NextKey generates the possible next key w/o changing the key length.
 // for [0x01, 0x01, 0x01] it will generate [0x01, 0x01, 0x02], etc
@@ -60,11 +58,11 @@ type LoadCommitHandler func(key []byte, isDone bool)
 
 type TransformArgs struct {
 	ExtractStartKey []byte
-	ExtractEndKey []byte
-	Chunks [][]byte
-	FixedBits		int
-	BufferType 		int
-	BufferSize 		int
+	ExtractEndKey   []byte
+	Chunks          [][]byte
+	FixedBits       int
+	BufferType      int
+	BufferSize      int
 	LoadStartKey    []byte
 	Quit            chan struct{}
 	OnLoadCommit    LoadCommitHandler
@@ -80,47 +78,47 @@ func Transform(
 	loadFunc LoadFunc,
 	args TransformArgs,
 ) error {
-	bufferSize:=bufferOptimalSize
-	if args.BufferSize>0 {
+	bufferSize := BufferOptimalSize
+	if args.BufferSize > 0 {
 		bufferSize = args.BufferSize
 	}
-	buffer:=getBufferByType(args.BufferType, bufferSize)
-	collector := NewCollector(datadir,buffer)
+	buffer := getBufferByType(args.BufferType, bufferSize)
+	collector := NewCollector(datadir, buffer)
 
-	t:=time.Now()
-	numOfChunks:=1+len(args.Chunks)
+	t := time.Now()
+	numOfChunks := 1 + len(args.Chunks)
 	if numOfChunks > 1 {
-		errg,_:=errgroup.WithContext(context.TODO())
-		f:= func(startKey, endKey []byte, collector *Collector,  i int) func() error {
+		errg, _ := errgroup.WithContext(context.TODO())
+		f := func(startKey, endKey []byte, collector *Collector, i int) func() error {
 			return func() error {
 				if err := extractBucketIntoFiles(db, fromBucket, startKey, endKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
 					disposeProviders(collector.dataProviders)
 					return err
 				}
-				log.Info("Main finished successfully","i",0)
+				log.Info("Main finished successfully", "i", i)
 				return nil
 			}
 		}
 		errg.Go(f(args.ExtractStartKey, args.Chunks[0], collector, 0))
 
-		localCollectors:=make([]*Collector, len(args.Chunks))
-		for i:=range args.Chunks {
-			i:=i
-			localCollectors[i] = NewCollector(datadir, newSortableBuffer(bufferOptimalSize))
-			extractStartKey :=args.Chunks[i]
+		localCollectors := make([]*Collector, len(args.Chunks))
+		for i := range args.Chunks {
+			i := i
+			localCollectors[i] = NewCollector(datadir, NewSortableBuffer(bufferSize))
+			extractStartKey := args.Chunks[i]
 			var endKey []byte
-			if i==len(args.Chunks)-1 {
+			if i == len(args.Chunks)-1 {
 				endKey = args.ExtractEndKey
 			} else {
-				endKey =args.Chunks[i+1]
+				endKey = args.Chunks[i+1]
 			}
 			errg.Go(f(extractStartKey, endKey, localCollectors[i], i+1))
 		}
-		err:=errg.Wait()
-		if err!=nil {
+		err := errg.Wait()
+		if err != nil {
 			return err
 		}
-		for i:=range localCollectors {
+		for i := range localCollectors {
 			collector.dataProviders = append(collector.dataProviders, localCollectors[i].dataProviders...)
 		}
 	} else {
@@ -152,7 +150,7 @@ func extractBucketIntoFiles(
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
-		if endkey!=nil && bytes.Compare(k, endkey) >=0 {
+		if endkey != nil && bytes.Compare(k, endkey) >= 0 {
 			return false, nil
 		}
 		if err := extractFunc(k, v, collector.extractNextFunc); err != nil {
@@ -191,4 +189,3 @@ func (s *bucketState) Stopped() error {
 func IdentityLoadFunc(k []byte, value []byte, _ State, next LoadNextFunc) error {
 	return next(k, value)
 }
-

@@ -2162,7 +2162,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regenera
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
 	if regenerate {
-		collector := etl.NewCollector(".")
+		collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
 		hashCollector := func(keyHex []byte, hash []byte) error {
 			if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 				return nil

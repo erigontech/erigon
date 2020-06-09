@@ -2,8 +2,8 @@ package etl
 
 import (
 	"bytes"
-	"github.com/ugorji/go/codec"
 	"sort"
+	"strconv"
 )
 
 const (
@@ -11,10 +11,12 @@ const (
 	SortableSliceBuffer = iota
 	//SortableAppendBuffer - just simple slice w
 	SortableAppendBuffer
+
+	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
 )
 
 type Buffer interface {
-	Put(k,v []byte)
+	Put(k, v []byte)
 	Get(i int) sortableBufferEntry
 	Len() int
 	Reset()
@@ -33,14 +35,13 @@ var (
 	_ = &appendSortableBuffer{}
 )
 
-func newSortableBuffer(bufferOptimalSize int) *sortableBuffer {
+func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
 	return &sortableBuffer{
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
 		optimalSize: bufferOptimalSize,
 	}
 }
-
 
 type sortableBuffer struct {
 	entries     []sortableBufferEntry
@@ -78,7 +79,7 @@ func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0] // keep the capacity
 	b.size = 0
 }
-func (b *sortableBuffer) Sort()  {
+func (b *sortableBuffer) Sort() {
 	sort.Stable(b)
 }
 
@@ -90,10 +91,9 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-
-func NewAppendBuffer(bufferOptimalSize int) *appendSortableBuffer  {
+func NewAppendBuffer(bufferOptimalSize int) *appendSortableBuffer {
 	return &appendSortableBuffer{
-		entries:     make(map[string][]byte, ),
+		entries:     make(map[string][]byte),
 		size:        0,
 		optimalSize: bufferOptimalSize,
 	}
@@ -104,16 +104,15 @@ type appendSortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
-	encoder     *codec.Encoder
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
-	stored,ok:=b.entries[string(k)]
+	stored, ok := b.entries[string(k)]
 	if !ok {
 		b.size += len(k)
 	}
 	b.size += len(v)
-	stored=append(stored, v...)
+	stored = append(stored, v...)
 	b.entries[string(k)] = stored
 }
 
@@ -124,13 +123,12 @@ func (b *appendSortableBuffer) Size() int {
 func (b *appendSortableBuffer) Len() int {
 	return len(b.entries)
 }
-func (b *appendSortableBuffer) Sort()  {
-	for i:=range b.entries {
+func (b *appendSortableBuffer) Sort() {
+	for i := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
 	}
 	sort.Sort(b)
 }
-
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
 	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
@@ -145,8 +143,8 @@ func (b *appendSortableBuffer) Get(i int) sortableBufferEntry {
 }
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = b.sortedBuf[:0]
-	b.entries=make(map[string][]byte, 0)
-	b.size=0
+	b.entries = make(map[string][]byte, 0)
+	b.size = 0
 }
 
 func (b *appendSortableBuffer) GetEntries() []sortableBufferEntry {
@@ -157,13 +155,13 @@ func (b *appendSortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func getBufferByType(tp int, size int) Buffer  {
+func getBufferByType(tp int, size int) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
-		return newSortableBuffer(size)
+		return NewSortableBuffer(size)
 	case SortableAppendBuffer:
 		return NewAppendBuffer(size)
 	default:
-		panic("unknown buffer type")
+		panic("unknown buffer type " + strconv.Itoa(tp))
 	}
 }

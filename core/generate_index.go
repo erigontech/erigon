@@ -87,25 +87,25 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 	}
 	log.Info("Index generation started", "from", blockNum, "csbucket", string(changeSetBucket))
 
-	t:=time.Now()
-	err:=etl.Transform(ig.db,changeSetBucket,
+	t := time.Now()
+	err := etl.Transform(ig.db, changeSetBucket,
 		v.IndexBucket,
 		os.TempDir(),
 		getExtractFunc(v.WalkerAdapter),
 		loadFunc2,
 		etl.TransformArgs{
-			ExtractStartKey:  dbutils.EncodeTimestamp(blockNum),
+			ExtractStartKey: dbutils.EncodeTimestamp(blockNum),
 			FixedBits:       0,
 			BufferType:      etl.SortableAppendBuffer,
-			BufferSize: 	ig.ChangeSetBufSize,
+			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
 		},
 	)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
-	log.Info("Index generation successfully finished",  "csbucket", string(changeSetBucket),"it took", time.Since(t))
+	log.Info("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
 
 	return nil
 }
@@ -199,8 +199,6 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 	return errors.New("imposible to drop")
 }
 
-
-
 func loadFunc2(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error { //nolint
 	if len(value)%9 != 0 {
 		log.Error("Strange value", "ln", len(value), "k", common.Bytes2Hex(k))
@@ -213,12 +211,11 @@ func loadFunc2(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) e
 		return fmt.Errorf("find chunk failed: %w", err1)
 	}
 
-	currentIndex:=dbutils.WrapHistoryIndex(indexBytes)
+	currentIndex := dbutils.WrapHistoryIndex(indexBytes)
 
-
-	for i:=0;i<len(value); i+=9 {
-		b:=binary.BigEndian.Uint64(value[i:])
-		vzero := value[i+8]==1
+	for i := 0; i < len(value); i += 9 {
+		b := binary.BigEndian.Uint64(value[i:])
+		vzero := value[i+8] == 1
 		blockNr := b
 		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
 			return fmt.Errorf("find chunk failed: %w", err1)
@@ -255,8 +252,8 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 			sKey := string(changesetKey)
 			list := bufferMap[sKey]
 			b := blockNum
-			v:=make([]byte, 9)
-			binary.BigEndian.PutUint64(v,b)
+			v := make([]byte, 9)
+			binary.BigEndian.PutUint64(v, b)
 			if len(changesetValue) == 0 {
 				v[8] = 1
 			}
@@ -270,7 +267,7 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 		}
 
 		for k, v := range bufferMap {
-			for i:=range v {
+			for i := range v {
 				err = next(dbKey, []byte(k), v[i])
 				if err != nil {
 					return err

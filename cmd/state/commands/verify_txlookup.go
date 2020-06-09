@@ -6,8 +6,8 @@ import (
 )
 
 func init() {
-	withChaindata(regenerateTxLookupCmd)
-	rootCmd.AddCommand(regenerateTxLookupCmd)
+	withChaindata(verifyTxLookupCmd)
+	rootCmd.AddCommand(verifyTxLookupCmd)
 }
 
 var verifyTxLookupCmd = &cobra.Command{

@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"math/big"
-	"os"
 )
 
 func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan struct{}) error {
@@ -23,38 +22,38 @@ func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan
 	}
 
 	startKey = dbutils.HeaderHashKey(blockNum)
-	err:=TxLookupTransform(db, startKey, quitCh, nil)
-	if err!=nil {
+	err := TxLookupTransform(db, startKey, quitCh, dataDir, nil)
+	if err != nil {
 		return err
 	}
 
 	return s.DoneAndUpdate(db, blockNum)
 }
 
-func TxLookupTransform(db ethdb.Database, startKey []byte, quitCh chan struct{}, chunks [][]byte) error  {
-	return etl.Transform(db,dbutils.HeaderPrefix,dbutils.TxLookupPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func TxLookupTransform(db ethdb.Database, startKey []byte, quitCh chan struct{}, datadir string, chunks [][]byte) error {
+	return etl.Transform(db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, datadir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		if !dbutils.CheckCanonicalKey(k) {
 			return nil
 		}
-		blocknum:=binary.BigEndian.Uint64(k)
+		blocknum := binary.BigEndian.Uint64(k)
 		body := rawdb.ReadBody(db, common.BytesToHash(v), blocknum)
 		if body == nil {
 			log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
 			return errors.New("empty block")
 		}
 
-		blockNumBytes:=new(big.Int).SetUint64(blocknum).Bytes()
+		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
 		for _, tx := range body.Transactions {
-			err:=next(k, tx.Hash().Bytes(), blockNumBytes)
-			if err!=nil {
+			err := next(k, tx.Hash().Bytes(), blockNumBytes)
+			if err != nil {
 				return err
 			}
 		}
 		return nil
-	},  etl.IdentityLoadFunc, etl.TransformArgs{
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
 		ExtractStartKey: startKey,
-		Chunks: chunks,
+		Chunks:          chunks,
 	})
 }
 
@@ -67,7 +66,7 @@ func unwindTxLookup(unwindPoint uint64, db ethdb.Database, quitCh chan struct{})
 		if !dbutils.CheckCanonicalKey(k) {
 			return true, nil
 		}
-		blocknum:=binary.BigEndian.Uint64(k)
+		blocknum := binary.BigEndian.Uint64(k)
 		body := rawdb.ReadBody(db, common.BytesToHash(v), blocknum)
 		if body == nil {
 			log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
@@ -79,11 +78,11 @@ func unwindTxLookup(unwindPoint uint64, db ethdb.Database, quitCh chan struct{})
 
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
-	for _,v:=range blocksToRemove {
-		if err=db.Delete(dbutils.TxLookupPrefix, v); err!=nil {
+	for _, v := range blocksToRemove {
+		if err = db.Delete(dbutils.TxLookupPrefix, v); err != nil {
 			return err
 		}
 	}

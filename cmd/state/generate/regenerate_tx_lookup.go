@@ -15,7 +15,7 @@ func RegenerateTxLookup(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	db.DeleteBucket(dbutils.TxLookupPrefix)
+	db.DeleteBucket(dbutils.TxLookupPrefix) //nolint
 	startTime := time.Now()
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
@@ -26,7 +26,7 @@ func RegenerateTxLookup(chaindata string) error {
 	}()
 
 	log.Info("TxLookup generation started", "start time", startTime)
-	err = stagedsync.TxLookupTransform(db, nil, quitCh, [][]byte{
+	err = stagedsync.TxLookupTransform(db, nil, quitCh, os.TempDir(), [][]byte{
 		dbutils.HeaderHashKey(4000000),
 		dbutils.HeaderHashKey(7000000),
 		dbutils.HeaderHashKey(9000000),
