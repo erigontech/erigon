@@ -2519,7 +2519,7 @@ func ExecuteBlockEphemerally(
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return nil, fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {

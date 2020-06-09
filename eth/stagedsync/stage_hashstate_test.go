@@ -33,7 +33,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	}
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket, dbutils.ContractCodeBucket)
@@ -55,7 +55,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	}
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 
 	generateBlocks(t, 51, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
@@ -68,7 +68,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	}
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
@@ -92,7 +92,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
 }
