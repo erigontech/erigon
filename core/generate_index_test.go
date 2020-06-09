@@ -17,11 +17,12 @@ import (
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+
 	test := func(blocksNum int, csBucket []byte) func(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			ig := NewIndexGenerator(db, make(chan struct{}))
-			log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 			csInfo, ok := mapper[string(csBucket)]
 			if !ok {
 				t.Fatal("incorrect cs bucket")
@@ -58,7 +59,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	//buckets := [][]byte{dbutils.StorageChangeSetBucket}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets:=[][]byte{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket, dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
 	for i := range buckets {
 		csbucket := buckets[i]

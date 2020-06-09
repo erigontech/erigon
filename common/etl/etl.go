@@ -2,11 +2,13 @@ package etl
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"time"
 )
@@ -26,8 +28,8 @@ type State interface {
 	Stopped() error
 }
 
-type ExtractNextFunc func(originalK, k []byte, v interface{}) error
-type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
+type ExtractNextFunc func(originalK, k []byte, v []byte) error
+type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) (error)
 
 
 // NextKey generates the possible next key w/o changing the key length.
@@ -59,6 +61,10 @@ type LoadCommitHandler func(key []byte, isDone bool)
 type TransformArgs struct {
 	ExtractStartKey []byte
 	ExtractEndKey []byte
+	Chunks [][]byte
+	FixedBits		int
+	BufferType 		int
+	BufferSize 		int
 	LoadStartKey    []byte
 	Quit            chan struct{}
 	OnLoadCommit    LoadCommitHandler
@@ -74,13 +80,65 @@ func Transform(
 	loadFunc LoadFunc,
 	args TransformArgs,
 ) error {
-	collector := NewCollector(datadir)
-	t:=time.Now()
-	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey,  collector, extractFunc, args.Quit); err != nil {
-		disposeProviders(collector.dataProviders)
-		return err
+	bufferSize:=bufferOptimalSize
+	if args.BufferSize>0 {
+		bufferSize = args.BufferSize
 	}
-	fmt.Println("loadTime", time.Since(t))
+	buffer:=getBufferByType(args.BufferType, bufferSize)
+	collector := NewCollector(datadir,buffer)
+
+	t:=time.Now()
+	numOfChunks:=1+len(args.Chunks)
+	if numOfChunks > 1 {
+		errg,_:=errgroup.WithContext(context.TODO())
+		errg.Go(func() error {
+			if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.Chunks[0], args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+				disposeProviders(collector.dataProviders)
+				return err
+			}
+			return nil
+		})
+
+		localCollectors:=make([]*Collector, len(args.Chunks))
+		for i:=range args.Chunks {
+			i:=i
+			localCollectors[i] = NewCollector(datadir, newSortableBuffer(bufferOptimalSize))
+			extractStartKey :=args.Chunks[i]
+			var endKey []byte
+			if i==len(args.Chunks) {
+				endKey = args.ExtractEndKey
+			} else {
+				endKey =args.Chunks[i+1]
+			}
+
+			errg.Go(func() error {
+				fmt.Println(i)
+				if err := extractBucketIntoFiles(db, fromBucket, extractStartKey, endKey, args.FixedBits, localCollectors[i], extractFunc, args.Quit); err != nil {
+					disposeProviders(localCollectors[i].dataProviders)
+					return err
+				}
+				return nil
+			})
+		}
+		err:=errg.Wait()
+		if err!=nil {
+			return err
+		}
+		for i:=range localCollectors {
+			collector.dataProviders = append(collector.dataProviders, localCollectors[i].dataProviders...)
+		}
+	} else {
+		if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+			disposeProviders(collector.dataProviders)
+			return err
+		}
+	}
+	log.Info("Extraction finished", "it took", time.Since(t))
+
+	t = time.Now()
+	defer func() {
+		log.Info("Collection finished", "it took", time.Since(t))
+	}()
 	return collector.Load(db, toBucket, loadFunc, args)
 }
 
@@ -89,11 +147,12 @@ func extractBucketIntoFiles(
 	bucket []byte,
 	startkey []byte,
 	endkey []byte,
+	fixedBits int,
 	collector *Collector,
 	extractFunc ExtractFunc,
 	quit chan struct{},
 ) error {
-	if err := db.Walk(bucket, startkey, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(bucket, startkey, fixedBits, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
@@ -109,15 +168,12 @@ func extractBucketIntoFiles(
 	}
 	return collector.flushBuffer(nil, true)
 }
-
-
 func disposeProviders(providers []dataProvider) {
 	for _, p := range providers {
 		err := p.Dispose()
 		if err != nil {
 			log.Warn("promoting hashed state, error while disposing provider", "provier", p, "err", err)
 		}
-
 	}
 }
 
@@ -136,12 +192,7 @@ func (s *bucketState) Stopped() error {
 }
 
 // IdentityLoadFunc loads entries as they are, without transformation
-func IdentityLoadFunc(k []byte, valueDecoder Decoder, _ State, next LoadNextFunc) error {
-	var v []byte
-	err := valueDecoder.Decode(&v)
-	if err != nil {
-		return err
-	}
-	return next(k, v)
+func IdentityLoadFunc(k []byte, value []byte, _ State, next LoadNextFunc) error {
+	return next(k, value)
 }
 

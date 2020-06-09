@@ -4,7 +4,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
@@ -13,8 +12,6 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	if lastProcessedBlockNumber > 0 {
 		blockNum = lastProcessedBlockNumber + 1
 	}
-
-	log.Info("Account history index generation started", "from", blockNum)
 
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir

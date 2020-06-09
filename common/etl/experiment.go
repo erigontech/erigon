@@ -12,56 +12,50 @@ import (
 	"golang.org/x/sync/errgroup"
 	"io"
 	"runtime"
-	"sort"
 	"time"
 )
 
 
-type getter interface {
-	Get(i int) sortableBufferEntry
-	Len() int
-	Reset()
-	EncoderReset(writer io.Writer)
-	GetEnt() []sortableBufferEntry
-	GetEncoder() Encoder
-}
-type Encoder interface {
-	Encode(toWrite interface{}) error
-}
-
-
-type TransformArgs2 struct {
-	ExtractStartKeys [][]byte
-	ExtractEndKeys [][]byte
-	LoadStartKey    []byte
-	Quit            chan struct{}
-	OnLoadCommit    LoadCommitHandler
-	loadBatchSize   int // used in testing
-}
 
 func Transform2(
 	db ethdb.Database,
 	fromBucket []byte,
 	toBucket []byte,
 	datadir string,
-	extractFunc ExtractFunc2,
-	loadFunc LoadFunc2,
-	args TransformArgs2,
+	extractFunc ExtractFunc,
+	loadFunc LoadFunc,
+	args TransformArgs,
 ) error {
 	collector := NewCollector2(datadir)
-	collectors:=make([]*Collector2, len(args.ExtractStartKeys))
+	numOfChunks:=1+len(args.Chunks)
+
 	t:=time.Now()
 	errg,_:=errgroup.WithContext(context.TODO())
-	if len(args.ExtractStartKeys) >0 {
-		for i:=range args.ExtractStartKeys {
+	if numOfChunks > 1 {
+		errg.Go(func() error {
+			if err := extractBucketIntoFiles2(db, fromBucket, args.ExtractStartKey, args.Chunks[0], args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+				disposeProviders(collector.dataProviders)
+				return err
+			}
+			return nil
+		})
+
+		localCollectors:=make([]*Collector2, len(args.Chunks))
+		for i:=range args.Chunks {
 			i:=i
-			collectors[i] = NewCollector2(datadir)
-			extractStartKey :=args.ExtractStartKeys[i]
-			endKey :=args.ExtractEndKeys[i]
+			localCollectors[i] = NewCollector2(datadir)
+			extractStartKey :=args.Chunks[i]
+			var endKey []byte
+			if i==len(args.Chunks) {
+				endKey = args.ExtractEndKey
+			} else {
+				endKey =args.Chunks[i+1]
+			}
+
 			errg.Go(func() error {
 				fmt.Println(i)
-				if err := extractBucketIntoFiles2(db, fromBucket, extractStartKey, endKey, 0, collectors[i], extractFunc, args.Quit); err != nil {
-					disposeProviders(collectors[i].dataProviders)
+				if err := extractBucketIntoFiles2(db, fromBucket, extractStartKey, endKey, args.FixedBits, localCollectors[i], extractFunc, args.Quit); err != nil {
+					disposeProviders(localCollectors[i].dataProviders)
 					return err
 				}
 				return nil
@@ -71,11 +65,11 @@ func Transform2(
 		if err!=nil {
 			return err
 		}
-		for i:=range collectors {
-			collector.dataProviders = append(collector.dataProviders, collectors[i].dataProviders...)
+		for i:=range localCollectors {
+			collector.dataProviders = append(collector.dataProviders, localCollectors[i].dataProviders...)
 		}
 	} else {
-		if err := extractBucketIntoFiles2(db, fromBucket, nil, nil, 0, collector, extractFunc, args.Quit); err != nil {
+		if err := extractBucketIntoFiles2(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
 			disposeProviders(collector.dataProviders)
 			return err
 		}
@@ -93,7 +87,7 @@ func extractBucketIntoFiles2(
 	endKey []byte,
 	fixedBits int,
 	collector *Collector2,
-	extractFunc ExtractFunc2,
+	extractFunc ExtractFunc,
 	quit chan struct{},
 ) error {
 	if err := db.Walk(bucket, startKey, fixedBits, func(k, v []byte) (bool, error) {
@@ -115,11 +109,9 @@ func extractBucketIntoFiles2(
 
 
 
-type ExtractNextFunc2 func(originalK, k []byte, v []byte) error
-type ExtractFunc2 func(k []byte, v []byte, next ExtractNextFunc2) error
 
 type Collector2 struct {
-	extractNextFunc ExtractNextFunc2
+	extractNextFunc ExtractNextFunc
 	flushBuffer     func([]byte, bool) error
 	dataProviders   []dataProvider
 	allFlushed      bool
@@ -128,7 +120,8 @@ type Collector2 struct {
 
 func NewCollector2(datadir string) *Collector2 {
 	c := &Collector2{}
-	sortableBuffer := NewAppendBuffer()
+	var sortableBuffer Buffer = NewAppendBuffer(bufferOptimalSize)
+	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
 		if sortableBuffer.Len() == 0 {
@@ -136,13 +129,13 @@ func NewCollector2(datadir string) *Collector2 {
 		}
 		var provider dataProvider
 		var err error
-		sortableBuffer.MakeSlice()
-		sort.Sort(sortableBuffer)
+
+		sortableBuffer.Sort()
 		if canStoreInRam && len(c.dataProviders) == 0 {
 			provider = KeepInRAM(sortableBuffer)
 			c.allFlushed = true
 		} else {
-			provider, err = FlushToDisk(currentKey, sortableBuffer, datadir)
+			provider, err = FlushToDisk(encoder, currentKey, sortableBuffer, datadir)
 		}
 		if err != nil {
 			return err
@@ -155,7 +148,7 @@ func NewCollector2(datadir string) *Collector2 {
 
 	c.extractNextFunc = func(originalK, k []byte, v []byte) error {
 		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(v))
-		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
+		if sortableBuffer.CheckFlushSize() {
 			if err := c.flushBuffer(originalK, false); err != nil {
 				return err
 			}
@@ -169,7 +162,7 @@ func (c *Collector2) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector2) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc2, args TransformArgs2) error {
+func (c *Collector2) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		disposeProviders(c.dataProviders)
 	}()
@@ -181,11 +174,8 @@ func (c *Collector2) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc2
 	return loadFilesIntoBucket2(db, toBucket, c.dataProviders, loadFunc, args)
 }
 
-type simpleDecoder struct {
-	source io.Reader
-}
 
-func loadFilesIntoBucket2(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc2, args TransformArgs2) error {
+func loadFilesIntoBucket2(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
@@ -259,84 +249,6 @@ func loadFilesIntoBucket2(db ethdb.Database, bucket []byte, providers []dataProv
 	}
 	return err
 }
-
-func NewAppendBuffer() *appendSortableBuffer  {
-	return &appendSortableBuffer{
-		entries:     make(map[string][]byte),
-		size:        0,
-		OptimalSize: bufferOptimalSize,
-		encoder:     codec.NewEncoder(nil, &cbor),
-
-	}
-}
-
-type appendSortableBuffer struct {
-	entries     map[string][]byte
-	size        int
-	OptimalSize int
-	sortedBuf	[]sortableBufferEntry
-	encoder     *codec.Encoder
-}
-
-func (b *appendSortableBuffer) Put(k, v []byte) {
-	stored,ok:=b.entries[string(k)]
-	if !ok {
-		b.size += len(k)
-	}
-	b.size += len(v)
-	stored=append(stored, v...)
-	b.entries[string(k)] = stored
-}
-
-func (b *appendSortableBuffer) Size() int {
-	return b.size
-}
-
-func (b *appendSortableBuffer) Len() int {
-	return len(b.entries)
-}
-func (b *appendSortableBuffer) MakeSlice()  {
-	for i:=range b.entries {
-		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
-	}
-}
-
-
-func (b *appendSortableBuffer) Less(i, j int) bool {
-	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
-}
-
-func (b *appendSortableBuffer) Swap(i, j int) {
-	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
-}
-
-func (b *appendSortableBuffer) Get(i int) sortableBufferEntry {
-	return b.sortedBuf[i]
-}
-func (b *appendSortableBuffer) Reset() {
-	b.sortedBuf = b.sortedBuf[:0]
-	b.entries=make(map[string][]byte, 0)
-	b.size=0
-}
-func (b *appendSortableBuffer) EncoderReset(writer io.Writer) {
-	b.encoder.Reset(writer)
-}
-
-func (b *appendSortableBuffer) GetEncoder() Encoder {
-	return b.encoder
-}
-func (b *appendSortableBuffer) GetEnt() []sortableBufferEntry {
-	return b.sortedBuf
-}
-
-
-
-type LoadNextFunc2 func(k []byte, v []byte) error
-type LoadFunc2 func(k []byte, value []byte, state State, next LoadNextFunc) error
-
-//func (b *appendSortableBuffer) Get(i int) sortableBufferEntry {
-//	return b.entries[i]
-//}
 
 
 

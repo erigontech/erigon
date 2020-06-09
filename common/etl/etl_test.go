@@ -3,16 +3,15 @@ package etl
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"os"
-	"strings"
-	"testing"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
+	"io"
+	"os"
+	"strings"
+	"testing"
 )
 
 func TestWriteAndReadBufferEntry(t *testing.T) {
@@ -91,9 +90,9 @@ func TestFileDataProviders(t *testing.T) {
 
 	generateTestData(t, db, sourceBucket, 10)
 
-	collector := NewCollector("")
+	collector := NewCollector("", newSortableBuffer(bufferOptimalSize))
 
-	err := extractBucketIntoFiles(db, sourceBucket, nil, collector, testExtractToMapFunc, nil)
+	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -121,8 +120,8 @@ func TestRAMDataProviders(t *testing.T) {
 	sourceBucket := dbutils.Buckets[0]
 	generateTestData(t, db, sourceBucket, 10)
 
-	collector := NewCollector("")
-	err := extractBucketIntoFiles(db, sourceBucket, nil, collector, testExtractToMapFunc, nil)
+	collector := NewCollector("", newSortableBuffer(bufferOptimalSize))
+	err := extractBucketIntoFiles(db, sourceBucket, nil, nil,0,  collector, testExtractToMapFunc, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -370,16 +369,27 @@ func generateTestData(t *testing.T, db ethdb.Putter, bucket []byte, count int) {
 }
 
 func testExtractToMapFunc(k, v []byte, next ExtractNextFunc) error {
+	buf:=bytes.NewBuffer(nil)
+	encoder := codec.NewEncoder(nil, &cbor)
+
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = v
-	return next(k, k, valueMap)
+	encoder.Reset(buf)
+	encoder.MustEncode(valueMap)
+	return next(k, k, buf.Bytes())
 }
 
 func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
+	buf:=bytes.NewBuffer(nil)
+	encoder := codec.NewEncoder(nil, &cbor)
+
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
 	k1 := append(k, 0xAA)
-	err := next(k, k1, valueMap)
+	encoder.Reset(buf)
+	encoder.MustEncode(valueMap)
+
+	err := next(k, k1, buf.Bytes())
 	if err != nil {
 		return err
 	}
@@ -387,10 +397,14 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
-	return next(k, k2, valueMap)
+	encoder.Reset(buf)
+	encoder.MustEncode(valueMap)
+	return next(k, k2, buf.Bytes())
 }
 
-func testLoadFromMapFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) error {
+func testLoadFromMapFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
+	decoder := codec.NewDecoder(nil, &cbor)
+	decoder.ResetBytes(v)
 	valueMap := make(map[string][]byte)
 	err := decoder.Decode(&valueMap)
 	if err != nil {
@@ -400,9 +414,12 @@ func testLoadFromMapFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) 
 	return next(k, realValue)
 }
 
-func testLoadFromMapDoubleFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) error {
+func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
+	decoder := codec.NewDecoder(nil, &cbor)
+	decoder.ResetBytes(v)
+
 	valueMap := make(map[string][]byte)
-	err := decoder.Decode(&valueMap)
+	err:=decoder.Decode(valueMap)
 	if err != nil {
 		return err
 	}

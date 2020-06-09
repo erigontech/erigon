@@ -10,11 +10,10 @@ import (
 	"github.com/ugorji/go/codec"
 	"io"
 	"runtime"
-	"sort"
 )
 
 type LoadNextFunc func(k []byte, v []byte) error
-type LoadFunc func(k []byte, valueDecoder Decoder, state State, next LoadNextFunc) error
+type LoadFunc func(k []byte, value []byte, state State, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
@@ -25,11 +24,9 @@ type Collector struct {
 	allFlushed      bool
 }
 
-func NewCollector(datadir string) *Collector {
+func NewCollector(datadir string, sortableBuffer Buffer) *Collector {
 	c := &Collector{}
-	buffer := bytes.NewBuffer(make([]byte, 0))
 	encoder := codec.NewEncoder(nil, &cbor)
-	sortableBuffer := newSortableBuffer()
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
 		if sortableBuffer.Len() == 0 {
@@ -37,12 +34,12 @@ func NewCollector(datadir string) *Collector {
 		}
 		var provider dataProvider
 		var err error
-		sort.Stable(sortableBuffer)
+		sortableBuffer.Sort()
 		if canStoreInRam && len(c.dataProviders) == 0 {
 			provider = KeepInRAM(sortableBuffer)
 			c.allFlushed = true
 		} else {
-			provider, err = FlushToDisk(currentKey, sortableBuffer, datadir)
+			provider, err = FlushToDisk(encoder, currentKey, sortableBuffer, datadir)
 		}
 		if err != nil {
 			return err
@@ -53,15 +50,9 @@ func NewCollector(datadir string) *Collector {
 		return nil
 	}
 
-	c.extractNextFunc = func(originalK, k []byte, v interface{}) error {
-		buffer.Reset()
-		encoder.Reset(buffer)
-		if err := encoder.Encode(v); err != nil {
-			return err
-		}
-		encodedValue := buffer.Bytes()
-		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(encodedValue))
-		if sortableBuffer.Size() >= sortableBuffer.OptimalSize {
+	c.extractNextFunc = func(originalK, k []byte, v []byte) error {
+		sortableBuffer.Put(common.CopyBytes(k), common.CopyBytes(v))
+		if sortableBuffer.CheckFlushSize() {
 			if err := c.flushBuffer(originalK, false); err != nil {
 				return err
 			}
@@ -146,8 +137,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 
 		element := (heap.Pop(h)).(HeapElem)
 		provider := providers[element.TimeIdx]
-		decoder.ResetBytes(element.Value)
-		err := loadFunc(element.Key, decoder, state, loadNextFunc)
+		err := loadFunc(element.Key, element.Value, state, loadNextFunc)
 		if err != nil {
 			return err
 		}

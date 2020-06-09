@@ -22,7 +22,13 @@ type fileDataProvider struct {
 	reader io.Reader
 }
 
-func FlushToDisk(currentKey []byte, b getter, datadir string) (dataProvider, error) {
+type Encoder interface {
+	Encode(toWrite interface{}) error
+	Reset(writer io.Writer)
+}
+
+
+func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
@@ -36,11 +42,9 @@ func FlushToDisk(currentKey []byte, b getter, datadir string) (dataProvider, err
 	defer func() {
 		bufferFile.Sync() //nolint:errcheck
 	}()
-
-	b.EncoderReset(w)
-	entries:=b.GetEnt()
-	for i := range entries {
-		err = writeToDisk(b.GetEncoder(), entries[i].key, entries[i].value)
+	encoder.Reset(w)
+	for _, entry := range b.GetEntries() {
+		err = writeToDisk(encoder, entry.key, entry.value)
 		if err != nil {
 			return nil, fmt.Errorf("error writing entries to disk: %v", err)
 		}
@@ -60,8 +64,6 @@ func FlushToDisk(currentKey []byte, b getter, datadir string) (dataProvider, err
 		"current key", currentKeyStr,
 		"name", bufferFile.Name(),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	//b.entries = b.entries[:0] // keep the capacity
-	//b.size = 0
 	b.Reset()
 
 	return &fileDataProvider{bufferFile, nil}, nil
@@ -107,11 +109,11 @@ func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
 }
 
 type memoryDataProvider struct {
-	buffer       getter
+	buffer       Buffer
 	currentIndex int
 }
 
-func KeepInRAM(buffer getter) dataProvider {
+func KeepInRAM(buffer Buffer) dataProvider {
 	return &memoryDataProvider{buffer, 0}
 }
 

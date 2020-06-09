@@ -81,7 +81,7 @@ func DoStagedSyncWithFetchers(
 			Disabled:            !history,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(s *StageState) error {
-				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				return spawnTxLookup(s, stateDB, datadir, quitCh)
 			},
 		},
 	}
