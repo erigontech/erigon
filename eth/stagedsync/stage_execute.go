@@ -81,7 +81,7 @@ const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
 const prof = false
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
 	lastProcessedBlockNumber := s.BlockNumber
 
 	nextBlockNumber := uint64(0)
@@ -163,9 +163,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
-		err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
+		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
 		if err != nil {
 			return err
+		}
+
+		if writeReceipts {
+			rawdb.WriteReceipts(stateBatch, block.Hash(), block.NumberU64(), receipts)
 		}
 
 		if err = s.Update(stateBatch, blockNum); err != nil {
