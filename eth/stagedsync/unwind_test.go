@@ -18,7 +18,7 @@ func TestUnwindStackLoadFromDb(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], nil}, db)
+		err := stack.Add(UnwindState{stages[i], points[i], []byte{}}, db)
 		assert.NoError(t, err)
 	}
 
@@ -42,7 +42,7 @@ func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], nil}, db)
+		err := stack.Add(UnwindState{stages[i], points[i], []byte{}}, db)
 		assert.NoError(t, err)
 	}
 
