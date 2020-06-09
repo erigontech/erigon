@@ -397,6 +397,7 @@ func bucketStats(chaindata string) {
 	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	bucketList := allBuckets(db)
+	//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
 	fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 	db.View(func(tx *bolt.Tx) error {
 		for _, bucket := range bucketList {
@@ -2157,46 +2158,62 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
-func testGetProof(chaindata string, address common.Address, rewind int, regenerate bool) error {
+func regenerate(chaindata string) error {
+	var m runtime.MemStats
+	db, dberr := ethdb.NewBoltDatabase(chaindata)
+	check(dberr)
+	defer db.Close()
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
+	log.Info("Regeneration started")
+	collector := etl.NewCollector(".")
+	hashCollector := func(keyHex []byte, hash []byte) error {
+		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+			return nil
+		}
+		var k []byte
+		trie.CompressNibbles(keyHex, &k)
+		return collector.Collect(k, common.CopyBytes(hash))
+	}
+	loader := trie.NewFlatDbSubTrieLoader()
+	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+		return err
+	}
+	if subTries, err := loader.LoadSubTries(); err == nil {
+		runtime.ReadMemStats(&m)
+		log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
+			"expected root", fmt.Sprintf("%x", headHeader.Root),
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	} else {
+		return err
+	}
+	quitCh := make(chan struct{})
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+		return err
+	}
+	log.Info("Regeneration ended")
+	return nil
+}
+
+func testGetProof(chaindata string, address common.Address, rewind int, regen bool) error {
+	if regen {
+		if err := regenerate(chaindata); err != nil {
+			return err
+		}
+	}
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	db, dberr := ethdb.NewBoltDatabase(chaindata)
 	check(dberr)
+	defer db.Close()
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
-	if regenerate {
-		collector := etl.NewCollector(".")
-		hashCollector := func(keyHex []byte, hash []byte) error {
-			if len(keyHex)%2 != 0 || len(keyHex) == 0 {
-				return nil
-			}
-			var k []byte
-			trie.CompressNibbles(keyHex, &k)
-			return collector.Collect(k, common.CopyBytes(hash))
-		}
-		loader := trie.NewFlatDbSubTrieLoader()
-		if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
-			return err
-		}
-		if subTries, err := loader.LoadSubTries(); err == nil {
-			runtime.ReadMemStats(&m)
-			log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
-				"expected root", fmt.Sprintf("%x", headHeader.Root),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-		} else {
-			return err
-		}
-		quitCh := make(chan struct{})
-		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-			return err
-		}
-	}
 	ts := dbutils.EncodeTimestamp(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
@@ -2421,7 +2438,7 @@ func testStage4(chaindata string, block uint64) error {
 }
 
 func testStageLoop(chaindata string) error {
-	for block := uint64(9600000); block < uint64(10000000); block += uint64(100000) {
+	for block := uint64(10000000); block < uint64(11000000); block += uint64(100000) {
 		if err := testStage4(chaindata, block); err != nil {
 			return err
 		}
@@ -2593,6 +2610,11 @@ func main() {
 	}
 	if *action == "stageLoop" {
 		if err := testStageLoop(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "regenerateIH" {
+		if err := regenerate(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
