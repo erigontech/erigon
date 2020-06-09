@@ -3,8 +3,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/big"
+	"os"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -56,7 +59,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	const batchSize = 5000
 
 	jobs := make(chan *senderRecoveryJob, batchSize)
-	out := make(chan *senderRecoveryJob, batchSize)
+	out := make(chan TxsFroms, batchSize)
 
 	wg := &sync.WaitGroup{}
 	wg.Add(numOfGoroutines)
@@ -72,8 +75,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
-	errCh := make(chan error)
-	go writeBatch(s, stateDB, out, mutation, errCh, quitCh, jobs)
+	firstBlock := uint64(0)
 
 	for {
 		if err := common.Stopped(quitCh); err != nil {
@@ -85,6 +87,10 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 			break
 		}
 
+		if firstBlock == 0 {
+			firstBlock = job.nextBlockNumber
+		}
+
 		jobs <- job
 
 		atomic.AddUint64(&nextBlockNumber, 1)
@@ -92,11 +98,29 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 	fmt.Println("DONE?")
 
-	err := <-errCh
+	errCh := make(chan error)
+	f, err := os.Create("./froms")
+	defer f.Close()
+	writeOnDiskBatch(f, firstBlock, out, errCh, quitCh, jobs)
+
+	err = <-errCh
 	fmt.Println("DONE!")
 	if err != nil {
 		return err
 	}
+
+	/*
+		errCh = make(chan error)
+		nextBlockNumber := lastProcessedBlockNumber + 1
+		blockNumber := big.NewInt(0)
+		writeBatchFromDisk(f, s, stateDB, mutation, config, errCh, quitCh, blockNumber, nextBlockNumber)
+
+		err = <-errCh
+		fmt.Println("DONE!")
+		if err != nil {
+			return err
+		}
+	*/
 	s.Done()
 	fmt.Println("DONE!!!")
 	return nil
@@ -166,6 +190,102 @@ func (m *mutationSafe) Set(mutation ethdb.DbWithPendingMutations) {
 	m.Unlock()
 }
 
+type TxsFroms struct {
+	blockNumber uint64
+	froms       []common.Address
+	err         error
+}
+
+func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh chan error, quitCh chan struct{}, in chan *senderRecoveryJob) {
+	var nextBlockNumber uint64
+	defer close(errCh)
+
+	const blockSize = 4096
+	const batch = (blockSize * 10 / 20) * 10000 //20*4096
+	n := 0
+	toWrite := make([]byte, 0, batch*len(common.Address{})+batch/100*5)
+
+	currentBlock := firstBlock
+
+	defer func() {
+		if len(toWrite) > 0 {
+			w.Write(toWrite)
+		}
+	}()
+
+	toSort := uint64(10)
+	buffer := make([]TxsFroms, 0, 1000)
+
+	defer func() {
+		// store last blocks
+		sort.SliceStable(buffer, func(i, j int) bool {
+			return buffer[i].blockNumber < buffer[j].blockNumber
+		})
+
+		for _, job := range buffer {
+			for i := range job.froms {
+				toWrite = append(toWrite, job.froms[i][:]...)
+			}
+			w.Write(toWrite)
+		}
+	}()
+
+	for j := range out {
+		if err := common.Stopped(quitCh); err != nil {
+			errCh <- err
+			return
+		}
+
+		if nextBlockNumber%1000 == 0 {
+			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "out", len(out), "in", len(in))
+		}
+
+		if j.err != nil {
+			errCh <- errors.Wrap(j.err, "could not extract senders")
+			return
+		}
+
+		buffer = append(buffer, j)
+		sort.SliceStable(buffer, func(i, j int) bool {
+			return buffer[i].blockNumber < buffer[j].blockNumber
+		})
+
+		// check if we have 10 sequential blocks
+		hasRow := true
+		for i := range buffer {
+			if uint64(i) >= toSort {
+				break
+			}
+			if buffer[i].blockNumber != currentBlock+uint64(i) {
+				hasRow = false
+				break
+			}
+		}
+		if !hasRow {
+			continue
+		}
+
+		currentBlock += toSort
+		writeFroms := buffer[:toSort]
+		buffer = buffer[toSort:]
+
+		for _, jobToWrite := range writeFroms {
+			for i := range jobToWrite.froms {
+				n++
+				toWrite = append(toWrite, jobToWrite.froms[i][:]...)
+				if n == batch {
+					w.Write(toWrite)
+
+					n = 0
+					toWrite = toWrite[:0]
+				}
+			}
+		}
+	}
+
+	return
+}
+
 func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJob, mutation *mutationSafe, errCh chan error, quitCh chan struct{}, in chan *senderRecoveryJob) {
 	var nextBlockNumber uint64
 	defer close(errCh)
@@ -207,6 +327,65 @@ func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJ
 	return
 }
 
+func writeBatchFromDisk(f io.Reader, s *StageState,
+	stateDB ethdb.Database, config *params.ChainConfig,
+	out chan *senderRecoveryJob, mutation *mutationSafe,
+	errCh chan error, quitCh chan struct{},
+	in chan *senderRecoveryJob, blockNumber *big.Int, nextBlockNumber uint64,
+) {
+
+	defer close(errCh)
+
+	const blockSize = 4096
+	const batch = (blockSize * 10 / 20) * 10000
+	toWrite := make([]byte, batch*len(common.Address{}))
+
+	for {
+		n, err := f.Read(toWrite)
+		if err != nil && err != io.EOF {
+			errCh <- err
+			return
+		}
+		if n%len(common.Address{}) != 0 {
+			errCh <- errors.New("got invalid address length")
+			return
+		}
+
+		// insert for
+		job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
+		if job == nil {
+			break
+		}
+		nextBlockNumber++
+
+		for i := range job.blockBody.Transactions {
+			from := common.Address{}
+			from.SetBytes(toWrite[i : (i+1)*20])
+			job.blockBody.Transactions[i].SetFrom(from)
+		}
+
+		rawdb.WriteBody(context.Background(), mutation, job.hash, job.nextBlockNumber, job.blockBody)
+
+		if mutation.BatchSize() >= mutation.IdealBatchSize() {
+			if err := s.Update(mutation, nextBlockNumber); err != nil {
+				errCh <- err
+				return
+			}
+
+			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "out", len(out), "in", len(in))
+
+			if err := mutation.Commit(); err != nil {
+				errCh <- err
+				return
+			}
+
+			mutation.Set(stateDB.NewBatch())
+		}
+	}
+
+	return
+}
+
 type senderRecoveryJob struct {
 	signer          types.Signer
 	blockBody       *types.Body
@@ -215,7 +394,7 @@ type senderRecoveryJob struct {
 	err             error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}, wg *sync.WaitGroup) {
+func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range in {
@@ -223,54 +402,41 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 			return
 		}
 
-		if err := recoverFrom(cryptoContext, job.blockBody, job.signer); err != nil {
-			job.err = err
+		res := TxsFroms{blockNumber: job.nextBlockNumber}
+		froms, err := recoverFrom(cryptoContext, job.blockBody, job.signer)
+		if err != nil {
+			res.err = err
+		} else {
+			res.froms = froms
 		}
 
 		// prevent sending to close channel
 		if err := common.Stopped(quit); err != nil {
-			job.err = err
+			res.err = err
 		}
-		out <- job
+		out <- res
 
-		if job.err == common.ErrStopped {
+		if res.err == common.ErrStopped {
 			return
 		}
 	}
 }
 
-func setFrom(blockNumber *big.Int, config *params.ChainConfig, mutation *mutationSafe, cryptoContext *secp256k1.Context) error {
-	number := blockNumber.Uint64()
-	hash := rawdb.ReadCanonicalHash(mutation, number)
-	if hash.IsEmpty() {
-		return nil
-	}
+func recoverFrom(cryptoContext *secp256k1.Context, blockBody *types.Body, signer types.Signer) ([]common.Address, error) {
+	froms := make([]common.Address, len(blockBody.Transactions))
+	for i, tx := range blockBody.Transactions {
+		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
+			fmt.Println("!!!!!!!!!!!")
+			return nil, errors.New("invalid chainId")
+		}
 
-	body := rawdb.ReadBody(mutation, hash, number)
-	if body == nil {
-		return nil
-	}
-
-	s := types.MakeSigner(config, blockNumber)
-
-	if err := recoverFrom(cryptoContext, body, s); err != nil {
-		return err
-	}
-	return nil
-}
-
-func recoverFrom(cryptoContext *secp256k1.Context, blockBody *types.Body, signer types.Signer) error {
-	for _, tx := range blockBody.Transactions {
 		from, err := signer.SenderWithContext(cryptoContext, tx)
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
+			return nil, errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
 		}
-		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
-			return errors.New("invalid chainId")
-		}
-		tx.SetFrom(from)
+		froms[i] = from
 	}
-	return nil
+	return froms, nil
 }
 
 func unwindSendersStage(stateDB ethdb.Database, unwindPoint uint64) error {
