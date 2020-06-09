@@ -17,22 +17,20 @@ import (
 var _ WriterWithChangeSets = (*PlainStateWriter)(nil)
 
 type PlainStateWriter struct {
-	stateDb                ethdb.Database
-	changeDb               ethdb.Database
-	csw                    *ChangeSetWriter
-	blockNumber            uint64
-	accountCache           *fastcache.Cache
-	storageCache           *fastcache.Cache
-	codeCache              *fastcache.Cache
-	codeSizeCache          *fastcache.Cache
+	db            ethdb.Database
+	csw           *ChangeSetWriter
+	blockNumber   uint64
+	accountCache  *fastcache.Cache
+	storageCache  *fastcache.Cache
+	codeCache     *fastcache.Cache
+	codeSizeCache *fastcache.Cache
 }
 
-func NewPlainStateWriter(stateDb, changeDb ethdb.Database, blockNumber uint64) *PlainStateWriter {
+func NewPlainStateWriter(db ethdb.Database, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
-		stateDb:                stateDb,
-		changeDb:               changeDb,
-		csw:                    NewChangeSetWriterPlain(),
-		blockNumber:            blockNumber,
+		db:          db,
+		csw:         NewChangeSetWriterPlain(),
+		blockNumber: blockNumber,
 	}
 }
 
@@ -61,7 +59,7 @@ func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common
 	if w.accountCache != nil {
 		w.accountCache.Set(address[:], value)
 	}
-	return w.stateDb.Put(dbutils.PlainStateBucket, address[:], value)
+	return w.db.Put(dbutils.PlainStateBucket, address[:], value)
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
@@ -80,10 +78,10 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
 		w.codeSizeCache.Set(address[:], b[:])
 	}
-	if err := w.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+	if err := w.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
-	return w.stateDb.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
+	return w.db.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
 }
 
 func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
@@ -101,13 +99,13 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 		binary.BigEndian.PutUint32(b[:], 0)
 		w.codeSizeCache.Set(address[:], b[:])
 	}
-	if err := w.stateDb.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
+	if err := w.db.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		if err := w.stateDb.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
+		if err := w.db.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
 			return err
 		}
 	}
@@ -128,16 +126,16 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 		w.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
-		return w.stateDb.Delete(dbutils.PlainStateBucket, compositeKey)
+		return w.db.Delete(dbutils.PlainStateBucket, compositeKey)
 	}
-	return w.stateDb.Put(dbutils.PlainStateBucket, compositeKey, v)
+	return w.db.Put(dbutils.PlainStateBucket, compositeKey, v)
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {
 	if err := w.csw.CreateContract(address); err != nil {
 		return err
 	}
-	if err := w.stateDb.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
+	if err := w.db.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
 		return err
 	}
 	return nil
@@ -154,7 +152,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		return err
 	}
 	key := dbutils.EncodeTimestamp(w.blockNumber)
-	if err = w.changeDb.Put(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
+	if err = w.db.Put(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
 	storageChanges, err := w.csw.GetStorageChanges()
@@ -167,7 +165,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		if err != nil {
 			return err
 		}
-		if err = w.changeDb.Put(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
+		if err = w.db.Put(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
 			return err
 		}
 	}
@@ -179,7 +177,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, w.changeDb)
+	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, w.db)
 	if err != nil {
 		return err
 	}
@@ -188,7 +186,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, w.changeDb)
+	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, w.db)
 	if err != nil {
 		return err
 	}

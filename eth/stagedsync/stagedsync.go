@@ -13,7 +13,7 @@ func PrepareStagedSync(
 	blockchain BlockChain,
 	stateDB ethdb.Database,
 	pid string,
-	history bool,
+	storageMode ethdb.StorageMode,
 	datadir string,
 	quitCh chan struct{},
 	headersFetchers []func() error,
@@ -56,7 +56,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests)
+				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindExecutionStage(u, s, stateDB)
@@ -85,7 +85,7 @@ func PrepareStagedSync(
 		{
 			ID:                  stages.AccountHistoryIndex,
 			Description:         "Generating account history index",
-			Disabled:            !history,
+			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
@@ -97,7 +97,7 @@ func PrepareStagedSync(
 		{
 			ID:                  stages.StorageHistoryIndex,
 			Description:         "Generating storage history index",
-			Disabled:            !history,
+			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)

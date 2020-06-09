@@ -460,7 +460,7 @@ func Stateless(
 		blockWriter := tds.DbStateWriter()
 		err = statedb.CommitBlock(ctx, blockWriter)
 		if err != nil {
-			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
+			fmt.Printf("Committing block %d failed: %v", blockNum, err)
 			return
 		}
 		if writeHistory {

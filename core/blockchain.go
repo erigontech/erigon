@@ -2474,9 +2474,9 @@ func (bc *BlockChain) waitJobs() {
 	bc.quitMu.Unlock()
 }
 
-// ExecuteBlockEuphemerally runs a block from provided stateReader and
+// ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
-func ExecuteBlockEuphemerally(
+func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,
 	chainContext ChainContext,
@@ -2485,7 +2485,7 @@ func ExecuteBlockEuphemerally(
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	dests vm.Cache,
-) error {
+) (types.Receipts, error) {
 	ibs := state.New(stateReader)
 	header := block.Header()
 	var receipts types.Receipts
@@ -2500,7 +2500,7 @@ func ExecuteBlockEuphemerally(
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, dests)
 		if err != nil {
-			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
@@ -2508,23 +2508,23 @@ func ExecuteBlockEuphemerally(
 	if chainConfig.IsByzantium(header.Number) {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
-			return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
-		return fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
 	}
 
-	return nil
+	return receipts, nil
 }

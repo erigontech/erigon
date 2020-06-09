@@ -1292,12 +1292,12 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{blockNr: tds.blockNr, stateDb: tds.db, changeDb: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
 }
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) PlainStateWriter() *PlainStateWriter {
-	return NewPlainStateWriter(tds.db, tds.db, tds.blockNr)
+	return NewPlainStateWriter(tds.db, tds.blockNr)
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {

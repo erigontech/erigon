@@ -127,7 +127,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
-		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 	return nil
 }

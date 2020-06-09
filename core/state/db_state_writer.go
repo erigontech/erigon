@@ -19,26 +19,24 @@ import (
 
 var _ WriterWithChangeSets = (*DbStateWriter)(nil)
 
-func NewDbStateWriter(stateDb, changeDb ethdb.Database, blockNr uint64) *DbStateWriter {
+func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 	return &DbStateWriter{
-		stateDb:        stateDb,
-		changeDb:       changeDb,
-		blockNr:        blockNr,
-		pw:             &PreimageWriter{db: stateDb, savePreimages: false},
-		csw:            NewChangeSetWriter(),
+		db:      db,
+		blockNr: blockNr,
+		pw:      &PreimageWriter{db: db, savePreimages: false},
+		csw:     NewChangeSetWriter(),
 	}
 }
 
 type DbStateWriter struct {
-	stateDb        ethdb.Database
-	changeDb       ethdb.Database
-	pw             *PreimageWriter
-	blockNr        uint64
-	csw            *ChangeSetWriter
-	accountCache   *fastcache.Cache
-	storageCache   *fastcache.Cache
-	codeCache      *fastcache.Cache
-	codeSizeCache  *fastcache.Cache
+	db            ethdb.Database
+	pw            *PreimageWriter
+	blockNr       uint64
+	csw           *ChangeSetWriter
+	accountCache  *fastcache.Cache
+	storageCache  *fastcache.Cache
+	codeCache     *fastcache.Cache
+	codeSizeCache *fastcache.Cache
 }
 
 func (dsw *DbStateWriter) SetAccountCache(accountCache *fastcache.Cache) {
@@ -86,7 +84,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	if err := dsw.stateDb.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
+	if err := dsw.db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
 	if dsw.accountCache != nil {
@@ -103,13 +101,13 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err != nil {
 		return err
 	}
-	if err := rawdb.DeleteAccount(dsw.stateDb, addrHash); err != nil {
+	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		if err := dsw.stateDb.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
+		if err := dsw.db.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
 			return err
 		}
 	}
@@ -132,7 +130,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 		return err
 	}
 	//save contract code mapping
-	if err := dsw.stateDb.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+	if err := dsw.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
 	addrHash, err := common.HashData(address.Bytes())
@@ -140,7 +138,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 		return err
 	}
 	//save contract to codeHash mapping
-	if err := dsw.stateDb.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
+	if err := dsw.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
 		return err
 	}
 	if dsw.codeCache != nil {
@@ -181,16 +179,16 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 		dsw.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
-		return dsw.stateDb.Delete(dbutils.CurrentStateBucket, compositeKey)
+		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey)
 	}
-	return dsw.stateDb.Put(dbutils.CurrentStateBucket, compositeKey, v)
+	return dsw.db.Put(dbutils.CurrentStateBucket, compositeKey, v)
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	if err := dsw.csw.CreateContract(address); err != nil {
 		return err
 	}
-	if err := dsw.stateDb.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
+	if err := dsw.db.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
 		return err
 	}
 	return nil
@@ -209,7 +207,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		return err
 	}
 	key := dbutils.EncodeTimestamp(dsw.blockNr)
-	if err = dsw.changeDb.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
+	if err = dsw.db.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
 	storageChanges, err := dsw.csw.GetStorageChanges()
@@ -222,7 +220,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		if err != nil {
 			return err
 		}
-		if err = dsw.changeDb.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
+		if err = dsw.db.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
 			return err
 		}
 	}
@@ -234,7 +232,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, dbutils.AccountsHistoryBucket, dsw.changeDb)
+	err = writeIndex(dsw.blockNr, accountChanges, dbutils.AccountsHistoryBucket, dsw.db)
 	if err != nil {
 		return err
 	}
@@ -243,7 +241,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, dbutils.StorageHistoryBucket, dsw.changeDb)
+	err = writeIndex(dsw.blockNr, storageChanges, dbutils.StorageHistoryBucket, dsw.db)
 	if err != nil {
 		return err
 	}
