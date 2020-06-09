@@ -39,7 +39,7 @@ func PrepareStagedSync(
 				return spawnBodyDownloadStage(s, u, d, pid)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindBodyDownloadStage(stateDB, u)
+				return unwindBodyDownloadStage(u, stateDB)
 			},
 		},
 		{
@@ -49,7 +49,7 @@ func PrepareStagedSync(
 				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(stateDB, u.UnwindPoint)
+				return unwindSendersStage(u, stateDB)
 			},
 		},
 		{
@@ -59,7 +59,7 @@ func PrepareStagedSync(
 				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindExecutionStage(u.UnwindPoint, stateDB)
+				return unwindExecutionStage(u, s, stateDB)
 			},
 		},
 		{

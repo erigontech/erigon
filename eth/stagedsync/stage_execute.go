@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -206,20 +205,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	return nil
 }
 
-func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Execution)
-	if err != nil {
-		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
-	}
-
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.Execution, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Execution: reset: %v", err)
-		}
-		return nil
-	}
-	log.Info("Unwind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
+func unwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 
 	rewindFunc := ethdb.RewindData
@@ -242,7 +229,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		recoverCodeHashFunc = recoverCodeHashPlain
 	}
 
-	accountMap, storageMap, err := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
+	accountMap, storageMap, err := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
@@ -277,14 +264,13 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		}
 	}
 
-	for i := lastProcessedBlockNumber; i > unwindPoint; i-- {
+	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
 		if err = deleteChangeSets(mutation, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
 		}
 	}
 
-	err = stages.SaveStageUnwind(mutation, stages.Execution, 0)
-	if err != nil {
+	if err = u.Done(mutation); err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
 

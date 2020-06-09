@@ -12,18 +12,23 @@ type Unwinder interface {
 type UnwindState struct {
 	Stage       stages.SyncStage
 	UnwindPoint uint64
+	StageData   []byte
 }
 
 func (u *UnwindState) Done(db ethdb.Putter) error {
-	err := stages.SaveStageProgress(db, u.Stage, u.UnwindPoint)
+	err := stages.SaveStageProgress(db, u.Stage, u.UnwindPoint, nil)
 	if err != nil {
 		return err
 	}
-	return stages.SaveStageUnwind(db, u.Stage, 0)
+	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
+}
+
+func (u *UnwindState) UpdateWithStageData(db ethdb.Putter, stageData []byte) error {
+	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint, stageData)
 }
 
 func (u *UnwindState) Skip(db ethdb.Putter) error {
-	return stages.SaveStageUnwind(db, u.Stage, 0)
+	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
 }
 
 type PersistentUnwindStack struct {
@@ -35,12 +40,12 @@ func NewPersistentUnwindStack() *PersistentUnwindStack {
 }
 
 func (s *PersistentUnwindStack) LoadFromDB(db ethdb.Getter, stageID stages.SyncStage) error {
-	unwindPoint, err := stages.GetStageUnwind(db, stageID)
+	unwindPoint, stageData, err := stages.GetStageUnwind(db, stageID)
 	if err != nil {
 		return err
 	}
 	if unwindPoint > 0 {
-		u := UnwindState{stageID, unwindPoint}
+		u := UnwindState{stageID, unwindPoint, stageData}
 		s.unwindStack = append(s.unwindStack, u)
 	}
 	return nil
@@ -51,7 +56,7 @@ func (s *PersistentUnwindStack) Empty() bool {
 }
 
 func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error {
-	currentPoint, err := stages.GetStageUnwind(db, u.Stage)
+	currentPoint, stageData, err := stages.GetStageUnwind(db, u.Stage)
 	if err != nil {
 		return err
 	}
@@ -59,7 +64,7 @@ func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error 
 		return nil
 	}
 	s.unwindStack = append(s.unwindStack, u)
-	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint)
+	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint, stageData)
 }
 
 func (s *PersistentUnwindStack) Pop() *UnwindState {
