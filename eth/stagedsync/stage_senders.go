@@ -53,7 +53,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 	blockNumber := big.NewInt(0)
 
-	const batchSize = 1000
+	const batchSize = 5000
 
 	jobs := make(chan *senderRecoveryJob, batchSize)
 	out := make(chan *senderRecoveryJob, batchSize)
@@ -265,10 +265,10 @@ func recoverFrom(cryptoContext *secp256k1.Context, blockBody *types.Body, signer
 		if err != nil {
 			return errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
 		}
-		tx.SetFrom(from)
 		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
 			return errors.New("invalid chainId")
 		}
+		tx.SetFrom(from)
 	}
 	return nil
 }
