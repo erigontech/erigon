@@ -200,7 +200,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", profileNumber))
 				defer f.Close()
 				runtime.GC()
-				pprof.WriteHeapProfile(f)
+				_, pprof.WriteHeapProfile(f)
 			}
 		}
 	}
