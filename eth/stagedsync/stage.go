@@ -21,10 +21,15 @@ type StageState struct {
 	state       *State
 	Stage       stages.SyncStage
 	BlockNumber uint64
+	StageData   []byte
 }
 
 func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
-	return stages.SaveStageProgress(db, s.Stage, newBlockNum)
+	return stages.SaveStageProgress(db, s.Stage, newBlockNum, nil)
+}
+
+func (s *StageState) UpdateWithStageData(db ethdb.Putter, newBlockNum uint64, stageData []byte) error {
+	return stages.SaveStageProgress(db, s.Stage, newBlockNum, stageData)
 }
 
 func (s *StageState) Done() {
@@ -32,11 +37,12 @@ func (s *StageState) Done() {
 }
 
 func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
-	return stages.GetStageProgress(db, stages.Execution)
+	execution, _, err := stages.GetStageProgress(db, stages.Execution)
+	return execution, err
 }
 
 func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
-	err := stages.SaveStageProgress(db, s.Stage, newBlockNum)
+	err := stages.SaveStageProgress(db, s.Stage, newBlockNum, nil)
 	s.state.NextStage()
 	return err
 }

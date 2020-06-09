@@ -2048,7 +2048,7 @@ func resetState(chaindata string) {
 	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.Execution, 0)
+	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
 	check(err)
 	fmt.Printf("Reset state done\n")
 }
@@ -2075,7 +2075,7 @@ func resetHashedState(chaindata string) {
 		return nil
 	})
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
@@ -2088,11 +2088,11 @@ func resetHistoryIndex(chaindata string) {
 	db.DeleteBucket(dbutils.AccountsHistoryBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageHistoryBucket)
-	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2392,11 +2392,11 @@ func testStage5(chaindata string, reset bool) error {
 			return err
 		}
 	}
-	if err = stages.SaveStageProgress(db, stages.HashState, 0); err != nil {
+	if err = stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
 		return err
 	}
 	var stage4progress uint64
-	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
 	}
 	log.Info("Stage4", "progress", stage4progress)
@@ -2418,13 +2418,13 @@ func testStage4(chaindata string, block uint64) error {
 	defer db.Close()
 	var progress uint64
 	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
-		if progress, err = stages.GetStageProgress(db, stage); err != nil {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
 	}
 	var stage4progress uint64
-	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
 	}
 	core.UsePlainStateExecution = true
