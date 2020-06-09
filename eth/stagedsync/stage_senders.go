@@ -58,16 +58,15 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 	const batchSize = 5000
 
-	jobs := make(chan *senderRecoveryJob, batchSize)
+	jobs := make(chan *senderRecoveryJob, 100*batchSize)
 	out := make(chan TxsFroms, batchSize)
 
 	wg := &sync.WaitGroup{}
+	numOfGoroutines := numOfGoroutines
+
+	numOfGoroutines = 16
+
 	wg.Add(numOfGoroutines)
-	defer func() {
-		close(jobs)
-		wg.Wait()
-		close(out)
-	}()
 	for i := 0; i < numOfGoroutines; i++ {
 		// each goroutine gets it's own crypto context to make sure they are really parallel
 		ctx := cryptoContexts[i]
@@ -75,39 +74,60 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
-	firstBlock := uint64(0)
+	firstBlock := new(uint64)
 
-	for {
-		if err := common.Stopped(quitCh); err != nil {
-			return err
+	errCh := make(chan error)
+	doneCh := make(chan struct{}, 1)
+	go func() {
+		defer func() {
+			close(jobs)
+			wg.Wait()
+			close(doneCh)
+			close(errCh)
+		}()
+
+		for {
+			if err := common.Stopped(quitCh); err != nil {
+				errCh <- err
+				return
+			}
+
+			job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
+			if job == nil {
+				break
+			}
+
+			if atomic.LoadUint64(firstBlock) == 0 {
+				atomic.StoreUint64(firstBlock, job.nextBlockNumber)
+			}
+
+			jobs <- job
+
+			atomic.AddUint64(&nextBlockNumber, 1)
 		}
-
-		job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
-		if job == nil {
-			break
-		}
-
-		if firstBlock == 0 {
-			firstBlock = job.nextBlockNumber
-		}
-
-		jobs <- job
-
-		atomic.AddUint64(&nextBlockNumber, 1)
-	}
+	}()
 
 	fmt.Println("DONE?")
 
-	errCh := make(chan error)
-	f, err := os.Create("./froms")
-	defer f.Close()
-	writeOnDiskBatch(f, firstBlock, out, errCh, quitCh, jobs)
-
-	err = <-errCh
-	fmt.Println("DONE!")
+	f, err := os.Create("/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/froms.out")
 	if err != nil {
 		return err
 	}
+	defer f.Close()
+
+	fmt.Println("Storing into a file")
+	err = writeOnDiskBatch(f, firstBlock, out, quitCh, jobs, doneCh)
+	fmt.Println("Storing into a file - DONE")
+
+	if err != nil {
+		return err
+	}
+
+	err = <-errCh
+	if err != nil {
+		return err
+	}
+	fmt.Println("DONE!")
 
 	/*
 		errCh = make(chan error)
@@ -196,16 +216,11 @@ type TxsFroms struct {
 	err         error
 }
 
-func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh chan error, quitCh chan struct{}, in chan *senderRecoveryJob) {
-	var nextBlockNumber uint64
-	defer close(errCh)
-
+func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob, doneCh chan struct{}) error {
 	const blockSize = 4096
 	const batch = (blockSize * 10 / 20) * 10000 //20*4096
 	n := 0
 	toWrite := make([]byte, 0, batch*len(common.Address{})+batch/100*5)
-
-	currentBlock := firstBlock
 
 	defer func() {
 		if len(toWrite) > 0 {
@@ -216,6 +231,10 @@ func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh c
 	toSort := uint64(10)
 	buffer := make([]TxsFroms, 0, 1000)
 
+	total := 0
+	totalFroms := 0
+	written := 0
+	var err error
 	defer func() {
 		// store last blocks
 		sort.SliceStable(buffer, func(i, j int) bool {
@@ -223,26 +242,41 @@ func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh c
 		})
 
 		for _, job := range buffer {
+			totalFroms += len(job.froms)
 			for i := range job.froms {
 				toWrite = append(toWrite, job.froms[i][:]...)
 			}
-			w.Write(toWrite)
+			written, err = w.Write(toWrite)
+			if err != nil {
+				panic(err)
+			}
+			total += written
 		}
 	}()
 
+	fmt.Println("xxx writeOnDiskBatch")
+
+	isFirst := true
+	currentBlock := uint64(0)
 	for j := range out {
-		if err := common.Stopped(quitCh); err != nil {
-			errCh <- err
-			return
+		if isFirst {
+			currentBlock = atomic.LoadUint64(firstBlock)
+			isFirst = false
 		}
 
-		if nextBlockNumber%1000 == 0 {
-			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "out", len(out), "in", len(in))
+		if err := common.Stopped(quitCh); err != nil {
+			return err
+		}
+		if err := common.Stopped(doneCh); err != nil {
+			return nil
+		}
+
+		if j.blockNumber%10000 == 0 {
+			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "toNextWrite", len(toWrite), "written", total, "txs", totalFroms)
 		}
 
 		if j.err != nil {
-			errCh <- errors.Wrap(j.err, "could not extract senders")
-			return
+			return errors.Wrap(j.err, "could not extract senders")
 		}
 
 		buffer = append(buffer, j)
@@ -252,13 +286,17 @@ func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh c
 
 		// check if we have 10 sequential blocks
 		hasRow := true
-		for i := range buffer {
-			if uint64(i) >= toSort {
-				break
-			}
-			if buffer[i].blockNumber != currentBlock+uint64(i) {
-				hasRow = false
-				break
+		if uint64(len(buffer)) < toSort {
+			hasRow = false
+		} else {
+			for i := range buffer {
+				if uint64(i) > toSort {
+					break
+				}
+				if buffer[i].blockNumber != currentBlock+uint64(i) {
+					hasRow = false
+					break
+				}
 			}
 		}
 		if !hasRow {
@@ -270,11 +308,17 @@ func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh c
 		buffer = buffer[toSort:]
 
 		for _, jobToWrite := range writeFroms {
+			totalFroms += len(jobToWrite.froms)
 			for i := range jobToWrite.froms {
 				n++
 				toWrite = append(toWrite, jobToWrite.froms[i][:]...)
-				if n == batch {
+				if 20*n == batch {
 					w.Write(toWrite)
+					written, err = w.Write(toWrite)
+					if err != nil {
+						return err
+					}
+					total += written
 
 					n = 0
 					toWrite = toWrite[:0]
@@ -283,7 +327,7 @@ func writeOnDiskBatch(w io.Writer, firstBlock uint64, out chan TxsFroms, errCh c
 		}
 	}
 
-	return
+	return nil
 }
 
 func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJob, mutation *mutationSafe, errCh chan error, quitCh chan struct{}, in chan *senderRecoveryJob) {
@@ -397,6 +441,8 @@ type senderRecoveryJob struct {
 func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	fmt.Println("recoverSenders started")
+
 	for job := range in {
 		if job == nil {
 			return
@@ -414,11 +460,12 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 		if err := common.Stopped(quit); err != nil {
 			res.err = err
 		}
-		out <- res
 
 		if res.err == common.ErrStopped {
 			return
 		}
+
+		out <- res
 	}
 }
 
@@ -426,7 +473,6 @@ func recoverFrom(cryptoContext *secp256k1.Context, blockBody *types.Body, signer
 	froms := make([]common.Address, len(blockBody.Transactions))
 	for i, tx := range blockBody.Transactions {
 		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
-			fmt.Println("!!!!!!!!!!!")
 			return nil, errors.New("invalid chainId")
 		}
 
