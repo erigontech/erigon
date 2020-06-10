@@ -377,16 +377,16 @@ func printBuckets(db *bolt.DB) {
 }
 
 func bucketStats(chaindata string) {
-	t := "bolt"
+	t := ethdb.Bolt
 	bucketList := dbutils.Buckets
 
 	switch t {
-	case "bolt":
+	case ethdb.Bolt:
 		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 		check(err)
 		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
 		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
-		db.View(func(tx *bolt.Tx) error {
+		_ = db.View(func(tx *bolt.Tx) error {
 			for _, bucket := range bucketList {
 				b := tx.Bucket(bucket)
 				bs := b.Stats()
@@ -396,14 +396,14 @@ func bucketStats(chaindata string) {
 			}
 			return nil
 		})
-	case "lmdb":
+	case ethdb.Lmdb:
 		env, err := lmdb.NewEnv()
 		check(err)
 		err = env.Open(chaindata, lmdb.Readonly, 0664)
 		check(err)
 
 		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-		env.View(func(tx *lmdb.Txn) error {
+		_ = env.View(func(tx *lmdb.Txn) error {
 			for _, bucket := range bucketList {
 				dbi, bucketErr := tx.OpenDBI(string(bucket), lmdb.Readonly)
 				check(bucketErr)

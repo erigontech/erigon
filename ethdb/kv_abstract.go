@@ -62,4 +62,5 @@ const (
 	Bolt DbProvider = iota
 	Badger
 	Remote
+	Lmdb
 )
