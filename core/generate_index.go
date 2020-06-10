@@ -213,8 +213,8 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 
 func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
 	if len(value)%9 != 0 {
-		log.Error("Strange value", "ln", len(value), "k", common.Bytes2Hex(k))
-		return nil
+		log.Error("Value must be a multiple of 9", "ln", len(value), "k", common.Bytes2Hex(k))
+		return errors.New("incorrect value")
 	}
 
 	currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
