@@ -26,7 +26,7 @@ var cryptoContexts []*secp256k1.Context
 func init() {
 	// To avoid bothering with creating/releasing the resources
 	// but still not leak the contexts
-	numOfGoroutines = 3 // We never get more than 3x improvement even if we use 8 goroutines
+	numOfGoroutines = 8
 	if numOfGoroutines > runtime.NumCPU() {
 		numOfGoroutines = runtime.NumCPU()
 	}
