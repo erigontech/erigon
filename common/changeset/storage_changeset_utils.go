@@ -401,7 +401,7 @@ func doSearch(
 	if addrID == numOfUniqueElements {
 		return nil, ErrNotFound
 	}
-	if !bytes.Equal(b[4+addrID*(4+keyPrefixLen) : 4+addrID*(4+keyPrefixLen)+keyPrefixLen], addrBytesToFind) {
+	if !bytes.Equal(b[4+addrID*(4+keyPrefixLen):4+addrID*(4+keyPrefixLen)+keyPrefixLen], addrBytesToFind) {
 		return nil, ErrNotFound
 	}
 	from := 0
@@ -419,7 +419,7 @@ func doSearch(
 	if index == to {
 		return nil, ErrNotFound
 	}
-	if !bytes.Equal(b[keysStart+common.HashLength*index : keysStart+common.HashLength*index+common.HashLength], keyBytesToFind) {
+	if !bytes.Equal(b[keysStart+common.HashLength*index:keysStart+common.HashLength*index+common.HashLength], keyBytesToFind) {
 		return nil, ErrNotFound
 	}
 	return findValue(b[valsInfoStart:], index)
