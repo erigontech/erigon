@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -40,45 +41,47 @@ const (
 )
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
-func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
+func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
-		return 0, err
+		return 0, nil, err
 	}
-	if len(v) == 0 {
-		return 0, nil
-	}
-	if len(v) != 8 {
-		return 0, fmt.Errorf("stage progress value must be of length 8, got %d", len(v))
-	}
-	return binary.BigEndian.Uint64(v), nil
+	return unmarshalData(v)
 }
 
 // SaveStageProgress saves the progress of the given stage in the database
-func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, encodeBigEndian(progress))
+func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageData []byte) error {
+	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, marshalData(progress, stageData))
 }
 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
-func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
+func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 	v, err := db.Get(dbutils.SyncStageUnwind, []byte{byte(stage)})
 	if err != nil && err != ethdb.ErrKeyNotFound {
-		return 0, err
+		return 0, nil, err
 	}
-	if len(v) == 0 {
-		return 0, nil
-	}
-	if len(v) != 8 {
-		return 0, fmt.Errorf("stage invalidation value must be of length 8, got %d", len(v))
-	}
-	return binary.BigEndian.Uint64(v), nil
+	return unmarshalData(v)
 }
 
 // SaveStageUnwind saves the progress of the given stage in the database
-func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
-	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, encodeBigEndian(invalidation))
+func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64, stageData []byte) error {
+	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, marshalData(invalidation, stageData))
+}
+
+func marshalData(blockNumber uint64, stageData []byte) []byte {
+	return append(encodeBigEndian(blockNumber), stageData...)
+}
+
+func unmarshalData(data []byte) (uint64, []byte, error) {
+	if len(data) == 0 {
+		return 0, nil, nil
+	}
+	if len(data) < 8 {
+		return 0, nil, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
+	}
+	return binary.BigEndian.Uint64(data[:8]), common.CopyBytes(data[8:]), nil
 }
 
 func encodeBigEndian(n uint64) []byte {

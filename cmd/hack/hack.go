@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AskAlexSharov/lmdb-go/lmdb"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -369,46 +370,52 @@ func accountSavings(db *bolt.DB) (int, int) {
 	return emptyRoots, emptyCodes
 }
 
-func allBuckets(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			n := make([]byte, len(name))
-			copy(n, name)
-			bucketList = append(bucketList, n)
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
 func printBuckets(db *bolt.DB) {
-	bucketList := allBuckets(db)
-	for _, bucket := range bucketList {
+	for _, bucket := range dbutils.Buckets {
 		fmt.Printf("%s\n", bucket)
 	}
 }
 
 func bucketStats(chaindata string) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	bucketList := allBuckets(db)
-	//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
-	fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
-	db.View(func(tx *bolt.Tx) error {
-		for _, bucket := range bucketList {
-			b := tx.Bucket(bucket)
-			bs := b.Stats()
-			fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-				bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-				bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-		}
-		return nil
-	})
+	t := ethdb.Bolt
+	bucketList := dbutils.Buckets
+
+	switch t {
+	case ethdb.Bolt:
+		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+		check(err)
+		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
+
+		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
+		_ = db.View(func(tx *bolt.Tx) error {
+			for _, bucket := range bucketList {
+				b := tx.Bucket(bucket)
+				bs := b.Stats()
+				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
+					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
+					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
+			}
+			return nil
+		})
+	case ethdb.Lmdb:
+		env, err := lmdb.NewEnv()
+		check(err)
+		err = env.Open(chaindata, lmdb.Readonly, 0664)
+		check(err)
+
+		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
+		_ = env.View(func(tx *lmdb.Txn) error {
+			for _, bucket := range bucketList {
+				dbi, bucketErr := tx.OpenDBI(string(bucket), lmdb.Readonly)
+				check(bucketErr)
+				bs, statErr := tx.Stat(dbi)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+			return nil
+		})
+	}
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -2048,7 +2055,7 @@ func resetState(chaindata string) {
 	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.Execution, 0)
+	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
 	check(err)
 	fmt.Printf("Reset state done\n")
 }
@@ -2075,7 +2082,7 @@ func resetHashedState(chaindata string) {
 		return nil
 	})
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
@@ -2088,11 +2095,11 @@ func resetHistoryIndex(chaindata string) {
 	db.DeleteBucket(dbutils.AccountsHistoryBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageHistoryBucket)
-	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2392,11 +2399,11 @@ func testStage5(chaindata string, reset bool) error {
 			return err
 		}
 	}
-	if err = stages.SaveStageProgress(db, stages.HashState, 0); err != nil {
+	if err = stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
 		return err
 	}
 	var stage4progress uint64
-	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
 	}
 	log.Info("Stage4", "progress", stage4progress)
@@ -2418,20 +2425,20 @@ func testStage4(chaindata string, block uint64) error {
 	defer db.Close()
 	var progress uint64
 	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
-		if progress, err = stages.GetStageProgress(db, stage); err != nil {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
 	}
 	var stage4progress uint64
-	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
 	}
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
 	stageState := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
 	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch, nil); err != nil {
+	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch, nil, false); err != nil {
 		return err
 	}
 	return nil

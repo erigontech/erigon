@@ -156,9 +156,9 @@ type Downloader struct {
 	bodyFetchHook    func([]*types.Header) // Method to call upon starting a block body fetch
 	receiptFetchHook func([]*types.Header) // Method to call upon starting a receipt fetch
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
-	// generate history index, disable/enable pruning
-	history bool
-	datadir string
+
+	storageMode ethdb.StorageMode
+	datadir     string
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -246,13 +246,13 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, history bool) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
 	dl := &Downloader{
 		mode:          FullSync,
-		stateDB:       stateDb,
+		stateDB:       stateDB,
 		mux:           mux,
 		queue:         newQueue(),
 		peers:         newPeerSet(),
@@ -268,8 +268,7 @@ func New(checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, 
 		receiptWakeCh: make(chan bool, 1),
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
-		//generate index, disable/enable pruning
-		history: history,
+		storageMode:   sm,
 	}
 	go dl.qosTuner()
 	return dl
@@ -557,7 +556,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 			d.blockchain,
 			d.stateDB,
 			p.id,
-			d.history,
+			d.storageMode,
 			d.datadir,
 			d.quitCh,
 			fetchers,

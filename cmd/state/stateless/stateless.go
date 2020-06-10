@@ -96,7 +96,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
-		return nil, fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 	return receipts, nil
 }
@@ -491,7 +491,7 @@ func Stateless(
 		blockWriter := tds.DbStateWriter()
 		err = statedb.CommitBlock(ctx, blockWriter)
 		if err != nil {
-			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
+			fmt.Printf("Committing block %d failed: %v", blockNum, err)
 			return
 		}
 		if writeHistory {

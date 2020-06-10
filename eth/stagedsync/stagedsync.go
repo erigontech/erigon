@@ -13,7 +13,7 @@ func PrepareStagedSync(
 	blockchain BlockChain,
 	stateDB ethdb.Database,
 	pid string,
-	history bool,
+	storageMode ethdb.StorageMode,
 	datadir string,
 	quitCh chan struct{},
 	headersFetchers []func() error,
@@ -39,7 +39,7 @@ func PrepareStagedSync(
 				return spawnBodyDownloadStage(s, u, d, pid)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindBodyDownloadStage(stateDB, u)
+				return unwindBodyDownloadStage(u, stateDB)
 			},
 		},
 		{
@@ -49,17 +49,17 @@ func PrepareStagedSync(
 				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(stateDB, u.UnwindPoint)
+				return unwindSendersStage(u, stateDB)
 			},
 		},
 		{
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests)
+				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindExecutionStage(u.UnwindPoint, stateDB)
+				return unwindExecutionStage(u, s, stateDB)
 			},
 		},
 		{
@@ -85,7 +85,7 @@ func PrepareStagedSync(
 		{
 			ID:                  stages.AccountHistoryIndex,
 			Description:         "Generating account history index",
-			Disabled:            !history,
+			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
@@ -97,7 +97,7 @@ func PrepareStagedSync(
 		{
 			ID:                  stages.StorageHistoryIndex,
 			Description:         "Generating storage history index",
-			Disabled:            !history,
+			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
