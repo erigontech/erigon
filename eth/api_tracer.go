@@ -285,7 +285,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			}
 			// Generate the next state snapshot fast without tracing
 			processor := api.eth.blockchain.Processor()
-			receipts, _, _, _, err := processor.PreProcess(block, statedb, tds, vm.Config{})
+			receipts, _, _, _, err := processor.PreProcess(block, statedb, tds, vm.Config{}, api.eth.blockchain.DestsCache)
 			if err != nil {
 				failed = err
 				break
@@ -481,7 +481,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 		msg, _ := tx.AsMessage(signer)
 		vmctx := core.NewEVMContext(msg, block.Header(), api.eth.blockchain, nil)
 
-		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vm.Config{})
+		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vm.Config{}, api.eth.blockchain.DestsCache)
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
 			failed = err
 			break
@@ -574,7 +574,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 			}
 		}
 		// Execute the transaction and flush any traces to disk
-		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vmConf)
+		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vmConf, api.eth.blockchain.DestsCache)
 		_, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()))
 		if writer != nil {
 			writer.Flush()
@@ -627,7 +627,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainKV(), blockHash, index)
+	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainKV(), blockHash, index, api.eth.blockchain.DestsCache)
 	if err != nil {
 		return nil, err
 	}
@@ -673,7 +673,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, state, api.eth.blockchain.Config(), vm.Config{Debug: true, Tracer: tracer})
+	vmenv := vm.NewEVM(vmctx, state, api.eth.blockchain.Config(), vm.Config{Debug: true, Tracer: tracer}, api.eth.blockchain.DestsCache)
 
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
 	if err != nil {
@@ -706,7 +706,7 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainKV ethdb.KV, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainKV ethdb.KV, blockHash common.Hash, txIndex uint64, dests vm.Cache) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
 	// Create the parent state database
 	block := blockGetter.GetBlockByHash(blockHash)
 	if block == nil {
@@ -739,7 +739,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 			return msg, EVMcontext, statedb, dbstate, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
+		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{}, dests)
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}

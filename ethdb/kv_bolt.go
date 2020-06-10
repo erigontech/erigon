@@ -3,11 +3,18 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"os"
+	"sync"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+)
+
+var (
+	boltTxPool     = sync.Pool{New: func() interface{} { return &boltTx{} }}
+	boltCursorPool = sync.Pool{New: func() interface{} { return &boltCursor{} }}
 )
 
 type boltOpts struct {
@@ -20,16 +27,16 @@ type BoltKV struct {
 	bolt *bolt.DB
 	log  log.Logger
 }
-type boltTx struct {
-	ctx context.Context
-	db  *BoltKV
 
-	bolt *bolt.Tx
+type boltTx struct {
+	ctx     context.Context
+	db      *BoltKV
+	bolt    *bolt.Tx
+	cursors []*boltCursor
 }
 
 type boltBucket struct {
-	tx *boltTx
-
+	tx      *boltTx
 	bolt    *bolt.Bucket
 	nameLen uint
 }
@@ -47,7 +54,7 @@ type boltCursor struct {
 }
 
 type noValuesBoltCursor struct {
-	boltCursor
+	*boltCursor
 }
 
 func (opts boltOpts) InMem() boltOpts {
@@ -65,9 +72,9 @@ func (opts boltOpts) Path(path string) boltOpts {
 	return opts
 }
 
-// WrapBoltDb provides a way for the code to gradually migrate
+// WrapBoltDB provides a way for the code to gradually migrate
 // to the abstract interface
-func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
+func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -81,6 +88,7 @@ func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
 			return nil, err
 		}
 	}
+
 	return &BoltKV{
 		opts: opts,
 		bolt: boltDB,
@@ -93,7 +101,7 @@ func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return opts.WrapBoltDb(boltDB)
+	return opts.WrapBoltDB(boltDB)
 }
 
 func (opts boltOpts) MustOpen(ctx context.Context) KV {
@@ -143,14 +151,20 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	t := boltTxPool.Get().(*boltTx)
+	t.ctx = ctx
+	t.db = db
 	var err error
-	t := &boltTx{db: db, ctx: ctx}
 	t.bolt, err = db.bolt.Begin(writable)
 	return t, err
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &boltTx{db: db, ctx: ctx}
+	t := boltTxPool.Get().(*boltTx)
+	defer boltTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
+	defer t.closeCursors()
 	return db.bolt.View(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -158,7 +172,11 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &boltTx{db: db, ctx: ctx}
+	t := boltTxPool.Get().(*boltTx)
+	defer boltTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
+	defer t.closeCursors()
 	return db.bolt.Update(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -166,11 +184,22 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *boltTx) Commit(ctx context.Context) error {
+	defer tx.closeCursors()
+	// could not put tx back to pool, because tx can be used by app code after commit
 	return tx.bolt.Commit()
 }
 
 func (tx *boltTx) Rollback() error {
+	defer tx.closeCursors()
+	// could not put tx back to pool, because tx can be used by app code after rollback
 	return tx.bolt.Rollback()
+}
+
+func (tx *boltTx) closeCursors() {
+	for _, c := range tx.cursors {
+		boltCursorPool.Put(c)
+	}
+	tx.cursors = tx.cursors[:0]
 }
 
 func (tx *boltTx) Yield() {
@@ -198,7 +227,12 @@ func (c *boltCursor) Prefetch(v uint) Cursor {
 }
 
 func (c *boltCursor) NoValues() NoValuesCursor {
-	return &noValuesBoltCursor{boltCursor: *c}
+	return &noValuesBoltCursor{boltCursor: c}
+}
+
+func (b boltBucket) Size() (uint64, error) {
+	st := b.bolt.Stats()
+	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
 }
 
 func (b boltBucket) Get(key []byte) (val []byte, err error) {
@@ -232,14 +266,20 @@ func (b boltBucket) Delete(key []byte) error {
 }
 
 func (b boltBucket) Cursor() Cursor {
-	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
-}
-
-func (c *boltCursor) initCursor() {
-	if c.bolt != nil {
-		return
+	c := boltCursorPool.Get().(*boltCursor)
+	c.ctx = b.tx.ctx
+	c.bucket = b
+	c.prefix = nil
+	c.k = nil
+	c.v = nil
+	c.err = nil
+	c.bolt = b.bolt.Cursor()
+	// add to auto-close on end of transactions
+	if b.tx.cursors == nil {
+		b.tx.cursors = make([]*boltCursor, 0, 1)
 	}
-	c.bolt = c.bucket.bolt.Cursor()
+	b.tx.cursors = append(b.tx.cursors, c)
+	return c
 }
 
 func (c *boltCursor) First() ([]byte, []byte, error) {

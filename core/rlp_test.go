@@ -25,6 +25,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -34,11 +35,12 @@ import (
 )
 
 func getBlock(transactions int, uncles int, dataSize int) *types.Block {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
-		db     = ethdb.NewMemDatabase()
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -57,7 +59,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 				// Add transactions and stuff on the last block
 				for i := 0; i < transactions; i++ {
 					tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
-						common.Num0, 50000, common.Num1, make([]byte, dataSize)), types.HomesteadSigner{}, key)
+						u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), types.HomesteadSigner{}, key)
 					b.AddTx(tx)
 				}
 				for i := 0; i < uncles; i++ {

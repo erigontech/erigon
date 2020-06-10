@@ -65,7 +65,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	defer genesisDB.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

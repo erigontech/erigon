@@ -199,12 +199,14 @@ type BlockChain struct {
 	enablePreimages     bool // Whether we store preimages into the database
 	resolveReads        bool
 	pruner              Pruner
+
+	DestsCache vm.Cache
 }
 
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64, dests vm.Cache) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -248,6 +250,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		enableTxLookupIndex: true,
 		enableReceipts:      false,
 		enablePreimages:     true,
+		DestsCache:          dests,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
@@ -1762,7 +1765,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if !bc.cacheConfig.DownloadOnly && execute {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
-			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
+			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig, bc.DestsCache)
 			reuseTrieDbState := true
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
@@ -2471,9 +2474,9 @@ func (bc *BlockChain) waitJobs() {
 	bc.quitMu.Unlock()
 }
 
-// ExecuteBlockEuphemerally runs a block from provided stateReader and
+// ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
-func ExecuteBlockEuphemerally(
+func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,
 	chainContext ChainContext,
@@ -2481,7 +2484,8 @@ func ExecuteBlockEuphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-) error {
+	dests vm.Cache,
+) (types.Receipts, error) {
 	ibs := state.New(stateReader)
 	header := block.Header()
 	var receipts types.Receipts
@@ -2494,9 +2498,9 @@ func ExecuteBlockEuphemerally(
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, dests)
 		if err != nil {
-			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
@@ -2504,23 +2508,23 @@ func ExecuteBlockEuphemerally(
 	if chainConfig.IsByzantium(header.Number) {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
-			return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
-		return fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
 	}
 
-	return nil
+	return receipts, nil
 }

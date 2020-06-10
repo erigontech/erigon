@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -62,7 +63,7 @@ func TestSimulatedBackend(t *testing.T) {
 	// generate a transaction and confirm you can retrieve it
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
-	tx := types.NewContractCreation(0, common.Num0, gas, common.Num1, common.FromHex(code))
+	tx := types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, key)
 
 	err = sim.SendTransaction(context.Background(), tx)
@@ -393,8 +394,8 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &addr,
 			Gas:      0,
-			GasPrice: common.Num0,
-			Value:    common.Num1,
+			GasPrice: u256.Num0,
+			Value:    u256.Num1,
 			Data:     nil,
 		}, params.TxGas, nil},
 
@@ -402,8 +403,8 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
-			GasPrice: common.Num0,
-			Value:    common.Num1,
+			GasPrice: u256.Num0,
+			Value:    u256.Num1,
 			Data:     nil,
 		}, 0, errors.New("always failing transaction (execution reverted)")},
 
@@ -411,7 +412,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
-			GasPrice: common.Num0,
+			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("d8b98391"),
 		}, 0, errors.New("always failing transaction (execution reverted) (revert reason)")},
@@ -420,7 +421,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
-			GasPrice: common.Num0,
+			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("aa8b1d30"),
 		}, 0, errors.New("always failing transaction (execution reverted)")},
@@ -429,7 +430,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
-			GasPrice: common.Num0,
+			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("50f6fe34"),
 		}, 0, errors.New("gas required exceeds allowance (100000)")},
@@ -438,7 +439,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
-			GasPrice: common.Num0,
+			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("b9b046f9"),
 		}, 0, errors.New("always failing transaction (invalid opcode: opcode 0xfe not defined)")},
@@ -447,7 +448,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
-			GasPrice: common.Num0,
+			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("e09fface"),
 		}, 21275, nil},

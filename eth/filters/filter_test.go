@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -124,7 +125,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(1, common.HexToAddress("0x1"), common.Num1, 1, common.Num1, nil))
+			gen.AddUncheckedTx(types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil))
 		case 2:
 			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
@@ -134,7 +135,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(2, common.HexToAddress("0x2"), common.Num2, 2, common.Num2, nil))
+			gen.AddUncheckedTx(types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil))
 
 		case 998:
 			receipt := types.NewReceipt(false, 0)

@@ -176,12 +176,12 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 }
 
 func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
-	sm, err := GetStorageModeFromDB(chaindb)
+	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
 	// Construct the different synchronisation mechanisms
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer, sm.History)
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
 
 	// Construct the fetcher (short sync)
@@ -1013,7 +1013,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()
-		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil)
+		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, vm.NewDestsCache(10))
 		if err != nil {
 			return fmt.Errorf("fail in NewBlockChain: %w", err)
 		}

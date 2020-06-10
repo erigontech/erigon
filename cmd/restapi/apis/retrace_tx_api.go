@@ -114,7 +114,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 		misc.ApplyDAOHardFork(ibs)
 	}
 	for _, tx := range block.Transactions() {
-		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
@@ -127,7 +127,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
-		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 	return nil
 }

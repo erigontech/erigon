@@ -8,12 +8,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -21,7 +24,7 @@ import (
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, writeReceipts bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -52,7 +55,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, nil)
+	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -60,13 +63,14 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
+	batch := chainDb.NewBatch()
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
 
-		dbstate := state.NewDbState(historyDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(historyDb.KV(), block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriter()
 		var blockWriter state.StateWriter
@@ -76,8 +80,24 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		if err := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block); err != nil {
-			return err
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block)
+		if err1 != nil {
+			return err1
+		}
+		if chainConfig.IsByzantium(block.Number()) {
+			receiptSha := types.DeriveSha(receipts)
+			if receiptSha != block.Header().ReceiptHash {
+				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			}
+		}
+		if writeReceipts {
+			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
+			if batch.BatchSize() >= chainDb.IdealBatchSize() {
+				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
+				if _, err := batch.Commit(); err != nil {
+					return err
+				}
+			}
 		}
 
 		if !nocheck {
@@ -137,7 +157,12 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		default:
 		}
 	}
-
+	if writeReceipts {
+		log.Info("Committing final receipts", "batch size", common.StorageSize(batch.BatchSize()))
+		if _, err := batch.Commit(); err != nil {
+			return err
+		}
+	}
 	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
 	return nil
 }

@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AskAlexSharov/lmdb-go/lmdb"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -369,45 +370,52 @@ func accountSavings(db *bolt.DB) (int, int) {
 	return emptyRoots, emptyCodes
 }
 
-func allBuckets(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			n := make([]byte, len(name))
-			copy(n, name)
-			bucketList = append(bucketList, n)
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
 func printBuckets(db *bolt.DB) {
-	bucketList := allBuckets(db)
-	for _, bucket := range bucketList {
+	for _, bucket := range dbutils.Buckets {
 		fmt.Printf("%s\n", bucket)
 	}
 }
 
 func bucketStats(chaindata string) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	bucketList := allBuckets(db)
-	fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
-	db.View(func(tx *bolt.Tx) error {
-		for _, bucket := range bucketList {
-			b := tx.Bucket(bucket)
-			bs := b.Stats()
-			fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-				bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-				bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-		}
-		return nil
-	})
+	t := ethdb.Bolt
+	bucketList := dbutils.Buckets
+
+	switch t {
+	case ethdb.Bolt:
+		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+		check(err)
+		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
+
+		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
+		_ = db.View(func(tx *bolt.Tx) error {
+			for _, bucket := range bucketList {
+				b := tx.Bucket(bucket)
+				bs := b.Stats()
+				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
+					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
+					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
+			}
+			return nil
+		})
+	case ethdb.Lmdb:
+		env, err := lmdb.NewEnv()
+		check(err)
+		err = env.Open(chaindata, lmdb.Readonly, 0664)
+		check(err)
+
+		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
+		_ = env.View(func(tx *lmdb.Txn) error {
+			for _, bucket := range bucketList {
+				dbi, bucketErr := tx.OpenDBI(string(bucket), lmdb.Readonly)
+				check(bucketErr)
+				bs, statErr := tx.Stat(dbi)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+			return nil
+		})
+	}
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -628,7 +636,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 
-	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	defer db.Close()
 	tds, err := bc.GetTrieDbState()
@@ -773,20 +781,21 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	defer blockDb.Close()
 	if fromScratch {
 		os.Remove("statedb")
 	}
-	stateDB, err := ethdb.NewBadgerDatabase("statedb")
-	check(err)
+	stateDB := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path("statedb").MustOpen(context.Background()))
+	//stateDB, err := ethdb.NewBadgerDatabase("statedb")
+	//check(err)
 	defer stateDB.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
 	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
@@ -806,7 +815,7 @@ Loop:
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 100 || i == block {
+		if len(blocks) >= 20000 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
 				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
@@ -821,7 +830,7 @@ Loop:
 			}
 			blocks = types.Blocks{}
 		}
-		if i%1000 == 0 {
+		if i%20000 == 0 {
 			fmt.Printf("Inserted %dK, %s \n", i/1000, time.Since(now))
 		}
 	}
@@ -842,7 +851,7 @@ func extractTrie(block int) {
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
@@ -861,7 +870,7 @@ func testRewind(chaindata string, block, rewind int) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -923,7 +932,7 @@ func testStartup() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -2028,17 +2037,25 @@ func resetState(chaindata string) {
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageChangeSetBucket)
 	//nolint:errcheck
+	db.DeleteBucket(dbutils.ContractCodeBucket)
+	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainStateBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.PlainContractCodeBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.IncarnationMapBucket)
+	//nolint:errcheck
+	db.DeleteBucket(dbutils.CodeBucket)
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.Execution, 0)
+	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
 	check(err)
 	fmt.Printf("Reset state done\n")
 }
@@ -2065,7 +2082,7 @@ func resetHashedState(chaindata string) {
 		return nil
 	})
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
@@ -2078,11 +2095,11 @@ func resetHistoryIndex(chaindata string) {
 	db.DeleteBucket(dbutils.AccountsHistoryBucket)
 	//nolint:errcheck
 	db.DeleteBucket(dbutils.StorageHistoryBucket)
-	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0)
+	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashCheck, 0)
+	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2148,46 +2165,62 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
-func testGetProof(chaindata string, address common.Address, rewind int, regenerate bool) error {
+func regenerate(chaindata string) error {
+	var m runtime.MemStats
+	db, dberr := ethdb.NewBoltDatabase(chaindata)
+	check(dberr)
+	defer db.Close()
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
+	log.Info("Regeneration started")
+	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	hashCollector := func(keyHex []byte, hash []byte) error {
+		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+			return nil
+		}
+		var k []byte
+		trie.CompressNibbles(keyHex, &k)
+		return collector.Collect(k, common.CopyBytes(hash))
+	}
+	loader := trie.NewFlatDbSubTrieLoader()
+	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+		return err
+	}
+	if subTries, err := loader.LoadSubTries(); err == nil {
+		runtime.ReadMemStats(&m)
+		log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
+			"expected root", fmt.Sprintf("%x", headHeader.Root),
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	} else {
+		return err
+	}
+	quitCh := make(chan struct{})
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+		return err
+	}
+	log.Info("Regeneration ended")
+	return nil
+}
+
+func testGetProof(chaindata string, address common.Address, rewind int, regen bool) error {
+	if regen {
+		if err := regenerate(chaindata); err != nil {
+			return err
+		}
+	}
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	db, dberr := ethdb.NewBoltDatabase(chaindata)
 	check(dberr)
+	defer db.Close()
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
-	if regenerate {
-		collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
-		hashCollector := func(keyHex []byte, hash []byte) error {
-			if len(keyHex)%2 != 0 || len(keyHex) == 0 {
-				return nil
-			}
-			var k []byte
-			trie.CompressNibbles(keyHex, &k)
-			return collector.Collect(k, common.CopyBytes(hash))
-		}
-		loader := trie.NewFlatDbSubTrieLoader()
-		if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
-			return err
-		}
-		if subTries, err := loader.LoadSubTries(); err == nil {
-			runtime.ReadMemStats(&m)
-			log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
-				"expected root", fmt.Sprintf("%x", headHeader.Root),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-		} else {
-			return err
-		}
-		quitCh := make(chan struct{})
-		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-			return err
-		}
-	}
 	ts := dbutils.EncodeTimestamp(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
@@ -2343,42 +2376,83 @@ func testSeek(chaindata string) {
 	}
 }
 
-func testStage5(chaindata string) error {
+func testStage5(chaindata string, reset bool) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
-		return err
+	if reset {
+		if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
+			return err
+		}
+		if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
+			return err
+		}
+		if err = db.Bolt().Update(func(tx *bolt.Tx) error {
+			_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
+			_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
+			_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
-	if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
-		return err
-	}
-	if err = db.Bolt().Update(func(tx *bolt.Tx) error {
-		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
-		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(db, stages.HashCheck, 0); err != nil {
+	if err = stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
 		return err
 	}
 	var stage4progress uint64
-	if stage4progress, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
 	}
 	log.Info("Stage4", "progress", stage4progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashCheck}
-	if err = stagedsync.SpawnCheckFinalHashStage(stageState, db, "", ch); err != nil {
+	stageState := &stagedsync.StageState{Stage: stages.HashState}
+	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
+	return nil
+}
+
+func testStage4(chaindata string, block uint64) error {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var progress uint64
+	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
+			return err
+		}
+		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+	}
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
+	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch, nil, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func testStageLoop(chaindata string) error {
+	for block := uint64(10000000); block < uint64(11000000); block += uint64(100000) {
+		if err := testStage4(chaindata, block); err != nil {
+			return err
+		}
+		if err := testStage5(chaindata, true /* reset */); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -2532,7 +2606,22 @@ func main() {
 		testSeek(*chaindata)
 	}
 	if *action == "stage5" {
-		if err := testStage5(*chaindata); err != nil {
+		if err := testStage5(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage4" {
+		if err := testStage4(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stageLoop" {
+		if err := testStageLoop(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "regenerateIH" {
+		if err := regenerate(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

@@ -24,7 +24,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 		close(quitCh)
 	}()
 
-	lastExecutedBlock, err := stages.GetStageProgress(db, stages.Execution)
+	lastExecutedBlock,_, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
 		//There could be headers without block in the end
 		log.Error("Cant get last executed block", "err", err)

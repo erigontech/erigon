@@ -439,7 +439,7 @@ var (
 * p - write preimages to the DB
 * r - write receipts to the DB
 * t - write tx lookup index to the DB`,
-		Value: eth.DefaultStorageMode.ToString(),
+		Value: ethdb.DefaultStorageMode.ToString(),
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
@@ -1554,7 +1554,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 
-	mode, err := eth.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
+	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -1814,7 +1814,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chain *core.B
 		l := ctx.GlobalUint64(TxLookupLimitFlag.Name)
 		limit = &l
 	}
-	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, limit)
+	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, limit, vm.NewDestsCache(10000))
 	if err != nil {
 		Fatalf("Can't create BlockChain: %v", err)
 	}

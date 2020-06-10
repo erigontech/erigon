@@ -15,6 +15,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -68,10 +69,10 @@ func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Add
 	tt.startMode[depth] = true
 	return nil
 }
-func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
-func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (tt TokenTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
@@ -135,7 +136,7 @@ func makeTokens(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	tt := NewTokenTracer()
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
 	check(err)
 	if blockNum > 1 {
 		tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
@@ -160,7 +161,7 @@ func makeTokens(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
 			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -194,7 +195,7 @@ func makeTokenBalances() {
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -251,7 +252,7 @@ func makeTokenBalances() {
 		vmConfig := vm.Config{EnablePreimageRecording: true}
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
 		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)
@@ -414,7 +415,7 @@ func makeTokenAllowances() {
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -474,7 +475,7 @@ func makeTokenAllowances() {
 		vmConfig := vm.Config{EnablePreimageRecording: true}
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
 		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)

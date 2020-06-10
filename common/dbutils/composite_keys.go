@@ -154,9 +154,9 @@ func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 }
 
 // address hash + incarnation prefix (for plain state)
-func PlainGenerateStoragePrefix(address common.Address, incarnation uint64) []byte {
+func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
 	prefix := make([]byte, common.AddressLength+8)
-	copy(prefix, address[:])
+	copy(prefix, address)
 	binary.BigEndian.PutUint64(prefix[common.AddressLength:], ^incarnation)
 	return prefix
 }

@@ -415,7 +415,7 @@ func TestClique(t *testing.T) {
 		engine := New(config.Clique, db)
 		engine.fakeDiff = true
 
-		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil, vm.NewDestsCache(100))
 		if err != nil {
 			t.Errorf("test %d: failed to create test chain: %v", i, err)
 			continue
@@ -507,5 +507,6 @@ func TestClique(t *testing.T) {
 				t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 			}
 		}
+		db.Close()
 	}
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -412,7 +413,7 @@ func copyDb(ctx *cli.Context) error {
 	if syncMode == downloader.FastSync {
 		//syncBloom = trie.NewSyncBloom(uint64(ctx.GlobalInt(utils.CacheFlag.Name)/2), chainDb)
 	}
-	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, true)
+	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, ethdb.DefaultStorageMode)
 
 	// Create a source peer to satisfy downloader requests from
 	db, err := ethdb.NewBoltDatabase(ctx.Args().First())
@@ -431,7 +432,7 @@ func copyDb(ctx *cli.Context) error {
 	start := time.Now()
 
 	currentHeader := hc.CurrentHeader()
-	if err = dl.Synchronise("local", currentHeader.Hash(), hc.GetTd(nil, currentHeader.Hash(), currentHeader.Number.Uint64()), syncMode); err != nil {
+	if err = dl.Synchronise("local", currentHeader.Hash(), hc.GetTd(nil, currentHeader.Hash(), currentHeader.Number.Uint64()), syncMode, vm.NewDestsCache(10000)); err != nil {
 		return err
 	}
 	for dl.Synchronising() {

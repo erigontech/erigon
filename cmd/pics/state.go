@@ -320,7 +320,7 @@ func initialState1() error {
 	genesisDb := db.MemCopy()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		return err
 	}

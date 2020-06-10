@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync"
 
 	"github.com/pkg/errors"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -54,14 +54,16 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	jobs := make(chan *senderRecoveryJob, batchSize)
 	out := make(chan *senderRecoveryJob, batchSize)
 
+	wg := &sync.WaitGroup{}
+	wg.Add(numOfGoroutines)
 	defer func() {
 		close(jobs)
+		wg.Wait()
 		close(out)
 	}()
-
 	for i := 0; i < numOfGoroutines; i++ {
 		// each goroutine gets it's own crypto context to make sure they are really parallel
-		go recoverSenders(cryptoContexts[i], jobs, out, quitCh)
+		go recoverSenders(cryptoContexts[i], jobs, out, quitCh, wg)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
@@ -125,14 +127,10 @@ type senderRecoveryJob struct {
 	err             error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}) {
-	var job *senderRecoveryJob
-	for {
-		if err := common.Stopped(quit); err != nil {
-			return
-		}
+func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan *senderRecoveryJob, quit chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-		job = <-in
+	for job := range in {
 		if job == nil {
 			return
 		}
@@ -148,25 +146,23 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 				break
 			}
 		}
+
+		// prevent sending to close channel
+		if err := common.Stopped(quit); err != nil {
+			job.err = err
+		}
 		out <- job
+
+		if job.err == common.ErrStopped {
+			return
+		}
 	}
 }
 
-func unwindSendersStage(stateDB ethdb.Database, unwindPoint uint64) error {
+func unwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
 	// Does not require any special processing
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Senders)
-	if err != nil {
-		return fmt.Errorf("unwind Senders: get stage progress: %v", err)
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.Senders, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Senders: reset: %v", err)
-		}
-		return nil
-	}
 	mutation := stateDB.NewBatch()
-	err = stages.SaveStageUnwind(mutation, stages.Senders, 0)
+	err := u.Done(mutation)
 	if err != nil {
 		return fmt.Errorf("unwind Senders: reset: %v", err)
 	}

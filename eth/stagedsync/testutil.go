@@ -55,13 +55,13 @@ type stateWriterGen func(uint64) state.WriterWithChangeSets
 
 func hashedWriterGen(db ethdb.Database) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewDbStateWriter(db, db, blockNum)
+		return state.NewDbStateWriter(db, blockNum)
 	}
 }
 
 func plainWriterGen(db ethdb.Database) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewPlainStateWriter(db, db, blockNum)
+		return state.NewPlainStateWriter(db, blockNum)
 	}
 }
 func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
@@ -81,7 +81,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 	}
 	ctx := context.Background()
 
-	for blockNumber := from; blockNumber < from+numberOfBlocks; blockNumber++ {
+	for blockNumber := uint64(1); blockNumber < from+numberOfBlocks; blockNumber++ {
 		updateIncarnation := difficulty != staticCodeStaticIncarnations && blockNumber%10 == 0
 		blockWriter := stateWriterGen(blockNumber)
 
@@ -95,17 +95,20 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			}
 
 			if blockNumber == 1 && newAcc.Incarnation > 0 {
-				err := blockWriter.CreateContract(addr)
-				if err != nil {
-					t.Fatal(err)
+				if blockNumber >= from {
+					if err := blockWriter.CreateContract(addr); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
 					codeHash, _ := common.HashData(code)
-					if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
-						t.Fatal(err)
+					if blockNumber >= from {
+						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
+							t.Fatal(err)
+						}
 					}
 					newAcc.CodeHash = codeHash
 				}
@@ -116,15 +119,21 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 				newValue.SetOne()
 				var location common.Hash
 				location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
-				if err := blockWriter.WriteAccountStorage(ctx, addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
+				if blockNumber >= from {
+					if err := blockWriter.WriteAccountStorage(ctx, addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if blockNumber >= from {
+				if err := blockWriter.UpdateAccountData(ctx, addr, oldAcc /* original */, newAcc /* new account */); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := blockWriter.UpdateAccountData(ctx, addr, oldAcc /* original */, newAcc /* new account */); err != nil {
-				t.Fatal(err)
-			}
-			if err := blockWriter.WriteChangeSets(); err != nil {
-				t.Fatal(err)
+			if blockNumber >= from {
+				if err := blockWriter.WriteChangeSets(); err != nil {
+					t.Fatal(err)
+				}
 			}
 			testAccounts[i] = newAcc
 		}

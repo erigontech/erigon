@@ -157,7 +157,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	genesis := gspec.MustCommit(db)
 
 	dbCopy := db.MemCopy()
-	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
 
 	// Generate a small n-block chain and an uncle block for it
@@ -214,7 +214,7 @@ func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensu
 	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h, true)
 	w.setEtherbase(t.testBankAddress)
 	if waitInit {
-		w.init()
+		w.init(vm.NewDestsCache(100))
 
 		// Ensure worker has finished initialization
 		timer := time.NewTicker(10 * time.Millisecond)
@@ -266,6 +266,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 		chainConfig *params.ChainConfig
 		db          = ethdb.NewMemDatabase()
 	)
+	defer db.Close()
 	if isClique {
 		chainConfig = params.AllCliqueProtocolChanges
 		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
@@ -280,8 +281,9 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	defer w.close()
 
 	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
 	b.genesis.MustCommit(db2)
-	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil)
+	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil, nil)
 	defer chain.Stop()
 
 	// Ignore empty commit here for less noise
@@ -294,7 +296,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	defer sub.Unsubscribe()
 
 	// Start mining!
-	w.start()
+	w.start(vm.NewDestsCache(100))
 
 	for i := 0; i < 5; i++ {
 		if err := b.txPool.AddLocal(b.newRandomTx(testCase, true)); err != nil {
@@ -436,7 +438,7 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 	w := newTestWorker(testCase, chainConfig, engine, backend, h, true)
 	defer w.close()
 
-	w.start()
+	w.start(vm.NewDestsCache(100))
 	for i := 0; i < 3; i++ {
 		select {
 		case <-taskCh:
@@ -505,7 +507,7 @@ func TestStreamUncleBlock(t *testing.T) {
 	w := newTestWorker(testCase, testCase.ethashChainConfig, ethash, b, h, true)
 	defer w.close()
 
-	w.start()
+	w.start(vm.NewDestsCache(100))
 
 	// Ignore the first two works
 	for i := 0; i < 2; i += 1 {
@@ -575,7 +577,7 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 	w := newTestWorker(testCase, chainConfig, engine, b, h, true)
 	defer w.close()
 
-	w.start()
+	w.start(vm.NewDestsCache(100))
 	// Ignore the first two works
 	for i := 0; i < 2; i += 1 {
 		select {
@@ -668,7 +670,7 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 	w := newTestWorker(testCase, chainConfig, engine, backend, h, true)
 	defer w.close()
 
-	w.start()
+	w.start(vm.NewDestsCache(100))
 
 	time.Sleep(time.Second) // Ensure two tasks have been summitted due to start opt
 	atomic.StoreUint32(&start, 1)

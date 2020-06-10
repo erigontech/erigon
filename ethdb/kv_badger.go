@@ -3,12 +3,17 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"runtime"
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
+)
+
+var (
+	badgerTxPool     = sync.Pool{New: func() interface{} { return &badgerTx{} }}     // pool of ethdb.badgerTx objects
+	badgerCursorPool = sync.Pool{New: func() interface{} { return &badgerCursor{} }} // pool of ethdb.badgerCursor objects
 )
 
 type badgerOpts struct {
@@ -32,20 +37,13 @@ func (opts badgerOpts) ReadOnly() badgerOpts {
 
 func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	logger := log.New("badger_db", opts.Badger.Dir)
+	opts.Badger = opts.Badger.WithMaxTableSize(128 << 20) // 128MB, default 64Mb
 
 	if opts.Badger.InMemory {
-		opts.Badger = opts.Badger.WithMaxTableSize(1 << 20) // 4MB
 		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
-	} else {
-		oldMaxProcs := runtime.GOMAXPROCS(0)
-		if oldMaxProcs < minGoMaxProcs {
-			runtime.GOMAXPROCS(minGoMaxProcs)
-			logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
-		}
-		opts.Badger = opts.Badger.WithMaxTableSize(128 << 20) // 128MB, default 64Mb
 	}
 
-	db, err := badger.Open(opts.Badger)
+	badgerDB, err := badger.Open(opts.Badger)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +57,7 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 			i := 0
 			for range gcTicker.C {
 			nextFile:
-				err := db.RunValueLogGC(0.5)
+				err := badgerDB.RunValueLogGC(0.7)
 				if err == nil {
 					i++
 					goto nextFile
@@ -69,20 +67,13 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 					i = 0
 					continue
 				}
-				logger.Warn("Badger GC error", "err", err)
 			}
 		}()
 	}
 
-	go func() {
-		for range time.NewTicker(1 * time.Minute).C {
-			logger.Info("Badger Metrics", "BfCache", db.BfCacheMetrics().String(), "DataCache", db.DataCacheMetrics().String())
-		}
-	}()
-
-	return &badgerDB{
+	return &badgerKV{
 		opts:     opts,
-		badger:   db,
+		badger:   badgerDB,
 		log:      logger,
 		gcTicker: gcTicker,
 	}, nil
@@ -96,7 +87,7 @@ func (opts badgerOpts) MustOpen(ctx context.Context) KV {
 	return db
 }
 
-type badgerDB struct {
+type badgerKV struct {
 	opts     badgerOpts
 	badger   *badger.DB
 	gcTicker *time.Ticker
@@ -109,7 +100,7 @@ func NewBadger() badgerOpts {
 
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
-func (db *badgerDB) Close() {
+func (db *badgerKV) Close() {
 	if db.gcTicker != nil {
 		db.gcTicker.Stop()
 	}
@@ -122,44 +113,43 @@ func (db *badgerDB) Close() {
 	}
 }
 
-func (db *badgerDB) DiskSize(_ context.Context) (common.StorageSize, error) {
+func (db *badgerKV) DiskSize(_ context.Context) (common.StorageSize, error) {
 	lsm, vlog := db.badger.Size()
 	return common.StorageSize(lsm + vlog), nil
 }
 
-func (db *badgerDB) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
+func (db *badgerKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
 	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
-func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {
-	return &badgerTx{
-		db:     db,
-		ctx:    ctx,
-		badger: db.badger.NewTransaction(writable),
-	}, nil
+func (db *badgerKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	t := badgerTxPool.Get().(*badgerTx)
+	defer badgerTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
+	t.badger = db.badger.NewTransaction(writable)
+	return t, nil
 }
 
 type badgerTx struct {
 	ctx context.Context
-	db  *badgerDB
+	db  *badgerKV
 
-	badger          *badger.Txn
-	badgerIterators []*badger.Iterator
+	badger  *badger.Txn
+	cursors []*badgerCursor
 }
 
 type badgerBucket struct {
-	tx *badgerTx
-
-	prefix  []byte
 	nameLen uint
+	tx      *badgerTx
+	prefix  []byte
 }
 
 type badgerCursor struct {
-	ctx    context.Context
-	bucket badgerBucket
-	prefix []byte
-
 	badgerOpts badger.IteratorOptions
+	ctx        context.Context
+	bucket     badgerBucket
+	prefix     []byte
 
 	badger *badger.Iterator
 
@@ -168,19 +158,25 @@ type badgerCursor struct {
 	err error
 }
 
-func (db *badgerDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &badgerTx{db: db, ctx: ctx}
+func (db *badgerKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	t := badgerTxPool.Get().(*badgerTx)
+	defer badgerTxPool.Put(t)
+	t.db = db
+	t.ctx = ctx
 	return db.badger.View(func(tx *badger.Txn) error {
-		defer t.cleanup()
+		defer t.closeCursors()
 		t.badger = tx
 		return f(t)
 	})
 }
 
-func (db *badgerDB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &badgerTx{db: db, ctx: ctx}
+func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	t := badgerTxPool.Get().(*badgerTx)
+	defer badgerTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
 	return db.badger.Update(func(tx *badger.Txn) error {
-		defer t.cleanup()
+		defer t.closeCursors()
 		t.badger = tx
 		return f(t)
 	})
@@ -193,20 +189,24 @@ func (tx *badgerTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *badgerTx) Commit(ctx context.Context) error {
-	tx.cleanup()
+	tx.closeCursors()
 	return tx.badger.Commit()
 }
 
 func (tx *badgerTx) Rollback() error {
-	tx.cleanup()
+	tx.closeCursors()
 	tx.badger.Discard()
 	return nil
 }
 
-func (tx *badgerTx) cleanup() {
-	for _, it := range tx.badgerIterators {
-		it.Close()
+func (tx *badgerTx) closeCursors() {
+	for _, c := range tx.cursors {
+		if c.badger != nil {
+			c.badger.Close()
+		}
+		badgerCursorPool.Put(c)
 	}
+	tx.cursors = tx.cursors[:0]
 }
 
 func (c *badgerCursor) Prefix(v []byte) Cursor {
@@ -228,7 +228,7 @@ func (c *badgerCursor) Prefetch(v uint) Cursor {
 
 func (c *badgerCursor) NoValues() NoValuesCursor {
 	c.badgerOpts.PrefetchValues = false
-	return &badgerNoValuesCursor{badgerCursor: *c}
+	return &badgerNoValuesCursor{badgerCursor: c}
 }
 
 func (b badgerBucket) Get(key []byte) (val []byte, err error) {
@@ -278,10 +278,26 @@ func (b badgerBucket) Delete(key []byte) error {
 	return b.tx.badger.Delete(b.prefix)
 }
 
+func (b badgerBucket) Size() (uint64, error) {
+	panic("not implemented")
+}
+
 func (b badgerBucket) Cursor() Cursor {
-	c := &badgerCursor{bucket: b, ctx: b.tx.ctx, badgerOpts: badger.DefaultIteratorOptions}
+	c := badgerCursorPool.Get().(*badgerCursor)
+	c.bucket = b
+	c.ctx = b.tx.ctx
+	c.badgerOpts = badger.DefaultIteratorOptions
 	c.prefix = append(c.prefix[:0], c.bucket.prefix[:c.bucket.nameLen]...)
 	c.badgerOpts.Prefix = append(c.badgerOpts.Prefix[:0], c.prefix...)
+	c.k = nil
+	c.v = nil
+	c.err = nil
+	c.badger = nil
+	// add to auto-close on end of transactions
+	if b.tx.cursors == nil {
+		b.tx.cursors = make([]*badgerCursor, 0, 1)
+	}
+	b.tx.cursors = append(b.tx.cursors, c)
 	return c
 }
 
@@ -291,11 +307,6 @@ func (c *badgerCursor) initCursor() {
 	}
 
 	c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
-	// add to auto-cleanup on end of transactions
-	if c.bucket.tx.badgerIterators == nil {
-		c.bucket.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
-	}
-	c.bucket.tx.badgerIterators = append(c.bucket.tx.badgerIterators, c.badger)
 }
 
 func (c *badgerCursor) First() ([]byte, []byte, error) {
@@ -416,7 +427,7 @@ func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 }
 
 type badgerNoValuesCursor struct {
-	badgerCursor
+	*badgerCursor
 }
 
 func (c *badgerNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {

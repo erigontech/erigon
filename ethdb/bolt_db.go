@@ -306,7 +306,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([
 
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
+		b := tx.Bucket(dbutils.ChangeSetByIndexBucket(dbutils.PlainStateBucket, hBucket))
 		if b == nil {
 			return nil
 		}

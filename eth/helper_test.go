@@ -31,6 +31,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
@@ -69,7 +70,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -167,7 +168,7 @@ func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subs
 
 // newTestTransaction create a new dummy transaction.
 func newTestTransaction(from *ecdsa.PrivateKey, nonce uint64, datasize int) *types.Transaction {
-	tx := types.NewTransaction(nonce, common.Address{}, common.Num0, 100000, common.Num0, make([]byte, datasize))
+	tx := types.NewTransaction(nonce, common.Address{}, u256.Num0, 100000, u256.Num0, make([]byte, datasize))
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, from)
 	return tx
 }
