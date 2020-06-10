@@ -146,12 +146,12 @@ func (db *ObjectDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([
 }
 
 // getChangeSetByBlockNoLock returns changeset by block and dbi
-func (db *ObjectDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
+func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
 
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(dbutils.PlainStateBucket, hBucket)).Get(key)
+		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(true /* plain */, storage)).Get(key)
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)

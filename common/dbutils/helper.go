@@ -1,7 +1,6 @@
 package dbutils
 
 import (
-	"bytes"
 )
 
 // EncodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
@@ -34,20 +33,17 @@ func DecodeTimestamp(suffix []byte) (uint64, []byte) {
 	return timestamp, suffix[bytecount:]
 }
 
-func ChangeSetByIndexBucket(bucket, hBucket []byte) []byte {
-	if bytes.Equal(hBucket, AccountsHistoryBucket) {
-		if bytes.Equal(bucket, CurrentStateBucket) {
-			return AccountChangeSetBucket
+func ChangeSetByIndexBucket(plain, storage bool) []byte {
+	if plain {
+		if storage {
+			return PlainStorageChangeSetBucket
+		} else {
+			return PlainAccountChangeSetBucket
 		}
-		return PlainAccountChangeSetBucket
+	} else if storage {
+		return StorageChangeSetBucket
 	}
-	if bytes.Equal(hBucket, StorageHistoryBucket) {
-		if bytes.Equal(bucket, CurrentStateBucket) {
-			return StorageChangeSetBucket
-		}
-		return PlainStorageChangeSetBucket
-	}
-	panic("wrong bucket")
+	return AccountChangeSetBucket
 }
 
 // NextSubtree does []byte++. Returns false if overflow.

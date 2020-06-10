@@ -155,7 +155,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := ethdb.GetAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
+			res, err := ethdb.GetAsOf(db.KV(), true /* plain */, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
 			if err != nil {
 				t.Fatal(err)
 			}

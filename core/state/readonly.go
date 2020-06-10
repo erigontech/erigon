@@ -80,7 +80,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	st := llrb.New()
 	var s [common.HashLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
-	accData, _ := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	accData, _ := ethdb.GetAsOf(dbs.db, false /* plain */, false /* storage */, addrHash[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err = acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
@@ -189,7 +189,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err != nil {
 		return nil, err
 	}
-	enc, err := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	enc, err := ethdb.GetAsOf(dbs.db, false /* plain */, false /* storage */, addrHash[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -212,7 +212,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := ethdb.GetAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
+	enc, err := ethdb.GetAsOf(dbs.db, false /* plain */, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
