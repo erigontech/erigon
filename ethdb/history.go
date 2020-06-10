@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -20,7 +21,7 @@ func GetAsOf(db KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, 
 			copy(dat, v)
 			return nil
 		}
-		if err != ErrKeyNotFound {
+		if !errors.Is(err, ErrKeyNotFound) {
 			return err
 		}
 
@@ -128,7 +129,7 @@ func FindByHistory(tx Tx, plain, storage bool, key []byte, timestamp uint64) ([]
 		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
 	}
 	if err != nil {
-		if err != ErrKeyNotFound {
+		if !errors.Is(err, ErrKeyNotFound) {
 			return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
 		}
 		return nil, err
