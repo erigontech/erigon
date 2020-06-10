@@ -84,7 +84,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	atomic.StoreUint64(&nextBlockNumber, lastProcessedBlockNumber+1)
 	profileNumber := atomic.LoadUint64(&nextBlockNumber)
 	if prof {
-		f, err := os.Create(fmt.Sprintf("cpu4-%d.prof", profileNumber))
+		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
 		if err != nil {
 			log.Error("could not create CPU profile", "error", err)
 			return err

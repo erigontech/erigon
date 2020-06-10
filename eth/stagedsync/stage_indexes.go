@@ -1,9 +1,6 @@
 package stagedsync
 
 import (
-	"os"
-	"runtime/pprof"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -11,20 +8,6 @@ import (
 )
 
 func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
-	if prof {
-		f, err := os.Create("cpu7.prof")
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return err
-		}
-		defer f.Close()
-		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return err
-		}
-		defer pprof.StopCPUProfile()
-	}
-
 	var blockNum uint64
 	lastProcessedBlockNumber := s.BlockNumber
 	if lastProcessedBlockNumber > 0 {
@@ -49,20 +32,6 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 }
 
 func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
-	if prof {
-		f, err := os.Create("cpu8.prof")
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return err
-		}
-		defer f.Close()
-		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return err
-		}
-		defer pprof.StopCPUProfile()
-	}
-
 	var blockNum uint64
 	lastProcessedBlockNumber := s.BlockNumber
 	if lastProcessedBlockNumber > 0 {

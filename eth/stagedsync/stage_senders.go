@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 	"runtime"
-	"runtime/pprof"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -37,20 +35,6 @@ func init() {
 }
 
 func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
-	if prof {
-		f, err := os.Create("cpu3.prof")
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return err
-		}
-		defer f.Close()
-		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return err
-		}
-		defer pprof.StopCPUProfile()
-	}
-
 	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := lastProcessedBlockNumber + 1
 
