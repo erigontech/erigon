@@ -81,7 +81,6 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 				break
 			}
 			body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
-			fmt.Println("Recover ", nextBlockNumber, hash.String(), body == nil)
 			if body == nil {
 				needExit = true
 				break
