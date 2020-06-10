@@ -37,6 +37,7 @@ const (
 	IntermediateHashes                   // Generate intermediate hashes
 	AccountHistoryIndex                  // Generating history index for accounts
 	StorageHistoryIndex                  // Generating history index for storage
+	TxLookup                             // Generating transactions lookup index
 	Finish                               // Nominal stage after all other stages
 )
 

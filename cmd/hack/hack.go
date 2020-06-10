@@ -2175,7 +2175,7 @@ func regenerate(chaindata string) error {
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
 	log.Info("Regeneration started")
-	collector := etl.NewCollector(".")
+	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
