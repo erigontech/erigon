@@ -11,7 +11,7 @@ func init() {
 }
 
 var verifyTxLookupCmd = &cobra.Command{
-	Use:   "regenerateTxLookup",
+	Use:   "verifyTxLookup",
 	Short: "Generate tx lookup index",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return verify.ValidateTxLookups(chaindata)

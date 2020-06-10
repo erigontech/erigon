@@ -30,7 +30,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum)
 
 			ig.ChangeSetBufSize = 16 * 1024
-			err := ig.GenerateIndex(0, csBucket)
+			err := ig.GenerateIndex(0, 0, csBucket)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +68,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		mp := CSMapper[string(csbucket)]
 		indexBucket := mp.IndexBucket
 		ig := NewIndexGenerator(db, make(chan struct{}))
-		err := ig.GenerateIndex(0, csbucket)
+		err := ig.GenerateIndex(0, 0, csbucket)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,14 +232,24 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 	res := make([][]uint64, len(expected1))
 	for i := range expected1 {
 		res[i], _, err = expected1[i].Decode()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	res2 := make([][]uint64, len(expected2))
 	for i := range expected2 {
 		res2[i], _, err = expected2[i].Decode()
+		if err != nil {
+			t.Fatal(err)
+		}
+
 	}
 	res3 := make([][]uint64, len(expected3))
 	for i := range expected3 {
 		res3[i], _, err = expected3[i].Decode()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	return addrs, map[string][][]uint64{
 		string(addrs[0]): res,

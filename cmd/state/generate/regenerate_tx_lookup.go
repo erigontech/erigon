@@ -3,6 +3,7 @@ package generate
 import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"os"
@@ -25,11 +26,16 @@ func RegenerateTxLookup(chaindata string) error {
 		close(quitCh)
 	}()
 
+	lastExecutedBlock, err := stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		//There could be headers without block in the end
+		log.Error("Cant get last executed block", "err", err)
+	}
 	log.Info("TxLookup generation started", "start time", startTime)
-	err = stagedsync.TxLookupTransform(db, nil, quitCh, os.TempDir(), [][]byte{
+	err = stagedsync.TxLookupTransform(db, dbutils.HeaderHashKey(0), dbutils.HeaderHashKey(lastExecutedBlock), quitCh, os.TempDir(), [][]byte{
 		dbutils.HeaderHashKey(4000000),
-		dbutils.HeaderHashKey(7000000),
-		dbutils.HeaderHashKey(9000000),
+		dbutils.HeaderHashKey(6000000),
+		dbutils.HeaderHashKey(8000000),
 	})
 	if err != nil {
 		return err

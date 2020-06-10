@@ -31,8 +31,8 @@ type sortableBufferEntry struct {
 }
 
 var (
-	_ = &sortableBuffer{}
-	_ = &appendSortableBuffer{}
+	_ Buffer = &sortableBuffer{}
+	_ Buffer = &appendSortableBuffer{}
 )
 
 func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
@@ -143,7 +143,7 @@ func (b *appendSortableBuffer) Get(i int) sortableBufferEntry {
 }
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = b.sortedBuf[:0]
-	b.entries = make(map[string][]byte, 0)
+	b.entries = make(map[string][]byte)
 	b.size = 0
 }
 

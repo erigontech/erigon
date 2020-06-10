@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -80,22 +81,34 @@ var CSMapper = map[string]struct {
 	},
 }
 
-func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte) error {
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte) error {
 	v, ok := CSMapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Info("Index generation started", "from", blockNum, "csbucket", string(changeSetBucket))
-
+	log.Info("Index generation started", "from", startBlock, "csbucket", string(changeSetBucket))
+	if endBlock < startBlock && endBlock != 0 {
+		return errors.New("endblock greater start block")
+	}
+	var (
+		endBlockKey []byte
+		chunks      [][]byte
+	)
+	if endBlock != 0 {
+		endBlockKey = dbutils.EncodeTimestamp(endBlock)
+		chunks = calculateIndexChunks(startBlock, endBlock, runtime.NumCPU()/2+1)
+	}
 	t := time.Now()
 	err := etl.Transform(ig.db, changeSetBucket,
 		v.IndexBucket,
 		os.TempDir(),
 		getExtractFunc(v.WalkerAdapter),
-		loadFunc2,
+		loadFunc,
 		etl.TransformArgs{
-			ExtractStartKey: dbutils.EncodeTimestamp(blockNum),
+			ExtractStartKey: dbutils.EncodeTimestamp(startBlock),
+			ExtractEndKey:   endBlockKey,
 			FixedBits:       0,
+			Chunks:          chunks,
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
@@ -106,7 +119,6 @@ func (ig *IndexGenerator) GenerateIndex(blockNum uint64, changeSetBucket []byte)
 	}
 
 	log.Info("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
-
 	return nil
 }
 
@@ -199,7 +211,7 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 	return errors.New("imposible to drop")
 }
 
-func loadFunc2(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error { //nolint
+func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
 	if len(value)%9 != 0 {
 		log.Error("Strange value", "ln", len(value), "k", common.Bytes2Hex(k))
 		return nil
@@ -276,4 +288,17 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 		}
 		return nil
 	}
+}
+
+func calculateIndexChunks(startBlock, endBlock uint64, numOfChunks int) [][]byte {
+	if endBlock < startBlock+1000000 || numOfChunks < 2 {
+		return nil
+	}
+
+	chunkSize := (endBlock - startBlock) / uint64(numOfChunks)
+	var chunks = make([][]byte, numOfChunks-1)
+	for i := uint64(1); i < uint64(numOfChunks); i++ {
+		chunks[i-1] = dbutils.EncodeTimestamp(i*chunkSize + 1)
+	}
+	return chunks
 }

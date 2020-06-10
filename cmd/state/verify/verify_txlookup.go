@@ -19,6 +19,7 @@ func ValidateTxLookups(chaindata string) error {
 	if err != nil {
 		return err
 	}
+
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
 	signal.Notify(ch, os.Interrupt)
@@ -56,7 +57,7 @@ func ValidateTxLookups(chaindata string) error {
 				log.Info("Validated", "entries", iterations, "number", blockNum)
 
 			}
-			if bytes.Compare(val, bn) != 0 {
+			if !bytes.Equal(val, bn) {
 				if err != nil {
 					panic(err)
 				}

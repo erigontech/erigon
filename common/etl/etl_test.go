@@ -388,6 +388,7 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
+	buf.Reset()
 	encoder.Reset(buf)
 	encoder.MustEncode(valueMap)
 	return next(k, k2, buf.Bytes())

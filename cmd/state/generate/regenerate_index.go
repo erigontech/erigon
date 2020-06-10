@@ -35,7 +35,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 	startTime := time.Now()
 	log.Info("Index generation started", "start time", startTime)
-	err = ig.GenerateIndex(0, csBucket)
+	err = ig.GenerateIndex(0, 0, csBucket)
 	if err != nil {
 		return err
 	}

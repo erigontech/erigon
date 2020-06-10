@@ -150,7 +150,7 @@ func extractBucketIntoFiles(
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
-		if endkey != nil && bytes.Compare(k, endkey) >= 0 {
+		if endkey != nil && bytes.Compare(k, endkey) > 0 {
 			return false, nil
 		}
 		if err := extractFunc(k, v, collector.extractNextFunc); err != nil {
