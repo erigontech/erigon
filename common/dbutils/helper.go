@@ -37,9 +37,8 @@ func ChangeSetByIndexBucket(plain, storage bool) []byte {
 	if plain {
 		if storage {
 			return PlainStorageChangeSetBucket
-		} else {
-			return PlainAccountChangeSetBucket
 		}
+		return PlainAccountChangeSetBucket
 	} else if storage {
 		return StorageChangeSetBucket
 	}

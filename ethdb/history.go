@@ -23,7 +23,7 @@ func GetAsOf(db KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, 
 		if err != ErrKeyNotFound {
 			return err
 		}
-		
+
 		{
 			var bucket []byte
 			if plain {
