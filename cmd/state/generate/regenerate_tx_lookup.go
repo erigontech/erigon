@@ -1,8 +1,8 @@
 package generate
 
 import (
-	"errors"
-	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
-func RegenerateIndex(chaindata string, csBucket []byte) error {
+func RegenerateTxLookup(chaindata string) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
 	}
+	db.DeleteBucket(dbutils.TxLookupPrefix) //nolint
+	startTime := time.Now()
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
 	signal.Notify(ch, os.Interrupt)
@@ -29,23 +31,15 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 		//There could be headers without block in the end
 		log.Error("Cant get last executed block", "err", err)
 	}
-
-	ig := core.NewIndexGenerator(db, quitCh)
-	cs, ok := core.CSMapper[string(csBucket)]
-	if !ok {
-		return errors.New("unknown changeset")
-	}
-
-	err = ig.DropIndex(cs.IndexBucket)
+	log.Info("TxLookup generation started", "start time", startTime)
+	err = stagedsync.TxLookupTransform(db, dbutils.HeaderHashKey(0), dbutils.HeaderHashKey(lastExecutedBlock), quitCh, os.TempDir(), [][]byte{
+		dbutils.HeaderHashKey(4000000),
+		dbutils.HeaderHashKey(6000000),
+		dbutils.HeaderHashKey(8000000),
+	})
 	if err != nil {
 		return err
 	}
-	startTime := time.Now()
-	log.Info("Index generation started", "start time", startTime)
-	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket)
-	if err != nil {
-		return err
-	}
-	log.Info("Index is successfully regenerated", "it took", time.Since(startTime))
+	log.Info("TxLookup index is successfully regenerated", "it took", time.Since(startTime))
 	return nil
 }
