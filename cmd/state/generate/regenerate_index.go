@@ -3,6 +3,7 @@ package generate
 import (
 	"errors"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"os"
@@ -23,6 +24,12 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 		close(quitCh)
 	}()
 
+	lastExecutedBlock, err := stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		//There could be headers without block in the end
+		log.Error("Cant get last executed block", "err", err)
+	}
+
 	ig := core.NewIndexGenerator(db, quitCh)
 	cs, ok := core.CSMapper[string(csBucket)]
 	if !ok {
@@ -35,7 +42,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 	startTime := time.Now()
 	log.Info("Index generation started", "start time", startTime)
-	err = ig.GenerateIndex(0, 0, csBucket)
+	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket)
 	if err != nil {
 		return err
 	}

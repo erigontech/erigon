@@ -21,6 +21,7 @@ func NewIndexGenerator(db ethdb.Database, quitCh chan struct{}) *IndexGenerator 
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		TempDir:          os.TempDir(),
+		quitCh: quitCh,
 	}
 }
 

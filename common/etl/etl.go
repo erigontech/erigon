@@ -95,7 +95,7 @@ func Transform(
 					disposeProviders(collector.dataProviders)
 					return err
 				}
-				log.Info("Main finished successfully", "i", i)
+				log.Info("Chunk finished successfully", "i", i, "dp", len(collector.dataProviders))
 				return nil
 			}
 		}
