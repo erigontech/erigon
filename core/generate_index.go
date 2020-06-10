@@ -220,7 +220,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 
 	currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 	indexBytes, err1 := state.Get(currentChunkKey)
-	if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+	if err1 != nil && errors.Is(err1, ethdb.ErrKeyNotFound) {
 		return fmt.Errorf("find chunk failed: %w", err1)
 	}
 

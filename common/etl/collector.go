@@ -126,7 +126,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			}
 			runtime.ReadMemStats(&m)
 			log.Info(
-				"Commited batch",
+				"Committed batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
 				"current key", currentKeyStr,
