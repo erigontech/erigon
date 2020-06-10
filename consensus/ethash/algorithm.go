@@ -229,25 +229,23 @@ func fnvHash(mix []uint32, data []uint32) {
 	}
 }
 
+const amd64 = runtime.GOARCH == "amd64"
+
 // fnvHash16 is a specialized version of fnvHash for 16 elements.
 func fnvHash16(mix []uint32, data []uint32) {
-	prime := uint32(0x01000193)
-	mix[0x0] = mix[0x0]*prime ^ data[0x0]
-	mix[0x1] = mix[0x1]*prime ^ data[0x1]
-	mix[0x2] = mix[0x2]*prime ^ data[0x2]
-	mix[0x3] = mix[0x3]*prime ^ data[0x3]
-	mix[0x4] = mix[0x4]*prime ^ data[0x4]
-	mix[0x5] = mix[0x5]*prime ^ data[0x5]
-	mix[0x6] = mix[0x6]*prime ^ data[0x6]
-	mix[0x7] = mix[0x7]*prime ^ data[0x7]
-	mix[0x8] = mix[0x8]*prime ^ data[0x8]
-	mix[0x9] = mix[0x9]*prime ^ data[0x9]
-	mix[0xa] = mix[0xa]*prime ^ data[0xa]
-	mix[0xb] = mix[0xb]*prime ^ data[0xb]
-	mix[0xc] = mix[0xc]*prime ^ data[0xc]
-	mix[0xd] = mix[0xd]*prime ^ data[0xd]
-	mix[0xe] = mix[0xe]*prime ^ data[0xe]
-	mix[0xf] = mix[0xf]*prime ^ data[0xf]
+	if !amd64 {
+		fnvHash(mix, data)
+		return
+	}
+
+	for i := 0; i < len(mix); i++ {
+		mix[i] *= 0x01000193
+	}
+
+	m := *(*[]byte)(unsafe.Pointer(&mix))
+	d := *(*[]byte)(unsafe.Pointer(&data))
+
+	xor64BytesSSE2(&m[0], &d[0])
 }
 
 // generateDatasetItem combines data from 256 pseudorandomly selected cache nodes,
