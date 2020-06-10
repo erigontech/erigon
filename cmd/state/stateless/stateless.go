@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -52,37 +51,10 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-	//fmt.Printf("Block %d -----------------------------\n", block.Number())
 	for _, tx := range block.Transactions() {
-		writeTrace := false
-		// This code is useful when debugging a certain transaction. If uncommented, together with the code
-		// at the end of this function, after the execution of transaction with given hash, the file
-		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
-		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-		if tx.Hash() == common.HexToHash("0x141c3fc6e4f5edf79679522eadf38cc41fafbfb3f20d24cb9ec5d8af2ddff4e4") {
-			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
-			vmConfig.Debug = true
-			writeTrace = true
-		}
 		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
-		}
-		if writeTrace {
-			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
-			if err1 != nil {
-				panic(err1)
-			}
-			encoder := json.NewEncoder(w)
-			logs := core.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-			if err2 := encoder.Encode(logs); err2 != nil {
-				panic(err2)
-			}
-			if err2 := w.Close(); err2 != nil {
-				panic(err2)
-			}
-			vmConfig.Debug = false
-			vmConfig.Tracer = nil
 		}
 		if err != nil {
 			return nil, err
