@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"sync"
-	"testing"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -18,8 +14,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"math/big"
+	"os"
+	"sync"
+	"testing"
+	"time"
 )
 
 type stagedSyncTester struct {
@@ -323,6 +325,7 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 }
 
 func TestUnwind(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester := newStagedSyncTester()
 	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
@@ -330,6 +333,8 @@ func TestUnwind(t *testing.T) {
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(time.Second)
+	fmt.Println("sync heavy")
 	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
 		t.Fatal(err)
 	}

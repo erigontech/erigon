@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"encoding/binary"
-	"errors"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -42,11 +41,12 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 			return nil
 		}
 		blocknum := binary.BigEndian.Uint64(k)
-		body := rawdb.ReadBody(db, common.BytesToHash(v), blocknum)
+		blockHash := common.BytesToHash(v)
+		body := rawdb.ReadBody(db, blockHash, blocknum)
 		if body == nil {
 			log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
-			return errors.New("empty block")
-
+			return nil
+			//return fmt.Errorf("empty block %v", blocknum)
 		}
 
 		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
@@ -60,6 +60,7 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
 		ExtractStartKey: startKey,
+		ExtractEndKey:   endKey,
 		Chunks:          chunks,
 	})
 }
