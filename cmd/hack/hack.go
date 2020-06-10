@@ -377,7 +377,7 @@ func printBuckets(db *bolt.DB) {
 }
 
 func bucketStats(chaindata string) {
-	t := ethdb.Bolt
+	t := ethdb.Lmdb
 	bucketList := dbutils.Buckets
 
 	switch t {
