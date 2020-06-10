@@ -26,6 +26,8 @@ type Bucket interface {
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
 	Cursor() Cursor
+
+	Size() (uint64, error)
 }
 
 type Cursor interface {

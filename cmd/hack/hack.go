@@ -385,6 +385,7 @@ func bucketStats(chaindata string) {
 		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 		check(err)
 		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
+
 		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 		_ = db.View(func(tx *bolt.Tx) error {
 			for _, bucket := range bucketList {

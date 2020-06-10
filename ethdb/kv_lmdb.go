@@ -48,7 +48,6 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	err = env.SetMaxDBs(100)
 	if err != nil {
 		return nil, err
@@ -367,6 +366,14 @@ func (b lmdbBucket) Delete(key []byte) error {
 		return nil
 	}
 	return err
+}
+
+func (b lmdbBucket) Size() (uint64, error) {
+	st, err := b.tx.tx.Stat(b.dbi)
+	if err != nil {
+		return 0, err
+	}
+	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
 func (b lmdbBucket) Cursor() Cursor {

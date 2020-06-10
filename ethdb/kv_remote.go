@@ -180,6 +180,10 @@ func (c *remoteCursor) NoValues() NoValuesCursor {
 	return &remoteNoValuesCursor{remoteCursor: c}
 }
 
+func (b remoteBucket) Size() (uint64, error) {
+	panic("not implemented")
+}
+
 func (b remoteBucket) Get(key []byte) (val []byte, err error) {
 	val, err = b.remote.Get(key)
 	return val, err

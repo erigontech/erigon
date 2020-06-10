@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"os"
 	"sync"
 
 	"github.com/ledgerwatch/bolt"
@@ -37,6 +38,7 @@ type boltTx struct {
 type boltBucket struct {
 	tx      *boltTx
 	bolt    *bolt.Bucket
+	name    []byte
 	nameLen uint
 }
 
@@ -227,6 +229,11 @@ func (c *boltCursor) Prefetch(v uint) Cursor {
 
 func (c *boltCursor) NoValues() NoValuesCursor {
 	return &noValuesBoltCursor{boltCursor: c}
+}
+
+func (b boltBucket) Size() (uint64, error) {
+	st := b.bolt.Stats()
+	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
 }
 
 func (b boltBucket) Get(key []byte) (val []byte, err error) {
