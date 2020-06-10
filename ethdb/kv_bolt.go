@@ -38,7 +38,6 @@ type boltTx struct {
 type boltBucket struct {
 	tx      *boltTx
 	bolt    *bolt.Bucket
-	name    []byte
 	nameLen uint
 }
 
