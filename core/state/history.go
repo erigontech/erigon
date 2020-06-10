@@ -120,23 +120,23 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		var lastChangesetBlock, lastIndexBlock uint64
 		stageBucket := tx.Bucket(dbutils.SyncStageProgress)
 		if stageBucket != nil {
-			v, err := stageBucket.Get([]byte{byte(stages.Execution)})
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return nil, err
+			v1, err1 := stageBucket.Get([]byte{byte(stages.Execution)})
+			if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
+				return nil, err1
 			}
-			if len(v) > 0 {
-				lastChangesetBlock = binary.BigEndian.Uint64(v[:8])
+			if len(v1) > 0 {
+				lastChangesetBlock = binary.BigEndian.Uint64(v1[:8])
 			}
 			if storage {
-				v, err = stageBucket.Get([]byte{byte(stages.AccountHistoryIndex)})
+				v1, err1 = stageBucket.Get([]byte{byte(stages.AccountHistoryIndex)})
 			} else {
-				v, err = stageBucket.Get([]byte{byte(stages.StorageHistoryIndex)})
+				v1, err1 = stageBucket.Get([]byte{byte(stages.StorageHistoryIndex)})
 			}
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return nil, err
+			if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
+				return nil, err1
 			}
-			if len(v) > 0 {
-				lastIndexBlock = binary.BigEndian.Uint64(v[:8])
+			if len(v1) > 0 {
+				lastIndexBlock = binary.BigEndian.Uint64(v1[:8])
 			}
 		}
 		if lastChangesetBlock > lastIndexBlock {
