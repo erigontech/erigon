@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -171,11 +172,18 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	if address == common.HexToAddress("0x6090a6e47849629b7245dfa1ca21d94cd15878ef") {
+		fmt.Printf("addr %x, inc %d, key: %x\n", address, incarnation, *key)
+	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
+		if address == common.HexToAddress("0x6090a6e47849629b7245dfa1ca21d94cd15878ef") {
+			fmt.Printf("err: %v\n", err)
+		}
 		return nil, nil
 	}
+	//fmt.Printf("%x\n", enc)
 	return enc, nil
 }
 
