@@ -278,6 +278,10 @@ func (b badgerBucket) Delete(key []byte) error {
 	return b.tx.badger.Delete(b.prefix)
 }
 
+func (b badgerBucket) Size() (uint64, error) {
+	panic("not implemented")
+}
+
 func (b badgerBucket) Cursor() Cursor {
 	c := badgerCursorPool.Get().(*badgerCursor)
 	c.bucket = b
