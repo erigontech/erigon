@@ -8,8 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-const prof = false // whether to profile
-
 func PrepareStagedSync(
 	d DownloaderGlue,
 	blockchain BlockChain,

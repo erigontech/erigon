@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+const prof = false // whether to profile
+
 type State struct {
 	unwindStack  *PersistentUnwindStack
 	stages       []*Stage
@@ -46,6 +48,9 @@ func (s *State) IsDone() bool {
 }
 
 func (s *State) CurrentStage() (uint, *Stage) {
+	if s.currentStage >= uint(len(s.stages)) {
+		return s.currentStage, nil
+	}
 	return s.currentStage, s.stages[s.currentStage]
 }
 
