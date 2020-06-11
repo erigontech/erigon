@@ -301,12 +301,12 @@ func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]b
 }
 
 // getChangeSetByBlockNoLock returns changeset by block and dbi
-func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
+func (db *BoltDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
 
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.ChangeSetByIndexBucket(dbutils.PlainStateBucket, hBucket))
+		b := tx.Bucket(dbutils.ChangeSetByIndexBucket(true /* plain */, storage))
 		if b == nil {
 			return nil
 		}

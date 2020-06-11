@@ -375,7 +375,7 @@ func doSearch(
 	keyBytesToFind []byte,
 ) ([]byte, error) {
 	if len(b) == 0 {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 	if len(b) < 4 {
 		return nil, fmt.Errorf("decode: input too short (%d bytes)", len(b))
@@ -383,7 +383,7 @@ func doSearch(
 
 	numOfUniqueElements := int(binary.BigEndian.Uint32(b))
 	if numOfUniqueElements == 0 {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 	incarnatonsInfo := 4 + numOfUniqueElements*(keyPrefixLen+4)
 	numOfElements := int(binary.BigEndian.Uint32(b[incarnatonsInfo-4:]))
@@ -401,6 +401,9 @@ func doSearch(
 	if addrID == numOfUniqueElements {
 		return nil, ErrNotFound
 	}
+	if !bytes.Equal(b[4+addrID*(4+keyPrefixLen):4+addrID*(4+keyPrefixLen)+keyPrefixLen], addrBytesToFind) {
+		return nil, ErrNotFound
+	}
 	from := 0
 	if addrID > 0 {
 		from = int(binary.BigEndian.Uint32(b[4+addrID*(keyPrefixLen+4)-4:]))
@@ -416,7 +419,9 @@ func doSearch(
 	if index == to {
 		return nil, ErrNotFound
 	}
-
+	if !bytes.Equal(b[keysStart+common.HashLength*index:keysStart+common.HashLength*index+common.HashLength], keyBytesToFind) {
+		return nil, ErrNotFound
+	}
 	return findValue(b[valsInfoStart:], index)
 }
 

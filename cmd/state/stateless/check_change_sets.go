@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -111,7 +110,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				return err
 			}
 
-			dbAccountChanges, err := historyDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
+			dbAccountChanges, err := historyDb.GetChangeSetByBlock(false /* storage */, blockNum)
 			if err != nil {
 				return err
 			}
@@ -134,7 +133,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				}
 			}
 
-			dbStorageChanges, err := historyDb.GetChangeSetByBlock(dbutils.StorageHistoryBucket, blockNum)
+			dbStorageChanges, err := historyDb.GetChangeSetByBlock(true /* storage */, blockNum)
 			if err != nil {
 				return err
 			}

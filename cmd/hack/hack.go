@@ -63,6 +63,7 @@ var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
 var name = flag.String("name", "", "name to add to the file names")
 var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
+var bucket = flag.String("bucket", "", "bucket in the database")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 var preImage = flag.String("preimage", "0x00", "preimage")
 
@@ -377,7 +378,7 @@ func printBuckets(db *bolt.DB) {
 }
 
 func bucketStats(chaindata string) {
-	t := ethdb.Bolt
+	t := ethdb.Lmdb
 	bucketList := dbutils.Buckets
 
 	switch t {
@@ -950,15 +951,15 @@ func testStartup() {
 	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 
-func dbSlice(chaindata string, prefix []byte) {
+func dbSlice(chaindata string, bucket []byte, prefix []byte) {
 	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
 	err = db.View(func(tx *bolt.Tx) error {
-		st := tx.Bucket(dbutils.SyncStageProgress)
+		st := tx.Bucket(bucket)
 		c := st.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.SyncStageProgress, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+			fmt.Printf("db.Put([]byte(\"%s\"), common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", bucket, k, v)
 		}
 		return nil
 	})
@@ -2417,6 +2418,22 @@ func testStage5(chaindata string, reset bool) error {
 	return nil
 }
 
+func printStages(chaindata string) error {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var progress uint64
+	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
+			return err
+		}
+		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+	}
+	return nil
+}
+
 func testStage4(chaindata string, block uint64) error {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
@@ -2454,6 +2471,33 @@ func testStageLoop(chaindata string) error {
 		}
 	}
 	return nil
+}
+
+func searchChangeSet(chaindata string, key []byte) error {
+	fmt.Printf("Searching changesets\n")
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	err = db.View(func(tx *bolt.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		c := st.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			//fmt.Printf("timestamp: %d\n", timestamp)
+			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
+				if bytes.Equal(kk, key) {
+					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
+				}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	})
+	return err
 }
 
 func main() {
@@ -2583,7 +2627,7 @@ func main() {
 		getModifiedAccounts(*chaindata)
 	}
 	if *action == "slice" {
-		dbSlice(*chaindata, common.FromHex(*hash))
+		dbSlice(*chaindata, []byte(*bucket), common.FromHex(*hash))
 	}
 	if *action == "mgrSchedule" {
 		mgrSchedule(*chaindata, uint64(*block))
@@ -2622,6 +2666,16 @@ func main() {
 	}
 	if *action == "regenerateIH" {
 		if err := regenerate(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "searchChangeSet" {
+		if err := searchChangeSet(*chaindata, common.FromHex(*hash)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "printStages" {
+		if err := printStages(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
