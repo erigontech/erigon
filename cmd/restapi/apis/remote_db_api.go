@@ -1,7 +1,6 @@
 package apis
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -27,7 +26,7 @@ func (e *Env) GetDB(c *gin.Context) {
 
 func (e *Env) PostDB(c *gin.Context) {
 	newAddr := c.Query("host") + ":" + c.Query("port")
-	remoteDB, err := ethdb.NewRemote().Path(newAddr).Open(context.TODO())
+	remoteDB, err := ethdb.NewRemote().Path(newAddr).Open()
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return

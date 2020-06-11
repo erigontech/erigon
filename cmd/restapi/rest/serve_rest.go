@@ -34,9 +34,9 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, boltPa
 	var db ethdb.KV
 	var err error
 	if remoteDBAddress != "" {
-		db, err = ethdb.NewRemote().Path(remoteDBAddress).Open(ctx)
+		db, err = ethdb.NewRemote().Path(remoteDBAddress).Open()
 	} else if boltPath != "" {
-		db, err = ethdb.NewBolt().Path(boltPath).ReadOnly().Open(ctx)
+		db, err = ethdb.NewBolt().Path(boltPath).ReadOnly().Open()
 	} else {
 		err = fmt.Errorf("either remote db or bolt db must be specified")
 	}

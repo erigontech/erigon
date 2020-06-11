@@ -84,8 +84,10 @@ func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
-	remoteDB, err := remote.Open(ctx, opts.Remote)
+func (opts remoteOpts) Open() (KV, error) {
+	connectionCtx, connectionCtxCancel := context.WithTimeout(context.Background(), time.Second)
+	defer connectionCtxCancel()
+	remoteDB, err := remote.Open(connectionCtx, opts.Remote)
 	if err != nil {
 		return nil, err
 	}
@@ -98,8 +100,7 @@ func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
 }
 
 func (opts remoteOpts) MustOpen() KV {
-	ctx, _ := context.WithTimeout(context.Background(), time.Second)
-	db, err := opts.Open(ctx)
+	db, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
