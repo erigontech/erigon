@@ -14,15 +14,16 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 		blockNum = lastProcessedBlockNumber + 1
 	}
 
-	log.Info("Account history index generation started", "from", blockNum)
-
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
-	var err error
+	endBlock, err := s.ExecutionAt(db)
+	if err != nil {
+		log.Warn("Execution block error is empty")
+	}
 	if plainState {
-		err = ig.GenerateIndex(blockNum, dbutils.PlainAccountChangeSetBucket)
+		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket)
 	} else {
-		err = ig.GenerateIndex(blockNum, dbutils.AccountChangeSetBucket)
+		err = ig.GenerateIndex(blockNum, endBlock, dbutils.AccountChangeSetBucket)
 	}
 	if err != nil {
 		return err
@@ -39,11 +40,15 @@ func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	}
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
-	var err error
+	endBlock, err := s.ExecutionAt(db)
+	if err != nil {
+		log.Warn("Execution block error is empty")
+	}
+
 	if plainState {
-		err = ig.GenerateIndex(blockNum, dbutils.PlainStorageChangeSetBucket)
+		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket)
 	} else {
-		err = ig.GenerateIndex(blockNum, dbutils.StorageChangeSetBucket)
+		err = ig.GenerateIndex(blockNum, endBlock, dbutils.StorageChangeSetBucket)
 	}
 	if err != nil {
 		return err

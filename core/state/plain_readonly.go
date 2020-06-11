@@ -60,7 +60,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
-	accData, _ := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, addr[:], dbs.blockNr+1)
+	accData, _ := GetAsOf(dbs.db, true /* plain */, false /* storage */, addr[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
@@ -159,7 +159,7 @@ func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Ad
 }
 
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, address[:], dbs.blockNr+1)
+	enc, err := GetAsOf(dbs.db, true /* plain */, false /* storage */, address[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -172,7 +172,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	enc, err := ethdb.GetAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
+	enc, err := GetAsOf(dbs.db, true /* plain */, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}

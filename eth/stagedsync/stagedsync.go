@@ -106,10 +106,21 @@ func PrepareStagedSync(
 				return unwindStorageHistoryIndex(u.UnwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
 			},
 		},
+		{
+			ID:                  stages.TxLookup,
+			Description:         "Generating tx lookup index",
+			Disabled:            !storageMode.TxIndex,
+			DisabledDescription: "Enable by adding `t` to --storage-mode",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return spawnTxLookup(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindTxLookup(u.UnwindPoint, stateDB, quitCh)
+			},
+		},
 	}
 
 	state := NewState(stages)
-
 	if err := state.LoadUnwindInfo(stateDB); err != nil {
 		return nil, err
 	}
