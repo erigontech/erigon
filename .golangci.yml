@@ -48,3 +48,6 @@ issues:
     - path: cmd/faucet/
       linters:
         - deadcode
+    - path: consensus/ethash/fnv_hash16_avx2.s
+      linters:
+        - govet
