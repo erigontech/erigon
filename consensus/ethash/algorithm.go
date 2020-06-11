@@ -230,7 +230,7 @@ func fnvHash(mix []uint32, data []uint32) {
 	}
 }
 
-var useAVX2 = cpu.X86.HasAVX2
+var useAVX2 = runtime.GOARCH == "amd64" && cpu.X86.HasAVX2
 
 // fnvHash16 is a specialized version of fnvHash for 16 elements.
 func fnvHash16(mix []uint32, data []uint32) {
