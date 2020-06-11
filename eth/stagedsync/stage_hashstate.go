@@ -49,14 +49,17 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 			return err
 		}
 	}
+	if err := verifyRootHash(stateDB, syncHeadNumber); err != nil {
+		return err
+	}
+	return s.DoneAndUpdate(stateDB, syncHeadNumber)
+}
 
+func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
-	syncHeadBlock := rawdb.ReadBlock(stateDB, hash, syncHeadNumber)
-
-	blockNr := syncHeadBlock.Header().Number.Uint64()
-
-	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
-	loader := trie.NewSubTrieLoader(blockNr)
+	syncHeadHeader := rawdb.ReadHeader(stateDB, hash, syncHeadNumber)
+	log.Info("Validating root hash", "block", syncHeadNumber, "blockRoot", syncHeadHeader.Root.Hex())
+	loader := trie.NewSubTrieLoader(syncHeadNumber)
 	rl := trie.NewRetainList(0)
 	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
@@ -65,11 +68,10 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 	if len(subTries.Hashes) != 1 {
 		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
 	}
-	if subTries.Hashes[0] != syncHeadBlock.Root() {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
+	if subTries.Hashes[0] != syncHeadHeader.Root {
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadHeader.Root)
 	}
-
-	return s.DoneAndUpdate(stateDB, blockNr)
+	return nil
 }
 
 func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
@@ -81,6 +83,9 @@ func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return err
 	}
 	if err := prom.Unwind(s.BlockNumber, u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
+		return err
+	}
+	if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
 		return err
 	}
 	if err := u.Done(stateDB); err != nil {

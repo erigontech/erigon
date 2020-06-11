@@ -87,9 +87,9 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Info("Index generation started", "from", startBlock, "csbucket", string(changeSetBucket))
+	log.Info("Index generation started", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
 	if endBlock < startBlock && endBlock != 0 {
-		return errors.New("endblock greater start block")
+		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
 	var (
 		endBlockKey []byte

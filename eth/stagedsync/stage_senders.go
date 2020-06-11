@@ -35,8 +35,7 @@ func init() {
 }
 
 func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
-	lastProcessedBlockNumber := s.BlockNumber
-	nextBlockNumber := lastProcessedBlockNumber + 1
+	nextBlockNumber := s.BlockNumber
 
 	mutation := stateDB.NewBatch()
 	defer func() {
@@ -75,23 +74,22 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 		written := 0
 		for i := 0; i < batchSize; i++ {
-			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
+			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber + 1)
 			if hash == emptyHash {
 				needExit = true
 				break
 			}
-			body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
+			body := rawdb.ReadBody(mutation, hash, nextBlockNumber + 1)
 			if body == nil {
 				needExit = true
 				break
 			}
+			nextBlockNumber++
 			blockNumber.SetUint64(nextBlockNumber)
 			s := types.MakeSigner(config, &blockNumber)
 
 			jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
 			written++
-
-			nextBlockNumber++
 		}
 
 		for i := 0; i < written; i++ {

@@ -44,7 +44,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		}
 
 		// Skip non relevant records
-		if len(k) == 8+len(dbutils.HeaderHashSuffix) && bytes.Equal(k[8:], dbutils.HeaderHashSuffix) {
+		if dbutils.CheckCanonicalKey(k) {
 			// This is how we learn about canonical chain
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			if blockNumber != currentNumber {
@@ -107,7 +107,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 	}
 
 	if err := d.spawnSync(fetchers); err == nil {
-		return true, nil
+		return true, s.Update(d.stateDB, to)
 	}
 	log.Error("Trying to rollback 1 block due to error")
 	return true, s.Update(d.stateDB, origin-1)
@@ -151,5 +151,9 @@ func (d *Downloader) SpawnHeaderDownloadStage(
 		d.bodiesState = nil
 		d.bodiesUnwinder = nil
 	}()
+	d.cancelLock.Lock()
+	d.cancelCh = make(chan struct{})
+	d.cancelLock.Unlock()
+	defer d.Cancel() // No matter what, we can't leave the cancel channel open
 	return d.spawnSync(fetchers)
 }

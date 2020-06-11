@@ -45,7 +45,6 @@ func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	if err != nil {
 		log.Warn("Execution block error is empty")
 	}
-
 	if plainState {
 		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket)
 	} else {
@@ -69,6 +68,7 @@ func unwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, plainState boo
 			return err
 		}
 	}
+	fmt.Printf("Unwind accounts to block %d sucessful\n", u.UnwindPoint)
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind AccountHistorytIndex: reset: %v", err)
 	}
@@ -86,6 +86,7 @@ func unwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, plainState boo
 			return err
 		}
 	}
+	fmt.Printf("Unwind accounts to block %d sucessful\n", u.UnwindPoint)
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind StorageHistorytIndex: reset: %v", err)
 	}

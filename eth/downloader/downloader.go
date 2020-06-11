@@ -565,6 +565,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 		if err != nil {
 			return err
 		}
+		d.headersUnwinder = d.stagedSync
 		return d.stagedSync.Run(d.stateDB)
 	}
 

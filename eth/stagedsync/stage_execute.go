@@ -80,10 +80,9 @@ func (l *progressLogger) Stop() {
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
 	lastProcessedBlockNumber := s.BlockNumber
 
-	nextBlockNumber := uint64(0)
+	nextBlockNumber := uint64(lastProcessedBlockNumber)
 
-	atomic.StoreUint64(&nextBlockNumber, lastProcessedBlockNumber+1)
-	profileNumber := atomic.LoadUint64(&nextBlockNumber)
+	profileNumber := lastProcessedBlockNumber
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
 		if err != nil {
@@ -115,7 +114,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			return err
 		}
 
-		blockNum := atomic.LoadUint64(&nextBlockNumber)
+		blockNum := atomic.LoadUint64(&nextBlockNumber) + 1
 		if limit > 0 && blockNum >= limit {
 			break
 		}
@@ -124,6 +123,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		if block == nil {
 			break
 		}
+		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
 		type cacheSetter interface {
 			SetAccountCache(cache *fastcache.Cache)
@@ -167,13 +167,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
 		}
 
-		if err = s.Update(batch, blockNum); err != nil {
-			return err
-		}
-
-		atomic.AddUint64(&nextBlockNumber, 1)
-
 		if batch.BatchSize() >= stateDB.IdealBatchSize() {
+			if err = s.Update(batch, blockNum); err != nil {
+				return err
+			}
 			start := time.Now()
 			if _, err = batch.Commit(); err != nil {
 				return err
@@ -197,10 +194,14 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 	}
 
+	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
+		return err
+	}
 	_, err := batch.Commit()
 	if err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	log.Info("Completed on", "block", atomic.LoadUint64(&nextBlockNumber))
 	s.Done()
 	return nil
 }
