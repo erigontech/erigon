@@ -2,15 +2,11 @@ package stagedsync
 
 import (
 	"fmt"
-	"os"
-	"runtime/pprof"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
-
-const prof = false // whether to profile
 
 type State struct {
 	unwindStack  *PersistentUnwindStack
@@ -48,9 +44,6 @@ func (s *State) IsDone() bool {
 }
 
 func (s *State) CurrentStage() (uint, *Stage) {
-	if s.currentStage >= uint(len(s.stages)) {
-		return s.currentStage, nil
-	}
 	return s.currentStage, s.stages[s.currentStage]
 }
 
@@ -121,7 +114,6 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 		// restart from 0 after completing the missing stage
 		s.currentStage = 0
 	}
-	prevIndex := ^uint(0)
 	for !s.IsDone() {
 		if unwind := s.unwindStack.Pop(); unwind != nil {
 			log.Info("Unwinding...")
@@ -169,39 +161,10 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 				continue
 			}
 
-			var message string
-			if index != prevIndex {
-				message = fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
-				log.Info(message)
-
-				if prof {
-					f, err := os.Create(fmt.Sprintf("cpu%d.prof", index+1))
-					if err != nil {
-						log.Error("could not create CPU profile", "error", err)
-						return err
-					}
-					defer f.Close()
-					if err = pprof.StartCPUProfile(f); err != nil {
-						log.Error("could not start CPU profile", "error", err)
-						return err
-					}
-				}
-
-				prevIndex = index
-			}
-
 			if err := s.runStage(stage, db, index); err != nil {
 				return err
 			}
 
-			index, _ = s.CurrentStage()
-			if index > prevIndex {
-				log.Info(fmt.Sprintf("%s DONE!", message))
-
-				if prof {
-					pprof.StopCPUProfile()
-				}
-			}
 		}
 	}
 	return nil
@@ -213,10 +176,14 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, index uint) error {
 		return err
 	}
 
+	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
+	log.Info(message)
+
 	err = stage.ExecFunc(stageState, s)
 	if err != nil {
 		return err
 	}
 
+	log.Info(fmt.Sprintf("%s DONE!", message))
 	return nil
 }
