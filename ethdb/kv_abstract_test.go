@@ -62,13 +62,11 @@ func TestManagedTx(t *testing.T) {
 }
 
 func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
-	ctx := context.Background()
-
 	writeDBs = []ethdb.KV{
-		ethdb.NewBolt().InMem().MustOpen(ctx),
-		ethdb.NewBolt().InMem().MustOpen(ctx), // for remote db
-		ethdb.NewBadger().InMem().MustOpen(ctx),
-		ethdb.NewLMDB().InMem().MustOpen(ctx),
+		ethdb.NewBolt().InMem().MustOpen(),
+		ethdb.NewBolt().InMem().MustOpen(), // for remote db
+		ethdb.NewBadger().InMem().MustOpen(),
+		ethdb.NewLMDB().InMem().MustOpen(),
 	}
 
 	serverIn, clientOut := io.Pipe()
@@ -76,12 +74,12 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 
 	readDBs = []ethdb.KV{
 		writeDBs[0],
-		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
+		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(),
 		writeDBs[2],
 		writeDBs[3],
 	}
 
-	serverCtx, serverCancel := context.WithCancel(ctx)
+	serverCtx, serverCancel := context.WithCancel(context.Background())
 	go func() {
 		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
 	}()

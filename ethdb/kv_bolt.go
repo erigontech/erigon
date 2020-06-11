@@ -185,8 +185,8 @@ func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
 	return opts.WrapBoltDB(boltDB)
 }
 
-func (opts boltOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts boltOpts) MustOpen() KV {
+	db, err := opts.Open(context.Background())
 	if err != nil {
 		panic(err)
 	}

@@ -146,8 +146,8 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 	}, nil
 }
 
-func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts lmdbOpts) MustOpen() KV {
+	db, err := opts.Open(context.Background())
 	if err != nil {
 		panic(fmt.Errorf("fail to open lmdb: %w", err))
 	}

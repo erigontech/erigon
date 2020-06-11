@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -96,7 +97,8 @@ func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
 	}, nil
 }
 
-func (opts remoteOpts) MustOpen(ctx context.Context) KV {
+func (opts remoteOpts) MustOpen() KV {
+	ctx, _ := context.WithTimeout(context.Background(), time.Second)
 	db, err := opts.Open(ctx)
 	if err != nil {
 		panic(err)

@@ -79,8 +79,8 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	}, nil
 }
 
-func (opts badgerOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts badgerOpts) MustOpen() KV {
+	db, err := opts.Open(context.Background())
 	if err != nil {
 		panic(err)
 	}

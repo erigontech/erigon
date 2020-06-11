@@ -788,7 +788,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	if fromScratch {
 		os.Remove("statedb")
 	}
-	stateDB := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path("statedb").MustOpen(context.Background()))
+	stateDB := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path("statedb").MustOpen())
 	//stateDB, err := ethdb.NewBadgerDatabase("statedb")
 	//check(err)
 	defer stateDB.Close()

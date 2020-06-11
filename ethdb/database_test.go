@@ -20,7 +20,6 @@ package ethdb
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -62,7 +61,7 @@ func newTestBadgerDB() (*BadgerDatabase, func()) {
 }
 
 func newTestLmdb() *ObjectDatabase {
-	return NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+	return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 }
 
 var testBucket = dbutils.CurrentStateBucket
