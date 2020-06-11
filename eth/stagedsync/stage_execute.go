@@ -78,13 +78,9 @@ func (l *progressLogger) Stop() {
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
-	lastProcessedBlockNumber := s.BlockNumber
-
-	nextBlockNumber := uint64(lastProcessedBlockNumber)
-
-	profileNumber := lastProcessedBlockNumber
+	nextBlockNumber := s.BlockNumber
 	if prof {
-		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
+		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
 		if err != nil {
 			log.Error("could not create CPU profile", "error", err)
 			return err
@@ -179,12 +175,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 
 		if prof {
-			if blockNum-profileNumber == 100000 {
+			if blockNum-s.BlockNumber == 100000 {
 				// Flush the CPU profiler
 				pprof.StopCPUProfile()
 
 				// And the memory profiler
-				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", profileNumber))
+				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
 				defer f.Close()
 				runtime.GC()
 				if err = pprof.WriteHeapProfile(f); err != nil {
