@@ -74,12 +74,12 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 		written := 0
 		for i := 0; i < batchSize; i++ {
-			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber + 1)
+			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber+1)
 			if hash == emptyHash {
 				needExit = true
 				break
 			}
-			body := rawdb.ReadBody(mutation, hash, nextBlockNumber + 1)
+			body := rawdb.ReadBody(mutation, hash, nextBlockNumber+1)
 			if body == nil {
 				needExit = true
 				break
