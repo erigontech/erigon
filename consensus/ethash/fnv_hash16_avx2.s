@@ -4,9 +4,8 @@
 TEXT ·fnvHash16AVX2(SB), NOSPLIT, $0
 	MOVQ  data+0(FP), AX
 	MOVQ  mix+8(FP), BX
-	MOVL  prime+16(FP), CX
 
-	VMOVD CX, X0
+	VMOVD prime+16(FP), X0
 	VPBROADCASTD X0, Y0
 
 	VPMULLD (AX), Y0, Y1
