@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -29,7 +30,7 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 		return err
 	}
 
-	return s.DoneAndUpdate(db, blockNum)
+	return s.DoneAndUpdate(db, endBlock)
 }
 
 func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
@@ -54,21 +55,39 @@ func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 		return err
 	}
 
-	return s.DoneAndUpdate(db, blockNum)
+	return s.DoneAndUpdate(db, endBlock)
 }
 
-func unwindAccountHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
+func unwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
 	ig := core.NewIndexGenerator(db, quitCh)
 	if plainState {
-		return ig.Truncate(unwindPoint, dbutils.PlainAccountChangeSetBucket)
+		if err := ig.Truncate(u.UnwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
+			return err
+		}
+	} else {
+		if err := ig.Truncate(u.UnwindPoint, dbutils.AccountChangeSetBucket); err != nil {
+			return err
+		}
 	}
-	return ig.Truncate(unwindPoint, dbutils.AccountChangeSetBucket)
+	if err := u.Done(db); err != nil {
+		return fmt.Errorf("unwind AccountHistorytIndex: reset: %v", err)
+	}
+	return nil
 }
 
-func unwindStorageHistoryIndex(unwindPoint uint64, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
+func unwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
 	ig := core.NewIndexGenerator(db, quitCh)
 	if plainState {
-		return ig.Truncate(unwindPoint, dbutils.PlainStorageChangeSetBucket)
+		if err := ig.Truncate(u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
+			return err
+		}
+	} else {
+		if err := ig.Truncate(u.UnwindPoint, dbutils.StorageChangeSetBucket); err != nil {
+			return err
+		}
 	}
-	return ig.Truncate(unwindPoint, dbutils.StorageChangeSetBucket)
+	if err := u.Done(db); err != nil {
+		return fmt.Errorf("unwind StorageHistorytIndex: reset: %v", err)
+	}
+	return nil
 }

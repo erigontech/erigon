@@ -91,7 +91,7 @@ func PrepareStagedSync(
 				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindAccountHistoryIndex(u.UnwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
+				return unwindAccountHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
 			},
 		},
 		{
@@ -103,7 +103,7 @@ func PrepareStagedSync(
 				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindStorageHistoryIndex(u.UnwindPoint, stateDB, core.UsePlainStateExecution, quitCh)
+				return unwindStorageHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
 			},
 		},
 		{
