@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sys/cpu"
 )
 
 const (
@@ -229,23 +230,15 @@ func fnvHash(mix []uint32, data []uint32) {
 	}
 }
 
-const amd64 = runtime.GOARCH == "amd64"
+var useAVX2 = cpu.X86.HasAVX2
 
 // fnvHash16 is a specialized version of fnvHash for 16 elements.
 func fnvHash16(mix []uint32, data []uint32) {
-	if !amd64 {
+	if useAVX2 {
+		fnvHash16AVX2(&mix[0], &data[0], 0x01000193)
+	} else {
 		fnvHash(mix, data)
-		return
 	}
-
-	for i := 0; i < len(mix); i++ {
-		mix[i] *= 0x01000193
-	}
-
-	m := *(*[]byte)(unsafe.Pointer(&mix))
-	d := *(*[]byte)(unsafe.Pointer(&data))
-
-	xor64BytesSSE2(&m[0], &d[0])
 }
 
 // generateDatasetItem combines data from 256 pseudorandomly selected cache nodes,
