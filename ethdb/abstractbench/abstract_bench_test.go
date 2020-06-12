@@ -185,21 +185,21 @@ func BenchmarkPut(b *testing.B) {
 	b.Run("bolt", func(b *testing.B) {
 		db := ethdb.NewWrapperBoltDatabase(boltOriginDb).NewBatch()
 		for i := 0; i < b.N; i++ {
-			db.MultiPut(tuples...)
-			db.Commit()
+			_, _ = db.MultiPut(tuples...)
+			_, _ = db.Commit()
 		}
 	})
 	//b.Run("badger", func(b *testing.B) {
 	//	db := ethdb.NewObjectDatabase(badgerDb)
 	//	for i := 0; i < b.N; i++ {
-	//		db.MultiPut(tuples...)
+	//		_, _ = db.MultiPut(tuples...)
 	//	}
 	//})
 	b.Run("lmdb", func(b *testing.B) {
 		db := ethdb.NewObjectDatabase(lmdbKV).NewBatch()
 		for i := 0; i < b.N; i++ {
-			db.MultiPut(tuples...)
-			db.Commit()
+			_, _ = db.MultiPut(tuples...)
+			_, _ = db.Commit()
 		}
 	})
 }

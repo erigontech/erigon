@@ -164,7 +164,7 @@ func (m *mutation) Commit() (uint64, error) {
 		return 0, fmt.Errorf("db.MultiPut failed: %w", err)
 	}
 
-	m.puts.Reset()
+	m.puts = newPuts()
 	m.tuples = m.tuples[:0]
 	return written, nil
 }
@@ -172,7 +172,7 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.puts.Reset()
+	m.puts = newPuts()
 	m.tuples = m.tuples[:0]
 }
 

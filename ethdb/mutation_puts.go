@@ -16,7 +16,7 @@ func (p *puts) set(bucket, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
 	if bucketPuts, ok = p.mp[string(bucket)]; !ok {
-		bucketPuts = make(putsBucket, 64)
+		bucketPuts = make(putsBucket)
 		p.mp[string(bucket)] = bucketPuts
 	}
 	oldLen := len(bucketPuts)
@@ -42,12 +42,6 @@ func (p *puts) get(bucket, key []byte) ([]byte, bool) {
 
 func (p *puts) Delete(bucket, key []byte) {
 	p.set(bucket, key, nil)
-}
-
-func (p *puts) Reset() {
-	for i := range p.mp {
-		p.mp[i] = make(putsBucket, 64)
-	}
 }
 
 func (p *puts) Len() int {
