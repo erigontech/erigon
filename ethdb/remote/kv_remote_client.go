@@ -275,7 +275,7 @@ func (closer notifyOnClose) Close() error {
 	return closer.internal.Close()
 }
 
-func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
+func Open(opts DbOpts) (*DB, error) {
 	if opts.DialFunc == nil {
 		opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
 			if opts.DialAddress == "" {
@@ -296,10 +296,6 @@ func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 	}
 
 	ctx, cancelConnections := context.WithCancel(context.Background())
-	go func() {
-		<-parentCtx.Done()
-		cancelConnections()
-	}()
 	db.cancelConnections = cancelConnections
 
 	pingTicker := time.NewTicker(db.opts.PingEvery)

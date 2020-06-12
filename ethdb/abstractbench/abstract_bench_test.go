@@ -2,6 +2,7 @@ package abstractbench
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"testing"
@@ -20,13 +21,14 @@ var boltDb ethdb.KV
 var badgerDb ethdb.KV
 var lmdbKV ethdb.KV
 
+var keysAmount = 100_000
+
 func setupDatabases() {
-	vsize := 10
-	keysAmount := 100_000
-	ctx := context.Background()
-	boltDb = ethdb.NewBolt().Path("test").MustOpen(ctx)
-	badgerDb = ethdb.NewBadger().Path("test2").MustOpen(ctx)
-	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen(ctx)
+	vsize, ctx := 10, context.Background()
+
+	boltDb = ethdb.NewBolt().Path("test").MustOpen()
+	badgerDb = ethdb.NewBadger().Path("test2").MustOpen()
+	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen()
 	var errOpen error
 	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{KeysPrefixCompressionDisable: true})
 	if errOpen != nil {
@@ -45,9 +47,10 @@ func setupDatabases() {
 
 	if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
 		defer func(t time.Time) { fmt.Println("origin bolt filled:", time.Since(t)) }(time.Now())
-		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
+			v := make([]byte, vsize)
+			k := make([]byte, 8)
+			binary.BigEndian.PutUint64(k, uint64(i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
 			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				return err
@@ -61,9 +64,10 @@ func setupDatabases() {
 	if err := boltDb.Update(ctx, func(tx ethdb.Tx) error {
 		defer func(t time.Time) { fmt.Println("abstract bolt filled:", time.Since(t)) }(time.Now())
 
-		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
+			v := make([]byte, vsize)
+			k := make([]byte, 8)
+			binary.BigEndian.PutUint64(k, uint64(i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
 			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				panic(err)
@@ -78,9 +82,10 @@ func setupDatabases() {
 	if err := badgerDb.Update(ctx, func(tx ethdb.Tx) error {
 		defer func(t time.Time) { fmt.Println("abstract badger filled:", time.Since(t)) }(time.Now())
 
-		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
+			v := make([]byte, vsize)
+			k := make([]byte, 8)
+			binary.BigEndian.PutUint64(k, uint64(i))
 			bucket := tx.Bucket(dbutils.CurrentStateBucket)
 			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				panic(err)
@@ -95,9 +100,10 @@ func setupDatabases() {
 	if err := badgerOriginDb.Update(func(tx *badger.Txn) error {
 		defer func(t time.Time) { fmt.Println("pure badger filled:", time.Since(t)) }(time.Now())
 
-		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
+			v := make([]byte, vsize)
+			k := make([]byte, 8)
+			binary.BigEndian.PutUint64(k, uint64(i))
 			_ = tx.Set(append(dbutils.CurrentStateBucket, k...), common.CopyBytes(v))
 		}
 
@@ -109,10 +115,11 @@ func setupDatabases() {
 	if err := lmdbKV.Update(ctx, func(tx ethdb.Tx) error {
 		defer func(t time.Time) { fmt.Println("abstract lmdb filled:", time.Since(t)) }(time.Now())
 
-		v := make([]byte, vsize)
+		bucket := tx.Bucket(dbutils.CurrentStateBucket)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.CurrentStateBucket)
+			v := make([]byte, vsize)
+			k := make([]byte, 8)
+			binary.BigEndian.PutUint64(k, uint64(i))
 			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
 				panic(err)
 			}
@@ -123,6 +130,42 @@ func setupDatabases() {
 		panic(err)
 	}
 
+}
+
+func BenchmarkGet(b *testing.B) {
+	setupDatabases()
+	defer os.Remove("test")
+	defer os.RemoveAll("test2")
+	defer os.Remove("test3")
+	defer os.RemoveAll("test4")
+	defer os.RemoveAll("test5")
+	k := make([]byte, 8)
+	binary.BigEndian.PutUint64(k, uint64(keysAmount-1))
+
+	b.Run("bolt", func(b *testing.B) {
+		db := ethdb.NewWrapperBoltDatabase(boltOriginDb)
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < 10; j++ {
+				_, _ = db.Get(dbutils.CurrentStateBucket, k)
+			}
+		}
+	})
+	b.Run("badger", func(b *testing.B) {
+		db := ethdb.NewObjectDatabase(badgerDb)
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < 10; j++ {
+				_, _ = db.Get(dbutils.CurrentStateBucket, k)
+			}
+		}
+	})
+	b.Run("lmdb", func(b *testing.B) {
+		db := ethdb.NewObjectDatabase(lmdbKV)
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < 10; j++ {
+				_, _ = db.Get(dbutils.CurrentStateBucket, k)
+			}
+		}
+	})
 }
 
 func BenchmarkCursor(b *testing.B) {

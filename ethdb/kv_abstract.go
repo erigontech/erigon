@@ -14,6 +14,14 @@ type KV interface {
 	Begin(ctx context.Context, writable bool) (Tx, error)
 }
 
+type NativeGet interface {
+	Get(ctx context.Context, bucket, key []byte) ([]byte, error)
+}
+
+type NativeHas interface {
+	Has(ctx context.Context, bucket, key []byte) (bool, error)
+}
+
 type Tx interface {
 	Bucket(name []byte) Bucket
 
