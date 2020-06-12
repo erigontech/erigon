@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -85,9 +84,7 @@ func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
 }
 
 func (opts remoteOpts) Open() (KV, error) {
-	connectionCtx, connectionCtxCancel := context.WithTimeout(context.Background(), time.Second)
-	defer connectionCtxCancel()
-	remoteDB, err := remote.Open(connectionCtx, opts.Remote)
+	remoteDB, err := remote.Open(opts.Remote)
 	if err != nil {
 		return nil, err
 	}
