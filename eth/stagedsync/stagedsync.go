@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+const prof = false // whether to profile
+
 func PrepareStagedSync(
 	d DownloaderGlue,
 	blockchain BlockChain,
@@ -34,7 +36,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.Bodies,
-			Description: "Downloading block bodiess",
+			Description: "Downloading block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnBodyDownloadStage(s, u, d, pid)
 			},

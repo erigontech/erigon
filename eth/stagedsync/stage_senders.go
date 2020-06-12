@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -24,7 +26,7 @@ var cryptoContexts []*secp256k1.Context
 func init() {
 	// To avoid bothering with creating/releasing the resources
 	// but still not leak the contexts
-	numOfGoroutines = 3 // We never get more than 3x improvement even if we use 8 goroutines
+	numOfGoroutines = 8
 	if numOfGoroutines > runtime.NumCPU() {
 		numOfGoroutines = runtime.NumCPU()
 	}
@@ -35,6 +37,20 @@ func init() {
 }
 
 func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
+	if prof {
+		f, err := os.Create("cpu-senders.prof")
+		if err != nil {
+			log.Error("could not create CPU profile", "error", err)
+			return err
+		}
+		defer f.Close()
+		if err = pprof.StartCPUProfile(f); err != nil {
+			log.Error("could not start CPU profile", "error", err)
+			return err
+		}
+		defer pprof.StopCPUProfile()
+	}
+
 	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := lastProcessedBlockNumber + 1
 

@@ -24,3 +24,6 @@ issues:
     - linters:
         - stylecheck
       text: "(should be|should have name of the form)"
+    - path: consensus/ethash/fnv_hash16_avx2.s
+      linters:
+        - govet
