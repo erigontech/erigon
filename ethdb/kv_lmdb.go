@@ -117,7 +117,6 @@ func (opts lmdbOpts) Open() (KV, error) {
 	db := &LmdbKV{
 		opts:            opts,
 		env:             env,
-		ctxCancel:       ctxCancel,
 		log:             logger,
 		buckets:         buckets,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
@@ -146,7 +145,6 @@ func (opts lmdbOpts) MustOpen() KV {
 type LmdbKV struct {
 	opts                lmdbOpts
 	env                 *lmdb.Env
-	ctxCancel           context.CancelFunc
 	log                 log.Logger
 	buckets             []lmdb.DBI
 	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
