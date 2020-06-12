@@ -20,6 +20,7 @@ import (
 var (
 	lmdbKvTxPool     = sync.Pool{New: func() interface{} { return &lmdbTx{} }}
 	lmdbKvCursorPool = sync.Pool{New: func() interface{} { return &lmdbCursor{} }}
+	lmdbKvBucketPool = sync.Pool{New: func() interface{} { return &lmdbBucket{} }}
 )
 
 type lmdbOpts struct {
@@ -295,6 +296,7 @@ type lmdbTx struct {
 	ctx     context.Context
 	db      *LmdbKV
 	cursors []*lmdbCursor
+	buckets []*lmdbBucket
 }
 
 type lmdbBucket struct {
@@ -305,7 +307,7 @@ type lmdbBucket struct {
 
 type lmdbCursor struct {
 	ctx    context.Context
-	bucket lmdbBucket
+	bucket *lmdbBucket
 	prefix []byte
 
 	cursor *lmdb.Cursor
@@ -347,7 +349,18 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
 	}
 
-	return lmdbBucket{tx: tx, dbi: tx.db.buckets[id], id: id}
+	b := lmdbKvBucketPool.Get().(*lmdbBucket)
+	b.tx = tx
+	b.dbi = tx.db.buckets[id]
+	b.id = id
+
+	// add to auto-close on end of transactions
+	if b.tx.buckets == nil {
+		b.tx.buckets = make([]*lmdbBucket, 0, 1)
+	}
+	b.tx.buckets = append(b.tx.buckets, b)
+
+	return b
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -373,6 +386,10 @@ func (tx *lmdbTx) closeCursors() {
 		lmdbKvCursorPool.Put(c)
 	}
 	tx.cursors = tx.cursors[:0]
+	for _, b := range tx.buckets {
+		lmdbKvBucketPool.Put(b)
+	}
+	tx.buckets = tx.buckets[:0]
 }
 
 func (c *lmdbCursor) Prefix(v []byte) Cursor {
@@ -408,7 +425,7 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 	return val, err
 }
 
-func (b lmdbBucket) Put(key []byte, value []byte) error {
+func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
@@ -422,7 +439,7 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 	return nil
 }
 
-func (b lmdbBucket) Delete(key []byte) error {
+func (b *lmdbBucket) Delete(key []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
@@ -436,7 +453,7 @@ func (b lmdbBucket) Delete(key []byte) error {
 	return err
 }
 
-func (b lmdbBucket) Size() (uint64, error) {
+func (b *lmdbBucket) Size() (uint64, error) {
 	st, err := b.tx.tx.Stat(b.dbi)
 	if err != nil {
 		return 0, err
@@ -444,7 +461,7 @@ func (b lmdbBucket) Size() (uint64, error) {
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
-func (b lmdbBucket) Cursor() Cursor {
+func (b *lmdbBucket) Cursor() Cursor {
 	c := lmdbKvCursorPool.Get().(*lmdbCursor)
 	c.ctx = b.tx.ctx
 	c.bucket = b
