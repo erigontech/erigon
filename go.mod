@@ -3,7 +3,7 @@ module github.com/ledgerwatch/turbo-geth
 go 1.13
 
 require (
-	github.com/AskAlexSharov/lmdb-go v1.8.1-0.20200609024141-123c53568c38
+	github.com/AskAlexSharov/lmdb-go v1.9.0
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
 	github.com/JekaMas/notify v0.9.4
