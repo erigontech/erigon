@@ -243,10 +243,6 @@ func (dl *downloadTester) GetTd(hash common.Hash, number uint64) *big.Int {
 	return dl.ownChainTd[hash]
 }
 
-func (dl *downloadTester) InsertHeaderChainStaged([]*types.Header, int) (int, bool, uint64, error) {
-	return 0, false, 0, nil
-}
-
 // InsertHeaderChain injects a new batch of headers into the simulated chain.
 func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq int) (i int, err error) {
 	dl.lock.Lock()

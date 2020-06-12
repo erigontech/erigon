@@ -145,9 +145,13 @@ func (d *Downloader) SpawnHeaderDownloadStage(
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
 ) error {
+	d.headersState = s
+	d.headersUnwinder = u
 	d.bodiesState = s
 	d.bodiesUnwinder = u
 	defer func() {
+		d.headersState = nil
+		d.headersUnwinder = nil
 		d.bodiesState = nil
 		d.bodiesUnwinder = nil
 	}()

@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -29,7 +28,6 @@ type stagedSyncTester struct {
 	db            ethdb.Database
 	peers         map[string]*stagedSyncTesterPeer
 	genesis       *types.Block
-	currentHeader *types.Header
 	lock          sync.RWMutex
 }
 
@@ -43,7 +41,6 @@ func newStagedSyncTester() *stagedSyncTester {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.currentHeader = tester.genesis.Header()
 	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
@@ -86,10 +83,9 @@ func (st *stagedSyncTester) CurrentFastBlock() *types.Block {
 
 // CurrentHeader is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) CurrentHeader() *types.Header {
-	st.lock.RLock()
-	defer st.lock.RUnlock()
-
-	return st.currentHeader
+	hash := rawdb.ReadHeadHeaderHash(st.db)
+	number := rawdb.ReadHeaderNumber(st.db, hash)
+	return rawdb.ReadHeader(st.db, hash, *number)
 }
 
 // ExecuteBlockEphemerally is part of the implementation of BlockChain interface defined in downloader.go
@@ -154,75 +150,6 @@ func (st *stagedSyncTester) InsertBodyChain(_ context.Context, blocks types.Bloc
 // InsertChain is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
 	panic("")
-}
-
-// InsertHeaderChainStaged is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, checkFreq int) (int, bool, uint64, error) {
-	st.lock.Lock()
-	defer st.lock.Unlock()
-
-	if rawdb.ReadHeaderNumber(st.db, headers[0].ParentHash) == nil {
-		return 0, false, 0, errors.New("unknown parent")
-	}
-	for i := 1; i < len(headers); i++ {
-		if headers[i].ParentHash != headers[i-1].Hash() {
-			return i, false, 0, errors.New("unknown parent")
-		}
-	}
-	var newCanonical bool
-	var lowestCanonicalNumber uint64
-	// Do a full insert if pre-checks passed
-	for i, header := range headers {
-		if rawdb.ReadHeaderNumber(st.db, header.Hash()) != nil {
-			continue
-		}
-		if rawdb.ReadHeaderNumber(st.db, header.ParentHash) == nil {
-			return i, newCanonical, lowestCanonicalNumber, fmt.Errorf("unknown parent %x", header.ParentHash)
-		}
-		number := header.Number.Uint64()
-		ptd := rawdb.ReadTd(st.db, header.ParentHash, number-1)
-		externTd := ptd.Add(ptd, header.Difficulty)
-		localTd := rawdb.ReadTd(st.db, st.currentHeader.Hash(), st.currentHeader.Number.Uint64())
-		if externTd.Cmp(localTd) > 0 {
-			batch := st.db.NewBatch()
-			// Delete any canonical number assignments above the new head
-			for i := number + 1; ; i++ {
-				hash := rawdb.ReadCanonicalHash(st.db, i)
-				if hash == (common.Hash{}) {
-					break
-				}
-				rawdb.DeleteCanonicalHash(batch, i)
-			}
-			// Overwrite any stale canonical number assignments
-			var (
-				headHash   = header.ParentHash
-				headNumber = number - 1
-				headHeader = rawdb.ReadHeader(st.db, headHash, headNumber)
-			)
-			for rawdb.ReadCanonicalHash(st.db, headNumber) != headHash {
-				rawdb.WriteCanonicalHash(batch, headHash, headNumber)
-
-				headHash = headHeader.ParentHash
-				headNumber--
-				headHeader = rawdb.ReadHeader(st.db, headHash, headNumber)
-			}
-			if _, err := batch.Commit(); err != nil {
-				return i, newCanonical, lowestCanonicalNumber, fmt.Errorf("write header markers into disk: %v", err)
-			}
-			// Last step update all in-memory head header markers
-			st.currentHeader = types.CopyHeader(header)
-			if !newCanonical || number < lowestCanonicalNumber {
-				lowestCanonicalNumber = number
-				fmt.Printf("Reorg %d\n", number)
-				newCanonical = true
-			}
-		}
-		rawdb.WriteTd(st.db, header.Hash(), header.Number.Uint64(), externTd)
-		rawdb.WriteHeader(context.Background(), st.db, header)
-		rawdb.WriteCanonicalHash(st.db, header.Hash(), header.Number.Uint64())
-		st.currentHeader = header
-	}
-	return len(headers), newCanonical, lowestCanonicalNumber, nil
 }
 
 // InsertHeaderChain is part of the implementation of BlockChain interface defined in downloader.go

@@ -80,9 +80,9 @@ func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
 		return err
 	}
-	if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
-		return err
-	}
+	//if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
+	//	return err
+	//}
 	if err := u.Done(stateDB); err != nil {
 		return fmt.Errorf("unwind HashState: reset: %v", err)
 	}
