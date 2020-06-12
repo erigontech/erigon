@@ -24,11 +24,11 @@ var lmdbKV ethdb.KV
 var keysAmount = 100_000
 
 func setupDatabases() {
-	vsize := 10
-	ctx := context.Background()
-	boltDb = ethdb.NewBolt().Path("test").MustOpen(ctx)
-	badgerDb = ethdb.NewBadger().Path("test2").MustOpen(ctx)
-	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen(ctx)
+	vsize, ctx := 10, context.Background()
+
+	boltDb = ethdb.NewBolt().Path("test").MustOpen()
+	badgerDb = ethdb.NewBadger().Path("test2").MustOpen()
+	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen()
 	var errOpen error
 	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{KeysPrefixCompressionDisable: true})
 	if errOpen != nil {

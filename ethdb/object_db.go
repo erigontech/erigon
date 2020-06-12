@@ -315,11 +315,11 @@ func (db *ObjectDatabase) MemCopy() Database {
 	// Open the db and recover any potential corruptions
 	switch db.kv.(type) {
 	case *LmdbKV:
-		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	case *BoltKV:
-		mem = NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
+		mem = NewObjectDatabase(NewBolt().InMem().MustOpen())
 	case *badgerKV:
-		mem = NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
+		mem = NewObjectDatabase(NewBadger().InMem().MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {

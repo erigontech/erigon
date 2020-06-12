@@ -43,7 +43,7 @@ func (opts lmdbOpts) ReadOnly() lmdbOpts {
 	return opts
 }
 
-func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
+func (opts lmdbOpts) Open() (KV, error) {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
@@ -114,40 +114,28 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		}
 	}
 
-	go func() {
-		for {
-			tick := time.NewTicker(time.Minute)
-			select {
-			case <-ctx.Done():
-				tick.Stop()
-				return
-			case <-tick.C:
-				// In any real application it is important to check for readers that were
-				// never closed by their owning process, and for which the owning process
-				// has exited.  See the documentation on transactions for more information.
-				staleReaders, err2 := env.ReaderCheck()
-				if err2 != nil {
-					logger.Error("failed ReaderCheck", "err", err2)
-				}
-				if staleReaders > 0 {
-					logger.Info("cleared reader slots from dead processes", "amount", staleReaders)
-				}
-			}
-		}
-	}()
-
-	return &LmdbKV{
+	db := &LmdbKV{
 		opts:            opts,
 		env:             env,
 		log:             logger,
 		buckets:         buckets,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
-	}, nil
+	}
+
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	db.stopStaleReadsCheck = ctxCancel
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		db.staleReadsCheckLoop(ctx, ticker)
+	}()
+
+	return db, nil
 }
 
-func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts lmdbOpts) MustOpen() KV {
+	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open lmdb: %w", err))
 	}
@@ -155,21 +143,47 @@ func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 }
 
 type LmdbKV struct {
-	opts            lmdbOpts
-	env             *lmdb.Env
-	log             log.Logger
-	buckets         []lmdb.DBI
-	lmdbTxPool      *lmdbpool.TxnPool // pool of lmdb.Txn objects
-	lmdbCursorPools []sync.Pool       // pool of lmdb.Cursor objects
+	opts                lmdbOpts
+	env                 *lmdb.Env
+	log                 log.Logger
+	buckets             []lmdb.DBI
+	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
+	lmdbCursorPools     []sync.Pool       // pool of lmdb.Cursor objects
+	stopStaleReadsCheck context.CancelFunc
 }
 
 func NewLMDB() lmdbOpts {
 	return lmdbOpts{}
 }
 
+// staleReadsCheckLoop - In any real application it is important to check for readers that were
+// never closed by their owning process, and for which the owning process
+// has exited.  See the documentation on transactions for more information.
+func (db *LmdbKV) staleReadsCheckLoop(ctx context.Context, ticker *time.Ticker) {
+	for {
+		// check once on app start
+		staleReaders, err2 := db.env.ReaderCheck()
+		if err2 != nil {
+			db.log.Error("failed ReaderCheck", "err", err2)
+		}
+		if staleReaders > 0 {
+			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
+	if db.stopStaleReadsCheck != nil {
+		db.stopStaleReadsCheck()
+	}
 	db.lmdbTxPool.Close()
 
 	if db.env != nil {
