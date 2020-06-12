@@ -1535,6 +1535,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 							if err1 := d.headersUnwinder.UnwindTo(lowestCanonicalNumber, d.stateDB); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
 							}
+							fmt.Printf("lowestCanonicalNumber = %d\n", lowestCanonicalNumber)
 						}
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)

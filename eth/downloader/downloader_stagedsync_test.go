@@ -213,6 +213,7 @@ func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, che
 			st.currentHeader = types.CopyHeader(header)
 			if !newCanonical || number < lowestCanonicalNumber {
 				lowestCanonicalNumber = number
+				fmt.Printf("Reorg %d\n", number)
 				newCanonical = true
 			}
 		}
@@ -322,6 +323,24 @@ func (stp *stagedSyncTesterPeer) RequestBodies(hashes []common.Hash) error {
 // RequestReceipts is part of the implementation of Peer interface in peer.go
 func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	panic("")
+}
+
+func TestStagedBase(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	tester := newStagedSyncTester()
+	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.sync("peer", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompareChains(t *testing.T) {
+	for i := 8388; i < 8395; i++ {
+		fmt.Printf("testChainForkLightA[%d]=%x\n", i, testChainForkLightA.chain[i])
+		fmt.Printf("testChainForkHeavy[%d]=%x\n", i, testChainForkHeavy.chain[i])
+	}
 }
 
 func TestUnwind(t *testing.T) {

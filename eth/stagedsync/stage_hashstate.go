@@ -70,11 +70,26 @@ func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	}
 	if subTries.Hashes[0] != syncHeadHeader.Root {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadHeader.Root)
+	} else {
+		fmt.Printf("Correct root: %x\n", subTries.Hashes[0])
 	}
 	return nil
 }
 
 func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
+		return err
+	}
+	if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
+		return err
+	}
+	if err := u.Done(stateDB); err != nil {
+		return fmt.Errorf("unwind HashState: reset: %v", err)
+	}
+	return nil
+}
+
+func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
@@ -84,12 +99,6 @@ func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}
 	if err := prom.Unwind(s.BlockNumber, u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return err
-	}
-	if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
-		return err
-	}
-	if err := u.Done(stateDB); err != nil {
-		return fmt.Errorf("unwind HashState: reset: %v", err)
 	}
 	return nil
 }
@@ -220,6 +229,20 @@ var promoterMapper = map[string]struct {
 			return changeset.StorageChangeSetPlainBytes(v)
 		},
 		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
+		Template: "st-prom-",
+	},
+	string(dbutils.AccountChangeSetBucket): {
+		WalkerAdapter: func(v []byte) changeset.Walker {
+			return changeset.AccountChangeSetBytes(v)
+		},
+		KeySize:  common.HashLength,
+		Template: "acc-prom-",
+	},
+	string(dbutils.StorageChangeSetBucket): {
+		WalkerAdapter: func(v []byte) changeset.Walker {
+			return changeset.StorageChangeSetBytes(v)
+		},
+		KeySize:  common.HashLength + common.IncarnationLength + common.HashLength,
 		Template: "st-prom-",
 	},
 }
