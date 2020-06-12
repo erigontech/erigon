@@ -816,7 +816,7 @@ Loop:
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 20000 || i == block {
+		if len(blocks) >= 1000 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
 				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
@@ -831,7 +831,7 @@ Loop:
 			}
 			blocks = types.Blocks{}
 		}
-		if i%20000 == 0 {
+		if i%10000 == 0 {
 			fmt.Printf("Inserted %dK, %s \n", i/1000, time.Since(now))
 		}
 	}

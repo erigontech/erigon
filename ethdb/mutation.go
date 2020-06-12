@@ -11,9 +11,10 @@ import (
 )
 
 type mutation struct {
-	puts *puts // Map buckets to map[key]value
-	mu   sync.RWMutex
-	db   Database
+	puts   *puts // Map buckets to map[key]value
+	mu     sync.RWMutex
+	db     Database
+	tuples MultiPutTuples
 }
 
 func (m *mutation) KV() KV {
@@ -145,22 +146,26 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	tuples := make(MultiPutTuples, 0, m.puts.Len()*3)
+	if m.tuples == nil {
+		m.tuples = make(MultiPutTuples, 0, m.puts.Len()*3)
+	}
+	m.tuples = m.tuples[:0]
 	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			value, _ := bt.GetStr(key)
-			tuples = append(tuples, bucketB, []byte(key), value)
+			m.tuples = append(m.tuples, bucketB, []byte(key), value)
 		}
 	}
-	sort.Sort(tuples)
+	sort.Sort(m.tuples)
 
-	written, err := m.db.MultiPut(tuples...)
+	written, err := m.db.MultiPut(m.tuples...)
 	if err != nil {
 		return 0, fmt.Errorf("db.MultiPut failed: %w", err)
 	}
 
 	m.puts = newPuts()
+	m.tuples = m.tuples[:0]
 	return written, nil
 }
 
@@ -168,6 +173,7 @@ func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts = newPuts()
+	m.tuples = m.tuples[:0]
 }
 
 func (m *mutation) Keys() ([][]byte, error) {
