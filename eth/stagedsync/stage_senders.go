@@ -119,14 +119,17 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	fmt.Println("DONE?")
 	now := time.Now()
 
+
 	f, err := os.Create(fmt.Sprintf("/mnt/sdb/turbo-geth/froms_%d_%d_%d.out", now.Day(), now.Hour(), now.Minute()))
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+
+	buf := NewAddressBuffer(f, (4096 * 10 / 20) * 100000)
+	defer buf.Close()
 
 	fmt.Println("Storing into a file")
-	err = writeOnDiskBatch(f, firstBlock, out, quitCh, jobs, doneCh)
+	err = writeOnDiskBatch(buf, firstBlock, out, quitCh, jobs, doneCh)
 	fmt.Println("Storing into a file - DONE")
 
 	if err != nil {
@@ -143,7 +146,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	errCh = make(chan error)
 	nextBlockNumber = lastProcessedBlockNumber + 1
 	blockNumber = big.NewInt(0)
-	writeBatchFromDisk(f, s, stateDB, config, mutation, errCh, quitCh, blockNumber, nextBlockNumber)
+	writeBatchFromDisk(buf, s, stateDB, config, mutation, errCh, quitCh, blockNumber, nextBlockNumber)
 
 	err = <-errCh
 	fmt.Println("DONE!")
@@ -227,16 +230,11 @@ type TxsFroms struct {
 	err         error
 }
 
-func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob, doneCh chan struct{}) error {
-	const blockSize = 4096
-	const batch = (blockSize * 10 / 20) * 10000 //20*4096
+func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob, doneCh chan struct{}) error {
 	n := 0
-	toWrite := make([]byte, 0, batch+batch/100)
 
 	defer func() {
-		if len(toWrite) > 0 {
-			w.Write(toWrite)
-		}
+		buf.Write()
 	}()
 
 	toSort := uint64(10)
@@ -256,9 +254,9 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 		for _, job := range buffer {
 			totalFroms += len(job.froms)
 			for i := range job.froms {
-				toWrite = append(toWrite, job.froms[i][:]...)
+				buf.buf = append(buf.buf, job.froms[i][:]...)
 			}
-			written, err = w.Write(toWrite)
+			written, err = buf.Write()
 			if err != nil {
 				panic(err)
 			}
@@ -287,7 +285,7 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 		}
 
 		if j.blockNumber%10000 == 0 {
-			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "toNextWrite", len(toWrite), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", len(toWrite), "toWriteCap", cap(toWrite))
+			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "toNextWrite", buf.Len(), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", buf.Len(), "toWriteCap", buf.Cap())
 		}
 
 		if j.err != nil {
@@ -326,17 +324,16 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 			totalFroms += len(jobToWrite.froms)
 			for i := range jobToWrite.froms {
 				n++
-				toWrite = append(toWrite, jobToWrite.froms[i][:]...)
-				if 20*n == batch {
-					w.Write(toWrite)
-					written, err = w.Write(toWrite)
+				buf.Add(jobToWrite.froms[i][:])
+				if 20*n == buf.size {
+					written, err = buf.Write()
 					if err != nil {
 						return err
 					}
 					total += written
 
 					n = 0
-					toWrite = toWrite[:0]
+					buf.Reset()
 				}
 			}
 		}
@@ -386,7 +383,48 @@ func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJ
 	return
 }
 
-func writeBatchFromDisk(f io.Reader, s *StageState,
+type AddressBuffer struct {
+	buf []byte
+	size int
+	io.ReadWriteCloser
+}
+
+func NewAddressBuffer(f io.ReadWriteCloser, size int) *AddressBuffer {
+	buf := make([]byte, size*len(common.Address{}))
+
+	return &AddressBuffer{
+		buf, size, f,
+	}
+}
+
+func (a *AddressBuffer) Write() (int, error) {
+	if len(a.buf) > 0 {
+		return a.ReadWriteCloser.Write(a.buf)
+	}
+	return 0, nil
+}
+
+func (a *AddressBuffer) Read() (int, error) {
+	return a.ReadWriteCloser.Read(a.buf)
+}
+
+func (a *AddressBuffer) Add(b []byte)  {
+	a.buf = append(a.buf, b...)
+}
+
+func (a *AddressBuffer) Reset() {
+	a.buf = a.buf[:0]
+}
+
+func (a *AddressBuffer) Len() int {
+	return len(a.buf)
+}
+
+func (a *AddressBuffer) Cap() int {
+	return cap(a.buf)
+}
+
+func writeBatchFromDisk(a *AddressBuffer, s *StageState,
 	stateDB ethdb.Database, config *params.ChainConfig,
 	mutation *mutationSafe,
 	errCh chan error, quitCh chan struct{},
@@ -394,12 +432,8 @@ func writeBatchFromDisk(f io.Reader, s *StageState,
 ) {
 	defer close(errCh)
 
-	const blockSize = 4096
-	const batch = (blockSize * 10 / 20) * 10000
-	toWrite := make([]byte, batch*len(common.Address{}))
-
 	for {
-		n, err := f.Read(toWrite)
+		n, err := a.Read()
 		if err != nil && err != io.EOF {
 			errCh <- err
 			return
@@ -418,7 +452,7 @@ func writeBatchFromDisk(f io.Reader, s *StageState,
 
 		for i := range job.blockBody.Transactions {
 			from := common.Address{}
-			from.SetBytes(toWrite[i : (i+1)*20])
+			from.SetBytes(a.buf[i : (i+1)*20])
 			job.blockBody.Transactions[i].SetFrom(from)
 		}
 
