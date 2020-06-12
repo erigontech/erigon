@@ -154,7 +154,7 @@ func (m *mutation) Commit() (uint64, error) {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			value, _ := bt.GetStr(key)
-			tuples = append(tuples, bucketB, []byte(key), value)
+			m.tuples = append(m.tuples, bucketB, []byte(key), value)
 		}
 	}
 	sort.Sort(m.tuples)
