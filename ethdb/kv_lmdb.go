@@ -44,7 +44,6 @@ func (opts lmdbOpts) ReadOnly() lmdbOpts {
 }
 
 func (opts lmdbOpts) Open() (KV, error) {
-	ctx, ctxCancel := context.WithCancel(ctx)
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
