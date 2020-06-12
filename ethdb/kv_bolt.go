@@ -150,6 +150,38 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 	return res, nil
 }
 
+func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
+	var err error
+	var val []byte
+	err = db.bolt.View(func(tx *bolt.Tx) error {
+		v, _ := tx.Bucket(bucket).Get(key)
+		if v != nil {
+			val = make([]byte, len(v))
+			copy(val, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+func (db *BoltKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
+	var has bool
+	err := db.bolt.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			has = false
+		} else {
+			v, _ := b.Get(key)
+			has = v != nil
+		}
+		return nil
+	})
+	return has, err
+}
+
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	t := boltTxPool.Get().(*boltTx)
 	t.ctx = ctx

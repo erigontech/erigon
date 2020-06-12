@@ -199,6 +199,58 @@ func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
+func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
+	id, ok := dbutils.BucketsIndex[string(bucket)]
+	if !ok {
+		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
+	}
+	return db.buckets[id]
+}
+
+func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
+	dbi := db.dbi(bucket)
+	var err error
+	var val []byte
+	err = db.View(ctx, func(tx Tx) error {
+		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
+		if lmdb.IsNotFound(err2) {
+			return nil
+		} else if err2 != nil {
+			return err2
+		}
+		if v != nil {
+			val = make([]byte, len(v))
+			copy(val, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+func (db *LmdbKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
+	dbi := db.dbi(bucket)
+
+	var err error
+	var has bool
+	err = db.View(ctx, func(tx Tx) error {
+		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
+		if lmdb.IsNotFound(err2) {
+			return nil
+		} else if err2 != nil {
+			return err2
+		}
+		has = v != nil
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return has, nil
+}
+
 func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	flags := uint(0)
 	var tx *lmdb.Txn
@@ -256,6 +308,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t.db = db
 	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
+		tx.RawRead = true
 		t.tx = tx
 		return f(t)
 	})
@@ -268,6 +321,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t.db = db
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
+		tx.RawRead = true
 		t.tx = tx
 		return f(t)
 	})
