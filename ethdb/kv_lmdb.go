@@ -202,11 +202,7 @@ func (db *LmdbKV) Close() {
 }
 
 func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
-	stats, err := db.env.Stat()
-	if err != nil {
-		return 0, fmt.Errorf("could not read database size: %w", err)
-	}
-	return common.StorageSize(uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages)), nil
+	return common.StorageSize(0), nil
 }
 
 func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
