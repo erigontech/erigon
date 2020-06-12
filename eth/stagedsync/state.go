@@ -114,60 +114,57 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 		// restart from 0 after completing the missing stage
 		s.currentStage = 0
 	}
-	var unwound bool
-	for unwind := s.unwindStack.Pop(); unwind != nil; {
-		unwound = true
-		log.Info("Unwinding...")
-		stage, err := s.StageByID(unwind.Stage)
-		if err != nil {
-			return err
-		}
-		if stage.UnwindFunc != nil {
-			stageState, err := s.StageState(unwind.Stage, db)
+	for !s.IsDone() {
+		if unwind := s.unwindStack.Pop(); unwind != nil {
+			log.Info("Unwinding...")
+			stage, err := s.StageByID(unwind.Stage)
 			if err != nil {
 				return err
 			}
-
-			if stageState.BlockNumber <= unwind.UnwindPoint {
-				if err = unwind.Skip(db); err != nil {
+			if stage.UnwindFunc != nil {
+				stageState, err := s.StageState(unwind.Stage, db)
+				if err != nil {
 					return err
 				}
+
+				if stageState.BlockNumber <= unwind.UnwindPoint {
+					if err = unwind.Skip(db); err != nil {
+						return err
+					}
+					continue
+				}
+
+				err = stage.UnwindFunc(unwind, stageState)
+				if err != nil {
+					return err
+				}
+
+				// always restart from stage 1 after unwind
+				s.currentStage = 0
+			}
+			log.Info("Unwinding... DONE!")
+		} else {
+			index, stage := s.CurrentStage()
+
+			if stage.Disabled {
+				message := fmt.Sprintf(
+					"Sync stage %d/%d. %v disabled. %s",
+					index+1,
+					s.Len(),
+					stage.Description,
+					stage.DisabledDescription,
+				)
+
+				log.Info(message)
+
+				s.NextStage()
 				continue
 			}
 
-			err = stage.UnwindFunc(unwind, stageState)
-			if err != nil {
+			if err := s.runStage(stage, db, index); err != nil {
 				return err
 			}
 
-			// always restart from stage 1 after unwind
-			s.currentStage = 0
-		}
-		log.Info("Unwinding... DONE!")
-	}
-	if unwound {
-		return nil // Need to recreate header fetchers after unwinding (to avoid re-downloading the same headers)
-	}
-	for !s.IsDone() {
-		index, stage := s.CurrentStage()
-
-		if stage.Disabled {
-			message := fmt.Sprintf(
-				"Sync stage %d/%d. %v disabled. %s",
-				index+1,
-				s.Len(),
-				stage.Description,
-				stage.DisabledDescription,
-			)
-
-			log.Info(message)
-
-			s.NextStage()
-			continue
-		}
-
-		if err := s.runStage(stage, db, index); err != nil {
-			return err
 		}
 	}
 	return nil

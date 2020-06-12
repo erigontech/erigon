@@ -67,10 +67,10 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 	})
 }
 
-func unwindTxLookup(unwindPoint uint64, db ethdb.Database, quitCh chan struct{}) error {
+func unwindTxLookup(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
 	var txsToRemove [][]byte
 	// Remove lookup entries for all blocks above unwindPoint
-	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(unwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
+	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
@@ -100,6 +100,9 @@ func unwindTxLookup(unwindPoint uint64, db ethdb.Database, quitCh chan struct{})
 			return err
 		}
 	}
+	if err := u.Done(db); err != nil {
+		return fmt.Errorf("unwind TxLookup: %w", err)
+	}	
 	return nil
 }
 

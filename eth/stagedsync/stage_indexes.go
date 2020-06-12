@@ -69,7 +69,7 @@ func unwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, plainState boo
 		}
 	}
 	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind AccountHistorytIndex: reset: %v", err)
+		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
 	}
 	return nil
 }
@@ -86,7 +86,7 @@ func unwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, plainState boo
 		}
 	}
 	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind StorageHistorytIndex: reset: %v", err)
+		return fmt.Errorf("unwind StorageHistorytIndex: %w", err)
 	}
 	return nil
 }
