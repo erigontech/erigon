@@ -24,7 +24,7 @@ var lmdbKV ethdb.KV
 var keysAmount = 100_000
 
 func setupDatabases() {
-	vsize, keysAmount, ctx := 10, 100_000, context.Background()
+	vsize, ctx := 10, context.Background()
 
 	boltDb = ethdb.NewBolt().Path("test").MustOpen()
 	badgerDb = ethdb.NewBadger().Path("test2").MustOpen()
