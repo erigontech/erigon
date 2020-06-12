@@ -10,6 +10,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -58,13 +59,13 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 	const batchSize = 5000
 
-	jobs := make(chan *senderRecoveryJob, 100*batchSize)
+	jobs := make(chan *senderRecoveryJob, 20*batchSize)
 	out := make(chan TxsFroms, batchSize)
 
 	wg := &sync.WaitGroup{}
 	numOfGoroutines := numOfGoroutines
 
-	numOfGoroutines = 16
+	numOfGoroutines = 32
 	ctxLength := len(cryptoContexts)
 	if ctxLength < numOfGoroutines {
 		for i := 0; i < numOfGoroutines-ctxLength; i++ {
@@ -116,8 +117,9 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	}()
 
 	fmt.Println("DONE?")
+	now := time.Now()
 
-	f, err := os.Create("/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/froms.out")
+	f, err := os.Create(fmt.Sprintf("/mnt/sdb/turbo-geth/froms_%d_%d_%d.out", now.Day(), now.Hour(), now.Minute()))
 	if err != nil {
 		return err
 	}
@@ -135,22 +137,23 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	if err != nil {
 		return err
 	}
+
 	fmt.Println("DONE!")
 
-	/*
-		errCh = make(chan error)
-		nextBlockNumber := lastProcessedBlockNumber + 1
-		blockNumber := big.NewInt(0)
-		writeBatchFromDisk(f, s, stateDB, mutation, config, errCh, quitCh, blockNumber, nextBlockNumber)
+	errCh = make(chan error)
+	nextBlockNumber = lastProcessedBlockNumber + 1
+	blockNumber = big.NewInt(0)
+	writeBatchFromDisk(f, s, stateDB, config, mutation, errCh, quitCh, blockNumber, nextBlockNumber)
 
-		err = <-errCh
-		fmt.Println("DONE!")
-		if err != nil {
-			return err
-		}
-	*/
+	err = <-errCh
+	fmt.Println("DONE!")
+	if err != nil {
+		return err
+	}
+
 	s.Done()
 	fmt.Println("DONE!!!")
+	panic("DONE!!!")
 	return nil
 }
 
@@ -228,7 +231,7 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 	const blockSize = 4096
 	const batch = (blockSize * 10 / 20) * 10000 //20*4096
 	n := 0
-	toWrite := make([]byte, 0, batch*len(common.Address{})+batch/100*5)
+	toWrite := make([]byte, 0, batch+batch/100)
 
 	defer func() {
 		if len(toWrite) > 0 {
@@ -238,6 +241,7 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 
 	toSort := uint64(10)
 	buffer := make([]TxsFroms, 0, 1000)
+	var writeFroms []TxsFroms
 
 	total := 0
 	totalFroms := 0
@@ -272,6 +276,9 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 			isFirst = false
 		}
 
+		if j.err != nil {
+			return err
+		}
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
@@ -280,7 +287,7 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 		}
 
 		if j.blockNumber%10000 == 0 {
-			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "toNextWrite", len(toWrite), "written", total, "txs", totalFroms)
+			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "toNextWrite", len(toWrite), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", len(toWrite), "toWriteCap", cap(toWrite))
 		}
 
 		if j.err != nil {
@@ -312,7 +319,7 @@ func writeOnDiskBatch(w io.Writer, firstBlock *uint64, out chan TxsFroms, quitCh
 		}
 
 		currentBlock += toSort
-		writeFroms := buffer[:toSort]
+		writeFroms = buffer[:toSort]
 		buffer = buffer[toSort:]
 
 		for _, jobToWrite := range writeFroms {
@@ -381,11 +388,10 @@ func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJ
 
 func writeBatchFromDisk(f io.Reader, s *StageState,
 	stateDB ethdb.Database, config *params.ChainConfig,
-	out chan *senderRecoveryJob, mutation *mutationSafe,
+	mutation *mutationSafe,
 	errCh chan error, quitCh chan struct{},
-	in chan *senderRecoveryJob, blockNumber *big.Int, nextBlockNumber uint64,
+	blockNumber *big.Int, nextBlockNumber uint64,
 ) {
-
 	defer close(errCh)
 
 	const blockSize = 4096
@@ -424,7 +430,7 @@ func writeBatchFromDisk(f io.Reader, s *StageState,
 				return
 			}
 
-			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "out", len(out), "in", len(in))
+			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
 
 			if err := mutation.Commit(); err != nil {
 				errCh <- err
