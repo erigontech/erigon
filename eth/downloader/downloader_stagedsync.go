@@ -104,7 +104,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 	}
 
 	if err := d.spawnSync(fetchers); err == nil {
-		return true, s.Update(d.stateDB, to)
+		return true, nil
 	}
 	log.Error("Trying to rollback 1 block due to error")
 	return true, s.Update(d.stateDB, origin-1)
