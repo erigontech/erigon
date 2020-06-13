@@ -9,8 +9,11 @@ import (
 const (
 	//SliceBuffer - just simple slice w
 	SortableSliceBuffer = iota
-	//SortableAppendBuffer - just simple slice w
+	//SortableAppendBuffer - map[k] [v1 v2 v3]
 	SortableAppendBuffer
+	// SortableOldestAppearedBuffer - buffer that keeps only the oldest entries.
+	// if first v1 was added under key K, then v2; only v1 will stay
+	SortableOldestAppearedBuffer
 
 	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
 )
