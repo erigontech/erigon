@@ -127,17 +127,17 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
 	// Please refer to http://www.cs.cornell.edu/~ie53/publications/btcProcFC.pdf
-	reorg := externTd.Cmp(localTd) > 0
-	if !reorg && externTd.Cmp(localTd) == 0 {
+	newCanonical := externTd.Cmp(localTd) > 0
+	if !newCanonical && externTd.Cmp(localTd) == 0 {
 		if lastHeader.Number.Uint64() < *headNumber {
-			reorg = true
+			newCanonical = true
 		} else if lastHeader.Number.Uint64() == *headNumber {
-			reorg = mrand.Float64() < 0.5
+			newCanonical = mrand.Float64() < 0.5
 		}
 	}
 
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
-	if reorg && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
+	if newCanonical && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
 		deepFork = true
 	}
 	var forkBlockNumber uint64
@@ -151,10 +151,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			continue
 		}
 		number := header.Number.Uint64()
-		if reorg && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(batch, number) {
+		if newCanonical && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(batch, number) {
 			forkBlockNumber = number - 1
 		}
-		if reorg {
+		if newCanonical {
 			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
 		}
 		td = td.Add(td, header.Difficulty)
@@ -173,11 +173,14 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	}
+	reorg := newCanonical && forkBlockNumber < *headNumber
 	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
 			rawdb.DeleteCanonicalHash(batch, i)
 		}
+	}
+	if newCanonical {
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {

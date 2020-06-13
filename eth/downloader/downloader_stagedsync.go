@@ -55,10 +55,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 			currentNumber++
 			if hashCount < len(hashes) {
 				copy(hashes[hashCount][:], v)
-			}
-			hashCount++
-			if hashCount >= len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
-				return false, nil
+				hashCount++
 			}
 			return true, nil
 		}
@@ -71,7 +68,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 			return false, err1
 		}
 		headers[common.BytesToHash(k[8:])] = header
-		return true, nil
+		return hashCount < len(hashes), nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("walking over canonical hashes: %w", err)
@@ -106,11 +103,10 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		func() error { return d.processBodiesStage(to) },
 	}
 
-	if err := d.spawnSync(fetchers); err == nil {
-		return true, s.Update(d.stateDB, to)
+	if err := d.spawnSync(fetchers); err != nil {
+		return false, err
 	}
-	log.Error("Trying to rollback 1 block due to error")
-	return true, s.Update(d.stateDB, origin-1)
+	return true, nil
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.

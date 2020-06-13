@@ -31,6 +31,7 @@ func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 }
 
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
+	fmt.Printf("UnwindTo %d\n", blockNumber)
 	for _, stage := range s.stages {
 		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
 			return err
@@ -115,34 +116,37 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 		s.currentStage = 0
 	}
 	for !s.IsDone() {
-		if unwind := s.unwindStack.Pop(); unwind != nil {
-			log.Info("Unwinding...")
-			stage, err := s.StageByID(unwind.Stage)
-			if err != nil {
-				return err
-			}
-			if stage.UnwindFunc != nil {
-				stageState, err := s.StageState(unwind.Stage, db)
+		if !s.unwindStack.Empty() {
+			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
+				log.Info("Unwinding...", "stage", unwind.Stage+1)
+				stage, err := s.StageByID(unwind.Stage)
 				if err != nil {
 					return err
 				}
-
-				if stageState.BlockNumber <= unwind.UnwindPoint {
-					if err = unwind.Skip(db); err != nil {
+				if stage.UnwindFunc != nil {
+					stageState, err := s.StageState(unwind.Stage, db)
+					if err != nil {
 						return err
 					}
-					continue
-				}
 
-				err = stage.UnwindFunc(unwind, stageState)
-				if err != nil {
-					return err
-				}
+					if stageState.BlockNumber <= unwind.UnwindPoint {
+						if err = unwind.Skip(db); err != nil {
+							return err
+						}
+						continue
+					}
 
-				// always restart from stage 1 after unwind
-				s.currentStage = 0
+					err = stage.UnwindFunc(unwind, stageState)
+					if err != nil {
+						return err
+					}
+
+					// always restart from stage 1 after unwind
+					s.currentStage = 0
+				}
+				log.Info("Unwinding... DONE!")
 			}
-			log.Info("Unwinding... DONE!")
+			return nil
 		} else {
 			index, stage := s.CurrentStage()
 
