@@ -114,7 +114,9 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		batchSize := batch.BatchSize()
 		if batchSize > batch.IdealBatchSize() || args.loadBatchSize > 0 && batchSize > args.loadBatchSize {
 			if args.OnLoadCommit != nil {
-				args.OnLoadCommit(batch, k, false)
+				if err := args.OnLoadCommit(batch, k, false); err != nil {
+					return err
+				}
 			}
 			if _, err := batch.Commit(); err != nil {
 				return err
@@ -154,7 +156,9 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		}
 	}
 	if args.OnLoadCommit != nil {
-		args.OnLoadCommit(batch, []byte{}, true)
+		if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
+			return err
+		}
 	}
 	_, err := batch.Commit()
 	return err
