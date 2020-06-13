@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"math/big"
+	mrand "math/rand"
 	"os"
 	"runtime/pprof"
 	"time"
@@ -122,9 +123,21 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	localTd := rawdb.ReadTd(db, headHash, *headNumber)
-	newCanonical := externTd.Cmp(localTd) > 0
+	lastHeader := headers[len(headers)-1]
+	// If the total difficulty is higher than our known, add it to the canonical chain
+	// Second clause in the if statement reduces the vulnerability to selfish mining.
+	// Please refer to http://www.cs.cornell.edu/~ie53/publications/btcProcFC.pdf
+	reorg := externTd.Cmp(localTd) > 0
+	if !reorg && externTd.Cmp(localTd) == 0 {
+		if lastHeader.Number.Uint64() < *headNumber {
+			reorg = true
+		} else if lastHeader.Number.Uint64() == *headNumber {
+			reorg = mrand.Float64() < 0.5
+		}
+	}
+
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
-	if newCanonical && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
+	if reorg && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
 		deepFork = true
 	}
 	var forkBlockNumber uint64
@@ -138,17 +151,16 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			continue
 		}
 		number := header.Number.Uint64()
-		if newCanonical && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(batch, number) {
+		if reorg && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(batch, number) {
 			forkBlockNumber = number - 1
 		}
-		if newCanonical {
+		if reorg {
 			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
 		}
 		td = td.Add(td, header.Difficulty)
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		rawdb.WriteHeader(context.Background(), batch, header)
 	}
-	lastHeader := headers[len(headers)-1]
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1
@@ -161,7 +173,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	}
-	if newCanonical {
+	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
 			rawdb.DeleteCanonicalHash(batch, i)
@@ -183,5 +195,5 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		ctx = append(ctx, []interface{}{"ignored", ignored}...)
 	}
 	log.Info("Imported new block headers", ctx...)
-	return len(headers), newCanonical, forkBlockNumber, nil
+	return len(headers), reorg, forkBlockNumber, nil
 }

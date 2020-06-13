@@ -1531,10 +1531,10 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					var n int
 					var err error
 					if d.mode == StagedSync {
-						var newCanonical bool
+						var reorg bool
 						var forkBlockNumber uint64
-						n, newCanonical, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), frequency)
-						if newCanonical && d.headersUnwinder != nil {
+						n, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), frequency)
+						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
