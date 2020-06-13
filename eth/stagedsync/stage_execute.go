@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"runtime"
@@ -105,6 +106,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
+	fmt.Printf("Start executing from block %d\n", atomic.LoadUint64(&nextBlockNumber) + 1)
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -115,8 +117,14 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			break
 		}
 
-		block := blockchain.GetBlockByNumber(blockNum)
+		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
+		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
+		if blockNum > 8389 && blockNum < 8395 {
+			fmt.Printf("Execute block %x %d\n", blockHash, blockNum)
+		}		
+
 		if block == nil {
+			fmt.Printf("Could not find block %d hash %x\n", blockNum, blockHash)
 			break
 		}
 		atomic.StoreUint64(&nextBlockNumber, blockNum)
@@ -193,10 +201,23 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
 		return err
 	}
-	_, err := batch.Commit()
-	if err != nil {
+	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	// Write state into a text file
+	f, err2 := os.Create(fmt.Sprintf("executed_%d.txt", atomic.LoadUint64(&nextBlockNumber)))
+	if err2 != nil {
+		return err2
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	if err2 = stateDB.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		fmt.Fprintf(w, "%x %x\n", k, v)
+		return true, nil
+	}); err2 != nil {
+		return err2
+	}
+	w.Flush()
 	log.Info("Completed on", "block", atomic.LoadUint64(&nextBlockNumber))
 	s.Done()
 	return nil
@@ -275,7 +296,20 @@ func unwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database)
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
-
+	// Write state into a text file
+	f, err2 := os.Create(fmt.Sprintf("unwind_%d.txt", u.UnwindPoint))
+	if err2 != nil {
+		return err2
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	if err2 = stateDB.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		fmt.Fprintf(w, "%x %x\n", k, v)
+		return true, nil
+	}); err2 != nil {
+		return err2
+	}
+	w.Flush()
 	return nil
 }
 

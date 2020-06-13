@@ -57,7 +57,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 				copy(hashes[hashCount][:], v)
 			}
 			hashCount++
-			if hashCount > len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
+			if hashCount >= len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
 				return false, nil
 			}
 			return true, nil
@@ -84,14 +84,14 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		return false, nil
 	}
 	d.queue.Reset()
-	if hashCount <= 1 {
+	if hashCount == 0 {
 		// No more bodies to download
 		return false, nil
 	}
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
-	d.queue.ScheduleBodies(from, hashes[:hashCount-1], headers)
-	to := from + uint64(hashCount-1)
+	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
+	to := from + uint64(hashCount)
 
 	select {
 	case d.bodyWakeCh <- true:
@@ -116,6 +116,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
+	fmt.Printf("processBodiesStage(%d)\n", to)
 	for {
 		if err := common.Stopped(d.quitCh); err != nil {
 			return err

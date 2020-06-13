@@ -107,23 +107,23 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	localTd := rawdb.ReadTd(db, headHash, *headNumber)
 	newCanonical := externTd.Cmp(localTd) > 0
-	fmt.Printf("localTd: %d, externTd: %d, newCanonical: %t\n", localTd, externTd, newCanonical)
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
 	if newCanonical && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
 		deepFork = true
 	}
+	fmt.Printf("localTd: %d, externTd: %d, newCanonical: %t, deepFork: %t\n", localTd, externTd, newCanonical, deepFork)
 	var forkBlockNumber uint64
 	ignored := 0
 	batch := db.NewBatch()
 	// Do a full insert if pre-checks passed
 	td := new(big.Int).Set(parentTd)
 	for _, header := range headers {
-		if rawdb.ReadHeaderNumber(db, header.Hash()) != nil {
+		if rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
 			ignored++
 			continue
 		}
 		number := header.Number.Uint64()
-		if newCanonical && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(db, number) {
+		if newCanonical && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(batch, number) {
 			forkBlockNumber = number - 1
 		}
 		if newCanonical {
@@ -133,18 +133,19 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		rawdb.WriteHeader(context.Background(), batch, header)
 	}
+	lastHeader := headers[len(headers)-1]
 	if deepFork {
-		forkHeader := rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64()-1
 		forkHash := forkHeader.ParentHash
-		for forkHash != rawdb.ReadCanonicalHash(db, forkBlockNumber) {
+		for forkHash != rawdb.ReadCanonicalHash(batch, forkBlockNumber) {
 			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
-			forkHeader = rawdb.ReadHeader(db, forkHash, forkBlockNumber)
+			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64()-1
 			forkHash = forkHeader.ParentHash			
 		}
+		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	}
-	lastHeader := headers[len(headers)-1]
 	if newCanonical {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber ; i++ {

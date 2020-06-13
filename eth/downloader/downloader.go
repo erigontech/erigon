@@ -757,7 +757,6 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 		headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
 		headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
 		localHeight = *headNumber
-		fmt.Printf("findAncesor, localHeight: %d\n", localHeight)
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
@@ -843,7 +842,6 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 					known = d.blockchain.HasFastBlock(h, n)
 				case StagedSync:
 					known = d.blockchain.HasHeader(h, n)
-					fmt.Printf("Header %x %d known: %t\n", h, n, known)
 				default:
 					known = d.lightchain.HasHeader(h, n)
 				}
@@ -1629,9 +1627,9 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	}
 	// Retrieve the a batch of results to import
 	first, last := results[0].Header, results[len(results)-1].Header
-	log.Debug("Inserting downloaded chain", "items", len(results),
+	log.Info("Inserting downloaded chain", "items", len(results),
 		"firstnum", first.Number, "firsthash", first.Hash(),
-		"lastnum", last.Number, "lasthash", last.Hash(),
+		"lastnum", last.Number, "lasthash", last.Hash(), "execute", execute,
 	)
 	blocks := make([]*types.Block, len(results))
 	for i, result := range results {
