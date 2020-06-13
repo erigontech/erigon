@@ -112,7 +112,7 @@ func TestUnwindHashed(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStage(u, s, db2, getDataDir(), nil)
+	err = unwindHashStateStageImpl(u, s, db2, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}

@@ -44,7 +44,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		}
 
 		// Skip non relevant records
-		if len(k) == 8+len(dbutils.HeaderHashSuffix) && bytes.Equal(k[8:], dbutils.HeaderHashSuffix) {
+		if dbutils.CheckCanonicalKey(k) {
 			// This is how we learn about canonical chain
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			if blockNumber != currentNumber {
@@ -57,7 +57,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 				copy(hashes[hashCount][:], v)
 			}
 			hashCount++
-			if hashCount > len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
+			if hashCount >= len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
 				return false, nil
 			}
 			return true, nil
@@ -84,14 +84,14 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		return false, nil
 	}
 	d.queue.Reset()
-	if hashCount <= 1 {
+	if hashCount == 0 {
 		// No more bodies to download
 		return false, nil
 	}
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
-	d.queue.ScheduleBodies(from, hashes[:hashCount-1], headers)
-	to := from + uint64(hashCount-1)
+	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
+	to := from + uint64(hashCount)
 
 	select {
 	case d.bodyWakeCh <- true:
@@ -107,7 +107,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 	}
 
 	if err := d.spawnSync(fetchers); err == nil {
-		return true, nil
+		return true, s.Update(d.stateDB, to)
 	}
 	log.Error("Trying to rollback 1 block due to error")
 	return true, s.Update(d.stateDB, origin-1)
@@ -145,11 +145,19 @@ func (d *Downloader) SpawnHeaderDownloadStage(
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
 ) error {
+	d.headersState = s
+	d.headersUnwinder = u
 	d.bodiesState = s
 	d.bodiesUnwinder = u
 	defer func() {
+		d.headersState = nil
+		d.headersUnwinder = nil
 		d.bodiesState = nil
 		d.bodiesUnwinder = nil
 	}()
+	d.cancelLock.Lock()
+	d.cancelCh = make(chan struct{})
+	d.cancelLock.Unlock()
+	defer d.Cancel() // No matter what, we can't leave the cancel channel open
 	return d.spawnSync(fetchers)
 }
