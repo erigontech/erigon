@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 
-	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 )
 
@@ -56,7 +56,7 @@ func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	rl := trie.NewRetainList(0)
 	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
 	if err1 != nil {
-		return errors.Wrap(err1, "checking root hash failed")
+		return fmt.Errorf("checking root hash failed (err=%v)", err1)
 	}
 	if len(subTries.Hashes) != 1 {
 		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
@@ -108,11 +108,11 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 	}
 	var loadStartKey []byte
 	skipCurrentState := false
-	if len(s.StageData) > 0 && s.StageData[0] == byte(0xFF) {
-		if len(s.StageData) == 1 {
-			skipCurrentState = true
-		} else {
-			loadStartKey, err = etl.NextKey(s.StageData[1:])
+	if len(s.StageData) == 1 && s.StageData[0] == byte(0xFF) {
+		skipCurrentState = true
+	} else if len(s.StageData) > 0 {
+		loadStartKey, err = etl.NextKey(s.StageData[1:])
+		if err != nil {
 			return err
 		}
 	}
@@ -152,7 +152,9 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 
 	if len(s.StageData) > 0 && s.StageData[0] == byte(0xCD) {
 		loadStartKey, err = etl.NextKey(s.StageData[1:])
-		return err
+		if err != nil {
+			return err
+		}
 	}
 
 	return etl.Transform(
@@ -308,9 +310,10 @@ func getUnwindExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
 }
 
 func getFromPlainStateAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
-	return func(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+	return func(k []byte, _ []byte, state etl.State, next etl.LoadNextFunc) error {
+		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
-		if err == nil || err == ethdb.ErrKeyNotFound {
+		if err == nil || errors.Is(err, ethdb.ErrKeyNotFound) {
 			return loadFunc(k, value, state, next)
 		}
 		return err
@@ -360,7 +363,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, changeSetBucket []byt
 			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
-					return s.UpdateWithStageData(putter, from, append([]byte{index}))
+					return s.UpdateWithStageData(putter, from, []byte{index})
 				}
 				return s.UpdateWithStageData(putter, from, append([]byte{index}, key...))
 			},
@@ -414,7 +417,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, changeSetBucket []byte,
 			ExtractStartKey: startkey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
-					return u.UpdateWithStageData(putter, append([]byte{index}))
+					return u.UpdateWithStageData(putter, []byte{index})
 				}
 				return u.UpdateWithStageData(putter, append([]byte{index}, key...))
 			},
