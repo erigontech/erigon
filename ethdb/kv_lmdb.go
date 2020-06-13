@@ -78,6 +78,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	if opts.inMem {
 		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
 	}
+	flags |= lmdb.NoReadahead
 	if err = os.MkdirAll(opts.path, 0744); err != nil {
 		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 	}
@@ -228,10 +229,12 @@ func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
 	var val []byte
 	err = db.View(ctx, func(tx Tx) error {
 		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
-		if lmdb.IsNotFound(err2) {
-			return nil
-		} else if err2 != nil {
-			return err2
+		if err2 != nil {
+			if lmdb.IsNotFound(err2) {
+				return nil
+			} else {
+				return err2
+			}
 		}
 		if v != nil {
 			val = make([]byte, len(v))
