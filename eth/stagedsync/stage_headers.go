@@ -1,8 +1,6 @@
 package stagedsync
 
 import (
-	"os"
-	"runtime/pprof"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +12,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"math/big"
+	"os"
+	"runtime/pprof"
 	"time"
 )
 
