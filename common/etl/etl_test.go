@@ -3,15 +3,16 @@ package etl
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os"
+	"strings"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
-	"io"
-	"os"
-	"strings"
-	"testing"
 )
 
 func TestWriteAndReadBufferEntry(t *testing.T) {
@@ -164,11 +165,12 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{
-			OnLoadCommit: func(_ []byte, isDone bool) {
+			OnLoadCommit: func(_ ethdb.Putter, _ []byte, isDone bool) error {
 				numberOfCalls++
 				if isDone {
 					finalized = true
 				}
+				return nil
 			},
 			loadBatchSize: 1,
 		},
@@ -198,11 +200,12 @@ func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{
-			OnLoadCommit: func(_ []byte, isDone bool) {
+			OnLoadCommit: func(_ ethdb.Putter, _ []byte, isDone bool) error {
 				numberOfCalls++
 				if isDone {
 					finalized = true
 				}
+				return nil
 			},
 		},
 	)
