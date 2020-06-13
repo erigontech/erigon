@@ -1490,12 +1490,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					if td.Cmp(d.lightchain.GetTd(head.Hash(), head.Number.Uint64())) > 0 {
 						return errStallingPeer
 					}
-				} else if d.mode == StagedSync {
-					headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
-					headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
-					if td.Cmp(d.lightchain.GetTd(headHash, *headNumber)) > 0 {
-						return errStallingPeer
-					}
 				}
 				// Disable any rollback and return
 				rollback = nil
