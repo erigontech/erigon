@@ -103,11 +103,10 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		func() error { return d.processBodiesStage(to) },
 	}
 
-	if err := d.spawnSync(fetchers); err == nil {
-		return true, nil
+	if err := d.spawnSync(fetchers); err != nil {
+		return false, err
 	}
-	log.Error("Trying to rollback 1 block due to error")
-	return true, s.Update(d.stateDB, origin-1)
+	return true, nil
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
