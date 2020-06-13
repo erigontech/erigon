@@ -548,7 +548,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 
 	// Turbo-Geth's staged sync goes here
 	if d.mode == StagedSync {
-		fmt.Printf("Staged sync with origin %d\n", origin)
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
 			d.blockchain,
@@ -760,7 +759,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
-	p.log.Info("Looking for common ancestor", "local", localHeight, "remote", remoteHeight)
+	p.log.Debug("Looking for common ancestor", "local", localHeight, "remote", remoteHeight)
 
 	// Recap floor value for binary search
 	if localHeight >= maxForkAncestry && d.mode != StagedSync {
@@ -947,7 +946,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 		p.log.Warn("Ancestor below allowance", "number", start, "hash", hash, "allowance", floor)
 		return 0, errInvalidAncestor
 	}
-	p.log.Info("Found common ancestor", "number", start, "hash", hash)
+	p.log.Debug("Found common ancestor", "number", start, "hash", hash)
 	return start, nil
 }
 
@@ -964,10 +963,10 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 	defer p.log.Debug("Header download terminated")
 
 	// Create a timeout timer, and the associated header fetcher
-	skeleton := d.mode != StagedSync   // Skeleton assembly phase or finishing up
-	request := time.Now()              // time of the last skeleton fetch request
-	timeout := time.NewTimer(0)        // timer to dump a non-responsive active peer
-	<-timeout.C                        // timeout channel should be initially empty
+	skeleton := d.mode != StagedSync // Skeleton assembly phase or finishing up
+	request := time.Now()            // time of the last skeleton fetch request
+	timeout := time.NewTimer(0)      // timer to dump a non-responsive active peer
+	<-timeout.C                      // timeout channel should be initially empty
 	defer timeout.Stop()
 
 	var ttl time.Duration
@@ -1089,7 +1088,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 				getHeaders(from)
 			} else {
 				// No headers delivered, or all of them being delayed, sleep a bit and retry
-				p.log.Info("All headers delayed, waiting")
+				p.log.Trace("All headers delayed, waiting")
 				select {
 				case <-time.After(fsHeaderContCheck):
 					getHeaders(from)
@@ -1540,7 +1539,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
 							}
-							fmt.Printf("forkBlockNumber = %d\n", forkBlockNumber)
 						}
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
@@ -1555,7 +1553,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						if n > 0 {
 							rollback = append(rollback, chunk[:n]...)
 						}
-						log.Info("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
+						log.Error("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
 						return errInvalidChain
 					}
 
@@ -1627,9 +1625,9 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	}
 	// Retrieve the a batch of results to import
 	first, last := results[0].Header, results[len(results)-1].Header
-	log.Info("Inserting downloaded chain", "items", len(results),
+	log.Debug("Inserting downloaded chain", "items", len(results),
 		"firstnum", first.Number, "firsthash", first.Hash(),
-		"lastnum", last.Number, "lasthash", last.Hash(), "execute", execute,
+		"lastnum", last.Number, "lasthash", last.Hash(),
 	)
 	blocks := make([]*types.Block, len(results))
 	for i, result := range results {

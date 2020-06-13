@@ -116,7 +116,6 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
 func (d *Downloader) processBodiesStage(to uint64) error {
-	fmt.Printf("processBodiesStage(%d)\n", to)
 	for {
 		if err := common.Stopped(d.quitCh); err != nil {
 			return err

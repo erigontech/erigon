@@ -68,24 +68,8 @@ func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	if len(subTries.Hashes) != 1 {
 		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
 	}
-	// Write state into a text file
-	f, err2 := os.Create(fmt.Sprintf("state_%x.txt", subTries.Hashes[0]))
-	if err2 != nil {
-		return err2
-	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	if err2 = stateDB.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		fmt.Fprintf(w, "%x %x\n", k, v)
-		return true, nil
-	}); err2 != nil {
-		return err2
-	}
-	w.Flush()
 	if subTries.Hashes[0] != syncHeadHeader.Root {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadHeader.Root)
-	} else {
-		fmt.Printf("Correct root: %x\n", subTries.Hashes[0])
 	}
 	return nil
 }

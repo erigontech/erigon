@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"time"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -13,6 +11,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"math/big"
+	"time"
 )
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
@@ -26,7 +26,7 @@ func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, heade
 // Implements consensus.ChainReader
 type ChainReader struct {
 	config *params.ChainConfig
-	db ethdb.Database
+	db     ethdb.Database
 }
 
 // Config retrieves the blockchain's chain configuration.
@@ -38,7 +38,7 @@ func (cr ChainReader) Config() *params.ChainConfig {
 func (cr ChainReader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.db)
 	number := rawdb.ReadHeaderNumber(cr.db, hash)
-	return rawdb.ReadHeader(cr.db, hash, *number)	
+	return rawdb.ReadHeader(cr.db, hash, *number)
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
@@ -83,7 +83,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	if checkFreq != 0 {
 		// In case of checkFreq == 0 all seals are left false.
 		for i := 0; i < len(seals)/checkFreq; i++ {
-			index := i*checkFreq
+			index := i * checkFreq
 			if index >= len(seals) {
 				index = len(seals) - 1
 			}
@@ -111,7 +111,6 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	if newCanonical && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
 		deepFork = true
 	}
-	fmt.Printf("localTd: %d, externTd: %d, newCanonical: %t, deepFork: %t\n", localTd, externTd, newCanonical, deepFork)
 	var forkBlockNumber uint64
 	ignored := 0
 	batch := db.NewBatch()
@@ -136,19 +135,19 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	lastHeader := headers[len(headers)-1]
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
-		forkBlockNumber = forkHeader.Number.Uint64()-1
+		forkBlockNumber = forkHeader.Number.Uint64() - 1
 		forkHash := forkHeader.ParentHash
 		for forkHash != rawdb.ReadCanonicalHash(batch, forkBlockNumber) {
 			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
-			forkBlockNumber = forkHeader.Number.Uint64()-1
-			forkHash = forkHeader.ParentHash			
+			forkBlockNumber = forkHeader.Number.Uint64() - 1
+			forkHash = forkHeader.ParentHash
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	}
 	if newCanonical {
 		// Delete any canonical number assignments above the new head
-		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber ; i++ {
+		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
 			rawdb.DeleteCanonicalHash(batch, i)
 		}
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
