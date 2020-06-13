@@ -78,6 +78,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	if opts.inMem {
 		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
 	}
+	flags |= lmdb.NoReadahead
 	if err = os.MkdirAll(opts.path, 0744); err != nil {
 		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 	}
@@ -224,9 +225,10 @@ func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
 	var val []byte
 	err = db.View(ctx, func(tx Tx) error {
 		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
-		if lmdb.IsNotFound(err2) {
-			return nil
-		} else if err2 != nil {
+		if err2 != nil {
+			if lmdb.IsNotFound(err2) {
+				return nil
+			}
 			return err2
 		}
 		if v != nil {
@@ -248,9 +250,10 @@ func (db *LmdbKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
 	var has bool
 	err = db.View(ctx, func(tx Tx) error {
 		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
-		if lmdb.IsNotFound(err2) {
-			return nil
-		} else if err2 != nil {
+		if err2 != nil {
+			if lmdb.IsNotFound(err2) {
+				return nil
+			}
 			return err2
 		}
 		has = v != nil
@@ -415,8 +418,11 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 	}
 
 	val, err = b.tx.tx.Get(b.dbi, key)
-	if lmdb.IsNotFound(err) {
-		return nil, nil
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return val, err
 }
@@ -443,8 +449,11 @@ func (b *lmdbBucket) Delete(key []byte) error {
 	}
 
 	err := b.tx.tx.Del(b.dbi, key, nil)
-	if lmdb.IsNotFound(err) {
-		return nil
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil
+		}
+		return err
 	}
 	return err
 }
@@ -524,15 +533,14 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
 		c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
-
-	}
-	if lmdb.IsNotFound(c.err) {
-		return nil, c.v, nil
 	}
 	if c.err != nil {
+		if lmdb.IsNotFound(c.err) {
+			return nil, nil, nil
+		}
 		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
 	}
-	if !bytes.HasPrefix(c.k, c.prefix) {
+	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 
@@ -551,13 +559,13 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 	}
 
 	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.Next)
-	if lmdb.IsNotFound(c.err) {
-		return nil, c.v, nil
-	}
 	if c.err != nil {
+		if lmdb.IsNotFound(c.err) {
+			return nil, nil, nil
+		}
 		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Next(): %w", c.err)
 	}
-	if !bytes.HasPrefix(c.k, c.prefix) {
+	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 
@@ -645,13 +653,14 @@ func (c *lmdbNoValuesCursor) First() ([]byte, uint32, error) {
 	} else {
 		c.k, c.v, c.err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
 	}
-	if lmdb.IsNotFound(c.err) {
-		return []byte{}, uint32(len(c.v)), nil
-	}
 	if c.err != nil {
+		if lmdb.IsNotFound(c.err) {
+			return []byte{}, uint32(len(c.v)), nil
+		}
 		return []byte{}, 0, c.err
 	}
-	if !bytes.HasPrefix(c.k, c.prefix) {
+
+	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 	return c.k, uint32(len(c.v)), c.err
@@ -669,13 +678,13 @@ func (c *lmdbNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	}
 
 	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetKey)
-	if lmdb.IsNotFound(c.err) {
-		return nil, uint32(len(c.v)), nil
-	}
 	if c.err != nil {
+		if lmdb.IsNotFound(c.err) {
+			return []byte{}, uint32(len(c.v)), nil
+		}
 		return []byte{}, 0, c.err
 	}
-	if !bytes.HasPrefix(c.k, c.prefix) {
+	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 
@@ -694,13 +703,13 @@ func (c *lmdbNoValuesCursor) Next() ([]byte, uint32, error) {
 	}
 
 	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.Next)
-	if lmdb.IsNotFound(c.err) {
-		return nil, uint32(len(c.v)), nil
-	}
 	if c.err != nil {
+		if lmdb.IsNotFound(c.err) {
+			return []byte{}, uint32(len(c.v)), nil
+		}
 		return []byte{}, 0, c.err
 	}
-	if !bytes.HasPrefix(c.k, c.prefix) {
+	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 		c.k, c.v = nil, nil
 	}
 
