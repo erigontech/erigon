@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"sort"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -158,12 +160,80 @@ func (b *appendSortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
+func NewOldestEntryBuffer(bufferOptimalSize int) *oldestEntrySortableBuffer {
+	return &oldestEntrySortableBuffer{
+		entries:     make(map[string][]byte),
+		size:        0,
+		optimalSize: bufferOptimalSize,
+	}
+}
+
+type oldestEntrySortableBuffer struct {
+	entries     map[string][]byte
+	size        int
+	optimalSize int
+	sortedBuf   []sortableBufferEntry
+}
+
+func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
+	_, ok := b.entries[string(k)]
+	if ok {
+		// if we already had this entry, we are going to keep it and ignore new value
+		return
+	}
+
+	b.size += len(k)
+	b.size += len(v)
+	b.entries[string(k)] = common.CopyBytes(v)
+}
+
+func (b *oldestEntrySortableBuffer) Size() int {
+	return b.size
+}
+
+func (b *oldestEntrySortableBuffer) Len() int {
+	return len(b.entries)
+}
+func (b *oldestEntrySortableBuffer) Sort() {
+	for i := range b.entries {
+		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
+	}
+	sort.Sort(b)
+}
+
+func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
+	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
+}
+
+func (b *oldestEntrySortableBuffer) Swap(i, j int) {
+	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
+}
+
+func (b *oldestEntrySortableBuffer) Get(i int) sortableBufferEntry {
+	return b.sortedBuf[i]
+}
+func (b *oldestEntrySortableBuffer) Reset() {
+	b.sortedBuf = b.sortedBuf[:0]
+	b.entries = make(map[string][]byte)
+	b.size = 0
+}
+
+func (b *oldestEntrySortableBuffer) GetEntries() []sortableBufferEntry {
+	return b.sortedBuf
+}
+
+func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
+	return b.size >= b.optimalSize
+}
+
 func getBufferByType(tp int, size int) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
 		return NewSortableBuffer(size)
 	case SortableAppendBuffer:
 		return NewAppendBuffer(size)
+	case SortableOldestAppearedBuffer:
+		return NewOldestEntryBuffer(size)
 	default:
 		panic("unknown buffer type " + strconv.Itoa(tp))
 	}
