@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 	"golang.org/x/sync/errgroup"
-	"io"
-	"time"
 )
 
 var (
@@ -54,7 +55,7 @@ func NextKey(key []byte) ([]byte, error) {
 // loaded from files into a DB
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
-type LoadCommitHandler func(key []byte, isDone bool)
+type LoadCommitHandler func(ethdb.Putter, []byte, bool) error
 
 type TransformArgs struct {
 	ExtractStartKey []byte

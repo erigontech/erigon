@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"io"
+	"runtime"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
-	"io"
-	"runtime"
 )
 
 type LoadNextFunc func(k []byte, v []byte) error
@@ -112,11 +113,11 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		}
 		batchSize := batch.BatchSize()
 		if batchSize > batch.IdealBatchSize() || args.loadBatchSize > 0 && batchSize > args.loadBatchSize {
+			if args.OnLoadCommit != nil {
+				args.OnLoadCommit(batch, k, false)
+			}
 			if _, err := batch.Commit(); err != nil {
 				return err
-			}
-			if args.OnLoadCommit != nil {
-				args.OnLoadCommit(k, false)
 			}
 			var currentKeyStr string
 			if len(k) < 4 {
@@ -152,9 +153,9 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			return fmt.Errorf("error while reading next element from disk: %v", err)
 		}
 	}
-	_, err := batch.Commit()
 	if args.OnLoadCommit != nil {
-		args.OnLoadCommit([]byte{}, true)
+		args.OnLoadCommit(batch, []byte{}, true)
 	}
+	_, err := batch.Commit()
 	return err
 }

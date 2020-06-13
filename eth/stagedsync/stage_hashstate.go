@@ -44,7 +44,7 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 
 	if core.UsePlainStateExecution {
 		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
-		err := promoteHashedState(stateDB, hashProgress, syncHeadNumber, datadir, quit)
+		err := promoteHashedState(s, stateDB, hashProgress, syncHeadNumber, datadir, quit)
 		if err != nil {
 			return err
 		}
@@ -101,28 +101,64 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 	return nil
 }
 
-func promoteHashedState(db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
+func promoteHashedState(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
 	if from == 0 {
-		return promoteHashedStateCleanly(db, datadir, quit)
+		return promoteHashedStateCleanly(s, db, to, datadir, quit)
 	}
 	return promoteHashedStateIncrementally(from, to, db, datadir, quit)
 }
 
-func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan struct{}) error {
-	if err := common.Stopped(quit); err != nil {
+func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, datadir string, quit chan struct{}) error {
+	var err error
+	if err = common.Stopped(quit); err != nil {
 		return err
 	}
-	err := etl.Transform(
-		db,
-		dbutils.PlainStateBucket,
-		dbutils.CurrentStateBucket,
-		datadir,
-		keyTransformExtractFunc(transformPlainStateKey),
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{Quit: quit},
-	)
+	var loadStartKey []byte
+	skipCurrentState := false
+	if len(s.StageData) > 0 && s.StageData[0] == byte(0xFF) {
+		if len(s.StageData) == 1 {
+			skipCurrentState = true
+		} else {
+			loadStartKey, err = etl.NextKey(s.StageData)
+			return err
+		}
+	}
 
-	if err != nil {
+	if !skipCurrentState {
+		toStateStageData := func(k []byte) []byte {
+			return append([]byte{0xFF}, k...)
+		}
+
+		err = etl.Transform(
+			db,
+			dbutils.PlainStateBucket,
+			dbutils.CurrentStateBucket,
+			datadir,
+			keyTransformExtractFunc(transformPlainStateKey),
+			etl.IdentityLoadFunc,
+			etl.TransformArgs{
+				Quit:         quit,
+				LoadStartKey: loadStartKey,
+				OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
+					if isDone {
+						return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(nil))
+					}
+					return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(key))
+				},
+			},
+		)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	toCodeStageData := func(k []byte) []byte {
+		return append([]byte{0xCD}, k...)
+	}
+
+	if len(s.StageData) > 0 && s.StageData[0] == byte(0xCD) {
+		loadStartKey, err = etl.NextKey(s.StageData)
 		return err
 	}
 
@@ -133,7 +169,16 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		datadir,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
-		etl.TransformArgs{Quit: quit},
+		etl.TransformArgs{
+			Quit:         quit,
+			LoadStartKey: loadStartKey,
+			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return s.UpdateWithStageData(batch, to, nil)
+				}
+				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
+			},
+		},
 	)
 }
 
@@ -513,7 +558,14 @@ func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
 		if err := p.mergeFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
 			return err
 		}
-		if err := collector.Load(p.db, dbutils.CurrentStateBucket, keyTransformLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+		if err := collector.Load(
+			p.db,
+			dbutils.CurrentStateBucket,
+			keyTransformLoadFunc,
+			etl.TransformArgs{
+				Quit: p.quitCh,
+			},
+		); err != nil {
 			return err
 		}
 	}
