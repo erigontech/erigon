@@ -57,9 +57,6 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 				copy(hashes[hashCount][:], v)
 			}
 			hashCount++
-			if hashCount >= len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
-				return false, nil
-			}
 			return true, nil
 		}
 		if len(k) != 8+common.HashLength {
@@ -71,7 +68,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 			return false, err1
 		}
 		headers[common.BytesToHash(k[8:])] = header
-		return true, nil
+		return hashCount < len(hashes), nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("walking over canonical hashes: %w", err)
