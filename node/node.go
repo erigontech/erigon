@@ -659,7 +659,7 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	if n.config.LMDB {
 		log.Info("Opening Database (LMDB)")
 		dir := n.config.ResolvePath(name + "_lmdb")
-		kv, err := ethdb.NewLMDB().Path(dir).Open(context.Background())
+		kv, err := ethdb.NewLMDB().Path(dir).Open()
 		if err != nil {
 			return nil, err
 		}

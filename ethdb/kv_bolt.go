@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 var (
@@ -17,15 +20,85 @@ var (
 	boltCursorPool = sync.Pool{New: func() interface{} { return &boltCursor{} }}
 )
 
+var valueBytesMetrics []metrics.Gauge
+var keyBytesMetrics []metrics.Gauge
+var totalBytesPutMetrics []metrics.Gauge
+var totalBytesDeleteMetrics []metrics.Gauge
+var keyNMetrics []metrics.Gauge
+
+func init() {
+	if metrics.Enabled {
+		for i := range dbutils.Buckets {
+			b := strings.ToLower(string(dbutils.Buckets[i]))
+			b = strings.Replace(b, "-", "_", -1)
+			valueBytesMetrics = append(valueBytesMetrics, metrics.NewRegisteredGauge("db/bucket/value_bytes/"+b, nil))
+			keyBytesMetrics = append(keyBytesMetrics, metrics.NewRegisteredGauge("db/bucket/key_bytes/"+b, nil))
+			totalBytesPutMetrics = append(totalBytesPutMetrics, metrics.NewRegisteredGauge("db/bucket/bytes_put_total/"+b, nil))
+			totalBytesDeleteMetrics = append(totalBytesDeleteMetrics, metrics.NewRegisteredGauge("db/bucket/bytes_delete_total/"+b, nil))
+			keyNMetrics = append(keyNMetrics, metrics.NewRegisteredGauge("db/bucket/keys/"+b, nil))
+		}
+	}
+}
+
+func collectBoltMetrics(ctx context.Context, db *bolt.DB, refresh time.Duration) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		time.Sleep(refresh)
+
+		stats := db.Stats()
+		boltPagesFreeGauge.Update(int64(stats.FreePageN))
+		boltPagesPendingGauge.Update(int64(stats.PendingPageN))
+		boltPagesAllocGauge.Update(int64(stats.FreeAlloc))
+		boltFreelistInuseGauge.Update(int64(stats.FreelistInuse))
+
+		boltTxGauge.Update(int64(stats.TxN))
+		boltTxOpenGauge.Update(int64(stats.OpenTxN))
+		boltTxCursorGauge.Update(int64(stats.TxStats.CursorCount))
+
+		boltRebalanceGauge.Update(int64(stats.TxStats.Rebalance))
+		boltRebalanceTimer.Update(stats.TxStats.RebalanceTime)
+
+		boltSplitGauge.Update(int64(stats.TxStats.Split))
+		boltSpillGauge.Update(int64(stats.TxStats.Spill))
+		boltSpillTimer.Update(stats.TxStats.SpillTime)
+
+		boltWriteGauge.Update(int64(stats.TxStats.Write))
+		boltWriteTimer.Update(stats.TxStats.WriteTime)
+
+		if len(valueBytesMetrics) == 0 {
+			continue
+		}
+		writeStats := db.WriteStats()
+		for i := range dbutils.Buckets {
+			st, ok := writeStats[string(dbutils.Buckets[i])]
+			if !ok {
+				continue
+			}
+
+			valueBytesMetrics[i].Update(int64(st.ValueBytesN))
+			keyBytesMetrics[i].Update(int64(st.KeyBytesN))
+			totalBytesPutMetrics[i].Update(int64(st.TotalBytesPut))
+			totalBytesDeleteMetrics[i].Update(int64(st.TotalBytesDelete))
+			keyNMetrics[i].Update(int64(st.KeyN))
+		}
+	}
+}
+
 type boltOpts struct {
 	Bolt *bolt.Options
 	path string
 }
 
 type BoltKV struct {
-	opts boltOpts
-	bolt *bolt.DB
-	log  log.Logger
+	opts        boltOpts
+	bolt        *bolt.DB
+	log         log.Logger
+	stopMetrics context.CancelFunc
 }
 
 type boltTx struct {
@@ -89,14 +162,22 @@ func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 		}
 	}
 
-	return &BoltKV{
+	db := &BoltKV{
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-	}, nil
+	}
+
+	if metrics.Enabled {
+		ctx, cancel := context.WithCancel(context.Background())
+		db.stopMetrics = cancel
+		go collectBoltMetrics(ctx, boltDB, 3*time.Second)
+	}
+
+	return db, nil
 }
 
-func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
+func (opts boltOpts) Open() (db KV, err error) {
 	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
 	if err != nil {
 		return nil, err
@@ -104,8 +185,8 @@ func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
 	return opts.WrapBoltDB(boltDB)
 }
 
-func (opts boltOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts boltOpts) MustOpen() KV {
+	db, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
@@ -121,6 +202,10 @@ func NewBolt() boltOpts {
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *BoltKV) Close() {
+	if db.stopMetrics != nil {
+		db.stopMetrics()
+	}
+
 	if db.bolt != nil {
 		if err := db.bolt.Close(); err != nil {
 			db.log.Warn("failed to close bolt DB", "err", err)
@@ -148,6 +233,38 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 		}
 	}
 	return res, nil
+}
+
+func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
+	var err error
+	var val []byte
+	err = db.bolt.View(func(tx *bolt.Tx) error {
+		v, _ := tx.Bucket(bucket).Get(key)
+		if v != nil {
+			val = make([]byte, len(v))
+			copy(val, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+func (db *BoltKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
+	var has bool
+	err := db.bolt.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			has = false
+		} else {
+			v, _ := b.Get(key)
+			has = v != nil
+		}
+		return nil
+	})
+	return has, err
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {

@@ -20,6 +20,7 @@ import (
 var (
 	lmdbKvTxPool     = sync.Pool{New: func() interface{} { return &lmdbTx{} }}
 	lmdbKvCursorPool = sync.Pool{New: func() interface{} { return &lmdbCursor{} }}
+	lmdbKvBucketPool = sync.Pool{New: func() interface{} { return &lmdbBucket{} }}
 )
 
 type lmdbOpts struct {
@@ -43,7 +44,7 @@ func (opts lmdbOpts) ReadOnly() lmdbOpts {
 	return opts
 }
 
-func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
+func (opts lmdbOpts) Open() (KV, error) {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
@@ -114,40 +115,28 @@ func (opts lmdbOpts) Open(ctx context.Context) (KV, error) {
 		}
 	}
 
-	go func() {
-		for {
-			tick := time.NewTicker(time.Minute)
-			select {
-			case <-ctx.Done():
-				tick.Stop()
-				return
-			case <-tick.C:
-				// In any real application it is important to check for readers that were
-				// never closed by their owning process, and for which the owning process
-				// has exited.  See the documentation on transactions for more information.
-				staleReaders, err2 := env.ReaderCheck()
-				if err2 != nil {
-					logger.Error("failed ReaderCheck", "err", err2)
-				}
-				if staleReaders > 0 {
-					logger.Info("cleared reader slots from dead processes", "amount", staleReaders)
-				}
-			}
-		}
-	}()
-
-	return &LmdbKV{
+	db := &LmdbKV{
 		opts:            opts,
 		env:             env,
 		log:             logger,
 		buckets:         buckets,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
-	}, nil
+	}
+
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	db.stopStaleReadsCheck = ctxCancel
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		db.staleReadsCheckLoop(ctx, ticker)
+	}()
+
+	return db, nil
 }
 
-func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts lmdbOpts) MustOpen() KV {
+	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open lmdb: %w", err))
 	}
@@ -155,21 +144,47 @@ func (opts lmdbOpts) MustOpen(ctx context.Context) KV {
 }
 
 type LmdbKV struct {
-	opts            lmdbOpts
-	env             *lmdb.Env
-	log             log.Logger
-	buckets         []lmdb.DBI
-	lmdbTxPool      *lmdbpool.TxnPool // pool of lmdb.Txn objects
-	lmdbCursorPools []sync.Pool       // pool of lmdb.Cursor objects
+	opts                lmdbOpts
+	env                 *lmdb.Env
+	log                 log.Logger
+	buckets             []lmdb.DBI
+	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
+	lmdbCursorPools     []sync.Pool       // pool of lmdb.Cursor objects
+	stopStaleReadsCheck context.CancelFunc
 }
 
 func NewLMDB() lmdbOpts {
 	return lmdbOpts{}
 }
 
+// staleReadsCheckLoop - In any real application it is important to check for readers that were
+// never closed by their owning process, and for which the owning process
+// has exited.  See the documentation on transactions for more information.
+func (db *LmdbKV) staleReadsCheckLoop(ctx context.Context, ticker *time.Ticker) {
+	for {
+		// check once on app start
+		staleReaders, err2 := db.env.ReaderCheck()
+		if err2 != nil {
+			db.log.Error("failed ReaderCheck", "err", err2)
+		}
+		if staleReaders > 0 {
+			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
+	if db.stopStaleReadsCheck != nil {
+		db.stopStaleReadsCheck()
+	}
 	db.lmdbTxPool.Close()
 
 	if db.env != nil {
@@ -197,6 +212,58 @@ func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
 
 func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
 	return map[string]common.StorageBucketWriteStats{}, nil
+}
+
+func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
+	id, ok := dbutils.BucketsIndex[string(bucket)]
+	if !ok {
+		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
+	}
+	return db.buckets[id]
+}
+
+func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
+	dbi := db.dbi(bucket)
+	var err error
+	var val []byte
+	err = db.View(ctx, func(tx Tx) error {
+		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
+		if lmdb.IsNotFound(err2) {
+			return nil
+		} else if err2 != nil {
+			return err2
+		}
+		if v != nil {
+			val = make([]byte, len(v))
+			copy(val, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+func (db *LmdbKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
+	dbi := db.dbi(bucket)
+
+	var err error
+	var has bool
+	err = db.View(ctx, func(tx Tx) error {
+		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
+		if lmdb.IsNotFound(err2) {
+			return nil
+		} else if err2 != nil {
+			return err2
+		}
+		has = v != nil
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return has, nil
 }
 
 func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
@@ -229,6 +296,7 @@ type lmdbTx struct {
 	ctx     context.Context
 	db      *LmdbKV
 	cursors []*lmdbCursor
+	buckets []*lmdbBucket
 }
 
 type lmdbBucket struct {
@@ -239,7 +307,7 @@ type lmdbBucket struct {
 
 type lmdbCursor struct {
 	ctx    context.Context
-	bucket lmdbBucket
+	bucket *lmdbBucket
 	prefix []byte
 
 	cursor *lmdb.Cursor
@@ -256,6 +324,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t.db = db
 	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
+		tx.RawRead = true
 		t.tx = tx
 		return f(t)
 	})
@@ -268,6 +337,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t.db = db
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
+		tx.RawRead = true
 		t.tx = tx
 		return f(t)
 	})
@@ -279,7 +349,18 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
 	}
 
-	return lmdbBucket{tx: tx, dbi: tx.db.buckets[id], id: id}
+	b := lmdbKvBucketPool.Get().(*lmdbBucket)
+	b.tx = tx
+	b.dbi = tx.db.buckets[id]
+	b.id = id
+
+	// add to auto-close on end of transactions
+	if b.tx.buckets == nil {
+		b.tx.buckets = make([]*lmdbBucket, 0, 1)
+	}
+	b.tx.buckets = append(b.tx.buckets, b)
+
+	return b
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -305,6 +386,10 @@ func (tx *lmdbTx) closeCursors() {
 		lmdbKvCursorPool.Put(c)
 	}
 	tx.cursors = tx.cursors[:0]
+	for _, b := range tx.buckets {
+		lmdbKvBucketPool.Put(b)
+	}
+	tx.buckets = tx.buckets[:0]
 }
 
 func (c *lmdbCursor) Prefix(v []byte) Cursor {
@@ -340,7 +425,7 @@ func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
 	return val, err
 }
 
-func (b lmdbBucket) Put(key []byte, value []byte) error {
+func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
@@ -354,7 +439,7 @@ func (b lmdbBucket) Put(key []byte, value []byte) error {
 	return nil
 }
 
-func (b lmdbBucket) Delete(key []byte) error {
+func (b *lmdbBucket) Delete(key []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
@@ -368,7 +453,7 @@ func (b lmdbBucket) Delete(key []byte) error {
 	return err
 }
 
-func (b lmdbBucket) Size() (uint64, error) {
+func (b *lmdbBucket) Size() (uint64, error) {
 	st, err := b.tx.tx.Stat(b.dbi)
 	if err != nil {
 		return 0, err
@@ -376,7 +461,7 @@ func (b lmdbBucket) Size() (uint64, error) {
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
-func (b lmdbBucket) Cursor() Cursor {
+func (b *lmdbBucket) Cursor() Cursor {
 	c := lmdbKvCursorPool.Get().(*lmdbCursor)
 	c.ctx = b.tx.ctx
 	c.bucket = b

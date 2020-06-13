@@ -99,6 +99,9 @@ test-lmdb: semantics/z3/build/libz3.a all
 test-badger: semantics/z3/build/libz3.a all
 	TEST_DB=badger $(GORUN) build/ci.go test
 
+test-bolt: semantics/z3/build/libz3.a all
+	TEST_DB=bolt $(GORUN) build/ci.go test
+
 lint: lintci
 
 lintci: semantics/z3/build/libz3.a all

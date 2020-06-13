@@ -1,6 +1,6 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-github.com/AskAlexSharov/lmdb-go v1.8.1-0.20200609024141-123c53568c38 h1:0lvFLmXBPIKQSwbMBc6CC+v93gqWn/wiwmlEs1/EURE=
-github.com/AskAlexSharov/lmdb-go v1.8.1-0.20200609024141-123c53568c38/go.mod h1:k7Jo/kN60Hq1MTBwsVSp2JllEs5Tyhd4MZ7tY9smjeA=
+github.com/AskAlexSharov/lmdb-go v1.9.0 h1:lXbgv+ERzRsLOiZi53tu2MOLuOZy6vSLFL8qlfSbLWU=
+github.com/AskAlexSharov/lmdb-go v1.9.0/go.mod h1:k7Jo/kN60Hq1MTBwsVSp2JllEs5Tyhd4MZ7tY9smjeA=
 github.com/Azure/azure-pipeline-go v0.2.1 h1:OLBdZJ3yvOn2MezlWvbrBMTEUQC72zAftRZOMdj5HYo=
 github.com/Azure/azure-pipeline-go v0.2.1/go.mod h1:UGSo8XybXnIGZ3epmeBw7Jdz+HiUVpqIlpz/HKHylF4=
 github.com/Azure/azure-storage-blob-go v0.8.0 h1:53qhf0Oxa0nOjgbDeeYPUeyiNmafAFEY95rZLK0Tj6o=

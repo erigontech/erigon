@@ -59,6 +59,7 @@ type BoltDatabase struct {
 
 	stopNetInterface context.CancelFunc
 	netAddr          string
+	stopMetrics      context.CancelFunc
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
@@ -100,41 +101,18 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		db.NoSync = true
 	}
 
-	if metrics.Enabled {
-		go CollectBoltMetrics(db, 3*time.Second)
-	}
-
-	return &BoltDatabase{
+	bdb := &BoltDatabase{
 		db:  db,
 		log: logger,
 		id:  id(),
-	}, nil
-}
-
-func CollectBoltMetrics(db *bolt.DB, refresh time.Duration) {
-	for {
-		time.Sleep(refresh)
-
-		stats := db.Stats()
-		boltPagesFreeGauge.Update(int64(stats.FreePageN))
-		boltPagesPendingGauge.Update(int64(stats.PendingPageN))
-		boltPagesAllocGauge.Update(int64(stats.FreeAlloc))
-		boltFreelistInuseGauge.Update(int64(stats.FreelistInuse))
-
-		boltTxGauge.Update(int64(stats.TxN))
-		boltTxOpenGauge.Update(int64(stats.OpenTxN))
-		boltTxCursorGauge.Update(int64(stats.TxStats.CursorCount))
-
-		boltRebalanceGauge.Update(int64(stats.TxStats.Rebalance))
-		boltRebalanceTimer.Update(stats.TxStats.RebalanceTime)
-
-		boltSplitGauge.Update(int64(stats.TxStats.Split))
-		boltSpillGauge.Update(int64(stats.TxStats.Spill))
-		boltSpillTimer.Update(stats.TxStats.SpillTime)
-
-		boltWriteGauge.Update(int64(stats.TxStats.Write))
-		boltWriteTimer.Update(stats.TxStats.WriteTime)
 	}
+	if metrics.Enabled {
+		ctx, cancel := context.WithCancel(context.Background())
+		bdb.stopMetrics = cancel
+		go collectBoltMetrics(ctx, db, 3*time.Second)
+	}
+
+	return bdb, nil
 }
 
 // Put inserts or updates a single entry.
@@ -162,16 +140,15 @@ func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			}
 			c := b.Cursor()
 			l := (bucketEnd - bucketStart) / 3
-			pairs := make([][]byte, 2*l)
 			for i := 0; i < l; i++ {
-				pairs[2*i] = tuples[bucketStart+3*i+1]
-				pairs[2*i+1] = tuples[bucketStart+3*i+2]
-				if pairs[2*i+1] == nil {
-					if err := c.Delete2(pairs[2*i]); err != nil {
+				k := tuples[bucketStart+3*i+1]
+				v := tuples[bucketStart+3*i+2]
+				if v == nil {
+					if err := c.Delete2(k); err != nil {
 						return err
 					}
 				} else {
-					if err := c.Put(pairs[2*i], pairs[2*i+1]); err != nil {
+					if err := c.Put(k, v); err != nil {
 						return err
 					}
 				}
@@ -258,6 +235,17 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func Get(db KV, bucket, key []byte) ([]byte, error) {
+	if getter, ok := db.(NativeGet); ok {
+		dat, err := getter.Get(context.Background(), bucket, key)
+		if err != nil {
+			return nil, err
+		}
+		if dat == nil {
+			return nil, ErrKeyNotFound
+		}
+		return dat, nil
+	}
+
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.View(context.Background(), func(tx Tx) error {
@@ -448,6 +436,10 @@ func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
 }
 
 func (db *BoltDatabase) Close() {
+	if db.stopMetrics != nil {
+		db.stopMetrics()
+	}
+
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 	} else {

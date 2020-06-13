@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	logInterval = 30    // seconds
-	prof        = false // whether to profile
+	logInterval = 30 // seconds
 )
 
 type progressLogger struct {

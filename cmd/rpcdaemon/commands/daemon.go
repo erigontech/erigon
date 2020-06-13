@@ -266,7 +266,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 
-	db, err := ethdb.NewRemote().Path(cfg.remoteDbAddress).Open(cmd.Context())
+	db, err := ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
