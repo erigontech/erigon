@@ -102,7 +102,7 @@ func unwindTxLookup(u *UnwindState, db ethdb.Database, quitCh chan struct{}) err
 	}
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind TxLookup: %w", err)
-	}	
+	}
 	return nil
 }
 
