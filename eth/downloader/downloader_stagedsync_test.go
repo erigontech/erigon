@@ -20,7 +20,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	//"time"
 )
 
 type stagedSyncTester struct {
@@ -290,6 +289,7 @@ func TestUnwind(t *testing.T) {
 	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
 	}
+	// Need to call sync twice, because the first call is terminated by the unwinding
 	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
 	}
