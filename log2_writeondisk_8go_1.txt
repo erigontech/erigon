@@ -1,0 +1,317 @@
+INFO [06-12|22:36:26.433] Starting Geth on Ethereum mainnet... 
+WARN [06-12|22:36:26.433] Sanitizing cache to Go's GC limits       provided=16384 updated=16084
+INFO [06-12|22:36:26.434] Maximum peer count                       ETH=50 LES=0 total=50
+INFO [06-12|22:36:26.435] setting up plain text execution          plain=true
+INFO [06-12|22:36:26.435] Starting peer-to-peer node               instance=turbo-geth/v1.9.14-stable-c2c6a0d0/linux-amd64/go1.14.3
+INFO [06-12|22:36:26.436] Allocated trie memory caches             clean=6.28GiB dirty=0.00B
+INFO [06-12|22:36:26.436] Opening Database (Badger) 
+INFO [06-12|22:36:26.436] Bumping GOMAXPROCS                       database=/home/eugene/.ethereum/geth/chaindata_badger old=8 new=128
+badger 2020/06/12 22:36:27 INFO: All 25 tables opened in 583ms
+badger 2020/06/12 22:36:27 INFO: Replaying file id: 185 at offset: 724039706
+badger 2020/06/12 22:36:27 INFO: Replay took: 6.107µs
+badger 2020/06/12 22:36:27 DEBUG: Value log discard stats empty
+INFO [06-12|22:36:27.071] Initialised chain configuration          config="{ChainID: 1 Homestead: 1150000 DAO: 1920000 DAOSupport: true EIP150: 2463000 EIP155: 2675000 EIP158: 2675000 Byzantium: 4370000 Constantinople: 7280000 Petersburg: 7280000 Istanbul: 9069000, Muir Glacier: 9200000, Engine: ethash}"
+INFO [06-12|22:36:27.071] Disk storage enabled for ethash caches   dir=/home/eugene/.ethereum/geth/ethash count=3
+INFO [06-12|22:36:27.071] Disk storage enabled for ethash DAGs     dir=/home/eugene/.ethash               count=2
+INFO [06-12|22:36:27.071] Initialising Ethereum protocol           versions="[65 64 63]" network=1
+INFO [06-12|22:36:27.073] Loaded most recent local header          number=10252782 hash="162d97…e49d87" td=15852722716025094455271 age=2m59s
+INFO [06-12|22:36:27.073] Loaded most recent local full block      number=0        hash="d4e567…cb8fa3" td=17179869184             age=51y2mo5d
+INFO [06-12|22:36:27.073] Loaded most recent local fast block      number=0        hash="d4e567…cb8fa3" td=17179869184             age=51y2mo5d
+INFO [06-12|22:36:27.073] Creating IntraBlockState from latest state block=0 isNIl=true callers="[github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbState github.com/ledgerwatch/turbo-geth/eth.NewProtocolManager github.com/ledgerwatch/turbo-geth/eth.New github.com/ledgerwatch/turbo-geth/cmd/utils.RegisterEthService.func1 github.com/ledgerwatch/turbo-geth/node.(*Node).Start github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode main.startNode main.geth github.com/urfave/cli.HandleAction github.com/urfave/cli.(*App).Run main.main runtime.main runtime.goexit]"
+INFO [06-12|22:36:27.073] Creation complete. 
+WARN [06-12|22:36:27.073] trieDbState has been changed             isNil=false callers="[github.com/ledgerwatch/turbo-geth/core.(*BlockChain).setTrieDbState github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbState github.com/ledgerwatch/turbo-geth/eth.NewProtocolManager github.com/ledgerwatch/turbo-geth/eth.New github.com/ledgerwatch/turbo-geth/cmd/utils.RegisterEthService.func1 github.com/ledgerwatch/turbo-geth/node.(*Node).Start github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode main.startNode main.geth github.com/urfave/cli.HandleAction github.com/urfave/cli.(*App).Run main.main runtime.main runtime.goexit]"
+INFO [06-12|22:36:27.073] Creation complete. 
+INFO [06-12|22:36:27.074] Initialising Merry-Go-Round protocol     versions=[1]
+INFO [06-12|22:36:27.088] New local node record                    seq=91 id=87a55c795108ca5a ip=127.0.0.1 udp=30303 tcp=30303
+INFO [06-12|22:36:27.089] Started P2P networking                   self=enode://868ca453103635f9d2069c2b563c5117f570951e5e5d8bf4f819882a3b16bc1777bd6df381b5e536bb93b3ca1d50d38d9282f751c25bd470b02fdce10e6045f3@127.0.0.1:30303
+INFO [06-12|22:36:27.090] IPC endpoint opened                      url=/home/eugene/.ethereum/geth.ipc
+INFO [06-12|22:36:27.106] Mapped network port                      proto=tcp extport=30303 intport=30303 interface=NAT-PMP(192.168.0.1)
+INFO [06-12|22:36:27.115] Mapped network port                      proto=udp extport=30303 intport=30303 interface=NAT-PMP(192.168.0.1)
+INFO [06-12|22:36:27.165] New local node record                    seq=92 id=87a55c795108ca5a ip=37.204.152.238 udp=30303 tcp=30303
+INFO [06-12|22:36:36.762] Block synchronisation started 
+INFO [06-12|22:36:37.172] Looking for peers                        peercount=5 tried=44 static=0
+INFO [06-12|22:36:47.305] Looking for peers                        peercount=8 tried=40 static=0
+INFO [06-12|22:36:57.114] Sync stage 1/3. Downloading headers... 
+INFO [06-12|22:36:57.852] Looking for peers                        peercount=7 tried=34 static=0
+INFO [06-12|22:37:08.191] Looking for peers                        peercount=11 tried=35 static=0
+INFO [06-12|22:37:13.142] Imported new block headers               count=10 elapsed=27.475ms number=10252792 hash="0e75f0…1f20a5"
+INFO [06-12|22:37:13.153] Database                                 size=153.35GiB written=41
+INFO [06-12|22:37:17.576] Imported new block headers               count=1  elapsed=8.925ms  number=10252793 hash="445f58…2ef587"
+INFO [06-12|22:37:17.582] Database                                 size=153.35GiB written=5
+INFO [06-12|22:37:18.195] Looking for peers                        peercount=13 tried=10 static=0
+INFO [06-12|22:37:23.201] Imported new block headers               count=1  elapsed=11.558ms number=10252794 hash="1b61cf…fe23ef"
+INFO [06-12|22:37:23.206] Database                                 size=153.35GiB written=5
+INFO [06-12|22:37:25.142] Checking for unwinding... 
+INFO [06-12|22:37:25.143] Checking for unwinding... Complete! 
+INFO [06-12|22:37:25.143] Sync stage 1/3. Downloading headers... DONE! 
+INFO [06-12|22:37:25.143] Sync stage 2/3. Downloading block bodies... 
+INFO [06-12|22:37:27.067] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-12|22:37:28.236] Looking for peers                        peercount=16 tried=11 static=0
+INFO [06-12|22:37:46.111] Inserting chain                          start=10252782 end=10252792 current=0 currentHeader=10252794
+INFO [06-12|22:37:46.126] Imported new chain segment               blocks=11 txs=1295 mgas=0.000 elapsed=14.345ms mgasps=0.000 number=10252792 hash="0e75f0…1f20a5" batch=336.94KiB age=1m19s
+INFO [06-12|22:37:46.136] Memory                                   nodes size=0 hashes=0 alloc=375340 sys=482412 numGC=18
+INFO [06-12|22:37:46.136] Database                                 size=153.35GiB written=11
+INFO [06-12|22:37:48.759] Looking for peers                        peercount=20 tried=4  static=0
+INFO [06-12|22:37:58.832] Looking for peers                        peercount=18 tried=8  static=0
+INFO [06-12|22:38:06.618] Inserting chain                          start=10252793 end=10252793 current=0 currentHeader=10252794
+INFO [06-12|22:38:06.620] Imported new chain segment               blocks=1  txs=174  mgas=0.000 elapsed=1.587ms  mgasps=0.000 number=10252793 hash="445f58…2ef587" batch=37.01KiB  age=1m17s
+INFO [06-12|22:38:06.630] Memory                                   nodes size=0 hashes=0 alloc=403724 sys=482476 numGC=18
+INFO [06-12|22:38:06.630] Database                                 size=153.35GiB written=1
+INFO [06-12|22:38:06.635] Sync stage 2/3. Downloading block bodies... DONE! 
+INFO [06-12|22:38:06.635] Sync stage 2/3. Downloading block bodies... 
+INFO [06-12|22:38:06.659] Sync stage 2/3. Downloading block bodies... DONE! 
+INFO [06-12|22:38:06.659] Sync stage 3/3. Recovering senders from tx signatures... 
+================= 3 32
+INFO [06-12|22:38:06.893] Sync (Senders): Started recoverer goroutines numOfGoroutines=32
+recoverSenders started
+recoverSenders started
+DONE?
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+recoverSenders started
+Storing into a file
+xxx writeOnDiskBatch
+INFO [06-12|22:38:07.215] Dumped on a disk:                        blockNumber=10000 out=1 in=0 written=0  txs=0    bufLen=9 bufCap=9990010 toWriteLen=0 toWriteCap=819200000 alloc=1663094 sys=1903126 numGC=20
+INFO [06-12|22:38:07.325] Dumped on a disk:                        blockNumber=20000 out=0 in=0 written=0  txs=0    bufLen=9 bufCap=9980010 toWriteLen=0 toWriteCap=819200000 alloc=1698007 sys=1904094 numGC=20
+INFO [06-12|22:38:07.448] Dumped on a disk:                        blockNumber=30000 out=0 in=0 written=0  txs=0    bufLen=9 bufCap=9970010 toWriteLen=0 toWriteCap=819200000 alloc=1733547 sys=1905054 numGC=20
+INFO [06-12|22:38:07.580] Dumped on a disk:                        blockNumber=40000 out=1 in=0 written=0  txs=0    bufLen=9 bufCap=9960010 toWriteLen=0 toWriteCap=819200000 alloc=1768973 sys=1905930 numGC=20
+INFO [06-12|22:38:07.728] Dumped on a disk:                        blockNumber=50000 out=2 in=0 written=0  txs=1868 bufLen=7 bufCap=9950010 toWriteLen=37360 toWriteCap=819200000 alloc=1810451 sys=1906698 numGC=20
+INFO [06-12|22:38:07.911] Dumped on a disk:                        blockNumber=60000 out=0 in=0 written=0  txs=5920 bufLen=7 bufCap=9940010 toWriteLen=118400 toWriteCap=819200000 alloc=1859867 sys=1976238 numGC=20
+INFO [06-12|22:38:08.131] Dumped on a disk:                        blockNumber=70000 out=3 in=0 written=0  txs=12597 bufLen=6 bufCap=9930010 toWriteLen=251940 toWriteCap=819200000 alloc=1916535 sys=2046448 numGC=20
+INFO [06-12|22:38:08.350] Dumped on a disk:                        blockNumber=80000 out=3 in=0 written=0  txs=16758 bufLen=41 bufCap=9920040 toWriteLen=335160 toWriteCap=819200000 alloc=1659723 sys=2047536 numGC=21
+INFO [06-12|22:38:08.528] Dumped on a disk:                        blockNumber=90000 out=65 in=0 written=0  txs=21926 bufLen=198 bufCap=9910230 toWriteLen=438520 toWriteCap=819200000 alloc=1714646 sys=2047728 numGC=21
+INFO [06-12|22:38:08.686] Dumped on a disk:                        blockNumber=100000 out=19 in=0 written=0  txs=26459 bufLen=28  bufCap=9900060 toWriteLen=529180 toWriteCap=819200000 alloc=1763544 sys=2047984 numGC=21
+INFO [06-12|22:38:08.856] Dumped on a disk:                        blockNumber=110000 out=0  in=0 written=0  txs=31374 bufLen=8   bufCap=9890010 toWriteLen=627480 toWriteCap=819200000 alloc=1814156 sys=2048240 numGC=21
+INFO [06-12|22:38:09.063] Dumped on a disk:                        blockNumber=120000 out=0  in=0 written=0  txs=37070 bufLen=676 bufCap=9880680 toWriteLen=741400 toWriteCap=819200000 alloc=1871303 sys=2048496 numGC=21
+INFO [06-12|22:38:09.327] Dumped on a disk:                        blockNumber=130000 out=5  in=0 written=0  txs=45537 bufLen=326 bufCap=9870330 toWriteLen=910740 toWriteCap=819200000 alloc=1918214 sys=2049264 numGC=22
+INFO [06-12|22:38:09.386] Looking for peers                        peercount=16 tried=7  static=0
+INFO [06-12|22:38:09.555] Dumped on a disk:                        blockNumber=140000 out=0  in=0 written=0  txs=53193 bufLen=360 bufCap=9860370 toWriteLen=1063860 toWriteCap=819200000 alloc=1692075 sys=2050416 numGC=22
+INFO [06-12|22:38:09.780] Dumped on a disk:                        blockNumber=150000 out=6  in=0 written=0  txs=61393 bufLen=1463 bufCap=9851480 toWriteLen=1227860 toWriteCap=819200000 alloc=1755373 sys=2050672 numGC=22
+INFO [06-12|22:38:10.028] Dumped on a disk:                        blockNumber=160000 out=1  in=0 written=0  txs=72668 bufLen=415  bufCap=9840420 toWriteLen=1453360 toWriteCap=819200000 alloc=1824061 sys=2050928 numGC=22
+INFO [06-12|22:38:10.286] Dumped on a disk:                        blockNumber=170000 out=0  in=0 written=0  txs=83882 bufLen=434  bufCap=9830440 toWriteLen=1677640 toWriteCap=819200000 alloc=1894081 sys=2051248 numGC=22
+INFO [06-12|22:38:10.648] Dumped on a disk:                        blockNumber=180000 out=1  in=0 written=0  txs=97514 bufLen=615  bufCap=9820620 toWriteLen=1950280 toWriteCap=819200000 alloc=1669908 sys=2051440 numGC=23
+INFO [06-12|22:38:10.919] Dumped on a disk:                        blockNumber=190000 out=0  in=0 written=0  txs=110168 bufLen=286  bufCap=9810290 toWriteLen=2203360 toWriteCap=819200000 alloc=1745201 sys=2051696 numGC=23
+INFO [06-12|22:38:11.177] Dumped on a disk:                        blockNumber=200000 out=6  in=0 written=0  txs=121464 bufLen=137  bufCap=9800140 toWriteLen=2429280 toWriteCap=819200000 alloc=1816237 sys=2051696 numGC=23
+INFO [06-12|22:38:11.434] Dumped on a disk:                        blockNumber=210000 out=1  in=0 written=0  txs=133019 bufLen=16   bufCap=9790020 toWriteLen=2660380 toWriteCap=819200000 alloc=1888454 sys=2051952 numGC=23
+INFO [06-12|22:38:11.757] Dumped on a disk:                        blockNumber=220000 out=1  in=0 written=0  txs=144696 bufLen=35   bufCap=9780010 toWriteLen=2893920 toWriteCap=819200000 alloc=1658863 sys=2120562 numGC=24
+INFO [06-12|22:38:12.021] Dumped on a disk:                        blockNumber=230000 out=2  in=0 written=0  txs=156385 bufLen=32   bufCap=9770030 toWriteLen=3127700 toWriteCap=819200000 alloc=1732582 sys=2120562 numGC=24
+INFO [06-12|22:38:12.290] Dumped on a disk:                        blockNumber=240000 out=2  in=0 written=0  txs=167626 bufLen=148  bufCap=9760180 toWriteLen=3352520 toWriteCap=819200000 alloc=1807410 sys=2120562 numGC=24
+INFO [06-12|22:38:12.549] Dumped on a disk:                        blockNumber=250000 out=113 in=0 written=0  txs=178838 bufLen=328  bufCap=9750360 toWriteLen=3576760 toWriteCap=819200000 alloc=1878263 sys=2120562 numGC=24
+INFO [06-12|22:38:12.845] Dumped on a disk:                        blockNumber=260000 out=24  in=0 written=0  txs=189692 bufLen=532  bufCap=9740560 toWriteLen=3793840 toWriteCap=819200000 alloc=1731712 sys=2120562 numGC=25
+INFO [06-12|22:38:13.111] Dumped on a disk:                        blockNumber=270000 out=69  in=0 written=0  txs=202271 bufLen=133  bufCap=9730160 toWriteLen=4045420 toWriteCap=819200000 alloc=1709230 sys=2120562 numGC=25
+INFO [06-12|22:38:13.400] Dumped on a disk:                        blockNumber=280000 out=40  in=0 written=0  txs=216437 bufLen=66   bufCap=9720070 toWriteLen=4328740 toWriteCap=819200000 alloc=1781737 sys=2120562 numGC=25
+INFO [06-12|22:38:13.675] Dumped on a disk:                        blockNumber=290000 out=424 in=0 written=0  txs=225557 bufLen=2448 bufCap=9712480 toWriteLen=4511140 toWriteCap=819200000 alloc=1853786 sys=2120562 numGC=25
+INFO [06-12|22:38:13.937] Dumped on a disk:                        blockNumber=300000 out=143 in=0 written=0  txs=238648 bufLen=2218 bufCap=9702250 toWriteLen=4772960 toWriteCap=819200000 alloc=1920053 sys=2120562 numGC=25
+INFO [06-12|22:38:14.296] Dumped on a disk:                        blockNumber=310000 out=1573 in=20 written=0  txs=252016 bufLen=984  bufCap=9690990 toWriteLen=5040320 toWriteCap=819200000 alloc=1694915 sys=2121330 numGC=26
+INFO [06-12|22:38:14.560] Dumped on a disk:                        blockNumber=320000 out=1195 in=0  written=0  txs=261249 bufLen=3444 bufCap=9683460 toWriteLen=5224980 toWriteCap=819200000 alloc=1759693 sys=2121330 numGC=26
+INFO [06-12|22:38:14.792] Dumped on a disk:                        blockNumber=330000 out=9    in=0  written=0  txs=276669 bufLen=568  bufCap=9670600 toWriteLen=5533380 toWriteCap=819200000 alloc=1820080 sys=2121330 numGC=26
+INFO [06-12|22:38:15.187] Dumped on a disk:                        blockNumber=340000 out=4127 in=0  written=0  txs=287492 bufLen=3038 bufCap=9663050 toWriteLen=5749840 toWriteCap=819200000 alloc=1919781 sys=2121330 numGC=26
+INFO [06-12|22:38:15.466] Dumped on a disk:                        blockNumber=350000 out=446  in=0  written=0  txs=303293 bufLen=888  bufCap=9650920 toWriteLen=6065860 toWriteCap=819200000 alloc=1658175 sys=2121586 numGC=27
+INFO [06-12|22:38:15.797] Dumped on a disk:                        blockNumber=360000 out=1544 in=9  written=0  txs=316913 bufLen=841  bufCap=9640830 toWriteLen=6338260 toWriteCap=819200000 alloc=1739800 sys=2121586 numGC=27
+INFO [06-12|22:38:16.108] Dumped on a disk:                        blockNumber=370000 out=2825 in=202 written=0  txs=329623 bufLen=809  bufCap=9630820 toWriteLen=6592460 toWriteCap=819200000 alloc=1818033 sys=2121586 numGC=27
+INFO [06-12|22:38:16.315] Dumped on a disk:                        blockNumber=380000 out=65   in=15  written=0  txs=342844 bufLen=639  bufCap=9620660 toWriteLen=6856880 toWriteCap=819200000 alloc=1869921 sys=2121586 numGC=27
+INFO [06-12|22:38:16.672] Dumped on a disk:                        blockNumber=390000 out=311  in=0   written=0  txs=356232 bufLen=682  bufCap=9610690 toWriteLen=7124640 toWriteCap=819200000 alloc=1938992 sys=2121842 numGC=28
+INFO [06-12|22:38:16.969] Dumped on a disk:                        blockNumber=400000 out=777  in=0   written=0  txs=369691 bufLen=798  bufCap=9600830 toWriteLen=7393820 toWriteCap=819200000 alloc=1712656 sys=2122098 numGC=28
+INFO [06-12|22:38:17.300] Dumped on a disk:                        blockNumber=410000 out=2345 in=0   written=0  txs=381009 bufLen=2541 bufCap=9592500 toWriteLen=7620180 toWriteCap=819200000 alloc=1795616 sys=2122098 numGC=28
+INFO [06-12|22:38:17.506] Dumped on a disk:                        blockNumber=420000 out=5    in=6   written=0  txs=395028 bufLen=657  bufCap=9580680 toWriteLen=7900560 toWriteCap=819200000 alloc=1847504 sys=2122098 numGC=28
+INFO [06-12|22:38:17.794] Dumped on a disk:                        blockNumber=430000 out=551  in=6   written=0  txs=407488 bufLen=830  bufCap=9570850 toWriteLen=8149760 toWriteCap=819200000 alloc=1921148 sys=2122098 numGC=28
+INFO [06-12|22:38:18.211] Dumped on a disk:                        blockNumber=440000 out=4303 in=0   written=0  txs=416931 bufLen=3180 bufCap=9563140 toWriteLen=8338620 toWriteCap=819200000 alloc=1708778 sys=2122354 numGC=29
+INFO [06-12|22:38:18.390] Dumped on a disk:                        blockNumber=450000 out=12   in=0   written=0  txs=432275 bufLen=421  bufCap=9550450 toWriteLen=8645500 toWriteCap=819200000 alloc=1751221 sys=2122354 numGC=29
+INFO [06-12|22:38:18.807] Dumped on a disk:                        blockNumber=460000 out=3039 in=0   written=0  txs=443063 bufLen=2929 bufCap=9542960 toWriteLen=8861260 toWriteCap=819200000 alloc=1852380 sys=2122610 numGC=29
+INFO [06-12|22:38:19.092] Dumped on a disk:                        blockNumber=470000 out=2298 in=98  written=0  txs=461492 bufLen=958  bufCap=9530990 toWriteLen=9229840 toWriteCap=819200000 alloc=1922178 sys=2122610 numGC=29
+INFO [06-12|22:38:19.470] Dumped on a disk:                        blockNumber=480000 out=2767 in=50  written=0  txs=476273 bufLen=14   bufCap=9520020 toWriteLen=9525460 toWriteCap=819200000 alloc=1690881 sys=2122610 numGC=30
+INFO [06-12|22:38:19.771] Dumped on a disk:                        blockNumber=490000 out=2755 in=0   written=0  txs=487323 bufLen=2106 bufCap=9512120 toWriteLen=9746460 toWriteCap=819200000 alloc=1764483 sys=2122610 numGC=30
+INFO [06-12|22:38:20.005] Dumped on a disk:                        blockNumber=500000 out=4    in=0   written=0  txs=504327 bufLen=276  bufCap=9500280 toWriteLen=10086540 toWriteCap=819200000 alloc=1820023 sys=2122610 numGC=30
+INFO [06-12|22:38:20.495] Dumped on a disk:                        blockNumber=510000 out=571  in=0   written=0  txs=526601 bufLen=1028 bufCap=9491060 toWriteLen=10532020 toWriteCap=819200000 alloc=1929241 sys=2122610 numGC=30
+INFO [06-12|22:38:20.899] Dumped on a disk:                        blockNumber=520000 out=290  in=2   written=0  txs=541264 bufLen=1869 bufCap=9481860 toWriteLen=10825280 toWriteCap=819200000 alloc=1703637 sys=2123122 numGC=31
+INFO [06-12|22:38:21.331] Dumped on a disk:                        blockNumber=530000 out=762  in=0   written=0  txs=560694 bufLen=1427 bufCap=9471360 toWriteLen=11213880 toWriteCap=819200000 alloc=1805804 sys=2123378 numGC=31
+INFO [06-12|22:38:21.649] Dumped on a disk:                        blockNumber=540000 out=995  in=0   written=0  txs=576664 bufLen=1507 bufCap=9461530 toWriteLen=11533280 toWriteCap=819200000 alloc=1884792 sys=2123634 numGC=31
+INFO [06-12|22:38:22.024] Dumped on a disk:                        blockNumber=550000 out=1329 in=0   written=0  txs=590882 bufLen=1313 bufCap=9451320 toWriteLen=11817640 toWriteCap=819200000 alloc=1959059 sys=2123890 numGC=32
+INFO [06-12|22:38:22.456] Dumped on a disk:                        blockNumber=560000 out=4322 in=495 written=0  txs=607037 bufLen=551  bufCap=9440540 toWriteLen=12140740 toWriteCap=819200000 alloc=1751441 sys=2123890 numGC=32
+INFO [06-12|22:38:22.659] Dumped on a disk:                        blockNumber=570000 out=474  in=0   written=0  txs=621773 bufLen=1108 bufCap=9431140 toWriteLen=12435460 toWriteCap=819200000 alloc=1798024 sys=2123890 numGC=32
+INFO [06-12|22:38:22.966] Dumped on a disk:                        blockNumber=580000 out=424  in=0   written=0  txs=635073 bufLen=1188 bufCap=9421220 toWriteLen=12701460 toWriteCap=819200000 alloc=1872696 sys=2123890 numGC=32
+INFO [06-12|22:38:23.281] Dumped on a disk:                        blockNumber=590000 out=329  in=0   written=0  txs=650201 bufLen=1066 bufCap=9411090 toWriteLen=13004020 toWriteCap=819200000 alloc=1950663 sys=2123890 numGC=32
+INFO [06-12|22:38:23.677] Dumped on a disk:                        blockNumber=600000 out=1239 in=0   written=0  txs=665272 bufLen=1075 bufCap=9401080 toWriteLen=13305440 toWriteCap=819200000 alloc=1717888 sys=2123890 numGC=33
+INFO [06-12|22:38:23.953] Dumped on a disk:                        blockNumber=610000 out=100  in=0   written=0  txs=678813 bufLen=1053 bufCap=9391070 toWriteLen=13576260 toWriteCap=819200000 alloc=1784108 sys=2123890 numGC=33
+INFO [06-12|22:38:24.329] Dumped on a disk:                        blockNumber=620000 out=1614 in=5   written=0  txs=691685 bufLen=2487 bufCap=9382500 toWriteLen=13833700 toWriteCap=819200000 alloc=1873699 sys=2123890 numGC=33
+INFO [06-12|22:38:24.583] Dumped on a disk:                        blockNumber=630000 out=54   in=120 written=0  txs=707487 bufLen=1058 bufCap=9371090 toWriteLen=14149740 toWriteCap=819200000 alloc=1937439 sys=2123890 numGC=33
+INFO [06-12|22:38:24.939] Dumped on a disk:                        blockNumber=640000 out=136  in=0   written=0  txs=721279 bufLen=798  bufCap=9360800 toWriteLen=14425580 toWriteCap=819200000 alloc=1704296 sys=2123890 numGC=34
+INFO [06-12|22:38:25.295] Dumped on a disk:                        blockNumber=650000 out=397  in=2   written=0  txs=735244 bufLen=1725 bufCap=9351740 toWriteLen=14704880 toWriteCap=819200000 alloc=1788933 sys=2124146 numGC=34
+INFO [06-12|22:38:25.585] Dumped on a disk:                        blockNumber=660000 out=14   in=34  written=0  txs=750911 bufLen=1153 bufCap=9341180 toWriteLen=15018220 toWriteCap=819200000 alloc=1859728 sys=2124146 numGC=34
+INFO [06-12|22:38:25.928] Dumped on a disk:                        blockNumber=670000 out=1300 in=0   written=0  txs=764781 bufLen=958  bufCap=9330990 toWriteLen=15295620 toWriteCap=819200000 alloc=1942569 sys=2124146 numGC=34
+INFO [06-12|22:38:26.406] Dumped on a disk:                        blockNumber=680000 out=3594 in=0   written=0  txs=780706 bufLen=1045 bufCap=9321050 toWriteLen=15614120 toWriteCap=819200000 alloc=1734539 sys=2124146 numGC=35
+INFO [06-12|22:38:26.762] Dumped on a disk:                        blockNumber=690000 out=1359 in=4   written=0  txs=796567 bufLen=907  bufCap=9310920 toWriteLen=15931340 toWriteCap=819200000 alloc=1814681 sys=2124146 numGC=35
+INFO [06-12|22:38:27.067] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-12|22:38:27.491] Dumped on a disk:                        blockNumber=700000 out=232  in=0   written=0  txs=833874 bufLen=1125 bufCap=9300220 toWriteLen=16677480 toWriteCap=819200000 alloc=1769867 sys=2124146 numGC=36
+INFO [06-12|22:38:27.974] Dumped on a disk:                        blockNumber=710000 out=2924 in=0   written=0  txs=853086 bufLen=106  bufCap=9290130 toWriteLen=17061720 toWriteCap=819200000 alloc=1774598 sys=2124146 numGC=36
+INFO [06-12|22:38:28.408] Dumped on a disk:                        blockNumber=720000 out=3587 in=0   written=0  txs=869926 bufLen=1298 bufCap=9281330 toWriteLen=17398520 toWriteCap=819200000 alloc=1875411 sys=2124402 numGC=36
+INFO [06-12|22:38:28.729] Dumped on a disk:                        blockNumber=730000 out=5    in=124 written=0  txs=893583 bufLen=381  bufCap=9270360 toWriteLen=17871660 toWriteCap=819200000 alloc=1947406 sys=2124402 numGC=36
+INFO [06-12|22:38:29.628] Looking for peers                        peercount=19 tried=3  static=0
+INFO [06-12|22:38:29.653] Dumped on a disk:                        blockNumber=740000 out=35   in=0   written=0  txs=936604 bufLen=510  bufCap=9260540 toWriteLen=18732080 toWriteCap=819200000 alloc=1813897 sys=2192807 numGC=37
+INFO [06-12|22:38:30.181] Dumped on a disk:                        blockNumber=750000 out=1075 in=0   written=0  txs=956990 bufLen=2287 bufCap=9252280 toWriteLen=19139800 toWriteCap=819200000 alloc=1932299 sys=2192807 numGC=37
+INFO [06-12|22:38:30.907] Dumped on a disk:                        blockNumber=760000 out=801  in=0   written=0  txs=991784 bufLen=578  bufCap=9240590 toWriteLen=19835680 toWriteCap=819200000 alloc=1739499 sys=2192807 numGC=38
+INFO [06-12|22:38:31.399] Dumped on a disk:                        blockNumber=770000 out=152  in=0   written=0  txs=1014222 bufLen=1556 bufCap=9231580 toWriteLen=20284440 toWriteCap=819200000 alloc=1847601 sys=2192807 numGC=38
+INFO [06-12|22:38:32.063] Dumped on a disk:                        blockNumber=780000 out=0    in=0   written=0  txs=1047830 bufLen=90   bufCap=9220110 toWriteLen=20956600 toWriteCap=819200000 alloc=1671800 sys=2192807 numGC=39
+INFO [06-12|22:38:32.519] Dumped on a disk:                        blockNumber=790000 out=1265 in=0   written=0  txs=1063856 bufLen=1382 bufCap=9211390 toWriteLen=21277120 toWriteCap=819200000 alloc=1775173 sys=2192807 numGC=39
+INFO [06-12|22:38:32.932] Dumped on a disk:                        blockNumber=800000 out=1905 in=0   written=0  txs=1080767 bufLen=1908 bufCap=9201940 toWriteLen=21615340 toWriteCap=819200000 alloc=1871590 sys=2192807 numGC=39
+INFO [06-12|22:38:33.757] Dumped on a disk:                        blockNumber=810000 out=0    in=742 written=0  txs=1123828 bufLen=728  bufCap=9190760 toWriteLen=22476560 toWriteCap=819200000 alloc=1726873 sys=2192807 numGC=40
+INFO [06-12|22:38:34.330] Dumped on a disk:                        blockNumber=820000 out=1533 in=0   written=0  txs=1149232 bufLen=706  bufCap=9180720 toWriteLen=22984640 toWriteCap=819200000 alloc=1851929 sys=2192807 numGC=40
+INFO [06-12|22:38:34.746] Dumped on a disk:                        blockNumber=830000 out=41   in=0   written=0  txs=1171403 bufLen=449  bufCap=9170460 toWriteLen=23428060 toWriteCap=819200000 alloc=1944788 sys=2192807 numGC=40
+INFO [06-12|22:38:35.314] Dumped on a disk:                        blockNumber=840000 out=1175 in=170 written=0  txs=1190928 bufLen=1271 bufCap=9161300 toWriteLen=23818560 toWriteCap=819200000 alloc=1750456 sys=2192807 numGC=41
+INFO [06-12|22:38:35.988] Dumped on a disk:                        blockNumber=850000 out=3507 in=0   written=0  txs=1218989 bufLen=1231 bufCap=9151260 toWriteLen=24379780 toWriteCap=819200000 alloc=1895336 sys=2193063 numGC=41
+INFO [06-12|22:38:36.485] Dumped on a disk:                        blockNumber=860000 out=3186 in=0   written=0  txs=1240701 bufLen=993  bufCap=9141000 toWriteLen=24814020 toWriteCap=819200000 alloc=1829768 sys=2193063 numGC=42
+INFO [06-12|22:38:36.953] Dumped on a disk:                        blockNumber=870000 out=1842 in=1   written=0  txs=1262536 bufLen=981  bufCap=9130980 toWriteLen=25250720 toWriteCap=819200000 alloc=1774837 sys=2193319 numGC=42
+INFO [06-12|22:38:37.346] Dumped on a disk:                        blockNumber=880000 out=86   in=0   written=0  txs=1287794 bufLen=428  bufCap=9120460 toWriteLen=25755880 toWriteCap=819200000 alloc=1860818 sys=2193319 numGC=42
+INFO [06-12|22:38:37.951] Dumped on a disk:                        blockNumber=890000 out=854  in=0   written=0  txs=1310885 bufLen=1054 bufCap=9111000 toWriteLen=26217700 toWriteCap=819200000 alloc=1969487 sys=2193319 numGC=43
+INFO [06-12|22:38:38.434] Dumped on a disk:                        blockNumber=900000 out=213  in=35  written=0  txs=1334663 bufLen=928  bufCap=9100960 toWriteLen=26693260 toWriteCap=819200000 alloc=1763167 sys=2193319 numGC=43
+INFO [06-12|22:38:39.114] Dumped on a disk:                        blockNumber=910000 out=2    in=141 written=0  txs=1367610 bufLen=838  bufCap=9090870 toWriteLen=27352200 toWriteCap=819200000 alloc=1904080 sys=2193319 numGC=43
+INFO [06-12|22:38:39.640] Looking for peers                        peercount=18 tried=9  static=0
+INFO [06-12|22:38:39.922] Dumped on a disk:                        blockNumber=920000 out=101  in=0   written=0  txs=1403230 bufLen=838  bufCap=9080860 toWriteLen=28064600 toWriteCap=819200000 alloc=1745526 sys=2193319 numGC=44
+INFO [06-12|22:38:40.577] Dumped on a disk:                        blockNumber=930000 out=274  in=8   written=0  txs=1435613 bufLen=568  bufCap=9070600 toWriteLen=28712260 toWriteCap=819200000 alloc=1881430 sys=2193319 numGC=44
+INFO [06-12|22:38:41.228] Dumped on a disk:                        blockNumber=940000 out=77   in=120 written=0  txs=1463185 bufLen=964  bufCap=9060940 toWriteLen=29263700 toWriteCap=819200000 alloc=1685296 sys=2193319 numGC=45
+INFO [06-12|22:38:41.876] Dumped on a disk:                        blockNumber=950000 out=1378 in=118 written=0  txs=1490822 bufLen=864  bufCap=9050840 toWriteLen=29816440 toWriteCap=819200000 alloc=1820419 sys=2193319 numGC=45
+INFO [06-12|22:38:42.418] Dumped on a disk:                        blockNumber=960000 out=86   in=3   written=0  txs=1518957 bufLen=1330 bufCap=9041360 toWriteLen=30379140 toWriteCap=819200000 alloc=1930145 sys=2193319 numGC=45
+INFO [06-12|22:38:43.441] Dumped on a disk:                        blockNumber=970000 out=291  in=524 written=0  txs=1566135 bufLen=830  bufCap=9030660 toWriteLen=31322700 toWriteCap=819200000 alloc=1800921 sys=2193575 numGC=46
+INFO [06-12|22:38:44.050] Dumped on a disk:                        blockNumber=980000 out=180  in=171 written=0  txs=1595964 bufLen=799  bufCap=9020830 toWriteLen=31919280 toWriteCap=819200000 alloc=1921690 sys=2193575 numGC=46
+INFO [06-12|22:38:44.883] Dumped on a disk:                        blockNumber=990000 out=0    in=177 written=0  txs=1633629 bufLen=448  bufCap=9010480 toWriteLen=32672580 toWriteCap=819200000 alloc=1752739 sys=2193575 numGC=47
+INFO [06-12|22:38:45.688] Dumped on a disk:                        blockNumber=1000000 out=604  in=0   written=0  txs=1671522 bufLen=381  bufCap=9000410 toWriteLen=33430440 toWriteCap=819200000 alloc=1909279 sys=2193575 numGC=47
+INFO [06-12|22:38:46.425] Dumped on a disk:                        blockNumber=1010000 out=133  in=285 written=0  txs=1705952 bufLen=439  bufCap=8990470 toWriteLen=34119040 toWriteCap=819200000 alloc=1717439 sys=2193831 numGC=48
+INFO [06-12|22:38:47.205] Dumped on a disk:                        blockNumber=1020000 out=53   in=0   written=0  txs=1744219 bufLen=398  bufCap=8980430 toWriteLen=34884380 toWriteCap=819200000 alloc=1867366 sys=2193831 numGC=48
+INFO [06-12|22:38:47.998] Dumped on a disk:                        blockNumber=1030000 out=1    in=41  written=0  txs=1778317 bufLen=662  bufCap=8970500 toWriteLen=35566340 toWriteCap=819200000 alloc=1704153 sys=2193831 numGC=49
+INFO [06-12|22:38:48.775] Dumped on a disk:                        blockNumber=1040000 out=1413 in=12  written=0  txs=1813225 bufLen=418  bufCap=8960450 toWriteLen=36264500 toWriteCap=819200000 alloc=1857323 sys=2193831 numGC=49
+INFO [06-12|22:38:49.581] Dumped on a disk:                        blockNumber=1050000 out=906  in=0   written=0  txs=1848542 bufLen=265  bufCap=8950290 toWriteLen=36970840 toWriteCap=819200000 alloc=1993793 sys=2194087 numGC=50
+INFO [06-12|22:38:49.675] Looking for peers                        peercount=20 tried=13 static=0
+INFO [06-12|22:38:50.301] Dumped on a disk:                        blockNumber=1060000 out=56   in=104 written=0  txs=1887631 bufLen=296  bufCap=8940300 toWriteLen=37752620 toWriteCap=819200000 alloc=1819460 sys=2194087 numGC=50
+INFO [06-12|22:38:51.144] Dumped on a disk:                        blockNumber=1070000 out=24   in=201 written=0  txs=1928781 bufLen=112  bufCap=8930140 toWriteLen=38575620 toWriteCap=819200000 alloc=1979974 sys=2194599 numGC=50
+INFO [06-12|22:38:52.019] Dumped on a disk:                        blockNumber=1080000 out=0    in=0   written=0  txs=1967259 bufLen=282  bufCap=8920270 toWriteLen=39345180 toWriteCap=819200000 alloc=1809126 sys=2194855 numGC=51
+INFO [06-12|22:38:52.936] Dumped on a disk:                        blockNumber=1090000 out=3    in=383 written=0  txs=2012175 bufLen=260  bufCap=8910290 toWriteLen=40243500 toWriteCap=819200000 alloc=1982393 sys=2194855 numGC=51
+INFO [06-12|22:38:53.983] Dumped on a disk:                        blockNumber=1100000 out=3    in=173 written=40960000 txs=2059160 bufLen=425  bufCap=8900450 toWriteLen=223200   toWriteCap=819200000 alloc=1839921 sys=2194855 numGC=52
+INFO [06-12|22:38:55.145] Dumped on a disk:                        blockNumber=1110000 out=11   in=0   written=40960000 txs=2114060 bufLen=279  bufCap=8890310 toWriteLen=1321200  toWriteCap=819200000 alloc=1723423 sys=2195111 numGC=53
+INFO [06-12|22:38:56.154] Dumped on a disk:                        blockNumber=1120000 out=0    in=114 written=40960000 txs=2163035 bufLen=310  bufCap=8880340 toWriteLen=2300700  toWriteCap=819200000 alloc=1909078 sys=2195111 numGC=53
+INFO [06-12|22:38:57.196] Dumped on a disk:                        blockNumber=1130000 out=107  in=258 written=40960000 txs=2208741 bufLen=601  bufCap=8870630 toWriteLen=3214820  toWriteCap=819200000 alloc=1760485 sys=2195111 numGC=54
+INFO [06-12|22:38:58.250] Dumped on a disk:                        blockNumber=1140000 out=10   in=213 written=40960000 txs=2260735 bufLen=340  bufCap=8860370 toWriteLen=4254700  toWriteCap=819200000 alloc=1951272 sys=2195111 numGC=54
+INFO [06-12|22:38:59.407] Dumped on a disk:                        blockNumber=1150000 out=0    in=130 written=40960000 txs=2313827 bufLen=444  bufCap=8850470 toWriteLen=5316540  toWriteCap=819200000 alloc=1822262 sys=2195367 numGC=55
+INFO [06-12|22:38:59.928] Looking for peers                        peercount=22 tried=10 static=0
+INFO [06-12|22:39:00.560] Dumped on a disk:                        blockNumber=1160000 out=365  in=86  written=40960000 txs=2364301 bufLen=483  bufCap=8840010 toWriteLen=6326020  toWriteCap=819200000 alloc=2015555 sys=2195367 numGC=56
+INFO [06-12|22:39:01.575] Dumped on a disk:                        blockNumber=1170000 out=77   in=470 written=40960000 txs=2416973 bufLen=233  bufCap=8830260 toWriteLen=7379460  toWriteCap=819200000 alloc=1887354 sys=2195623 numGC=56
+INFO [06-12|22:39:02.806] Dumped on a disk:                        blockNumber=1180000 out=4    in=70  written=40960000 txs=2472258 bufLen=616  bufCap=8820490 toWriteLen=8485160  toWriteCap=819200000 alloc=1771714 sys=2195623 numGC=57
+INFO [06-12|22:39:03.901] Dumped on a disk:                        blockNumber=1190000 out=78   in=32  written=40960000 txs=2524109 bufLen=683  bufCap=8810690 toWriteLen=9522180  toWriteCap=819200000 alloc=1972182 sys=2195623 numGC=57
+INFO [06-12|22:39:05.081] Dumped on a disk:                        blockNumber=1200000 out=94   in=0   written=40960000 txs=2581601 bufLen=118  bufCap=8800150 toWriteLen=10672020 toWriteCap=819200000 alloc=1861347 sys=2195623 numGC=58
+INFO [06-12|22:39:06.325] Dumped on a disk:                        blockNumber=1210000 out=10   in=0   written=40960000 txs=2632882 bufLen=1072 bufCap=8791100 toWriteLen=11697640 toWriteCap=819200000 alloc=1755331 sys=2195623 numGC=59
+INFO [06-12|22:39:07.508] Dumped on a disk:                        blockNumber=1220000 out=3    in=94  written=40960000 txs=2694690 bufLen=541  bufCap=8780570 toWriteLen=12933800 toWriteCap=819200000 alloc=1973745 sys=2195623 numGC=59
+INFO [06-12|22:39:08.763] Dumped on a disk:                        blockNumber=1230000 out=38   in=87  written=40960000 txs=2751798 bufLen=305  bufCap=8770320 toWriteLen=14075960 toWriteCap=819200000 alloc=1856324 sys=2195623 numGC=60
+INFO [06-12|22:39:09.975] Dumped on a disk:                        blockNumber=1240000 out=2    in=296 written=40960000 txs=2803637 bufLen=840  bufCap=8760860 toWriteLen=15112740 toWriteCap=819200000 alloc=1824627 sys=2263533 numGC=61
+INFO [06-12|22:39:10.217] Looking for peers                        peercount=24 tried=6  static=0
+INFO [06-12|22:39:11.185] Dumped on a disk:                        blockNumber=1250000 out=1    in=319 written=40960000 txs=2864851 bufLen=548  bufCap=8750360 toWriteLen=16337020 toWriteCap=819200000 alloc=1951284 sys=2263533 numGC=61
+INFO [06-12|22:39:12.366] Dumped on a disk:                        blockNumber=1260000 out=24   in=0   written=40960000 txs=2916469 bufLen=1228 bufCap=8741260 toWriteLen=17369380 toWriteCap=819200000 alloc=1813657 sys=2263533 numGC=62
+INFO [06-12|22:39:13.360] Dumped on a disk:                        blockNumber=1270000 out=1    in=65  written=40960000 txs=2965887 bufLen=713  bufCap=8730740 toWriteLen=18357740 toWriteCap=819200000 alloc=1996805 sys=2263533 numGC=62
+INFO [06-12|22:39:14.625] Dumped on a disk:                        blockNumber=1280000 out=3    in=50  written=40960000 txs=3025585 bufLen=278  bufCap=8720310 toWriteLen=19551700 toWriteCap=819200000 alloc=1876066 sys=2263533 numGC=63
+INFO [06-12|22:39:15.924] Dumped on a disk:                        blockNumber=1290000 out=2    in=309 written=40960000 txs=3080834 bufLen=1098 bufCap=8711130 toWriteLen=20656680 toWriteCap=819200000 alloc=1766139 sys=2263533 numGC=64
+INFO [06-12|22:39:17.059] Dumped on a disk:                        blockNumber=1300000 out=0    in=557 written=40960000 txs=3137772 bufLen=739  bufCap=8700770 toWriteLen=21795440 toWriteCap=819200000 alloc=1974454 sys=2263533 numGC=64
+INFO [06-12|22:39:18.237] Dumped on a disk:                        blockNumber=1310000 out=3    in=249 written=40960000 txs=3189959 bufLen=958  bufCap=8690850 toWriteLen=22839180 toWriteCap=819200000 alloc=1845568 sys=2263533 numGC=65
+INFO [06-12|22:39:19.427] Dumped on a disk:                        blockNumber=1320000 out=19   in=0   written=40960000 txs=3247308 bufLen=183  bufCap=8680050 toWriteLen=23986160 toWriteCap=819200000 alloc=1946023 sys=2263533 numGC=66
+INFO [06-12|22:39:20.425] Looking for peers                        peercount=24 tried=8  static=0
+INFO [06-12|22:39:20.549] Dumped on a disk:                        blockNumber=1330000 out=3    in=163 written=40960000 txs=3298086 bufLen=523  bufCap=8670550 toWriteLen=25001720 toWriteCap=819200000 alloc=1920338 sys=2263533 numGC=66
+INFO [06-12|22:39:21.917] Dumped on a disk:                        blockNumber=1340000 out=223  in=6   written=40960000 txs=3360764 bufLen=379  bufCap=8660410 toWriteLen=26255280 toWriteCap=819200000 alloc=1824187 sys=2263533 numGC=67
+INFO [06-12|22:39:23.053] Dumped on a disk:                        blockNumber=1350000 out=0    in=377 written=40960000 txs=3413215 bufLen=968  bufCap=8650960 toWriteLen=27304300 toWriteCap=819200000 alloc=2026956 sys=2263533 numGC=67
+INFO [06-12|22:39:24.445] Dumped on a disk:                        blockNumber=1360000 out=0    in=132 written=40960000 txs=3476962 bufLen=381  bufCap=8640410 toWriteLen=28579240 toWriteCap=819200000 alloc=1931411 sys=2263533 numGC=68
+INFO [06-12|22:39:25.671] Dumped on a disk:                        blockNumber=1370000 out=25   in=304 written=40960000 txs=3530059 bufLen=882  bufCap=8630910 toWriteLen=29641180 toWriteCap=819200000 alloc=1816240 sys=2263533 numGC=69
+INFO [06-12|22:39:26.973] Dumped on a disk:                        blockNumber=1380000 out=481  in=0   written=40960000 txs=3586418 bufLen=829  bufCap=8620860 toWriteLen=30768360 toWriteCap=819200000 alloc=2029344 sys=2263533 numGC=70
+INFO [06-12|22:39:27.076] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-12|22:39:28.042] Dumped on a disk:                        blockNumber=1390000 out=1    in=854 written=40960000 txs=3639879 bufLen=1020 bufCap=8611020 toWriteLen=31837580 toWriteCap=819200000 alloc=1911625 sys=2263533 numGC=70
+INFO [06-12|22:39:29.258] Dumped on a disk:                        blockNumber=1400000 out=0    in=0   written=40960000 txs=3694726 bufLen=1508 bufCap=8601330 toWriteLen=32934520 toWriteCap=819200000 alloc=1787719 sys=2263533 numGC=71
+INFO [06-12|22:39:30.456] Dumped on a disk:                        blockNumber=1410000 out=0    in=338 written=40960000 txs=3753656 bufLen=1069 bufCap=8591100 toWriteLen=34113120 toWriteCap=819200000 alloc=2001902 sys=2263533 numGC=71
+INFO [06-12|22:39:30.539] Looking for peers                        peercount=27 tried=7  static=0
+INFO [06-12|22:39:31.663] Dumped on a disk:                        blockNumber=1420000 out=5    in=82  written=40960000 txs=3804697 bufLen=1698 bufCap=8581730 toWriteLen=35133940 toWriteCap=819200000 alloc=1871853 sys=2263533 numGC=72
+INFO [06-12|22:39:33.071] Dumped on a disk:                        blockNumber=1430000 out=2    in=363 written=40960000 txs=3869807 bufLen=874  bufCap=8570880 toWriteLen=36436140 toWriteCap=819200000 alloc=1781759 sys=2263533 numGC=73
+INFO [06-12|22:39:34.558] Dumped on a disk:                        blockNumber=1440000 out=0    in=147 written=40960000 txs=3945196 bufLen=545  bufCap=8560570 toWriteLen=37943920 toWriteCap=819200000 alloc=2038863 sys=2263533 numGC=73
+INFO [06-12|22:39:36.018] Dumped on a disk:                        blockNumber=1450000 out=0    in=0   written=40960000 txs=4013301 bufLen=437  bufCap=8550460 toWriteLen=39306020 toWriteCap=819200000 alloc=1945372 sys=2263533 numGC=74
+INFO [06-12|22:39:37.415] Dumped on a disk:                        blockNumber=1460000 out=1    in=641 written=40960000 txs=4074685 bufLen=460  bufCap=8540490 toWriteLen=40533700 toWriteCap=819200000 alloc=1862620 sys=2263533 numGC=75
+INFO [06-12|22:39:38.854] Dumped on a disk:                        blockNumber=1470000 out=9    in=119 written=81920000 txs=4134293 bufLen=1335 bufCap=8531360 toWriteLen=765860   toWriteCap=819200000 alloc=1769695 sys=2263533 numGC=76
+INFO [06-12|22:39:40.153] Dumped on a disk:                        blockNumber=1480000 out=0    in=55  written=81920000 txs=4201595 bufLen=335  bufCap=8520360 toWriteLen=2111900  toWriteCap=819200000 alloc=1994255 sys=2263533 numGC=76
+INFO [06-12|22:39:41.579] Dumped on a disk:                        blockNumber=1490000 out=1    in=385 written=81920000 txs=4264742 bufLen=906  bufCap=8510930 toWriteLen=3374840  toWriteCap=819200000 alloc=1898588 sys=2263789 numGC=77
+INFO [06-12|22:39:41.638] Looking for peers                        peercount=25 tried=8  static=0
+INFO [06-12|22:39:43.119] Dumped on a disk:                        blockNumber=1500000 out=0    in=651 written=81920000 txs=4337504 bufLen=403  bufCap=8500430 toWriteLen=4830080  toWriteCap=819200000 alloc=1824602 sys=2264557 numGC=78
+INFO [06-12|22:39:44.689] Dumped on a disk:                        blockNumber=1510000 out=1    in=75  written=81920000 txs=4408778 bufLen=405  bufCap=8490430 toWriteLen=6255560  toWriteCap=819200000 alloc=1879669 sys=2264557 numGC=79
+INFO [06-12|22:39:46.348] Dumped on a disk:                        blockNumber=1520000 out=98   in=160 written=81920000 txs=4484690 bufLen=838  bufCap=8480870 toWriteLen=7773800  toWriteCap=819200000 alloc=2033293 sys=2264557 numGC=79
+INFO [06-12|22:39:47.836] Dumped on a disk:                        blockNumber=1530000 out=1    in=9   written=81920000 txs=4554470 bufLen=393  bufCap=8470380 toWriteLen=9169400  toWriteCap=819200000 alloc=1942758 sys=2264813 numGC=80
+INFO [06-12|22:39:49.429] Dumped on a disk:                        blockNumber=1540000 out=0    in=347 written=81920000 txs=4625356 bufLen=673  bufCap=8460500 toWriteLen=10587120 toWriteCap=819200000 alloc=1864613 sys=2264813 numGC=81
+INFO [06-12|22:39:51.116] Dumped on a disk:                        blockNumber=1550000 out=2    in=348 written=81920000 txs=4701892 bufLen=527  bufCap=8450030 toWriteLen=12117840 toWriteCap=819200000 alloc=1803255 sys=2264813 numGC=82
+INFO [06-12|22:39:51.854] Looking for peers                        peercount=24 tried=6  static=0
+INFO [06-12|22:39:52.591] Dumped on a disk:                        blockNumber=1560000 out=1    in=358 written=81920000 txs=4771917 bufLen=410  bufCap=8440440 toWriteLen=13518340 toWriteCap=819200000 alloc=2055269 sys=2264813 numGC=82
+INFO [06-12|22:39:54.028] Dumped on a disk:                        blockNumber=1570000 out=1    in=366 written=81920000 txs=4835444 bufLen=1108 bufCap=8431140 toWriteLen=14788880 toWriteCap=819200000 alloc=1954042 sys=2264813 numGC=83
+INFO [06-12|22:39:55.620] Dumped on a disk:                        blockNumber=1580000 out=2    in=120 written=81920000 txs=4911034 bufLen=611  bufCap=8420640 toWriteLen=16300680 toWriteCap=819200000 alloc=1878010 sys=2264813 numGC=84
+INFO [06-12|22:39:57.453] Dumped on a disk:                        blockNumber=1590000 out=1    in=536 written=81920000 txs=4997612 bufLen=190  bufCap=8410220 toWriteLen=18032240 toWriteCap=819200000 alloc=1846054 sys=2264813 numGC=85
+INFO [06-12|22:39:59.475] Dumped on a disk:                        blockNumber=1600000 out=0    in=186 written=81920000 txs=5089400 bufLen=163  bufCap=8400160 toWriteLen=19868000 toWriteCap=819200000 alloc=1842602 sys=2264813 numGC=86
+INFO [06-12|22:40:01.367] Dumped on a disk:                        blockNumber=1610000 out=0    in=1   written=81920000 txs=5175948 bufLen=384  bufCap=8390230 toWriteLen=21598960 toWriteCap=819200000 alloc=1805131 sys=2264813 numGC=87
+INFO [06-12|22:40:01.899] Looking for peers                        peercount=21 tried=7  static=0
+INFO [06-12|22:40:02.877] Dumped on a disk:                        blockNumber=1620000 out=0    in=325 written=81920000 txs=5243951 bufLen=469  bufCap=8380500 toWriteLen=22959020 toWriteCap=819200000 alloc=2065391 sys=2264813 numGC=87
+INFO [06-12|22:40:04.409] Dumped on a disk:                        blockNumber=1630000 out=0    in=82  written=81920000 txs=5312896 bufLen=1206 bufCap=8371000 toWriteLen=24337920 toWriteCap=819200000 alloc=1965106 sys=2265069 numGC=88
+INFO [06-12|22:40:05.892] Dumped on a disk:                        blockNumber=1640000 out=6    in=120 written=81920000 txs=5383230 bufLen=402  bufCap=8360430 toWriteLen=25744600 toWriteCap=819200000 alloc=1866679 sys=2265069 numGC=89
+INFO [06-12|22:40:07.385] Dumped on a disk:                        blockNumber=1650000 out=714  in=0   written=81920000 txs=5441567 bufLen=1368 bufCap=8351400 toWriteLen=26911340 toWriteCap=819200000 alloc=2104983 sys=2265069 numGC=90
+INFO [06-12|22:40:08.656] Dumped on a disk:                        blockNumber=1660000 out=0    in=94  written=81920000 txs=5512472 bufLen=188  bufCap=8340220 toWriteLen=28329440 toWriteCap=819200000 alloc=1984121 sys=2265069 numGC=90
+INFO [06-12|22:40:10.244] Dumped on a disk:                        blockNumber=1670000 out=55   in=307 written=81920000 txs=5582685 bufLen=288  bufCap=8330260 toWriteLen=29733700 toWriteCap=819200000 alloc=1906196 sys=2265069 numGC=91
+INFO [06-12|22:40:11.740] Dumped on a disk:                        blockNumber=1680000 out=1    in=51  written=81920000 txs=5651368 bufLen=289  bufCap=8320320 toWriteLen=31107360 toWriteCap=819200000 alloc=1810783 sys=2265069 numGC=92
+INFO [06-12|22:40:11.909] Looking for peers                        peercount=23 tried=6  static=0
+INFO [06-12|22:40:13.099] Dumped on a disk:                        blockNumber=1690000 out=0    in=66  written=81920000 txs=5709042 bufLen=1031 bufCap=8311060 toWriteLen=32260840 toWriteCap=819200000 alloc=2043492 sys=2265069 numGC=92
+INFO [06-12|22:40:14.743] Dumped on a disk:                        blockNumber=1700000 out=0    in=83  written=81920000 txs=5788321 bufLen=411  bufCap=8300440 toWriteLen=33846420 toWriteCap=819200000 alloc=1959753 sys=2265069 numGC=93
+INFO [06-12|22:40:16.431] Dumped on a disk:                        blockNumber=1710000 out=2    in=302 written=81920000 txs=5860284 bufLen=989  bufCap=8290980 toWriteLen=35285680 toWriteCap=819200000 alloc=1894422 sys=2265069 numGC=94
+INFO [06-12|22:40:18.194] Dumped on a disk:                        blockNumber=1720000 out=1    in=167 written=81920000 txs=5940198 bufLen=402  bufCap=8280410 toWriteLen=36883960 toWriteCap=819200000 alloc=1845006 sys=2265069 numGC=95
+INFO [06-12|22:40:20.678] Dumped on a disk:                        blockNumber=1730000 out=1    in=312 written=81920000 txs=6058148 bufLen=238  bufCap=8270270 toWriteLen=39242960 toWriteCap=819200000 alloc=1901418 sys=2332719 numGC=96
+INFO [06-12|22:40:21.913] Looking for peers                        peercount=21 tried=7  static=0
+INFO [06-12|22:40:22.303] Dumped on a disk:                        blockNumber=1740000 out=2    in=0   written=81920000 txs=6128479 bufLen=959  bufCap=8260980 toWriteLen=40649580 toWriteCap=819200000 alloc=1821134 sys=2332719 numGC=97
+INFO [06-12|22:40:24.131] Dumped on a disk:                        blockNumber=1750000 out=1    in=49  written=122880000 txs=6214855 bufLen=478  bufCap=8250510 toWriteLen=1417100  toWriteCap=819200000 alloc=2079486 sys=2332719 numGC=98
+INFO [06-12|22:40:25.720] Dumped on a disk:                        blockNumber=1760000 out=1    in=216 written=122880000 txs=6290288 bufLen=347  bufCap=8240370 toWriteLen=2925760  toWriteCap=819200000 alloc=2049634 sys=2332719 numGC=98
+INFO [06-12|22:40:27.067] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-12|22:40:27.239] Dumped on a disk:                        blockNumber=1770000 out=3    in=241 written=122880000 txs=6357482 bufLen=974  bufCap=8231000 toWriteLen=4269640  toWriteCap=819200000 alloc=1953006 sys=2332719 numGC=99
+INFO [06-12|22:40:28.713] Dumped on a disk:                        blockNumber=1780000 out=0    in=186 written=122880000 txs=6425040 bufLen=248  bufCap=8220280 toWriteLen=5620800  toWriteCap=819200000 alloc=1851950 sys=2332719 numGC=100
+INFO [06-12|22:40:30.211] Dumped on a disk:                        blockNumber=1790000 out=1    in=106 written=122880000 txs=6496057 bufLen=128  bufCap=8210160 toWriteLen=7041140  toWriteCap=819200000 alloc=2105194 sys=2332719 numGC=100
+INFO [06-12|22:40:32.592] Dumped on a disk:                        blockNumber=1800000 out=659  in=783 written=122880000 txs=6589743 bufLen=629  bufCap=8200660 toWriteLen=8914860  toWriteCap=819200000 alloc=2110916 sys=2332975 numGC=102
+INFO [06-12|22:40:33.884] Dumped on a disk:                        blockNumber=1810000 out=6    in=672 written=122880000 txs=6657896 bufLen=692  bufCap=8190720 toWriteLen=10277920 toWriteCap=819200000 alloc=2010839 sys=2332975 numGC=102
+INFO [06-12|22:40:35.386] Dumped on a disk:                        blockNumber=1820000 out=0    in=0   written=122880000 txs=6722762 bufLen=1104 bufCap=8181040 toWriteLen=11575240 toWriteCap=819200000 alloc=1901931 sys=2332975 numGC=103
+INFO [06-12|22:40:36.864] Dumped on a disk:                        blockNumber=1830000 out=121  in=56  written=122880000 txs=6790381 bufLen=626  bufCap=8170440 toWriteLen=12927620 toWriteCap=819200000 alloc=2136381 sys=2332975 numGC=104
+INFO [06-12|22:40:38.201] Dumped on a disk:                        blockNumber=1840000 out=17   in=68  written=122880000 txs=6854480 bufLen=751  bufCap=8160780 toWriteLen=14209600 toWriteCap=819200000 alloc=2026631 sys=2332975 numGC=104
+INFO [06-12|22:40:39.741] Dumped on a disk:                        blockNumber=1850000 out=2    in=198 written=122880000 txs=6922195 bufLen=818  bufCap=8150850 toWriteLen=15563900 toWriteCap=819200000 alloc=1924103 sys=2332975 numGC=105
+INFO [06-12|22:40:41.288] Dumped on a disk:                        blockNumber=1860000 out=0    in=139 written=122880000 txs=6989006 bufLen=539  bufCap=8140540 toWriteLen=16900120 toWriteCap=819200000 alloc=1828276 sys=2332975 numGC=106
+INFO [06-12|22:40:42.659] Dumped on a disk:                        blockNumber=1870000 out=2    in=0   written=122880000 txs=7050213 bufLen=1148 bufCap=8131180 toWriteLen=18124260 toWriteCap=819200000 alloc=2051088 sys=2332975 numGC=106
+INFO [06-12|22:40:44.164] Dumped on a disk:                        blockNumber=1880000 out=9    in=10  written=122880000 txs=7118698 bufLen=182  bufCap=8120190 toWriteLen=19493960 toWriteCap=819200000 alloc=1934560 sys=2332975 numGC=107
+INFO [06-12|22:40:45.817] Dumped on a disk:                        blockNumber=1890000 out=0    in=313 written=122880000 txs=7187150 bufLen=923  bufCap=8110920 toWriteLen=20863000 toWriteCap=819200000 alloc=1854921 sys=2332975 numGC=108
+INFO [06-12|22:40:47.137] Dumped on a disk:                        blockNumber=1900000 out=73   in=204 written=122880000 txs=7247105 bufLen=1110 bufCap=8101140 toWriteLen=22062100 toWriteCap=819200000 alloc=2075618 sys=2332975 numGC=108
+INFO [06-12|22:40:48.455] Dumped on a disk:                        blockNumber=1910000 out=38   in=0   written=122880000 txs=7309345 bufLen=398  bufCap=8090430 toWriteLen=23306900 toWriteCap=819200000 alloc=1936824 sys=2333231 numGC=109
+INFO [06-12|22:40:50.169] Dumped on a disk:                        blockNumber=1920000 out=0    in=329 written=122880000 txs=7383301 bufLen=819  bufCap=8080850 toWriteLen=24786020 toWriteCap=819200000 alloc=1864622 sys=2333231 numGC=110
+INFO [06-12|22:40:52.077] Dumped on a disk:                        blockNumber=1930000 out=711  in=8   written=122880000 txs=7460886 bufLen=838  bufCap=8070870 toWriteLen=26337720 toWriteCap=819200000 alloc=2118594 sys=2333487 numGC=111
+INFO [06-12|22:40:53.784] Dumped on a disk:                        blockNumber=1940000 out=12   in=208 written=122880000 txs=7545903 bufLen=262  bufCap=8060290 toWriteLen=28038060 toWriteCap=819200000 alloc=2082637 sys=2333487 numGC=111
+INFO [06-12|22:40:55.615] Looking for peers                        peercount=22 tried=9  static=0
+INFO [06-12|22:40:55.876] Dumped on a disk:                        blockNumber=1950000 out=0    in=398 written=122880000 txs=7638143 bufLen=455  bufCap=8050420 toWriteLen=29882860 toWriteCap=819200000 alloc=2052767 sys=2333487 numGC=112
+INFO [06-12|22:40:58.227] Dumped on a disk:                        blockNumber=1960000 out=21   in=37  written=122880000 txs=7730100 bufLen=1037 bufCap=8041040 toWriteLen=31722000 toWriteCap=819200000 alloc=2033304 sys=2333487 numGC=113
+INFO [06-12|22:40:59.553] Got interrupt, shutting down... 
+INFO [06-12|22:40:59.554] IPC endpoint closed                      url=/home/eugene/.ethereum/geth.ipc
+INFO [06-12|22:40:59.554] Blockchain stopped 
+Storing into a file - DONE

@@ -1,0 +1,452 @@
+INFO [06-13|08:52:30.562] Starting Geth on Ethereum mainnet... 
+WARN [06-13|08:52:30.562] Sanitizing cache to Go's GC limits       provided=16384 updated=16084
+INFO [06-13|08:52:30.563] Maximum peer count                       ETH=50 LES=0 total=50
+INFO [06-13|08:52:30.579] setting up plain text execution          plain=true
+INFO [06-13|08:52:30.579] Starting peer-to-peer node               instance=turbo-geth/v1.9.14-stable-c2c6a0d0/linux-amd64/go1.14.3
+INFO [06-13|08:52:30.579] Allocated trie memory caches             clean=6.28GiB dirty=0.00B
+INFO [06-13|08:52:30.579] Opening Database (Badger) 
+INFO [06-13|08:52:30.580] Bumping GOMAXPROCS                       database=/home/eugene/.ethereum/geth/chaindata_badger old=8 new=128
+badger 2020/06/13 08:52:31 INFO: All 25 tables opened in 613ms
+badger 2020/06/13 08:52:31 INFO: Replaying file id: 185 at offset: 724039706
+badger 2020/06/13 08:52:32 INFO: Replay took: 1.74429402s
+badger 2020/06/13 08:52:32 INFO: Replaying file id: 186 at offset: 0
+badger 2020/06/13 08:52:34 DEBUG: Flushing memtable, mt.size=134217736 size of flushChan: 0
+badger 2020/06/13 08:52:34 DEBUG: Storing value log head: {Fid:0 Len:0 Offset:0}
+badger 2020/06/13 08:52:35 INFO: Replay took: 2.242120341s
+badger 2020/06/13 08:52:35 INFO: Replaying file id: 187 at offset: 0
+badger 2020/06/13 08:52:36 INFO: Replay took: 1.724402792s
+badger 2020/06/13 08:52:36 INFO: Replaying file id: 188 at offset: 0
+badger 2020/06/13 08:52:37 DEBUG: Flushing memtable, mt.size=134217806 size of flushChan: 0
+badger 2020/06/13 08:52:37 DEBUG: Storing value log head: {Fid:0 Len:0 Offset:0}
+badger 2020/06/13 08:52:38 INFO: Replay took: 1.874283861s
+badger 2020/06/13 08:52:38 INFO: Replaying file id: 189 at offset: 0
+badger 2020/06/13 08:52:39 INFO: Replay took: 372.14943ms
+badger 2020/06/13 08:52:39 DEBUG: Value log discard stats empty
+INFO [06-13|08:52:39.181] Initialised chain configuration          config="{ChainID: 1 Homestead: 1150000 DAO: 1920000 DAOSupport: true EIP150: 2463000 EIP155: 2675000 EIP158: 2675000 Byzantium: 4370000 Constantinople: 7280000 Petersburg: 7280000 Istanbul: 9069000, Muir Glacier: 9200000, Engine: ethash}"
+INFO [06-13|08:52:39.181] Disk storage enabled for ethash caches   dir=/home/eugene/.ethereum/geth/ethash count=3
+INFO [06-13|08:52:39.181] Disk storage enabled for ethash DAGs     dir=/home/eugene/.ethash               count=2
+INFO [06-13|08:52:39.182] Initialising Ethereum protocol           versions="[65 64 63]" network=1
+INFO [06-13|08:52:39.182] Loaded most recent local header          number=10253227 hash="0ee1c4…9d18ad" td=15853753610237407595171 age=8h38m34s
+INFO [06-13|08:52:39.182] Loaded most recent local full block      number=0        hash="d4e567…cb8fa3" td=17179869184             age=51y2mo6d
+INFO [06-13|08:52:39.182] Loaded most recent local fast block      number=0        hash="d4e567…cb8fa3" td=17179869184             age=51y2mo6d
+INFO [06-13|08:52:39.182] Creating IntraBlockState from latest state block=0 isNIl=true callers="[github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbState github.com/ledgerwatch/turbo-geth/eth.NewProtocolManager github.com/ledgerwatch/turbo-geth/eth.New github.com/ledgerwatch/turbo-geth/cmd/utils.RegisterEthService.func1 github.com/ledgerwatch/turbo-geth/node.(*Node).Start github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode main.startNode main.geth github.com/urfave/cli.HandleAction github.com/urfave/cli.(*App).Run main.main runtime.main runtime.goexit]"
+INFO [06-13|08:52:39.182] Creation complete. 
+WARN [06-13|08:52:39.182] trieDbState has been changed             isNil=false callers="[github.com/ledgerwatch/turbo-geth/core.(*BlockChain).setTrieDbState github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbState github.com/ledgerwatch/turbo-geth/eth.NewProtocolManager github.com/ledgerwatch/turbo-geth/eth.New github.com/ledgerwatch/turbo-geth/cmd/utils.RegisterEthService.func1 github.com/ledgerwatch/turbo-geth/node.(*Node).Start github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode main.startNode main.geth github.com/urfave/cli.HandleAction github.com/urfave/cli.(*App).Run main.main runtime.main runtime.goexit]"
+INFO [06-13|08:52:39.182] Creation complete. 
+INFO [06-13|08:52:39.183] Initialising Merry-Go-Round protocol     versions=[1]
+INFO [06-13|08:52:39.203] New local node record                    seq=117 id=87a55c795108ca5a ip=127.0.0.1 udp=30303 tcp=30303
+INFO [06-13|08:52:39.207] New local node record                    seq=118 id=87a55c795108ca5a ip=37.204.152.238 udp=30303 tcp=30303
+INFO [06-13|08:52:39.208] Started P2P networking                   self=enode://868ca453103635f9d2069c2b563c5117f570951e5e5d8bf4f819882a3b16bc1777bd6df381b5e536bb93b3ca1d50d38d9282f751c25bd470b02fdce10e6045f3@37.204.152.238:30303
+INFO [06-13|08:52:39.209] IPC endpoint opened                      url=/home/eugene/.ethereum/geth.ipc
+INFO [06-13|08:52:39.219] Mapped network port                      proto=tcp extport=30303 intport=30303 interface=NAT-PMP(192.168.0.1)
+INFO [06-13|08:52:39.235] Mapped network port                      proto=udp extport=30303 intport=30303 interface=NAT-PMP(192.168.0.1)
+INFO [06-13|08:52:49.208] Block synchronisation started 
+INFO [06-13|08:52:49.276] Looking for peers                        peercount=2 tried=44 static=0
+INFO [06-13|08:52:56.543] Sync stage 1/1. Recovering senders from tx signatures... 
+START 3.2
+INFO [06-13|08:52:57.243] Recovered for blocks:                    blockNumber=3491490 alloc=1120234 sys=1838620 numGC=75
+INFO [06-13|08:52:57.846] Recovered for blocks:                    blockNumber=3495010 alloc=1052752 sys=1839240 numGC=76
+INFO [06-13|08:52:58.434] Recovered for blocks:                    blockNumber=3499808 alloc=1160354 sys=1839304 numGC=76
+INFO [06-13|08:52:58.970] Recovered for blocks:                    blockNumber=3504558 alloc=1070207 sys=1839752 numGC=77
+INFO [06-13|08:52:59.301] Looking for peers                        peercount=3 tried=50 static=0
+INFO [06-13|08:52:59.502] Recovered for blocks:                    blockNumber=3508939 alloc=1178922 sys=1840072 numGC=77
+INFO [06-13|08:53:00.096] Recovered for blocks:                    blockNumber=3513529 alloc=1092927 sys=1840200 numGC=78
+INFO [06-13|08:53:00.642] Recovered for blocks:                    blockNumber=3518216 alloc=1204867 sys=1840328 numGC=78
+INFO [06-13|08:53:01.162] Recovered for blocks:                    blockNumber=3522510 alloc=1132989 sys=1840328 numGC=79
+INFO [06-13|08:53:01.669] Recovered for blocks:                    blockNumber=3526230 alloc=1235661 sys=1840584 numGC=79
+INFO [06-13|08:53:02.272] Recovered for blocks:                    blockNumber=3530179 alloc=1164565 sys=1840584 numGC=80
+INFO [06-13|08:53:02.839] Recovered for blocks:                    blockNumber=3534593 alloc=1068855 sys=1840584 numGC=81
+INFO [06-13|08:53:03.466] Recovered for blocks:                    blockNumber=3538918 alloc=1178063 sys=1840584 numGC=81
+INFO [06-13|08:53:04.158] Recovered for blocks:                    blockNumber=3543867 alloc=1101567 sys=1840584 numGC=82
+INFO [06-13|08:53:04.706] Recovered for blocks:                    blockNumber=3549078 alloc=1220835 sys=1840584 numGC=82
+INFO [06-13|08:53:05.269] Recovered for blocks:                    blockNumber=3553743 alloc=1158111 sys=1840840 numGC=83
+INFO [06-13|08:53:05.840] Recovered for blocks:                    blockNumber=3558100 alloc=1058975 sys=1840840 numGC=84
+INFO [06-13|08:53:06.406] Recovered for blocks:                    blockNumber=3562013 alloc=1168909 sys=1840840 numGC=84
+INFO [06-13|08:53:07.013] Recovered for blocks:                    blockNumber=3565963 alloc=1078727 sys=1840904 numGC=85
+INFO [06-13|08:53:07.541] Recovered for blocks:                    blockNumber=3570017 alloc=1198119 sys=1840904 numGC=85
+INFO [06-13|08:53:08.200] Recovered for blocks:                    blockNumber=3574378 alloc=1114722 sys=1840904 numGC=86
+INFO [06-13|08:53:08.703] Recovered for blocks:                    blockNumber=3577938 alloc=1222679 sys=1840904 numGC=86
+INFO [06-13|08:53:09.302] Recovered for blocks:                    blockNumber=3582633 alloc=1158364 sys=1840904 numGC=87
+INFO [06-13|08:53:09.824] Looking for peers                        peercount=3 tried=51 static=0
+INFO [06-13|08:53:09.955] Recovered for blocks:                    blockNumber=3587326 alloc=1066786 sys=1840904 numGC=88
+INFO [06-13|08:53:10.540] Recovered for blocks:                    blockNumber=3591698 alloc=1173588 sys=1840904 numGC=88
+INFO [06-13|08:53:11.079] Recovered for blocks:                    blockNumber=3595957 alloc=1086882 sys=1840904 numGC=89
+INFO [06-13|08:53:11.650] Recovered for blocks:                    blockNumber=3599596 alloc=1192527 sys=1840904 numGC=89
+INFO [06-13|08:53:12.167] Recovered for blocks:                    blockNumber=3603464 alloc=1100547 sys=1840904 numGC=90
+INFO [06-13|08:53:12.701] Recovered for blocks:                    blockNumber=3607144 alloc=1219740 sys=1840904 numGC=90
+INFO [06-13|08:53:13.236] Recovered for blocks:                    blockNumber=3610291 alloc=1147657 sys=1840904 numGC=91
+INFO [06-13|08:53:13.795] Recovered for blocks:                    blockNumber=3613866 alloc=1256324 sys=1840904 numGC=91
+INFO [06-13|08:53:14.372] Recovered for blocks:                    blockNumber=3617022 alloc=1157495 sys=1840904 numGC=92
+INFO [06-13|08:53:14.929] Recovered for blocks:                    blockNumber=3620625 alloc=1062681 sys=1840904 numGC=93
+INFO [06-13|08:53:15.377] Recovered for blocks:                    blockNumber=3624083 alloc=1173714 sys=1840904 numGC=93
+INFO [06-13|08:53:15.910] Recovered for blocks:                    blockNumber=3627750 alloc=1093404 sys=1840904 numGC=94
+INFO [06-13|08:53:16.407] Recovered for blocks:                    blockNumber=3630887 alloc=1214548 sys=1840904 numGC=94
+INFO [06-13|08:53:16.881] Recovered for blocks:                    blockNumber=3633539 alloc=1147924 sys=1840904 numGC=95
+INFO [06-13|08:53:17.421] Recovered for blocks:                    blockNumber=3636519 alloc=1262141 sys=1840904 numGC=95
+INFO [06-13|08:53:17.897] Recovered for blocks:                    blockNumber=3639235 alloc=1151008 sys=1840904 numGC=96
+INFO [06-13|08:53:18.490] Recovered for blocks:                    blockNumber=3642617 alloc=1253411 sys=1840904 numGC=96
+INFO [06-13|08:53:19.133] Recovered for blocks:                    blockNumber=3646250 alloc=1152650 sys=1840904 numGC=97
+INFO [06-13|08:53:19.611] Recovered for blocks:                    blockNumber=3649367 alloc=1054614 sys=1840904 numGC=98
+INFO [06-13|08:53:19.864] Looking for peers                        peercount=5 tried=48 static=0
+INFO [06-13|08:53:20.156] Recovered for blocks:                    blockNumber=3652265 alloc=1158002 sys=1840904 numGC=98
+INFO [06-13|08:53:20.624] Recovered for blocks:                    blockNumber=3655320 alloc=1069810 sys=1840904 numGC=99
+INFO [06-13|08:53:21.212] Recovered for blocks:                    blockNumber=3658846 alloc=1192406 sys=1840904 numGC=99
+INFO [06-13|08:53:21.690] Recovered for blocks:                    blockNumber=3662400 alloc=1110483 sys=1840904 numGC=100
+INFO [06-13|08:53:22.183] Recovered for blocks:                    blockNumber=3665413 alloc=1220067 sys=1840904 numGC=100
+INFO [06-13|08:53:22.689] Recovered for blocks:                    blockNumber=3668715 alloc=1159282 sys=1841160 numGC=101
+INFO [06-13|08:53:23.178] Recovered for blocks:                    blockNumber=3671772 alloc=1055145 sys=1841160 numGC=102
+INFO [06-13|08:53:23.737] Recovered for blocks:                    blockNumber=3674693 alloc=1173447 sys=1841160 numGC=102
+INFO [06-13|08:53:24.338] Recovered for blocks:                    blockNumber=3677714 alloc=1080165 sys=1841160 numGC=103
+INFO [06-13|08:53:24.861] Recovered for blocks:                    blockNumber=3680764 alloc=1182443 sys=1841160 numGC=103
+INFO [06-13|08:53:25.459] Recovered for blocks:                    blockNumber=3683775 alloc=1093599 sys=1841160 numGC=104
+INFO [06-13|08:53:25.996] Recovered for blocks:                    blockNumber=3687030 alloc=1199266 sys=1841160 numGC=104
+INFO [06-13|08:53:26.582] Recovered for blocks:                    blockNumber=3689972 alloc=1107447 sys=1841160 numGC=105
+INFO [06-13|08:53:27.075] Recovered for blocks:                    blockNumber=3692961 alloc=1219352 sys=1841160 numGC=105
+INFO [06-13|08:53:27.633] Recovered for blocks:                    blockNumber=3696292 alloc=1165400 sys=1841160 numGC=106
+INFO [06-13|08:53:28.150] Recovered for blocks:                    blockNumber=3699479 alloc=1053950 sys=1841160 numGC=107
+INFO [06-13|08:53:28.674] Recovered for blocks:                    blockNumber=3703136 alloc=1164864 sys=1841160 numGC=107
+INFO [06-13|08:53:29.214] Recovered for blocks:                    blockNumber=3706453 alloc=1070460 sys=1841160 numGC=108
+INFO [06-13|08:53:29.788] Recovered for blocks:                    blockNumber=3709323 alloc=1187327 sys=1841160 numGC=108
+INFO [06-13|08:53:29.923] Looking for peers                        peercount=8 tried=56 static=0
+INFO [06-13|08:53:30.324] Recovered for blocks:                    blockNumber=3711953 alloc=1098840 sys=1841160 numGC=109
+INFO [06-13|08:53:30.931] Recovered for blocks:                    blockNumber=3714478 alloc=1200415 sys=1841160 numGC=109
+INFO [06-13|08:53:31.429] Recovered for blocks:                    blockNumber=3717335 alloc=1111005 sys=1841160 numGC=110
+INFO [06-13|08:53:31.975] Recovered for blocks:                    blockNumber=3719794 alloc=1229901 sys=1841416 numGC=110
+INFO [06-13|08:53:32.568] Recovered for blocks:                    blockNumber=3722397 alloc=1166915 sys=1841416 numGC=111
+INFO [06-13|08:53:33.065] Recovered for blocks:                    blockNumber=3724529 alloc=1064687 sys=1841416 numGC=112
+INFO [06-13|08:53:33.561] Recovered for blocks:                    blockNumber=3726739 alloc=1178391 sys=1841672 numGC=112
+INFO [06-13|08:53:34.065] Recovered for blocks:                    blockNumber=3729163 alloc=1084832 sys=1841672 numGC=113
+INFO [06-13|08:53:34.535] Recovered for blocks:                    blockNumber=3731385 alloc=1188654 sys=1841672 numGC=113
+INFO [06-13|08:53:35.048] Recovered for blocks:                    blockNumber=3733382 alloc=1096047 sys=1841672 numGC=114
+INFO [06-13|08:53:35.555] Recovered for blocks:                    blockNumber=3735369 alloc=1197899 sys=1841672 numGC=114
+INFO [06-13|08:53:36.059] Recovered for blocks:                    blockNumber=3737679 alloc=1107441 sys=1841672 numGC=115
+INFO [06-13|08:53:36.524] Recovered for blocks:                    blockNumber=3740101 alloc=1216079 sys=1841672 numGC=115
+INFO [06-13|08:53:36.991] Recovered for blocks:                    blockNumber=3742549 alloc=1157394 sys=1841672 numGC=116
+INFO [06-13|08:53:37.521] Recovered for blocks:                    blockNumber=3744555 alloc=1267949 sys=1841672 numGC=116
+INFO [06-13|08:53:37.971] Recovered for blocks:                    blockNumber=3746657 alloc=1155140 sys=1841672 numGC=117
+INFO [06-13|08:53:38.516] Recovered for blocks:                    blockNumber=3748435 alloc=1052188 sys=1841672 numGC=118
+INFO [06-13|08:53:38.954] Recovered for blocks:                    blockNumber=3750465 alloc=1160446 sys=1841672 numGC=118
+INFO [06-13|08:53:39.171] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-13|08:53:39.390] Recovered for blocks:                    blockNumber=3751855 alloc=1056689 sys=1841672 numGC=119
+INFO [06-13|08:53:39.921] Recovered for blocks:                    blockNumber=3753280 alloc=1156850 sys=1841672 numGC=119
+INFO [06-13|08:53:40.398] Recovered for blocks:                    blockNumber=3754837 alloc=1063253 sys=1841672 numGC=120
+INFO [06-13|08:53:40.879] Recovered for blocks:                    blockNumber=3756214 alloc=1154194 sys=1841672 numGC=120
+INFO [06-13|08:53:41.317] Recovered for blocks:                    blockNumber=3757853 alloc=1068648 sys=1841672 numGC=121
+INFO [06-13|08:53:41.759] Recovered for blocks:                    blockNumber=3759264 alloc=1177482 sys=1841672 numGC=121
+INFO [06-13|08:53:42.207] Recovered for blocks:                    blockNumber=3760735 alloc=1079875 sys=1841672 numGC=122
+INFO [06-13|08:53:42.694] Recovered for blocks:                    blockNumber=3762068 alloc=1177700 sys=1841672 numGC=122
+INFO [06-13|08:53:43.198] Recovered for blocks:                    blockNumber=3763508 alloc=1084827 sys=1841672 numGC=123
+INFO [06-13|08:53:43.658] Recovered for blocks:                    blockNumber=3764929 alloc=1188198 sys=1841672 numGC=123
+INFO [06-13|08:53:44.154] Recovered for blocks:                    blockNumber=3766786 alloc=1090585 sys=1841672 numGC=124
+INFO [06-13|08:53:44.613] Recovered for blocks:                    blockNumber=3768621 alloc=1189628 sys=1841672 numGC=124
+INFO [06-13|08:53:45.081] Recovered for blocks:                    blockNumber=3770181 alloc=1087269 sys=1841672 numGC=125
+INFO [06-13|08:53:45.513] Recovered for blocks:                    blockNumber=3772202 alloc=1184479 sys=1841672 numGC=125
+INFO [06-13|08:53:45.972] Recovered for blocks:                    blockNumber=3774002 alloc=1085998 sys=1841672 numGC=126
+INFO [06-13|08:53:46.397] Recovered for blocks:                    blockNumber=3775792 alloc=1180335 sys=1841672 numGC=126
+INFO [06-13|08:53:46.860] Recovered for blocks:                    blockNumber=3777709 alloc=1081567 sys=1841672 numGC=127
+INFO [06-13|08:53:47.368] Recovered for blocks:                    blockNumber=3779630 alloc=1188322 sys=1841672 numGC=127
+INFO [06-13|08:53:47.935] Recovered for blocks:                    blockNumber=3781286 alloc=1088659 sys=1841672 numGC=128
+INFO [06-13|08:53:48.389] Recovered for blocks:                    blockNumber=3783034 alloc=1191566 sys=1841672 numGC=128
+INFO [06-13|08:53:49.002] Recovered for blocks:                    blockNumber=3785423 alloc=1103327 sys=1841672 numGC=129
+INFO [06-13|08:53:49.514] Recovered for blocks:                    blockNumber=3787566 alloc=1204055 sys=1841672 numGC=129
+INFO [06-13|08:53:49.944] Recovered for blocks:                    blockNumber=3789195 alloc=1105583 sys=1841672 numGC=130
+INFO [06-13|08:53:50.424] Recovered for blocks:                    blockNumber=3790977 alloc=1206216 sys=1841672 numGC=130
+INFO [06-13|08:53:50.977] Recovered for blocks:                    blockNumber=3792447 alloc=1106087 sys=1841672 numGC=131
+INFO [06-13|08:53:51.406] Recovered for blocks:                    blockNumber=3793639 alloc=1192899 sys=1841928 numGC=131
+INFO [06-13|08:53:51.843] Recovered for blocks:                    blockNumber=3794857 alloc=1098415 sys=1841928 numGC=132
+INFO [06-13|08:53:52.276] Recovered for blocks:                    blockNumber=3796206 alloc=1193868 sys=1841928 numGC=132
+INFO [06-13|08:53:52.774] Recovered for blocks:                    blockNumber=3797627 alloc=1091828 sys=1841928 numGC=133
+INFO [06-13|08:53:53.217] Recovered for blocks:                    blockNumber=3799102 alloc=1199347 sys=1841928 numGC=133
+INFO [06-13|08:53:53.647] Recovered for blocks:                    blockNumber=3800386 alloc=1111395 sys=1841928 numGC=134
+INFO [06-13|08:53:54.100] Recovered for blocks:                    blockNumber=3801840 alloc=1214719 sys=1841928 numGC=134
+INFO [06-13|08:53:54.561] Recovered for blocks:                    blockNumber=3803255 alloc=1139605 sys=1841928 numGC=135
+INFO [06-13|08:53:55.003] Recovered for blocks:                    blockNumber=3804662 alloc=1241563 sys=1841928 numGC=135
+INFO [06-13|08:53:55.437] Recovered for blocks:                    blockNumber=3806245 alloc=1148349 sys=1841928 numGC=136
+INFO [06-13|08:53:55.874] Recovered for blocks:                    blockNumber=3807634 alloc=1258584 sys=1841928 numGC=136
+INFO [06-13|08:53:56.260] Recovered for blocks:                    blockNumber=3808932 alloc=1144799 sys=1841928 numGC=137
+INFO [06-13|08:53:56.662] Recovered for blocks:                    blockNumber=3809930 alloc=1236273 sys=1841928 numGC=137
+INFO [06-13|08:53:57.087] Recovered for blocks:                    blockNumber=3811387 alloc=1088612 sys=1841928 numGC=138
+INFO [06-13|08:53:57.634] Recovered for blocks:                    blockNumber=3812958 alloc=1187257 sys=1841928 numGC=138
+INFO [06-13|08:53:58.046] Recovered for blocks:                    blockNumber=3814255 alloc=1079951 sys=1841928 numGC=139
+INFO [06-13|08:53:58.455] Recovered for blocks:                    blockNumber=3815645 alloc=1171133 sys=1841928 numGC=139
+INFO [06-13|08:53:58.934] Recovered for blocks:                    blockNumber=3817322 alloc=1078766 sys=1841928 numGC=140
+INFO [06-13|08:53:59.379] Recovered for blocks:                    blockNumber=3818779 alloc=1178785 sys=1841928 numGC=140
+INFO [06-13|08:53:59.797] Recovered for blocks:                    blockNumber=3820088 alloc=1077132 sys=1841928 numGC=141
+INFO [06-13|08:54:00.272] Recovered for blocks:                    blockNumber=3821769 alloc=1176235 sys=1841928 numGC=141
+INFO [06-13|08:54:00.732] Recovered for blocks:                    blockNumber=3823205 alloc=1083904 sys=1841928 numGC=142
+INFO [06-13|08:54:01.179] Recovered for blocks:                    blockNumber=3824733 alloc=1180807 sys=1841928 numGC=142
+INFO [06-13|08:54:01.629] Recovered for blocks:                    blockNumber=3826264 alloc=1085063 sys=1841928 numGC=143
+INFO [06-13|08:54:02.031] Recovered for blocks:                    blockNumber=3827546 alloc=1193074 sys=1841928 numGC=143
+INFO [06-13|08:54:02.466] Recovered for blocks:                    blockNumber=3828888 alloc=1091202 sys=1841928 numGC=144
+INFO [06-13|08:54:02.877] Recovered for blocks:                    blockNumber=3830188 alloc=1186341 sys=1841928 numGC=144
+INFO [06-13|08:54:03.323] Recovered for blocks:                    blockNumber=3831432 alloc=1089459 sys=1841928 numGC=145
+INFO [06-13|08:54:03.791] Recovered for blocks:                    blockNumber=3832790 alloc=1198029 sys=1841928 numGC=145
+INFO [06-13|08:54:04.194] Recovered for blocks:                    blockNumber=3834161 alloc=1095106 sys=1841928 numGC=146
+INFO [06-13|08:54:04.580] Recovered for blocks:                    blockNumber=3835488 alloc=1187856 sys=1841928 numGC=146
+INFO [06-13|08:54:04.984] Recovered for blocks:                    blockNumber=3836741 alloc=1093554 sys=1841928 numGC=147
+INFO [06-13|08:54:05.506] Recovered for blocks:                    blockNumber=3838066 alloc=1194104 sys=1841928 numGC=147
+INFO [06-13|08:54:06.001] Recovered for blocks:                    blockNumber=3839299 alloc=1109620 sys=1841928 numGC=148
+INFO [06-13|08:54:06.427] Recovered for blocks:                    blockNumber=3840723 alloc=1212553 sys=1841928 numGC=148
+INFO [06-13|08:54:06.845] Recovered for blocks:                    blockNumber=3842176 alloc=1143060 sys=1841928 numGC=149
+INFO [06-13|08:54:07.260] Recovered for blocks:                    blockNumber=3843628 alloc=1249483 sys=1841928 numGC=149
+INFO [06-13|08:54:07.689] Recovered for blocks:                    blockNumber=3844963 alloc=1147810 sys=1841928 numGC=150
+INFO [06-13|08:54:08.173] Recovered for blocks:                    blockNumber=3846040 alloc=1240599 sys=1841928 numGC=150
+INFO [06-13|08:54:08.670] Recovered for blocks:                    blockNumber=3847300 alloc=1104053 sys=1841928 numGC=151
+INFO [06-13|08:54:09.192] Recovered for blocks:                    blockNumber=3848881 alloc=1209030 sys=1841928 numGC=151
+INFO [06-13|08:54:09.617] Recovered for blocks:                    blockNumber=3850405 alloc=1151493 sys=1841928 numGC=152
+INFO [06-13|08:54:10.105] Recovered for blocks:                    blockNumber=3851754 alloc=1251833 sys=1841928 numGC=152
+INFO [06-13|08:54:10.514] Recovered for blocks:                    blockNumber=3853018 alloc=1140111 sys=1841928 numGC=153
+INFO [06-13|08:54:10.975] Recovered for blocks:                    blockNumber=3854268 alloc=1246106 sys=1841928 numGC=153
+INFO [06-13|08:54:11.448] Recovered for blocks:                    blockNumber=3855299 alloc=1143184 sys=1841928 numGC=154
+INFO [06-13|08:54:11.932] Recovered for blocks:                    blockNumber=3856433 alloc=1238291 sys=1841928 numGC=154
+INFO [06-13|08:54:12.324] Recovered for blocks:                    blockNumber=3857497 alloc=1105579 sys=1841928 numGC=155
+INFO [06-13|08:54:12.759] Recovered for blocks:                    blockNumber=3858604 alloc=1202936 sys=1841928 numGC=155
+INFO [06-13|08:54:13.202] Recovered for blocks:                    blockNumber=3859691 alloc=1147379 sys=1841928 numGC=156
+INFO [06-13|08:54:13.614] Recovered for blocks:                    blockNumber=3860551 alloc=1237044 sys=1841928 numGC=156
+INFO [06-13|08:54:14.141] Recovered for blocks:                    blockNumber=3861254 alloc=1104483 sys=1841928 numGC=157
+INFO [06-13|08:54:14.634] Recovered for blocks:                    blockNumber=3862267 alloc=1214844 sys=1841928 numGC=157
+INFO [06-13|08:54:15.138] Recovered for blocks:                    blockNumber=3863442 alloc=1141367 sys=1841928 numGC=158
+INFO [06-13|08:54:15.557] Recovered for blocks:                    blockNumber=3864487 alloc=1248114 sys=1842184 numGC=158
+INFO [06-13|08:54:16.071] Recovered for blocks:                    blockNumber=3865520 alloc=1143616 sys=1842184 numGC=159
+INFO [06-13|08:54:16.585] Recovered for blocks:                    blockNumber=3866732 alloc=1243208 sys=1842184 numGC=159
+INFO [06-13|08:54:17.067] Recovered for blocks:                    blockNumber=3867712 alloc=1151463 sys=1842184 numGC=160
+INFO [06-13|08:54:17.534] Recovered for blocks:                    blockNumber=3868786 alloc=1245389 sys=1842184 numGC=160
+INFO [06-13|08:54:17.976] Recovered for blocks:                    blockNumber=3870046 alloc=1105047 sys=1842184 numGC=161
+INFO [06-13|08:54:18.411] Recovered for blocks:                    blockNumber=3871111 alloc=1214486 sys=1842184 numGC=161
+INFO [06-13|08:54:18.815] Recovered for blocks:                    blockNumber=3872357 alloc=1149141 sys=1842184 numGC=162
+INFO [06-13|08:54:19.258] Recovered for blocks:                    blockNumber=3873508 alloc=1243921 sys=1842184 numGC=162
+INFO [06-13|08:54:19.785] Recovered for blocks:                    blockNumber=3874699 alloc=1101472 sys=1842184 numGC=163
+INFO [06-13|08:54:20.309] Recovered for blocks:                    blockNumber=3875708 alloc=1199010 sys=1842184 numGC=163
+INFO [06-13|08:54:20.769] Recovered for blocks:                    blockNumber=3877003 alloc=1107872 sys=1842184 numGC=164
+INFO [06-13|08:54:21.210] Recovered for blocks:                    blockNumber=3878110 alloc=1211755 sys=1842184 numGC=164
+INFO [06-13|08:54:21.653] Recovered for blocks:                    blockNumber=3879272 alloc=1114008 sys=1842184 numGC=165
+INFO [06-13|08:54:22.147] Recovered for blocks:                    blockNumber=3880511 alloc=1207201 sys=1842184 numGC=165
+INFO [06-13|08:54:22.604] Recovered for blocks:                    blockNumber=3881620 alloc=1108747 sys=1842184 numGC=166
+INFO [06-13|08:54:23.056] Recovered for blocks:                    blockNumber=3882743 alloc=1203250 sys=1842184 numGC=166
+INFO [06-13|08:54:23.475] Recovered for blocks:                    blockNumber=3883960 alloc=1140023 sys=1842184 numGC=167
+INFO [06-13|08:54:23.997] Recovered for blocks:                    blockNumber=3885223 alloc=1240665 sys=1842184 numGC=167
+INFO [06-13|08:54:24.417] Recovered for blocks:                    blockNumber=3886345 alloc=1146088 sys=1842184 numGC=168
+INFO [06-13|08:54:24.883] Recovered for blocks:                    blockNumber=3887524 alloc=1237366 sys=1842184 numGC=168
+INFO [06-13|08:54:25.304] Recovered for blocks:                    blockNumber=3888752 alloc=1097890 sys=1842184 numGC=169
+INFO [06-13|08:54:25.847] Recovered for blocks:                    blockNumber=3889932 alloc=1195528 sys=1842184 numGC=169
+INFO [06-13|08:54:26.289] Recovered for blocks:                    blockNumber=3891221 alloc=1098542 sys=1842184 numGC=170
+INFO [06-13|08:54:26.737] Recovered for blocks:                    blockNumber=3892304 alloc=1203536 sys=1842184 numGC=170
+INFO [06-13|08:54:27.204] Recovered for blocks:                    blockNumber=3893544 alloc=1099027 sys=1842184 numGC=171
+badger 2020/06/13 08:54:27 DEBUG: Flushing memtable, mt.size=95418453 size of flushChan: 0
+badger 2020/06/13 08:54:27 DEBUG: Storing value log head: {Fid:190 Len:33 Offset:1065906886}
+INFO [06-13|08:54:27.707] Recovered for blocks:                    blockNumber=3894841 alloc=1429927 sys=1842184 numGC=173
+INFO [06-13|08:54:28.231] Recovered for blocks:                    blockNumber=3895956 alloc=1541317 sys=1842184 numGC=173
+INFO [06-13|08:54:28.703] Recovered for blocks:                    blockNumber=3896944 alloc=1210489 sys=1842184 numGC=174
+INFO [06-13|08:54:29.081] Recovered for blocks:                    blockNumber=3898116 alloc=1305141 sys=1842184 numGC=174
+INFO [06-13|08:54:29.613] Recovered for blocks:                    blockNumber=3899223 alloc=1401991 sys=1842184 numGC=174
+INFO [06-13|08:54:30.123] Recovered for blocks:                    blockNumber=3900098 alloc=1295916 sys=1842184 numGC=175
+INFO [06-13|08:54:30.649] Recovered for blocks:                    blockNumber=3901077 alloc=1394113 sys=1842184 numGC=175
+INFO [06-13|08:54:31.121] Recovered for blocks:                    blockNumber=3901917 alloc=1252411 sys=1842184 numGC=176
+INFO [06-13|08:54:31.497] Recovered for blocks:                    blockNumber=3902644 alloc=1348583 sys=1842184 numGC=176
+INFO [06-13|08:54:31.883] Recovered for blocks:                    blockNumber=3903430 alloc=1226694 sys=1842184 numGC=177
+INFO [06-13|08:54:32.364] Recovered for blocks:                    blockNumber=3904648 alloc=1342998 sys=1842184 numGC=177
+INFO [06-13|08:54:32.867] Recovered for blocks:                    blockNumber=3906571 alloc=1230669 sys=1842184 numGC=178
+INFO [06-13|08:54:33.335] Recovered for blocks:                    blockNumber=3908024 alloc=1336834 sys=1842184 numGC=178
+INFO [06-13|08:54:33.787] Recovered for blocks:                    blockNumber=3909464 alloc=1230729 sys=1842184 numGC=179
+INFO [06-13|08:54:34.252] Recovered for blocks:                    blockNumber=3910756 alloc=1342525 sys=1842184 numGC=179
+INFO [06-13|08:54:34.754] Recovered for blocks:                    blockNumber=3912006 alloc=1233793 sys=1842184 numGC=180
+INFO [06-13|08:54:35.236] Recovered for blocks:                    blockNumber=3913143 alloc=1330680 sys=1842184 numGC=180
+INFO [06-13|08:54:35.654] Recovered for blocks:                    blockNumber=3914149 alloc=1216329 sys=1842184 numGC=181
+INFO [06-13|08:54:36.127] Recovered for blocks:                    blockNumber=3915000 alloc=1318824 sys=1842184 numGC=181
+INFO [06-13|08:54:36.602] Recovered for blocks:                    blockNumber=3915898 alloc=1200468 sys=1842184 numGC=182
+INFO [06-13|08:54:37.041] Recovered for blocks:                    blockNumber=3916878 alloc=1306295 sys=1842184 numGC=182
+INFO [06-13|08:54:37.437] Recovered for blocks:                    blockNumber=3917667 alloc=1393148 sys=1842184 numGC=182
+INFO [06-13|08:54:37.859] Recovered for blocks:                    blockNumber=3918792 alloc=1291575 sys=1842184 numGC=183
+INFO [06-13|08:54:38.352] Recovered for blocks:                    blockNumber=3920056 alloc=1392575 sys=1842440 numGC=183
+INFO [06-13|08:54:38.841] Recovered for blocks:                    blockNumber=3921306 alloc=1223946 sys=1842440 numGC=184
+INFO [06-13|08:54:39.172] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-13|08:54:39.262] Recovered for blocks:                    blockNumber=3922389 alloc=1327921 sys=1842440 numGC=184
+INFO [06-13|08:54:39.714] Recovered for blocks:                    blockNumber=3923244 alloc=1207865 sys=1842440 numGC=185
+INFO [06-13|08:54:40.239] Recovered for blocks:                    blockNumber=3924225 alloc=1298126 sys=1842440 numGC=185
+INFO [06-13|08:54:40.704] Recovered for blocks:                    blockNumber=3925372 alloc=1396921 sys=1842440 numGC=185
+INFO [06-13|08:54:41.136] Recovered for blocks:                    blockNumber=3926332 alloc=1285144 sys=1842440 numGC=186
+INFO [06-13|08:54:41.549] Recovered for blocks:                    blockNumber=3927457 alloc=1380425 sys=1842440 numGC=186
+INFO [06-13|08:54:42.077] Recovered for blocks:                    blockNumber=3928508 alloc=1222714 sys=1842440 numGC=187
+INFO [06-13|08:54:42.535] Recovered for blocks:                    blockNumber=3929499 alloc=1315887 sys=1842440 numGC=187
+INFO [06-13|08:54:42.991] Recovered for blocks:                    blockNumber=3930821 alloc=1198166 sys=1842440 numGC=188
+INFO [06-13|08:54:43.381] Recovered for blocks:                    blockNumber=3931805 alloc=1303707 sys=1842440 numGC=188
+INFO [06-13|08:54:43.842] Recovered for blocks:                    blockNumber=3932799 alloc=1193647 sys=1842440 numGC=189
+INFO [06-13|08:54:44.310] Recovered for blocks:                    blockNumber=3933835 alloc=1292382 sys=1842440 numGC=189
+INFO [06-13|08:54:44.816] Recovered for blocks:                    blockNumber=3934479 alloc=1409038 sys=1842440 numGC=189
+INFO [06-13|08:54:45.329] Recovered for blocks:                    blockNumber=3935511 alloc=1295308 sys=1842440 numGC=190
+INFO [06-13|08:54:45.956] Recovered for blocks:                    blockNumber=3936555 alloc=1392540 sys=1842440 numGC=190
+INFO [06-13|08:54:46.455] Recovered for blocks:                    blockNumber=3937933 alloc=1251293 sys=1842440 numGC=191
+INFO [06-13|08:54:46.916] Recovered for blocks:                    blockNumber=3939056 alloc=1351925 sys=1842440 numGC=191
+INFO [06-13|08:54:47.426] Recovered for blocks:                    blockNumber=3940232 alloc=1241423 sys=1842440 numGC=192
+INFO [06-13|08:54:47.866] Recovered for blocks:                    blockNumber=3941313 alloc=1331018 sys=1842440 numGC=192
+INFO [06-13|08:54:48.299] Recovered for blocks:                    blockNumber=3942277 alloc=1215539 sys=1842440 numGC=193
+INFO [06-13|08:54:48.710] Recovered for blocks:                    blockNumber=3943188 alloc=1318128 sys=1842440 numGC=193
+INFO [06-13|08:54:49.241] Recovered for blocks:                    blockNumber=3944040 alloc=1199533 sys=1842440 numGC=194
+INFO [06-13|08:54:49.661] Recovered for blocks:                    blockNumber=3944909 alloc=1296462 sys=1842440 numGC=194
+INFO [06-13|08:54:50.032] Recovered for blocks:                    blockNumber=3945906 alloc=1397476 sys=1842440 numGC=194
+INFO [06-13|08:54:50.417] Recovered for blocks:                    blockNumber=3946712 alloc=1282136 sys=1842440 numGC=195
+INFO [06-13|08:54:50.835] Recovered for blocks:                    blockNumber=3947745 alloc=1379137 sys=1842440 numGC=195
+INFO [06-13|08:54:51.223] Recovered for blocks:                    blockNumber=3948791 alloc=1230537 sys=1842440 numGC=196
+INFO [06-13|08:54:51.638] Recovered for blocks:                    blockNumber=3949817 alloc=1339711 sys=1842440 numGC=196
+INFO [06-13|08:54:52.093] Recovered for blocks:                    blockNumber=3950951 alloc=1227115 sys=1842440 numGC=197
+INFO [06-13|08:54:52.541] Recovered for blocks:                    blockNumber=3951905 alloc=1329401 sys=1842440 numGC=197
+INFO [06-13|08:54:53.003] Recovered for blocks:                    blockNumber=3953004 alloc=1207948 sys=1842440 numGC=198
+INFO [06-13|08:54:53.437] Recovered for blocks:                    blockNumber=3954039 alloc=1300941 sys=1842440 numGC=198
+INFO [06-13|08:54:53.833] Recovered for blocks:                    blockNumber=3955235 alloc=1394373 sys=1842440 numGC=198
+INFO [06-13|08:54:54.322] Recovered for blocks:                    blockNumber=3956355 alloc=1286019 sys=1842440 numGC=199
+INFO [06-13|08:54:54.752] Recovered for blocks:                    blockNumber=3957585 alloc=1388996 sys=1842440 numGC=199
+INFO [06-13|08:54:55.197] Recovered for blocks:                    blockNumber=3958709 alloc=1230888 sys=1842440 numGC=200
+INFO [06-13|08:54:55.632] Recovered for blocks:                    blockNumber=3959924 alloc=1322535 sys=1842440 numGC=200
+INFO [06-13|08:54:56.079] Recovered for blocks:                    blockNumber=3960949 alloc=1203620 sys=1842440 numGC=201
+INFO [06-13|08:54:56.532] Recovered for blocks:                    blockNumber=3962063 alloc=1300626 sys=1842440 numGC=201
+INFO [06-13|08:54:56.946] Recovered for blocks:                    blockNumber=3963313 alloc=1398452 sys=1842440 numGC=201
+INFO [06-13|08:54:57.392] Recovered for blocks:                    blockNumber=3964473 alloc=1276361 sys=1842440 numGC=202
+INFO [06-13|08:54:57.822] Recovered for blocks:                    blockNumber=3965438 alloc=1376688 sys=1842440 numGC=202
+INFO [06-13|08:54:58.256] Recovered for blocks:                    blockNumber=3966502 alloc=1226980 sys=1842440 numGC=203
+INFO [06-13|08:54:58.784] Recovered for blocks:                    blockNumber=3967328 alloc=1334400 sys=1842440 numGC=203
+INFO [06-13|08:54:59.246] Recovered for blocks:                    blockNumber=3968143 alloc=1205808 sys=1842440 numGC=204
+INFO [06-13|08:54:59.675] Recovered for blocks:                    blockNumber=3969033 alloc=1306626 sys=1842440 numGC=204
+INFO [06-13|08:55:00.050] Recovered for blocks:                    blockNumber=3969995 alloc=1395610 sys=1842440 numGC=204
+INFO [06-13|08:55:00.484] Recovered for blocks:                    blockNumber=3971059 alloc=1296687 sys=1842696 numGC=205
+INFO [06-13|08:55:00.898] Recovered for blocks:                    blockNumber=3971950 alloc=1402695 sys=1842696 numGC=205
+INFO [06-13|08:55:01.320] Recovered for blocks:                    blockNumber=3972926 alloc=1245487 sys=1842696 numGC=206
+INFO [06-13|08:55:01.716] Recovered for blocks:                    blockNumber=3973780 alloc=1348198 sys=1842696 numGC=206
+INFO [06-13|08:55:02.092] Recovered for blocks:                    blockNumber=3974571 alloc=1216274 sys=1842696 numGC=207
+INFO [06-13|08:55:02.521] Recovered for blocks:                    blockNumber=3975568 alloc=1315722 sys=1842696 numGC=207
+INFO [06-13|08:55:02.958] Recovered for blocks:                    blockNumber=3976575 alloc=1196363 sys=1842696 numGC=208
+INFO [06-13|08:55:03.425] Recovered for blocks:                    blockNumber=3977487 alloc=1293286 sys=1842696 numGC=208
+INFO [06-13|08:55:03.906] Recovered for blocks:                    blockNumber=3978499 alloc=1397834 sys=1842696 numGC=208
+INFO [06-13|08:55:04.295] Recovered for blocks:                    blockNumber=3979391 alloc=1272809 sys=1842696 numGC=209
+INFO [06-13|08:55:04.701] Recovered for blocks:                    blockNumber=3980273 alloc=1361328 sys=1842696 numGC=209
+INFO [06-13|08:55:05.186] Recovered for blocks:                    blockNumber=3981365 alloc=1217239 sys=1842696 numGC=210
+INFO [06-13|08:55:05.670] Recovered for blocks:                    blockNumber=3982239 alloc=1312835 sys=1842696 numGC=210
+INFO [06-13|08:55:06.138] Recovered for blocks:                    blockNumber=3983428 alloc=1199680 sys=1842696 numGC=211
+INFO [06-13|08:55:06.568] Recovered for blocks:                    blockNumber=3984512 alloc=1310072 sys=1842696 numGC=211
+INFO [06-13|08:55:06.989] Recovered for blocks:                    blockNumber=3985596 alloc=1403449 sys=1842696 numGC=211
+INFO [06-13|08:55:07.440] Recovered for blocks:                    blockNumber=3986726 alloc=1291240 sys=1842696 numGC=212
+INFO [06-13|08:55:07.977] Recovered for blocks:                    blockNumber=3987659 alloc=1391714 sys=1842696 numGC=212
+INFO [06-13|08:55:08.418] Recovered for blocks:                    blockNumber=3988480 alloc=1241858 sys=1842696 numGC=213
+INFO [06-13|08:55:08.815] Recovered for blocks:                    blockNumber=3989333 alloc=1340954 sys=1842696 numGC=213
+INFO [06-13|08:55:09.311] Recovered for blocks:                    blockNumber=3990332 alloc=1214706 sys=1842696 numGC=214
+INFO [06-13|08:55:09.787] Recovered for blocks:                    blockNumber=3991538 alloc=1325326 sys=1842696 numGC=214
+INFO [06-13|08:55:10.284] Recovered for blocks:                    blockNumber=3992594 alloc=1208089 sys=1842696 numGC=215
+INFO [06-13|08:55:10.708] Recovered for blocks:                    blockNumber=3993788 alloc=1307182 sys=1842696 numGC=215
+INFO [06-13|08:55:11.109] Recovered for blocks:                    blockNumber=3994828 alloc=1403497 sys=1842696 numGC=215
+INFO [06-13|08:55:11.647] Recovered for blocks:                    blockNumber=3995730 alloc=1278760 sys=1842696 numGC=216
+INFO [06-13|08:55:12.111] Recovered for blocks:                    blockNumber=3996817 alloc=1383193 sys=1842696 numGC=216
+INFO [06-13|08:55:12.632] Recovered for blocks:                    blockNumber=3998237 alloc=1238557 sys=1842696 numGC=217
+INFO [06-13|08:55:13.045] Recovered for blocks:                    blockNumber=3999548 alloc=1335216 sys=1842696 numGC=217
+INFO [06-13|08:55:13.501] Recovered for blocks:                    blockNumber=4001008 alloc=1217890 sys=1842696 numGC=218
+INFO [06-13|08:55:14.013] Recovered for blocks:                    blockNumber=4001732 alloc=1323584 sys=1842696 numGC=218
+INFO [06-13|08:55:14.440] Recovered for blocks:                    blockNumber=4002788 alloc=1198878 sys=1842696 numGC=219
+INFO [06-13|08:55:14.846] Recovered for blocks:                    blockNumber=4003711 alloc=1291807 sys=1842696 numGC=219
+INFO [06-13|08:55:15.269] Recovered for blocks:                    blockNumber=4004627 alloc=1391360 sys=1842696 numGC=219
+INFO [06-13|08:55:15.781] Recovered for blocks:                    blockNumber=4005329 alloc=1289622 sys=1842696 numGC=220
+INFO [06-13|08:55:16.263] Recovered for blocks:                    blockNumber=4006169 alloc=1387239 sys=1842696 numGC=220
+INFO [06-13|08:55:16.733] Recovered for blocks:                    blockNumber=4006920 alloc=1232072 sys=1842696 numGC=221
+INFO [06-13|08:55:17.170] Recovered for blocks:                    blockNumber=4007832 alloc=1335853 sys=1842696 numGC=221
+INFO [06-13|08:55:17.631] Recovered for blocks:                    blockNumber=4008770 alloc=1218167 sys=1842696 numGC=222
+INFO [06-13|08:55:18.053] Recovered for blocks:                    blockNumber=4009758 alloc=1314377 sys=1842696 numGC=222
+INFO [06-13|08:55:18.498] Recovered for blocks:                    blockNumber=4010574 alloc=1198818 sys=1842696 numGC=223
+INFO [06-13|08:55:18.949] Recovered for blocks:                    blockNumber=4011730 alloc=1297149 sys=1842696 numGC=223
+INFO [06-13|08:55:19.392] Recovered for blocks:                    blockNumber=4012506 alloc=1400561 sys=1842696 numGC=223
+INFO [06-13|08:55:19.814] Recovered for blocks:                    blockNumber=4013325 alloc=1285049 sys=1842696 numGC=224
+INFO [06-13|08:55:20.210] Recovered for blocks:                    blockNumber=4014082 alloc=1390378 sys=1842696 numGC=224
+INFO [06-13|08:55:20.683] Recovered for blocks:                    blockNumber=4014852 alloc=1225600 sys=1842696 numGC=225
+INFO [06-13|08:55:21.164] Recovered for blocks:                    blockNumber=4015570 alloc=1316481 sys=1842696 numGC=225
+INFO [06-13|08:55:21.623] Recovered for blocks:                    blockNumber=4016571 alloc=1407368 sys=1842696 numGC=225
+INFO [06-13|08:55:22.052] Recovered for blocks:                    blockNumber=4017666 alloc=1295375 sys=1842696 numGC=226
+INFO [06-13|08:55:22.440] Recovered for blocks:                    blockNumber=4018521 alloc=1393687 sys=1842696 numGC=226
+INFO [06-13|08:55:22.851] Recovered for blocks:                    blockNumber=4019476 alloc=1245288 sys=1842696 numGC=227
+INFO [06-13|08:55:23.223] Recovered for blocks:                    blockNumber=4020340 alloc=1340983 sys=1842696 numGC=227
+INFO [06-13|08:55:23.665] Recovered for blocks:                    blockNumber=4021410 alloc=1223816 sys=1842696 numGC=228
+INFO [06-13|08:55:24.059] Recovered for blocks:                    blockNumber=4022213 alloc=1320479 sys=1842696 numGC=228
+INFO [06-13|08:55:24.560] Recovered for blocks:                    blockNumber=4023167 alloc=1200516 sys=1842696 numGC=229
+INFO [06-13|08:55:24.932] Recovered for blocks:                    blockNumber=4024210 alloc=1291133 sys=1842696 numGC=229
+INFO [06-13|08:55:25.382] Recovered for blocks:                    blockNumber=4025086 alloc=1385939 sys=1842696 numGC=229
+INFO [06-13|08:55:25.803] Recovered for blocks:                    blockNumber=4026230 alloc=1250058 sys=1842696 numGC=230
+INFO [06-13|08:55:26.225] Recovered for blocks:                    blockNumber=4027356 alloc=1355882 sys=1842696 numGC=230
+INFO [06-13|08:55:26.658] Recovered for blocks:                    blockNumber=4028554 alloc=1245848 sys=1842696 numGC=231
+INFO [06-13|08:55:27.094] Recovered for blocks:                    blockNumber=4029684 alloc=1346593 sys=1842696 numGC=231
+INFO [06-13|08:55:27.550] Recovered for blocks:                    blockNumber=4030658 alloc=1226571 sys=1842696 numGC=232
+INFO [06-13|08:55:27.969] Recovered for blocks:                    blockNumber=4031498 alloc=1336262 sys=1842696 numGC=232
+INFO [06-13|08:55:28.360] Recovered for blocks:                    blockNumber=4032588 alloc=1219517 sys=1842696 numGC=233
+INFO [06-13|08:55:28.809] Recovered for blocks:                    blockNumber=4033668 alloc=1318799 sys=1842696 numGC=233
+INFO [06-13|08:55:29.431] Recovered for blocks:                    blockNumber=4034509 alloc=1196481 sys=1842696 numGC=234
+INFO [06-13|08:55:29.828] Recovered for blocks:                    blockNumber=4035443 alloc=1287196 sys=1842696 numGC=234
+INFO [06-13|08:55:30.243] Recovered for blocks:                    blockNumber=4036353 alloc=1379802 sys=1842696 numGC=234
+INFO [06-13|08:55:30.644] Recovered for blocks:                    blockNumber=4037427 alloc=1244502 sys=1842696 numGC=235
+INFO [06-13|08:55:31.069] Recovered for blocks:                    blockNumber=4038412 alloc=1338634 sys=1842696 numGC=235
+INFO [06-13|08:55:31.536] Recovered for blocks:                    blockNumber=4039549 alloc=1215301 sys=1842696 numGC=236
+INFO [06-13|08:55:31.920] Recovered for blocks:                    blockNumber=4040307 alloc=1307333 sys=1842696 numGC=236
+INFO [06-13|08:55:32.377] Recovered for blocks:                    blockNumber=4040911 alloc=1391783 sys=1842696 numGC=236
+INFO [06-13|08:55:32.891] Recovered for blocks:                    blockNumber=4041461 alloc=1271288 sys=1842696 numGC=237
+INFO [06-13|08:55:33.400] Recovered for blocks:                    blockNumber=4042374 alloc=1376202 sys=1842696 numGC=237
+INFO [06-13|08:55:33.950] Recovered for blocks:                    blockNumber=4043183 alloc=1236363 sys=1842696 numGC=238
+INFO [06-13|08:55:34.364] Recovered for blocks:                    blockNumber=4044235 alloc=1338765 sys=1842696 numGC=238
+INFO [06-13|08:55:34.787] Recovered for blocks:                    blockNumber=4045185 alloc=1212699 sys=1842696 numGC=239
+INFO [06-13|08:55:35.171] Recovered for blocks:                    blockNumber=4046054 alloc=1318900 sys=1842696 numGC=239
+INFO [06-13|08:55:35.597] Recovered for blocks:                    blockNumber=4046947 alloc=1203303 sys=1842696 numGC=240
+INFO [06-13|08:55:36.117] Recovered for blocks:                    blockNumber=4047812 alloc=1298676 sys=1842696 numGC=240
+INFO [06-13|08:55:36.646] Recovered for blocks:                    blockNumber=4048916 alloc=1392973 sys=1842696 numGC=240
+INFO [06-13|08:55:37.064] Recovered for blocks:                    blockNumber=4049933 alloc=1285174 sys=1842696 numGC=241
+INFO [06-13|08:55:37.519] Recovered for blocks:                    blockNumber=4051062 alloc=1376182 sys=1842696 numGC=241
+INFO [06-13|08:55:37.976] Recovered for blocks:                    blockNumber=4051968 alloc=1218558 sys=1842696 numGC=242
+INFO [06-13|08:55:38.462] Recovered for blocks:                    blockNumber=4053182 alloc=1314616 sys=1842696 numGC=242
+INFO [06-13|08:55:38.888] Recovered for blocks:                    blockNumber=4054257 alloc=1409185 sys=1842696 numGC=242
+INFO [06-13|08:55:39.172] Badger Metrics                           database=/home/eugene/.ethereum/geth/chaindata_badger BfCache= DataCache=
+INFO [06-13|08:55:39.378] Recovered for blocks:                    blockNumber=4055401 alloc=1295338 sys=1842696 numGC=243
+INFO [06-13|08:55:39.853] Recovered for blocks:                    blockNumber=4056775 alloc=1396056 sys=1842696 numGC=243
+INFO [06-13|08:55:40.375] Recovered for blocks:                    blockNumber=4057925 alloc=1251257 sys=1842696 numGC=244
+INFO [06-13|08:55:40.907] Recovered for blocks:                    blockNumber=4058961 alloc=1342611 sys=1842696 numGC=244
+INFO [06-13|08:55:41.406] Recovered for blocks:                    blockNumber=4060185 alloc=1227921 sys=1842696 numGC=245
+INFO [06-13|08:55:41.908] Recovered for blocks:                    blockNumber=4060986 alloc=1323040 sys=1842696 numGC=245
+INFO [06-13|08:55:42.389] Recovered for blocks:                    blockNumber=4061865 alloc=1213982 sys=1842696 numGC=246
+INFO [06-13|08:55:42.919] Recovered for blocks:                    blockNumber=4063066 alloc=1318850 sys=1842696 numGC=246
+INFO [06-13|08:55:43.352] Recovered for blocks:                    blockNumber=4064099 alloc=1195514 sys=1842696 numGC=247
+INFO [06-13|08:55:43.820] Recovered for blocks:                    blockNumber=4065086 alloc=1303569 sys=1842696 numGC=247
+INFO [06-13|08:55:44.260] Recovered for blocks:                    blockNumber=4065567 alloc=1408203 sys=1842696 numGC=247
+INFO [06-13|08:55:44.786] Recovered for blocks:                    blockNumber=4066422 alloc=1281148 sys=1842696 numGC=248
+INFO [06-13|08:55:45.207] Recovered for blocks:                    blockNumber=4067442 alloc=1386107 sys=1842696 numGC=248
+INFO [06-13|08:55:45.666] Recovered for blocks:                    blockNumber=4068461 alloc=1235147 sys=1842696 numGC=249
+INFO [06-13|08:55:46.077] Recovered for blocks:                    blockNumber=4069680 alloc=1328592 sys=1842696 numGC=249
+INFO [06-13|08:55:46.559] Recovered for blocks:                    blockNumber=4070582 alloc=1205930 sys=1842696 numGC=250
+INFO [06-13|08:55:46.972] Recovered for blocks:                    blockNumber=4071591 alloc=1304267 sys=1842696 numGC=250
+INFO [06-13|08:55:47.411] Recovered for blocks:                    blockNumber=4072589 alloc=1411732 sys=1842696 numGC=250
+INFO [06-13|08:55:47.887] Recovered for blocks:                    blockNumber=4073414 alloc=1274818 sys=1842696 numGC=251
+INFO [06-13|08:55:48.337] Recovered for blocks:                    blockNumber=4074536 alloc=1368591 sys=1842696 numGC=251
+INFO [06-13|08:55:48.751] Recovered for blocks:                    blockNumber=4075507 alloc=1220033 sys=1842696 numGC=252
+INFO [06-13|08:55:49.146] Recovered for blocks:                    blockNumber=4076646 alloc=1324333 sys=1842696 numGC=252
+INFO [06-13|08:55:49.604] Recovered for blocks:                    blockNumber=4077898 alloc=1205387 sys=1842696 numGC=253
+INFO [06-13|08:55:50.053] Recovered for blocks:                    blockNumber=4078961 alloc=1304093 sys=1842696 numGC=253
+INFO [06-13|08:55:50.465] Recovered for blocks:                    blockNumber=4079958 alloc=1397283 sys=1842696 numGC=253
+INFO [06-13|08:55:50.952] Recovered for blocks:                    blockNumber=4081141 alloc=1293456 sys=1842696 numGC=254
+INFO [06-13|08:55:51.398] Recovered for blocks:                    blockNumber=4082281 alloc=1395162 sys=1842696 numGC=254
+INFO [06-13|08:55:51.816] Staged sync finished 
+panic: runtime error: slice bounds out of range [:409600020] with capacity 409600000
+
+goroutine 786 [running]:
+github.com/ledgerwatch/turbo-geth/eth/stagedsync.(*AddressBuffer).Next(0xc00321d710, 0x0, 0x0, 0xc000000000, 0x0, 0x0)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/stagedsync/stage_senders.go:450 +0x28d
+github.com/ledgerwatch/turbo-geth/eth/stagedsync.writeBatchFromDisk(0xc00321d710, 0xc003f7a240, 0x16b24c0, 0xc00536a040, 0x2156560, 0xc003f4f410, 0xc000040ba0, 0x35383d, 0xc003353758, 0x509467)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/stagedsync/stage_senders.go:478 +0x186
+github.com/ledgerwatch/turbo-geth/eth/stagedsync.recoverSendersFromDisk(0xc003f7a240, 0x16b24c0, 0xc00536a040, 0x2156560, 0xc003f4f410, 0xc000040ba0, 0x35383d, 0x14022fd, 0x25, 0x0, ...)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/stagedsync/stage_senders.go:184 +0x1c7
+github.com/ledgerwatch/turbo-geth/eth/stagedsync.spawnRecoverSendersStage(0xc003f7a240, 0x16b24c0, 0xc00536a040, 0x2156560, 0xc0003ec180, 0x16, 0xc000040ba0, 0x0, 0x0)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/stagedsync/stage_senders.go:160 +0x222
+github.com/ledgerwatch/turbo-geth/eth/stagedsync.DoStagedSyncWithFetchers.func3(0xc003f7a240, 0xc003f6dac0, 0x38)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/stagedsync/stagedsync.go:45 +0xad
+github.com/ledgerwatch/turbo-geth/eth/stagedsync.DoStagedSyncWithFetchers(0x1688320, 0xc0005cc680, 0x7f37cc0dc190, 0xc000396d80, 0x16b24c0, 0xc00536a040, 0xc003135fc0, 0x10, 0x7f382f2db901, 0xc0003ec180, ...)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/stagedsync/stagedsync.go:117 +0xbb0
+github.com/ledgerwatch/turbo-geth/eth/downloader.(*Downloader).syncWithPeer(0xc0005cc680, 0xc0034db950, 0xe5a28cc6a4a9b345, 0xe30500b6b7e23964, 0x7c4e33a6ced90154, 0xc760c89882f7f03a, 0xc003dfe7c0, 0x169ce60, 0xc0006e0328, 0x0, ...)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/downloader/downloader.go:548 +0xd92
+github.com/ledgerwatch/turbo-geth/eth/downloader.(*Downloader).synchronise(0xc0005cc680, 0xc003135fc0, 0x10, 0xe5a28cc6a4a9b345, 0xe30500b6b7e23964, 0x7c4e33a6ced90154, 0xc760c89882f7f03a, 0xc003dfe7c0, 0x3, 0x169ce60, ...)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/downloader/downloader.go:437 +0x392
+github.com/ledgerwatch/turbo-geth/eth/downloader.(*Downloader).Synchronise(0xc0005cc680, 0xc003135fc0, 0x10, 0xe5a28cc6a4a9b345, 0xe30500b6b7e23964, 0x7c4e33a6ced90154, 0xc760c89882f7f03a, 0xc003dfe7c0, 0x3, 0x169ce60, ...)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/downloader/downloader.go:349 +0xa8
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).doSync(0xc0003c06c0, 0xc00dbfde00, 0x14bb608, 0xc000599260)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/sync.go:311 +0xba
+github.com/ledgerwatch/turbo-geth/eth.(*chainSyncer).startSync.func1(0xc002b74ab0, 0xc00dbfde00)
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/sync.go:283 +0x38
+created by github.com/ledgerwatch/turbo-geth/eth.(*chainSyncer).startSync
+	/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/eth/sync.go:283 +0x7a

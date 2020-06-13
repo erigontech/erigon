@@ -86,7 +86,7 @@ func DoStagedSyncWithFetchers(
 		},
 	}
 
-	state := NewState(stages[:3])
+	state := NewState(stages[2:3])
 
 	for !state.IsDone() {
 		index, stage := state.CurrentStage()

@@ -56,101 +56,111 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	}()
 
 	blockNumber := big.NewInt(0)
+	firstBlockToProceed := lastProcessedBlockNumber
 
-	const batchSize = 5000
+	const batchSize = 10000
 
-	jobs := make(chan *senderRecoveryJob, 20*batchSize)
-	out := make(chan TxsFroms, batchSize)
+	onlySecondStage := true
+	var filePath string
+	if !onlySecondStage {
+		fmt.Println("START 3.1")
 
-	wg := &sync.WaitGroup{}
-	numOfGoroutines := numOfGoroutines
+		jobs := make(chan *senderRecoveryJob, 50*batchSize)
+		out := make(chan TxsFroms, batchSize)
 
-	numOfGoroutines = 32
-	ctxLength := len(cryptoContexts)
-	if ctxLength < numOfGoroutines {
-		for i := 0; i < numOfGoroutines-ctxLength; i++ {
-			cryptoContexts = append(cryptoContexts, secp256k1.NewContext())
+		wg := &sync.WaitGroup{}
+		numOfGoroutines := numOfGoroutines
+
+		numOfGoroutines = 32
+		ctxLength := len(cryptoContexts)
+		if ctxLength < numOfGoroutines {
+			for i := 0; i < numOfGoroutines-ctxLength; i++ {
+				cryptoContexts = append(cryptoContexts, secp256k1.NewContext())
+			}
 		}
-	}
 
-	fmt.Println("=================", ctxLength, numOfGoroutines)
+		fmt.Println("=================", ctxLength, numOfGoroutines)
 
-	wg.Add(numOfGoroutines)
-	for i := 0; i < numOfGoroutines; i++ {
-		// each goroutine gets it's own crypto context to make sure they are really parallel
-		ctx := cryptoContexts[i]
-		go recoverSenders(ctx, jobs, out, quitCh, wg)
-	}
-	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
+		wg.Add(numOfGoroutines)
+		for i := 0; i < numOfGoroutines; i++ {
+			// each goroutine gets it's own crypto context to make sure they are really parallel
+			ctx := cryptoContexts[i]
+			go recoverSenders(ctx, jobs, out, quitCh, wg)
+		}
+		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
 
-	firstBlock := new(uint64)
+		firstBlock := new(uint64)
 
-	errCh := make(chan error)
-	doneCh := make(chan struct{}, 1)
-	go func() {
-		defer func() {
-			close(jobs)
-			wg.Wait()
-			close(doneCh)
-			close(errCh)
+		errCh := make(chan error)
+		doneCh := make(chan struct{}, 1)
+		go func() {
+			defer func() {
+				close(jobs)
+				wg.Wait()
+				close(doneCh)
+				close(errCh)
+			}()
+
+			for {
+				if err := common.Stopped(quitCh); err != nil {
+					errCh <- err
+					return
+				}
+
+				job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
+				if job == nil {
+					break
+				}
+
+				if atomic.LoadUint64(firstBlock) == 0 {
+					atomic.StoreUint64(firstBlock, job.nextBlockNumber)
+				}
+
+				jobs <- job
+
+				atomic.AddUint64(&nextBlockNumber, 1)
+			}
 		}()
 
-		for {
-			if err := common.Stopped(quitCh); err != nil {
-				errCh <- err
-				return
-			}
+		fmt.Println("DONE?")
+		now := time.Now()
 
-			job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
-			if job == nil {
-				break
-			}
-
-			if atomic.LoadUint64(firstBlock) == 0 {
-				atomic.StoreUint64(firstBlock, job.nextBlockNumber)
-			}
-
-			jobs <- job
-
-			atomic.AddUint64(&nextBlockNumber, 1)
+		filePath := fmt.Sprintf("/mnt/sdb/turbo-geth/froms_%d_%d_%d.out", now.Day(), now.Hour(), now.Minute())
+		f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND, 0664)
+		if err != nil {
+			return err
 		}
-	}()
 
-	fmt.Println("DONE?")
-	now := time.Now()
+		const blockSize = 4096
+		const batch = (blockSize * 10 / 20) * 10000 // 20*4096
+		buf := NewAddressBuffer(f, batch, true)
 
+		fmt.Println("Storing into a file")
+		firstBlock = new(uint64)
+		err = writeOnDiskBatch(buf, firstBlock, out, quitCh, jobs, doneCh)
+		fmt.Println("Storing into a file - DONE")
 
-	f, err := os.Create(fmt.Sprintf("/mnt/sdb/turbo-geth/froms_%d_%d_%d.out", now.Day(), now.Hour(), now.Minute()))
-	if err != nil {
-		return err
+		if err != nil {
+			buf.Close()
+			return err
+		}
+
+		err = <-errCh
+		buf.Close()
+		if err != nil {
+			return err
+		}
+		fmt.Println("DONE!")
 	}
 
-	buf := NewAddressBuffer(f, (4096 * 10 / 20) * 100000)
-	defer buf.Close()
-
-	fmt.Println("Storing into a file")
-	err = writeOnDiskBatch(buf, firstBlock, out, quitCh, jobs, doneCh)
-	fmt.Println("Storing into a file - DONE")
-
-	if err != nil {
-		return err
+	fmt.Println("START 3.2")
+	if onlySecondStage {
+		filePath = "/mnt/sdb/turbo-geth/froms_13_0_17.out"
 	}
-
-	err = <-errCh
-	if err != nil {
-		return err
-	}
+	err := recoverSendersFromDisk(s, stateDB, config, mutation, quitCh, firstBlockToProceed, filePath)
 
 	fmt.Println("DONE!")
-
-	errCh = make(chan error)
-	nextBlockNumber = lastProcessedBlockNumber + 1
-	blockNumber = big.NewInt(0)
-	writeBatchFromDisk(buf, s, stateDB, config, mutation, errCh, quitCh, blockNumber, nextBlockNumber)
-
-	err = <-errCh
-	fmt.Println("DONE!")
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return err
 	}
 
@@ -160,6 +170,21 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	return nil
 }
 
+func recoverSendersFromDisk(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, mutation *mutationSafe, quitCh chan struct{}, lastProcessedBlockNumber uint64, filePath string) error {
+	f, err := os.OpenFile(filePath, os.O_RDONLY, 0664)
+	if err != nil {
+		return err
+	}
+
+	const blockSize = 4096
+	const batch = (blockSize * 10 / 20) * 10000 //20*4096
+	buf := NewAddressBuffer(f, batch, false)
+	defer buf.Close()
+
+	return writeBatchFromDisk(buf, s, stateDB, config, mutation, quitCh, lastProcessedBlockNumber)
+}
+
+// fixme refactor to get rid of blockNumber
 func getBlockBody(mutation *mutationSafe, config *params.ChainConfig, blockNumber *big.Int, nextBlockNumber uint64) *senderRecoveryJob {
 	hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
 	if hash.IsEmpty() {
@@ -237,14 +262,16 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 		buf.Write()
 	}()
 
-	toSort := uint64(10)
-	buffer := make([]TxsFroms, 0, 1000)
+	toSort := uint64(1000)
+	buffer := make([]TxsFroms, 0, 50_000)
 	var writeFroms []TxsFroms
 
 	total := 0
 	totalFroms := 0
 	written := 0
 	var err error
+	m := &runtime.MemStats{}
+
 	defer func() {
 		// store last blocks
 		sort.SliceStable(buffer, func(i, j int) bool {
@@ -270,6 +297,7 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 	currentBlock := uint64(0)
 	for j := range out {
 		if isFirst {
+			// fixme make a normal fromBlock param
 			currentBlock = atomic.LoadUint64(firstBlock)
 			isFirst = false
 		}
@@ -285,7 +313,9 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 		}
 
 		if j.blockNumber%10000 == 0 {
-			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "toNextWrite", buf.Len(), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", buf.Len(), "toWriteCap", buf.Cap())
+			runtime.ReadMemStats(m)
+			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", buf.Len(), "toWriteCap", buf.Cap(),
+				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 
 		if j.err != nil {
@@ -325,7 +355,7 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 			for i := range jobToWrite.froms {
 				n++
 				buf.Add(jobToWrite.froms[i][:])
-				if 20*n == buf.size {
+				if 20*n >= buf.size {
 					written, err = buf.Write()
 					if err != nil {
 						return err
@@ -333,7 +363,6 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 					total += written
 
 					n = 0
-					buf.Reset()
 				}
 			}
 		}
@@ -342,64 +371,37 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 	return nil
 }
 
-func writeBatch(s *StageState, stateDB ethdb.Database, out chan *senderRecoveryJob, mutation *mutationSafe, errCh chan error, quitCh chan struct{}, in chan *senderRecoveryJob) {
-	var nextBlockNumber uint64
-	defer close(errCh)
-
-	for j := range out {
-		if err := common.Stopped(quitCh); err != nil {
-			errCh <- err
-			return
-		}
-
-		if j.err != nil {
-			errCh <- errors.Wrap(j.err, "could not extract senders")
-			return
-		}
-
-		if j.nextBlockNumber > nextBlockNumber {
-			nextBlockNumber = j.nextBlockNumber
-		}
-
-		rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
-
-		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if err := s.Update(mutation, nextBlockNumber); err != nil {
-				errCh <- err
-				return
-			}
-
-			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "out", len(out), "in", len(in))
-
-			if err := mutation.Commit(); err != nil {
-				errCh <- err
-				return
-			}
-
-			mutation.Set(stateDB.NewBatch())
-		}
-	}
-
-	return
-}
-
 type AddressBuffer struct {
-	buf []byte
-	size int
+	buf        []byte
+	size       int
+	currentIdx int
 	io.ReadWriteCloser
 }
 
-func NewAddressBuffer(f io.ReadWriteCloser, size int) *AddressBuffer {
-	buf := make([]byte, size*len(common.Address{}))
+func NewAddressBuffer(f io.ReadWriteCloser, size int, fullLength bool) *AddressBuffer {
+	length := size * len(common.Address{})
+	var buf []byte
+	if fullLength {
+		buf = make([]byte, 0, length)
+		buf = buf[0:0:len(buf)]
+	} else {
+		buf = make([]byte, length)
+	}
 
 	return &AddressBuffer{
-		buf, size, f,
+		buf, size, -1, f,
 	}
 }
 
 func (a *AddressBuffer) Write() (int, error) {
 	if len(a.buf) > 0 {
-		return a.ReadWriteCloser.Write(a.buf)
+		n, err := a.ReadWriteCloser.Write(a.buf)
+		if err != nil {
+			return 0, err
+		}
+
+		a.Reset()
+		return n, nil
 	}
 	return 0, nil
 }
@@ -408,7 +410,7 @@ func (a *AddressBuffer) Read() (int, error) {
 	return a.ReadWriteCloser.Read(a.buf)
 }
 
-func (a *AddressBuffer) Add(b []byte)  {
+func (a *AddressBuffer) Add(b []byte) {
 	a.buf = append(a.buf, b...)
 }
 
@@ -424,58 +426,85 @@ func (a *AddressBuffer) Cap() int {
 	return cap(a.buf)
 }
 
-func writeBatchFromDisk(a *AddressBuffer, s *StageState,
-	stateDB ethdb.Database, config *params.ChainConfig,
-	mutation *mutationSafe,
-	errCh chan error, quitCh chan struct{},
-	blockNumber *big.Int, nextBlockNumber uint64,
-) {
-	defer close(errCh)
+func (a *AddressBuffer) Next() (common.Address, error) {
+	if (a.currentIdx+2)*20 > len(a.buf){
+		a.currentIdx = -1
+	}
 
-	for {
+	if a.currentIdx == -1 {
 		n, err := a.Read()
-		if err != nil && err != io.EOF {
-			errCh <- err
-			return
+		if err != nil {
+			return common.Address{}, err
 		}
 		if n%len(common.Address{}) != 0 {
-			errCh <- errors.New("got invalid address length")
-			return
+			return common.Address{}, errors.New("got invalid address length")
 		}
+		if n == 0 {
+			return common.Address{}, io.EOF
+		}
+	}
 
+	a.currentIdx++
+
+	var addr common.Address
+	addr.SetBytes(a.buf[a.currentIdx*20 : (a.currentIdx+1)*20])
+
+	return addr, nil
+}
+
+func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
+	stateDB ethdb.Database, config *params.ChainConfig,
+	mutation *mutationSafe,
+	quitCh chan struct{},
+	lastBlockNumber uint64,
+) error {
+
+	var err error
+	var addr common.Address
+	blockNumber := big.NewInt(0)
+	nextBlockNumber := lastBlockNumber + 1
+	m := &runtime.MemStats{}
+
+	for {
 		// insert for
 		job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
 		if job == nil {
+			fmt.Println("111 1", blockNumber.String(), nextBlockNumber)
 			break
 		}
 		nextBlockNumber++
 
 		for i := range job.blockBody.Transactions {
-			from := common.Address{}
-			from.SetBytes(a.buf[i : (i+1)*20])
-			job.blockBody.Transactions[i].SetFrom(from)
+			addr, err = buf.Next()
+			if err != nil {
+				fmt.Println("111 2", err)
+				return err
+			}
+
+			job.blockBody.Transactions[i].SetFrom(addr)
 		}
 
 		rawdb.WriteBody(context.Background(), mutation, job.hash, job.nextBlockNumber, job.blockBody)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if err := s.Update(mutation, nextBlockNumber); err != nil {
-				errCh <- err
-				return
+				fmt.Println("111 3", err)
+				return err
 			}
 
-			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
+			runtime.ReadMemStats(m)
+			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 
 			if err := mutation.Commit(); err != nil {
-				errCh <- err
-				return
+				fmt.Println("111 4", err)
+				return err
 			}
 
 			mutation.Set(stateDB.NewBatch())
 		}
 	}
 
-	return
+	return nil
 }
 
 type senderRecoveryJob struct {
