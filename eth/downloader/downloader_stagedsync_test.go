@@ -20,7 +20,7 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
+	//"time"
 )
 
 type stagedSyncTester struct {
@@ -283,12 +283,22 @@ func TestUnwind(t *testing.T) {
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second)
 	fmt.Println("sync heavy")
 	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
+	}
+	if err := tester.sync("forkpeer", nil); err != nil {
+		t.Fatal(err)
+	}
+	currentHeader := tester.CurrentHeader()
+	expectedHash := testChainForkHeavy.chain[len(testChainForkHeavy.chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(testChainForkHeavy.chain) - 1 {
+		t.Errorf("last block expected number %d, got %d", len(testChainForkHeavy.chain) - 1, currentHeader.Number.Uint64())
+	}
+	if currentHeader.Hash() != expectedHash {
+		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
 	}
 }
