@@ -24,11 +24,11 @@ import (
 )
 
 type stagedSyncTester struct {
-	downloader    *Downloader
-	db            ethdb.Database
-	peers         map[string]*stagedSyncTesterPeer
-	genesis       *types.Block
-	lock          sync.RWMutex
+	downloader *Downloader
+	db         ethdb.Database
+	peers      map[string]*stagedSyncTesterPeer
+	genesis    *types.Block
+	lock       sync.RWMutex
 }
 
 func newStagedSyncTester() *stagedSyncTester {
@@ -295,8 +295,8 @@ func TestUnwind(t *testing.T) {
 	}
 	currentHeader := tester.CurrentHeader()
 	expectedHash := testChainForkHeavy.chain[len(testChainForkHeavy.chain)-1]
-	if int(currentHeader.Number.Uint64()) != len(testChainForkHeavy.chain) - 1 {
-		t.Errorf("last block expected number %d, got %d", len(testChainForkHeavy.chain) - 1, currentHeader.Number.Uint64())
+	if int(currentHeader.Number.Uint64()) != len(testChainForkHeavy.chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(testChainForkHeavy.chain)-1, currentHeader.Number.Uint64())
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
