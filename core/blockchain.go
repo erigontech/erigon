@@ -1392,9 +1392,6 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 	if len(chain) == 0 {
 		return 0, nil
 	}
-	log.Info("Inserting chain",
-		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
-		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
 	// Remove already known canon-blocks
 	var (
 		block, prev *types.Block
