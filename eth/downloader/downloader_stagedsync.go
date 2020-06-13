@@ -55,8 +55,8 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 			currentNumber++
 			if hashCount < len(hashes) {
 				copy(hashes[hashCount][:], v)
+				hashCount++
 			}
-			hashCount++
 			return true, nil
 		}
 		if len(k) != 8+common.HashLength {
