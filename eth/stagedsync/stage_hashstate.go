@@ -85,10 +85,10 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
 	prom.TempDir = datadir
-	if err := prom.Unwind(s.BlockNumber, u.UnwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
+	if err := prom.Unwind(s, u, dbutils.PlainAccountChangeSetBucket, 0x00); err != nil {
 		return err
 	}
-	if err := prom.Unwind(s.BlockNumber, u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
+	if err := prom.Unwind(s, u, dbutils.PlainStorageChangeSetBucket, 0x01); err != nil {
 		return err
 	}
 	return nil
@@ -98,7 +98,7 @@ func promoteHashedState(s *StageState, db ethdb.Database, from, to uint64, datad
 	if from == 0 {
 		return promoteHashedStateCleanly(s, db, to, datadir, quit)
 	}
-	return promoteHashedStateIncrementally(from, to, db, datadir, quit)
+	return promoteHashedStateIncrementally(s, from, to, db, datadir, quit)
 }
 
 func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, datadir string, quit chan struct{}) error {
@@ -317,10 +317,32 @@ func getFromPlainStateAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 	}
 }
 
-func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
+func (p *Promoter) Promote(s *StageState, from, to uint64, changeSetBucket []byte, index byte) error {
 	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
+	skip := false
+
+	var loadStartKey []byte
+	if len(s.StageData) != 0 {
+		// we have finished this stage but didn't start the next one
+		if len(s.StageData) == 1 && s.StageData[0] == index {
+			skip = true
+			// we are already at the next stage
+		} else if s.StageData[0] > index {
+			skip = true
+			// if we at the current stage and we have something meaningful at StageData
+		} else if s.StageData[0] == index {
+			var err error
+			loadStartKey, err = etl.NextKey(s.StageData[1:])
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if skip {
+		return nil
+	}
 
 	return etl.Transform(
 		p.db,
@@ -335,15 +357,49 @@ func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
 		etl.TransformArgs{
 			BufferType:      etl.SortableAppendBuffer,
 			ExtractStartKey: startkey,
-			Quit:            p.quitCh,
+			LoadStartKey:    loadStartKey,
+			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return s.UpdateWithStageData(putter, from, append([]byte{index}))
+				}
+				return s.UpdateWithStageData(putter, from, append([]byte{index}, key...))
+			},
+			Quit: p.quitCh,
 		},
 	)
 }
 
-func (p *Promoter) Unwind(from, to uint64, changeSetBucket []byte) error {
+func (p *Promoter) Unwind(s *StageState, u *UnwindState, changeSetBucket []byte, index byte) error {
+	from := s.BlockNumber
+	to := u.UnwindPoint
+
 	log.Info("Unwinding started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
+
+	var loadStartKey []byte
+	skip := false
+
+	if len(u.StageData) != 0 {
+		// we have finished this stage but didn't start the next one
+		if len(u.StageData) == 1 && u.StageData[0] == index {
+			skip = true
+			// we are already at the next stage
+		} else if u.StageData[0] > index {
+			skip = true
+			// if we at the current stage and we have something meaningful at StageData
+		} else if u.StageData[0] == index {
+			var err error
+			loadStartKey, err = etl.NextKey(u.StageData[1:])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if skip {
+		return nil
+	}
 
 	return etl.Transform(
 		p.db,
@@ -354,19 +410,26 @@ func (p *Promoter) Unwind(from, to uint64, changeSetBucket []byte) error {
 		keyTransformLoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
+			LoadStartKey:    loadStartKey,
 			ExtractStartKey: startkey,
-			Quit:            p.quitCh,
+			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return u.UpdateWithStageData(putter, append([]byte{index}))
+				}
+				return u.UpdateWithStageData(putter, append([]byte{index}, key...))
+			},
+			Quit: p.quitCh,
 		},
 	)
 }
 
-func promoteHashedStateIncrementally(from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
+func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
-	if err := prom.Promote(from, to, dbutils.PlainAccountChangeSetBucket); err != nil {
+	if err := prom.Promote(s, from, to, dbutils.PlainAccountChangeSetBucket, 0x01); err != nil {
 		return err
 	}
-	if err := prom.Promote(from, to, dbutils.PlainStorageChangeSetBucket); err != nil {
+	if err := prom.Promote(s, from, to, dbutils.PlainStorageChangeSetBucket, 0x02); err != nil {
 		return err
 	}
 	return nil
