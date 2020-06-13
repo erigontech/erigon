@@ -77,14 +77,9 @@ func (l *progressLogger) Stop() {
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
-	lastProcessedBlockNumber := s.BlockNumber
-
-	nextBlockNumber := uint64(0)
-
-	atomic.StoreUint64(&nextBlockNumber, lastProcessedBlockNumber+1)
-	profileNumber := atomic.LoadUint64(&nextBlockNumber)
+	nextBlockNumber := s.BlockNumber
 	if prof {
-		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
+		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
 		if err != nil {
 			log.Error("could not create CPU profile", "error", err)
 			return err
@@ -109,20 +104,23 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
+	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1)
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
 
-		blockNum := atomic.LoadUint64(&nextBlockNumber)
+		blockNum := atomic.LoadUint64(&nextBlockNumber) + 1
 		if limit > 0 && blockNum >= limit {
 			break
 		}
 
-		block := blockchain.GetBlockByNumber(blockNum)
+		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
+		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
 		if block == nil {
 			break
 		}
+		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
 		type cacheSetter interface {
 			SetAccountCache(cache *fastcache.Cache)
@@ -166,13 +164,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
 		}
 
-		if err = s.Update(batch, blockNum); err != nil {
-			return err
-		}
-
-		atomic.AddUint64(&nextBlockNumber, 1)
-
 		if batch.BatchSize() >= stateDB.IdealBatchSize() {
+			if err = s.Update(batch, blockNum); err != nil {
+				return err
+			}
 			start := time.Now()
 			if _, err = batch.Commit(); err != nil {
 				return err
@@ -181,12 +176,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 
 		if prof {
-			if blockNum-profileNumber == 100000 {
+			if blockNum-s.BlockNumber == 100000 {
 				// Flush the CPU profiler
 				pprof.StopCPUProfile()
 
 				// And the memory profiler
-				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", profileNumber))
+				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
 				defer f.Close()
 				runtime.GC()
 				if err = pprof.WriteHeapProfile(f); err != nil {
@@ -196,10 +191,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 	}
 
-	_, err := batch.Commit()
-	if err != nil {
+	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
+		return err
+	}
+	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	log.Info("Completed on", "block", atomic.LoadUint64(&nextBlockNumber))
 	s.Done()
 	return nil
 }
@@ -277,7 +275,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database)
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
-
 	return nil
 }
 

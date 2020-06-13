@@ -218,9 +218,6 @@ type BlockChain interface {
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
 	InsertBodyChain(context.Context, types.Blocks) (int, error)
 
-	// InsertHeaderChainStaged inserts a batch of headers into the local chain.
-	InsertHeaderChainStaged([]*types.Header, int) (int, bool, uint64, error)
-
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
 
@@ -749,7 +746,6 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 		floor        = int64(-1)
 		localHeight  uint64
 		remoteHeight = remoteHeader.Number.Uint64()
-		err          error
 	)
 	switch d.mode {
 	case FullSync:
@@ -757,10 +753,9 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	case FastSync:
 		localHeight = d.blockchain.CurrentFastBlock().NumberU64()
 	case StagedSync:
-		localHeight, err = d.stagedSync.GetLocalHeight(d.stateDB)
-		if err != nil {
-			return 0, err
-		}
+		headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
+		headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
+		localHeight = *headNumber
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
@@ -968,10 +963,10 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 	defer p.log.Debug("Header download terminated")
 
 	// Create a timeout timer, and the associated header fetcher
-	skeleton := true            // Skeleton assembly phase or finishing up
-	request := time.Now()       // time of the last skeleton fetch request
-	timeout := time.NewTimer(0) // timer to dump a non-responsive active peer
-	<-timeout.C                 // timeout channel should be initially empty
+	skeleton := d.mode != StagedSync // Skeleton assembly phase or finishing up
+	request := time.Now()            // time of the last skeleton fetch request
+	timeout := time.NewTimer(0)      // timer to dump a non-responsive active peer
+	<-timeout.C                      // timeout channel should be initially empty
 	defer timeout.Stop()
 
 	var ttl time.Duration
@@ -1053,8 +1048,12 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 				if n := len(headers); n > 0 {
 					// Retrieve the current head we're at
 					var head uint64
-					if d.mode == LightSync || d.mode == StagedSync {
+					if d.mode == LightSync {
 						head = d.lightchain.CurrentHeader().Number.Uint64()
+					} else if d.mode == StagedSync {
+						headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
+						headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
+						head = *headNumber
 					} else {
 						head = d.blockchain.CurrentFastBlock().NumberU64()
 						if full := d.blockchain.CurrentBlock().NumberU64(); head < full {
@@ -1486,9 +1485,15 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				// This check cannot be executed "as is" for full imports, since blocks may still be
 				// queued for processing when the header download completes. However, as long as the
 				// peer gave us something useful, we're already happy/progressed (above check).
-				if d.mode == FastSync || d.mode == LightSync || d.mode == StagedSync {
+				if d.mode == FastSync || d.mode == LightSync {
 					head := d.lightchain.CurrentHeader()
 					if td.Cmp(d.lightchain.GetTd(head.Hash(), head.Number.Uint64())) > 0 {
+						return errStallingPeer
+					}
+				} else if d.mode == StagedSync {
+					headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
+					headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
+					if td.Cmp(d.lightchain.GetTd(headHash, *headNumber)) > 0 {
 						return errStallingPeer
 					}
 				}
@@ -1526,13 +1531,13 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					var n int
 					var err error
 					if d.mode == StagedSync {
-						var newCanonical bool
-						var lowestCanonicalNumber uint64
-						n, newCanonical, lowestCanonicalNumber, err = d.blockchain.InsertHeaderChainStaged(chunk, frequency)
-						if newCanonical && d.headersUnwinder != nil {
+						var reorg bool
+						var forkBlockNumber uint64
+						n, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), frequency)
+						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
-							if err1 := d.headersUnwinder.UnwindTo(lowestCanonicalNumber, d.stateDB); err1 != nil {
-								return fmt.Errorf("unwinding all stages to %d: %v", lowestCanonicalNumber, err1)
+							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
+								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
 							}
 						}
 					} else {
@@ -1548,7 +1553,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						if n > 0 {
 							rollback = append(rollback, chunk[:n]...)
 						}
-						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
+						log.Error("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
 						return errInvalidChain
 					}
 

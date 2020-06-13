@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 	wg.Add(3)
 	go func() { testChainForkLightA = testChainBase.makeFork(forkLen, false, 1); wg.Done() }()
 	go func() { testChainForkLightB = testChainBase.makeFork(forkLen, false, 2); wg.Done() }()
-	go func() { testChainForkHeavy = testChainBase.makeFork(forkLen, true, 3); wg.Done() }()
+	go func() { testChainForkHeavy = testChainBase.makeFork(forkLen+1, true, 3); wg.Done() }()
 	wg.Wait()
 
 	result := m.Run()

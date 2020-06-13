@@ -1,13 +1,18 @@
 package stagedsync
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
+	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"math/big"
 	"runtime"
 )
@@ -32,7 +37,7 @@ func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan
 		return err
 	}
 
-	return s.DoneAndUpdate(db, blockNum)
+	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
 func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan struct{}, datadir string, chunks [][]byte) error {
@@ -44,15 +49,12 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(db, blockHash, blocknum)
 		if body == nil {
-			log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
-			return nil
-			//return fmt.Errorf("empty block %v", blocknum)
+			return fmt.Errorf("tx lookup generation, empty block body %d, hash %x", blocknum, v)
 		}
 
 		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
 		for _, tx := range body.Transactions {
-			err := next(k, tx.Hash().Bytes(), blockNumBytes)
-			if err != nil {
+			if err := next(k, tx.Hash().Bytes(), blockNumBytes); err != nil {
 				return err
 			}
 		}
@@ -65,34 +67,41 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 	})
 }
 
-func unwindTxLookup(unwindPoint uint64, db ethdb.Database, quitCh chan struct{}) error {
-	var blocksToRemove [][]byte
-	err := db.Walk(dbutils.HeaderHashKey(unwindPoint), dbutils.HeaderHashKey(unwindPoint), 0, func(k, v []byte) (b bool, e error) {
+func unwindTxLookup(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
+	var txsToRemove [][]byte
+	// Remove lookup entries for all blocks above unwindPoint
+	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
-		if !dbutils.CheckCanonicalKey(k) {
-			return true, nil
+		data := v
+		if debug.IsBlockCompressionEnabled() && len(data) > 0 {
+			var err1 error
+			data, err1 = snappy.Decode(nil, v)
+			if err1 != nil {
+				return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err1)
+			}
 		}
-		blocknum := binary.BigEndian.Uint64(k)
-		body := rawdb.ReadBody(db, common.BytesToHash(v), blocknum)
-		if body == nil {
-			log.Error("empty body", "blocknum", blocknum, "hash", common.BytesToHash(v))
-			return true, nil
+		body := new(types.Body)
+		if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
+			return false, fmt.Errorf("unwindTxLookup, rlp decode err: %w", err)
 		}
 		for _, tx := range body.Transactions {
-			blocksToRemove = append(blocksToRemove, tx.Hash().Bytes())
+			txsToRemove = append(txsToRemove, tx.Hash().Bytes())
 		}
 
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	for _, v := range blocksToRemove {
-		if err = db.Delete(dbutils.TxLookupPrefix, v); err != nil {
+	// TODO: Do it in a batcn and update the progress
+	for _, v := range txsToRemove {
+		if err := db.Delete(dbutils.TxLookupPrefix, v); err != nil {
 			return err
 		}
+	}
+	if err := u.Done(db); err != nil {
+		return fmt.Errorf("unwind TxLookup: %w", err)
 	}
 	return nil
 }
