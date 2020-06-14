@@ -414,6 +414,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.IntraBlockState.GetCodeHash(address)
+	fmt.Printf("Check collision %x. Nonce: %d, codeHash: %x\n", address, evm.IntraBlockState.GetNonce(address), contractHash)
 	if evm.IntraBlockState.GetNonce(address) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
 		return nil, common.Address{}, 0, ErrContractAddressCollision
 	}
