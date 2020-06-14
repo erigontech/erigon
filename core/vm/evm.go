@@ -18,7 +18,6 @@ package vm
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -239,7 +238,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 		evm.IntraBlockState.CreateAccount(addr, false)
 	}
-	fmt.Printf("Transfer %d from %x to %x\n", value.Uint64(), caller.Address(), to.Address())
 	evm.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value)
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
@@ -414,7 +412,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.IntraBlockState.GetCodeHash(address)
-	fmt.Printf("Check collision %x. Nonce: %d, codeHash: %x\n", address, evm.IntraBlockState.GetNonce(address), contractHash)
 	if evm.IntraBlockState.GetNonce(address) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
 		return nil, common.Address{}, 0, ErrContractAddressCollision
 	}

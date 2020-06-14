@@ -207,11 +207,6 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 		return nil, nil, common.Hash{}, err
 	}
 	// And _now_ get the state root
-	//if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-	//	return nil, nil, common.Hash{}, err
-	//}
-	//fmt.Printf("\n before\n%s\n", tds.Dump())
-
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -221,12 +216,9 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
-	fmt.Printf("Before committing\n=========================\n")
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
-	fmt.Printf("After committing\n=========================\n")
-	//fmt.Printf("\nbefore%s\n", tds.Dump())
 
 	roots, err := tds.ComputeTrieRoots()
 	if err != nil {

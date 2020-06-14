@@ -568,10 +568,10 @@ func (sdb *IntraBlockState) SetIncarnation(addr common.Address, incarnation uint
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
-	//trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
-	//if trace {
+	trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
 		fmt.Printf("IntraBlockState(%d).Suicide(%x)\n", sdb.txIndex, addr)
-	//}
+	}
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -596,7 +596,6 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	stateObject.markSuicided()
 	stateObject.created = false
 	stateObject.data.Balance.Clear()
-	stateObject.data.Nonce = 0
 
 	return true
 }
@@ -708,10 +707,10 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
-	//trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
-	//if trace {
+	trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
 		fmt.Printf("IntraBlockState(%d).CreateAccount(%x, %t)\n", sdb.txIndex, addr, contractCreation)
-	//}
+	}
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -800,13 +799,13 @@ func (a *Addresses) Swap(i, j int) {
 }
 
 func updateAccount(ti int, ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
-	//trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
-	//if trace {
+	trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
 		fmt.Printf("IntraBlockState(%d).updateAccount(%x, dirty=%t, suicided=%t)\n", ti, addr, isDirty, stateObject.suicided)
-	//}
+	}
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
-		fmt.Printf("DeleteAccount %x\n", addr)
+		//fmt.Printf("DeleteAccount %x\n", addr)
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 			return err
 		}
@@ -816,22 +815,22 @@ func updateAccount(ti int, ctx context.Context, stateWriter StateWriter, addr co
 		stateObject.deleted = false
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("%d UpdateAccountCode %x: %x\n", ti, addr, stateObject.code)
+			//fmt.Printf("%d UpdateAccountCode %x: %x\n", ti, addr, stateObject.code)
 			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 				return err
 			}
 		}
 		if stateObject.created {
-			fmt.Printf("%d CreateContract %x\n", ti, addr)
+			//fmt.Printf("%d CreateContract %x\n", ti, addr)
 			if err := stateWriter.CreateContract(addr); err != nil {
 				return err
 			}
 		}
-		fmt.Printf("%d updateTrie %x\n", ti, addr)
+		//fmt.Printf("%d updateTrie %x\n", ti, addr)
 		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 			return err
 		}
-		fmt.Printf("%d UpdateAccountData %x: %d\n", ti, addr, stateObject.data.Balance.Uint64())
+		//fmt.Printf("%d UpdateAccountData %x: %d\n", ti, addr, stateObject.data.Balance.Uint64())
 		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
