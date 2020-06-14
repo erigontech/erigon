@@ -807,9 +807,9 @@ func (a *Addresses) Swap(i, j int) {
 func updateAccount(ti int, ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	if trace {
-		fmt.Printf("IntraBlockState(%d).updateAccount(%x, dirty=%t, suicided=%t)\n", ti, addr, isDirty, stateObject.suicided )
+		fmt.Printf("IntraBlockState(%d).updateAccount(%x, dirty=%t, suicided=%t)\n", ti, addr, isDirty, stateObject.suicided)
 	}
-	emptyRemoval :=  params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
+	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 			return err
