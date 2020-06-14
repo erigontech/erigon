@@ -323,6 +323,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t.db = db
 	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
+		tx.Pooled = true
 		tx.RawRead = true
 		t.tx = tx
 		return f(t)
@@ -518,33 +519,37 @@ func (c *lmdbCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
-func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, nil, err
+		}
 	}
 
 	if seek == nil {
-		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
-		c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
+		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
 	}
-	if c.err != nil {
-		if lmdb.IsNotFound(c.err) {
+	if err != nil {
+		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
 	}
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+			k, v = nil, nil
+		}
 	}
 
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
 func (c *lmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
