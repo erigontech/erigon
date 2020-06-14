@@ -798,7 +798,7 @@ func (a *Addresses) Swap(i, j int) {
 	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
-func updateAccount(ti int, ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+func updateAccount(_ int, ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	//trace := addr == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	//if trace {
 	//	fmt.Printf("IntraBlockState(%d).updateAccount(%x, dirty=%t, suicided=%t)\n", ti, addr, isDirty, stateObject.suicided)
