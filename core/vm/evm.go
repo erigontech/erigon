@@ -18,6 +18,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -238,6 +239,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 		evm.IntraBlockState.CreateAccount(addr, false)
 	}
+	fmt.Printf("Transfer %d from %x to %x\n", value.Uint64(), caller.Address(), to.Address())
 	evm.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value)
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
