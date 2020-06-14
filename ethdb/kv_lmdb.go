@@ -512,14 +512,16 @@ func (c *lmdbCursor) initCursor() error {
 }
 
 func (c *lmdbCursor) First() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, nil, err
+		}
 	}
 
 	return c.Seek(c.prefix)
 }
 
-func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
+func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
@@ -533,23 +535,21 @@ func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	}
 
 	if seek == nil {
-		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
+		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
-		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
+		c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
 	}
-	if err != nil {
-		if lmdb.IsNotFound(err) {
+	if c.err != nil {
+		if lmdb.IsNotFound(c.err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
 	}
-	if c.prefix != nil {
-		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-			k, v = nil, nil
-		}
+	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
 	}
 
-	return k, v, nil
+	return c.k, c.v, nil
 }
 
 func (c *lmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
@@ -578,14 +578,16 @@ func (c *lmdbCursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *lmdbCursor) Delete(key []byte) error {
-	if err := c.initCursor(); err != nil {
-		return err
-	}
-
 	select {
 	case <-c.ctx.Done():
 		return c.ctx.Err()
 	default:
+	}
+
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
 	}
 
 	k, _, err := c.Seek(key)
@@ -600,14 +602,16 @@ func (c *lmdbCursor) Delete(key []byte) error {
 }
 
 func (c *lmdbCursor) Put(key []byte, value []byte) error {
-	if err := c.initCursor(); err != nil {
-		return err
-	}
-
 	select {
 	case <-c.ctx.Done():
 		return c.ctx.Err()
 	default:
+	}
+
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
 	}
 
 	return c.cursor.Put(key, value, 0)
@@ -650,9 +654,12 @@ func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, err
 }
 
 func (c *lmdbNoValuesCursor) First() ([]byte, uint32, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, 0, err
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, 0, err
+		}
 	}
+
 	if len(c.prefix) == 0 {
 		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
@@ -678,8 +685,10 @@ func (c *lmdbNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	default:
 	}
 
-	if err := c.initCursor(); err != nil {
-		return []byte{}, 0, err
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, 0, err
+		}
 	}
 
 	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetKey)
