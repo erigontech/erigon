@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
@@ -51,6 +52,10 @@ func (w *PlainStateWriter) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
 }
 
 func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
+		fmt.Printf("UpdateAccountData(%x)\n", address)
+	}
 	if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
@@ -63,6 +68,10 @@ func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
+		fmt.Printf("UpdateAccountCode(%x, %d, %x, %x...%x)\n", address, incarnation, codeHash, code[:4], code[len(code)-4:])
+	}
 	if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
@@ -85,6 +94,10 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 }
 
 func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
+		fmt.Printf("DeleteAccount(%x, original.Inc=%d)\n", address, original.Incarnation)
+	}
 	if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
 		return err
 	}
@@ -132,6 +145,10 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
+	if trace {
+		fmt.Printf("CreateContract(%x)\n", address)
+	}
 	if err := w.csw.CreateContract(address); err != nil {
 		return err
 	}

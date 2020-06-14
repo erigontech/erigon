@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"github.com/VictoriaMetrics/fastcache"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -47,6 +48,7 @@ func (r *PlainStateReader) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
 }
 
 func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	var enc []byte
 	var ok bool
 	if r.accountCache != nil {
@@ -69,10 +71,14 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
+	if trace {
+		fmt.Printf("ReadAccountData(%x)={inc:%d}\n", address, acc.Incarnation)
+	}
 	return acc, nil
 }
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	if r.storageCache != nil {
 		if enc, ok := r.storageCache.HasGet(nil, compositeKey); ok {
@@ -86,10 +92,14 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 	if r.storageCache != nil {
 		r.storageCache.Set(compositeKey, enc)
 	}
+	if trace {
+		fmt.Printf("ReadAccountStorage(%x, %d, %x)=%x\n", address, incarnation, *key, enc)
+	}
 	return enc, nil
 }
 
 func (r *PlainStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	if r.codeCache != nil {
 		if code, ok := r.codeCache.HasGet(nil, address[:]); ok {
 			return code, nil
@@ -104,10 +114,14 @@ func (r *PlainStateReader) ReadAccountCode(address common.Address, codeHash comm
 		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
 		r.codeSizeCache.Set(address[:], b[:])
 	}
+	if trace {
+		fmt.Printf("ReadAccountCode(%x, %x)=%x...%x\n", address, codeHash, code[:4], code[len(code)-4:])
+	}
 	return code, err
 }
 
 func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}
@@ -125,13 +139,23 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash 
 		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
 		r.codeSizeCache.Set(address[:], b[:])
 	}
+	if trace {
+		fmt.Printf("ReadAccountCodeSize(%x, %x)=%d\n", address, codeHash, len(code))
+	}
 	return len(code), nil
 }
 
 func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	if b, err := r.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
+		if trace {
+			fmt.Printf("ReadAccountIncarnation(%x)=%d\n", address, binary.BigEndian.Uint64(b))
+		}
 		return binary.BigEndian.Uint64(b), nil
 	} else if entryNotFound(err) {
+		if trace {
+			fmt.Printf("ReadAccountIncarnation(%x)=0\n", address)
+		}
 		return 0, nil
 	} else {
 		return 0, err
