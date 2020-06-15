@@ -56,7 +56,6 @@ func TestRemoteNotify(t *testing.T) {
 	block := types.NewBlockWithHeader(header)
 
 	_ = ethash.Seal(consensus.NewCancel(), nil, block, nil, nil)
-
 	select {
 	case work := <-sink:
 		if want := ethash.SealHash(header).Hex(); work[0] != want {
@@ -97,16 +96,22 @@ func TestRemoteMultiNotify(t *testing.T) {
 	ethash := NewTester([]string{server.URL}, false)
 	defer ethash.Close()
 
+	// Provide a results reader.
+	// Otherwise the unread results will be logged asynchronously
+	// and this can happen after the test is finished, causing a panic.
+	results := make(chan consensus.ResultWithContext, cap(sink))
+
 	// Stream a lot of work task and ensure all the notifications bubble out.
 	for i := 0; i < cap(sink); i++ {
 		header := &types.Header{Number: big.NewInt(int64(i)), Difficulty: big.NewInt(100)}
 		block := types.NewBlockWithHeader(header)
-		_ = ethash.Seal(consensus.NewCancel(), nil, block, nil, nil)
+		_ = ethash.Seal(consensus.NewCancel(), nil, block, results, nil)
 	}
 
 	for i := 0; i < cap(sink); i++ {
 		select {
 		case <-sink:
+			<-results
 		case <-time.After(10 * time.Second):
 			t.Fatalf("notification %d timed out", i)
 		}

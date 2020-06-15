@@ -43,7 +43,7 @@ func NewDepTracer() *DepTracer {
 func (dt *DepTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
-func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	if op == vm.SSTORE {
 		addr := contract.Address()
 		if stack.Len() == 0 {
@@ -73,7 +73,7 @@ func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 	}
 	return nil
 }
-func (dt *DepTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (dt *DepTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	dt.accountsWriteSetFrame = make(map[common.Address]struct{})
 	dt.storageWriteSetFrame = make(map[common.Address]map[common.Hash]struct{})
 	return nil

@@ -27,7 +27,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	cli "github.com/urfave/cli"
@@ -226,7 +226,7 @@ func loadSigningKey(keyfile string) *ecdsa.PrivateKey {
 	if err != nil {
 		exit(fmt.Errorf("failed to read the keyfile at '%s': %v", keyfile, err))
 	}
-	password, _ := console.Stdin.PromptPassword("Please enter the password for '" + keyfile + "': ")
+	password, _ := prompt.Stdin.PromptPassword("Please enter the password for '" + keyfile + "': ")
 	key, err := keystore.DecryptKey(keyjson, password)
 	if err != nil {
 		exit(fmt.Errorf("error decrypting key: %v", err))

@@ -21,21 +21,20 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"runtime"
 	godebug "runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/elastic/gosigar"
+	gopsutil "github.com/shirou/gopsutil/mem"
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethclient"
@@ -149,6 +148,7 @@ var (
 		utils.RopstenFlag,
 		utils.RinkebyFlag,
 		utils.GoerliFlag,
+		utils.YoloV1Flag,
 		utils.VMEnableDebugFlag,
 		utils.NetworkIdFlag,
 		utils.EthStatsURLFlag,
@@ -259,7 +259,7 @@ func init() {
 	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
-		console.Stdin.Close() // Resets terminal mode.
+		prompt.Stdin.Close() // Resets terminal mode.
 		return nil
 	}
 }
@@ -314,19 +314,17 @@ func prepare(ctx *cli.Context) {
 		ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(128))
 	}
 	// Cap the cache allowance and tune the garbage collector
-	var mem gosigar.Mem
-	// Workaround until OpenBSD support lands into gosigar
-	// Check https://github.com/elastic/gosigar#supported-platforms
-	if runtime.GOOS != "openbsd" {
-		if err := mem.Get(); err == nil {
-			if 32<<(^uintptr(0)>>63) == 32 && mem.Total > 2*1024*1024*1024 {
-				log.Warn("Lowering memory allowance on 32bit arch", "available", mem.Total/1024/1024, "addressable", 2*1024)
-				mem.Total = 2 * 1024 * 1024 * 1024
-			}
-			allowance := int(mem.Total / 1024 / 1024 / 3)
-			if cache := ctx.GlobalInt(utils.CacheFlag.Name); cache > allowance {
-				log.Warn("Sanitizing cache to Go's GC limits", "provided", cache, "updated", allowance)
-				ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(allowance))
+	mem, err := gopsutil.VirtualMemory()
+	if err == nil {
+		if 32<<(^uintptr(0)>>63) == 32 && mem.Total > 2*1024*1024*1024 {
+			log.Warn("Lowering memory allowance on 32bit arch", "available", mem.Total/1024/1024, "addressable", 2*1024)
+			mem.Total = 2 * 1024 * 1024 * 1024
+		}
+		allowance := int(mem.Total / 1024 / 1024 / 3)
+		if cache := ctx.GlobalInt(utils.CacheFlag.Name); cache > allowance {
+			log.Warn("Sanitizing cache to Go's GC limits", "provided", cache, "updated", allowance)
+			if err = ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(allowance)); err != nil {
+				log.Error("Error while sanitizing cache to Go's GC limits", "err", err)
 			}
 		}
 	}
