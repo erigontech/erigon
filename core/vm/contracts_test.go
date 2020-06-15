@@ -74,7 +74,7 @@ func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 	in := common.Hex2Bytes(test.Input)
 	contract := NewContract(AccountRef(common.HexToAddress("1337")),
 		nil, new(uint256.Int), p.RequiredGas(in), NewDestsCache(10))
-	t.Run(fmt.Sprintf("%s-Gas=%d", test.name, contract.Gas), func(t *testing.T) {
+	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, contract.Gas), func(t *testing.T) {
 		if res, err := RunPrecompiledContract(p, in, contract); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
@@ -93,7 +93,7 @@ func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
 	in := common.Hex2Bytes(test.Input)
 	contract := NewContract(AccountRef(common.HexToAddress("1337")),
 		nil, new(uint256.Int), p.RequiredGas(in)-1, NewDestsCache(10))
-	t.Run(fmt.Sprintf("%s-Gas=%d", test.name, contract.Gas), func(t *testing.T) {
+	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, contract.Gas), func(t *testing.T) {
 		_, err := RunPrecompiledContract(p, in, contract)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)

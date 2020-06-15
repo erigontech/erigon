@@ -1133,8 +1133,7 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 		}
 	}
 	// Check for pending transactions for every account that sent new ones
-	if pool.currentState != nil {
-		promoted := pool.promoteExecutables(promoteAddrs)
+	promoted := pool.promoteExecutables(promoteAddrs)
 
 	// If a new block appeared, validate the pool of pending transactions. This will
 	// remove any transaction that has been included in the block or was invalidated
@@ -1147,11 +1146,9 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 	pool.truncateQueue()
 
 	// Update all accounts to the latest known pending nonce
-	if pool.currentState != nil {
-		for addr, list := range pool.pending {
-			txs := list.Flatten() // Heavy but will be cached and is needed by the miner anyway
-			pool.pendingNonces.set(addr, txs[len(txs)-1].Nonce()+1)
-		}
+	for addr, list := range pool.pending {
+		txs := list.Flatten() // Heavy but will be cached and is needed by the miner anyway
+		pool.pendingNonces.set(addr, txs[len(txs)-1].Nonce()+1)
 	}
 	pool.mu.Unlock()
 

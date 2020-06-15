@@ -28,9 +28,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/asm"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -347,7 +349,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//	}})
 
 	for i := 0; i < b.N; i++ {
-		Execute(code, nil, nil)
+		_, _, _ = Execute(code, nil, nil, 0)
 	}
 }
 
@@ -356,28 +358,41 @@ type stepCounter struct {
 	steps int
 }
 
-func (s *stepCounter) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 
-func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, rStack *vm.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	s.steps++
 	// Enable this for more output
 	//s.inner.CaptureState(env, pc, op, gas, cost, memory, stack, rStack, contract, depth, err)
 	return nil
 }
 
-func (s *stepCounter) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, rStack *vm.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (s *stepCounter) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 
-func (s *stepCounter) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (s *stepCounter) CaptureEnd(_ int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	return nil
+}
+
+func (s *stepCounter) CaptureCreate(creator common.Address, creation common.Address) error {
+	return nil
+}
+func (s *stepCounter) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+func (s *stepCounter) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
 func TestJumpSub1024Limit(t *testing.T) {
-	state, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-	address := common.HexToAddress("0x0a")
+	var (
+		tds     = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		state   = state.New(tds)
+		address = common.HexToAddress("0x0a")
+	)
 	// Code is
 	// 0 beginsub
 	// 1 push 0
@@ -413,8 +428,11 @@ func TestJumpSub1024Limit(t *testing.T) {
 }
 
 func TestReturnSubShallow(t *testing.T) {
-	state, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-	address := common.HexToAddress("0x0a")
+	var (
+		tds     = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		state   = state.New(tds)
+		address = common.HexToAddress("0x0a")
+	)
 	// The code does returnsub without having anything on the returnstack.
 	// It should not panic, but just fail after one step
 	state.SetCode(address, []byte{
@@ -449,21 +467,24 @@ func TestReturnSubShallow(t *testing.T) {
 
 // disabled -- only used for generating markdown
 func DisabledTestReturnCases(t *testing.T) {
+	tracer := stepCounter{inner: vm.NewJSONLogger(nil, os.Stdout)}
 	cfg := &Config{
 		EVMConfig: vm.Config{
 			Debug:     true,
-			Tracer:    vm.NewMarkdownLogger(nil, os.Stdout),
+			Tracer:    &tracer,
 			ExtraEips: []int{2315},
 		},
 	}
 	// This should fail at first opcode
+	//nolint:errcheck
 	Execute([]byte{
 		byte(vm.RETURNSUB),
 		byte(vm.PC),
 		byte(vm.PC),
-	}, nil, cfg)
+	}, nil, cfg, 0)
 
 	// Should also fail
+	//nolint:errcheck
 	Execute([]byte{
 		byte(vm.PUSH1), 5,
 		byte(vm.JUMPSUB),
@@ -472,9 +493,10 @@ func DisabledTestReturnCases(t *testing.T) {
 		byte(vm.BEGINSUB),
 		byte(vm.RETURNSUB),
 		byte(vm.PC),
-	}, nil, cfg)
+	}, nil, cfg, 0)
 
 	// This should complete
+	//nolint:errcheck
 	Execute([]byte{
 		byte(vm.PUSH1), 0x4,
 		byte(vm.JUMPSUB),
@@ -485,17 +507,18 @@ func DisabledTestReturnCases(t *testing.T) {
 		byte(vm.RETURNSUB),
 		byte(vm.BEGINSUB),
 		byte(vm.RETURNSUB),
-	}, nil, cfg)
+	}, nil, cfg, 0)
 }
 
 // DisabledTestEipExampleCases contains various testcases that are used for the
 // EIP examples
 // This test is disabled, as it's only used for generating markdown
 func DisabledTestEipExampleCases(t *testing.T) {
+	tracer := stepCounter{inner: vm.NewJSONLogger(nil, os.Stdout)}
 	cfg := &Config{
 		EVMConfig: vm.Config{
 			Debug:     true,
-			Tracer:    vm.NewMarkdownLogger(nil, os.Stdout),
+			Tracer:    &tracer,
 			ExtraEips: []int{2315},
 		},
 	}
@@ -514,7 +537,7 @@ func DisabledTestEipExampleCases(t *testing.T) {
 		fmt.Printf("%v\nBytecode: `0x%x` (`%v`)\n",
 			comment,
 			code, ops)
-		Execute(code, nil, cfg)
+		Execute(code, nil, cfg, 0) //nolint:errcheck
 	}
 
 	{ // First eip testcase

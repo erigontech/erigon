@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:stylecheck
 package bls12381
 
 import (
@@ -176,6 +177,7 @@ func (e *fe) sign() bool {
 	return r[0]&1 == 0
 }
 
+//nolint:unparam
 func (fe *fe) div2(e uint64) {
 	fe[0] = fe[0]>>1 | fe[1]<<63
 	fe[1] = fe[1]>>1 | fe[2]<<63

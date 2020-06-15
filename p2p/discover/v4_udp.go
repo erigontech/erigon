@@ -31,8 +31,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/p2p/discover/v4wire"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -243,7 +243,7 @@ func (t *UDPv4) sendPing(toid enode.ID, toaddr *net.UDPAddr, callback func()) *r
 	})
 	// Send the packet.
 	t.localNode.UDPContact(toaddr)
-	t.write(toaddr, toid, req.Name(), packet)
+	t.write(toaddr, toid, req.Name(), packet) //nolint:errcheck
 	return rm
 }
 
@@ -320,10 +320,12 @@ func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubke
 		}
 		return true, nreceived >= bucketSize
 	})
-	t.send(toaddr, toid, &v4wire.Findnode{
+	if _, err := t.send(toaddr, toid, &v4wire.Findnode{
 		Target:     target,
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return nodes, <-rm.errc
 }
 
@@ -347,8 +349,12 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 		return matched, matched
 	})
 	// Send the packet and wait for the reply.
-	t.write(addr, n.ID(), req.Name(), packet)
-	if err := <-rm.errc; err != nil {
+
+	err = t.write(addr, n.ID(), req.Name(), packet)
+	if err != nil {
+		return nil, err
+	}
+	if err = <-rm.errc; err != nil {
 		return nil, err
 	}
 	// Verify the response record.
@@ -489,6 +495,7 @@ func (t *UDPv4) loop() {
 	}
 }
 
+//nolint:unparam
 func (t *UDPv4) send(toaddr *net.UDPAddr, toid enode.ID, req v4wire.Packet) ([]byte, error) {
 	packet, hash, err := v4wire.Encode(t.priv, req)
 	if err != nil {
@@ -652,6 +659,8 @@ func (t *UDPv4) handlePing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 
 	// Reply.
 	seq, _ := rlp.EncodeToBytes(t.localNode.Node().Seq())
+
+	//nolint:errcheck
 	t.send(from, fromID, &v4wire.Pong{
 		To:         v4wire.NewEndpoint(from, req.From.TCP),
 		ReplyTok:   mac,
@@ -767,6 +776,7 @@ func (t *UDPv4) verifyENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 }
 
 func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, mac []byte) {
+	//nolint:errcheck
 	t.send(from, fromID, &v4wire.ENRResponse{
 		ReplyTok: mac,
 		Record:   *t.localNode.Node().Record(),

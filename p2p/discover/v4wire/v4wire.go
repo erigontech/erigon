@@ -27,11 +27,11 @@ import (
 	"net"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/enr"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // RPC packet types
@@ -192,7 +192,7 @@ func seqFromTail(tail []rlp.RawValue) uint64 {
 		return 0
 	}
 	var seq uint64
-	rlp.DecodeBytes(tail[0], &seq)
+	rlp.DecodeBytes(tail[0], &seq) //nolint:errcheck
 	return seq
 }
 
@@ -254,7 +254,7 @@ func Encode(priv *ecdsa.PrivateKey, req Packet) (packet, hash []byte, err error)
 	b := new(bytes.Buffer)
 	b.Write(headSpace)
 	b.WriteByte(req.Kind())
-	if err := rlp.Encode(b, req); err != nil {
+	if err = rlp.Encode(b, req); err != nil {
 		return nil, nil, err
 	}
 	packet = b.Bytes()

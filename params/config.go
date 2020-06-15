@@ -490,7 +490,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 						lastFork.name, lastFork.block, cur.name, cur.block)
 				}
 			}
-		// If it was optional and not set, then ignore it
+			// If it was optional and not set, then ignore it
 		}
 		if !cur.optional || cur.block != nil {
 			lastFork = cur
@@ -535,8 +535,8 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head *big.Int) *Confi
 	}
 	if isForkIncompatible(c.MuirGlacierBlock, newcfg.MuirGlacierBlock, head) {
 		return newCompatError("Muir Glacier fork block", c.MuirGlacierBlock, newcfg.MuirGlacierBlock)
-	if isForkIncompatible(c.YoloV1Block, newcfg.YoloV1Block, head) {
 	}
+	if isForkIncompatible(c.YoloV1Block, newcfg.YoloV1Block, head) {
 		return newCompatError("YOLOv1 fork block", c.YoloV1Block, newcfg.YoloV1Block)
 	}
 	if isForkIncompatible(c.EWASMBlock, newcfg.EWASMBlock, head) {

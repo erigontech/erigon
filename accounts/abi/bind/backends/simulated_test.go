@@ -122,7 +122,7 @@ func simTestBackend(testAddr common.Address) *SimulatedBackend {
 
 func TestNewSimulatedBackend(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := big.NewInt(10000000000)
+	expectedBal := uint256.NewInt().SetUint64(10000000000)
 	sim := simTestBackend(testAddr)
 	defer sim.Close()
 

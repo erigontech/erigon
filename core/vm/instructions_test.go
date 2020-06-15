@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:errcheck
 package vm
 
 import (
@@ -96,8 +97,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
-		rstack         = newReturnStack()
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
 	)
@@ -195,8 +196,8 @@ func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcas
 	var (
 		dests       = NewDestsCache(100)
 		env         = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack      = stack.NewReturnStack()
 		stack       = stack.New()
-		rstack      = newReturnStack()
 		pc          = uint64(0)
 		interpreter = env.interpreter.(*EVMInterpreter)
 	)
@@ -247,8 +248,8 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
-		rstack         = newReturnStack()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 	)
 
@@ -482,8 +483,8 @@ func TestOpMstore(t *testing.T) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
-		rstack         = newReturnStack()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 	)
@@ -510,8 +511,8 @@ func BenchmarkOpMstore(bench *testing.B) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
-		rstack         = newReturnStack()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 	)
@@ -534,8 +535,8 @@ func BenchmarkOpSHA3(bench *testing.B) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
-		rstack         = newReturnStack()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 	)

@@ -99,16 +99,20 @@ type ReturnStack struct {
 	data []uint64
 }
 
-func newReturnStack() *ReturnStack {
+func NewReturnStack() *ReturnStack {
 	return &ReturnStack{data: make([]uint64, 0, 1024)}
 }
 
-func (st *ReturnStack) push(d uint64) {
+func (st *ReturnStack) Push(d uint64) {
 	st.data = append(st.data, d)
 }
 
-func (st *ReturnStack) pop() (ret uint64) {
+func (st *ReturnStack) Pop() (ret uint64) {
 	ret = st.data[len(st.data)-1]
 	st.data = st.data[:len(st.data)-1]
 	return
+}
+
+func (st *ReturnStack) Data() []uint64 {
+	return st.data
 }

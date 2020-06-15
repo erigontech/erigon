@@ -14,13 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:errcheck
 package console
 
 import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/ethereum/go-ethereum/internal/jsre"
+	"github.com/ledgerwatch/turbo-geth/internal/jsre"
 )
 
 // TestUndefinedAsParam ensures that personal functions can receive

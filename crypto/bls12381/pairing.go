@@ -194,14 +194,14 @@ func (e *Engine) millerLoop(f *fe12) {
 		if i != 62 {
 			fp12.square(f, f)
 		}
-		for i := 0; i <= len(pairs)-1; i++ {
+		for i := 0; i <= len(pairs)-1; i++ { //nolint:govet
 			fp2.mulByFq(t[0], &ellCoeffs[i][j][2], &pairs[i].g1[1])
 			fp2.mulByFq(t[1], &ellCoeffs[i][j][1], &pairs[i].g1[0])
 			fp12.mulBy014Assign(f, &ellCoeffs[i][j][0], t[1], t[0])
 		}
 		if x.Bit(i) != 0 {
 			j++
-			for i := 0; i <= len(pairs)-1; i++ {
+			for i := 0; i <= len(pairs)-1; i++ { //nolint:govet
 				fp2.mulByFq(t[0], &ellCoeffs[i][j][2], &pairs[i].g1[1])
 				fp2.mulByFq(t[1], &ellCoeffs[i][j][1], &pairs[i].g1[0])
 				fp12.mulBy014Assign(f, &ellCoeffs[i][j][0], t[1], t[0])

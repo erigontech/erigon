@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/scwallet"
 	"github.com/ledgerwatch/turbo-geth/accounts/usbwallet"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ethereum/go-ethereum/console/prompt"
+	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/internal/jsre"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -469,7 +469,7 @@ func setError(resp *goja.Object, code int, msg string, data interface{}) {
 	if data != nil {
 		err["data"] = data
 	}
-	resp.Set("error", err)
+	resp.Set("error", err) //nolint:errcheck
 }
 
 // isNumber returns true if input value is a JS number.

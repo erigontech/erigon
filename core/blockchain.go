@@ -1497,7 +1497,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
 
 	// If the chain is terminating, don't even bother starting u
-	if bc.getProcInterrupt() {
+	if bc.insertStopped() {
 		return 0, nil
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
@@ -2364,7 +2364,7 @@ type Pruner interface {
 func (bc *BlockChain) addJob() error {
 	bc.quitMu.RLock()
 	defer bc.quitMu.RUnlock()
-	if bc.getProcInterrupt() {
+	if bc.insertStopped() {
 		return errors.New("blockchain is stopped")
 	}
 	bc.wg.Add(1)

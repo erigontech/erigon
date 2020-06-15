@@ -115,7 +115,7 @@ func setSlice(dst, src reflect.Value) error {
 		dst.Set(slice)
 		return nil
 	}
-	return errors.New("Cannot set slice, destination not settable")
+	return errors.New("cannot set slice, destination not settable")
 }
 
 func setArray(dst, src reflect.Value) error {
@@ -133,7 +133,7 @@ func setArray(dst, src reflect.Value) error {
 		dst.Set(array)
 		return nil
 	}
-	return errors.New("Cannot set array, destination not settable")
+	return errors.New("cannot set array, destination not settable")
 }
 
 func setStruct(dst, src reflect.Value) error {
@@ -141,7 +141,7 @@ func setStruct(dst, src reflect.Value) error {
 		srcField := src.Field(i)
 		dstField := dst.Field(i)
 		if !dstField.IsValid() || !srcField.IsValid() {
-			return fmt.Errorf("Could not find src field: %v value: %v in destination", srcField.Type().Name(), srcField)
+			return fmt.Errorf("could not find src field: %v value: %v in destination", srcField.Type().Name(), srcField)
 		}
 		if err := set(dstField, srcField); err != nil {
 			return err

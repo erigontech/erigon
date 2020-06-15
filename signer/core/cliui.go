@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"golang.org/x/crypto/ssh/terminal"
 )
 
 type CommandlineUI struct {

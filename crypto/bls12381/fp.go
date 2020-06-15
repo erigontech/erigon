@@ -127,7 +127,7 @@ func inverse(inv, e *fe) {
 			laddAssign(s, r)
 			z += r.mul2()
 		}
-		k += 1
+		k++
 	}
 
 	if !found {

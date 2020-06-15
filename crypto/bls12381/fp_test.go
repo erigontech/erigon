@@ -462,7 +462,7 @@ func TestFpNonResidue(t *testing.T) {
 				t.Fatal("element is quadratic non residue, 2", i)
 			}
 		} else {
-			i -= 1
+			i--
 		}
 	}
 
@@ -846,7 +846,7 @@ func TestFp2NonResidue(t *testing.T) {
 				t.Fatal("element is quadratic non residue, 2", i)
 			}
 		} else {
-			i -= 1
+			i--
 		}
 	}
 }
@@ -1393,6 +1393,7 @@ func BenchmarkMultiplication(t *testing.B) {
 	}
 }
 
+//nolint:unparam
 func padBytes(in []byte, size int) []byte {
 	out := make([]byte, size)
 	if len(in) > size {

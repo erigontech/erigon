@@ -57,14 +57,16 @@ func TestStoreCapture(t *testing.T) {
 		env      = NewEVM(Context{}, &dummyStatedb{}, params.TestChainConfig, Config{}, dests)
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
+		rstack   = stack.NewReturnStack()
 		stack    = stack.New()
-		rstack   = newReturnStack()
 		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, NewDestsCache(10))
 	)
 	stack.Push(uint256.NewInt().SetOne())
 	stack.Push(uint256.NewInt())
 	var index common.Hash
-	logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, rstack, contract, 0, nil)
+	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, rstack, contract, 0, nil); err != nil {
+		t.Fatalf("error while caturing state %v", err)
+	}
 	if len(logger.changedValues[contract.Address()]) == 0 {
 		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.changedValues[contract.Address()]))
 	}

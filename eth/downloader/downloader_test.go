@@ -250,7 +250,7 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 
 	// Do a quick check, as the blockchain.InsertHeaderChain doesn't insert anything in case of errors
 	if _, ok := dl.ownHeaders[headers[0].ParentHash]; !ok {
-		return 0, errors.New("InsertHeaderChain: unknown parent at first position")
+		return 0, errors.New("error in InsertHeaderChain: unknown parent at first position")
 	}
 	var hashes []common.Hash
 	for i := 1; i < len(headers); i++ {
@@ -269,7 +269,7 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 		}
 		if _, ok := dl.ownHeaders[header.ParentHash]; !ok {
 			// This _should_ be impossible, due to precheck and induction
-			return i, fmt.Errorf("InsertHeaderChain: unknown parent at position %d", i)
+			return i, fmt.Errorf("error in InsertHeaderChain: unknown parent at position %d", i)
 		}
 		dl.ownHashes = append(dl.ownHashes, hash)
 		dl.ownHeaders[hash] = header
@@ -297,7 +297,7 @@ func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i
 
 	for i, block := range blocks {
 		if _, ok := dl.ownBlocks[block.ParentHash()]; !ok {
-			return i, fmt.Errorf("InsertChain: unknown parent at position %d / %d", i, len(blocks))
+			return i, fmt.Errorf("error in InsertChain: unknown parent at position %d / %d", i, len(blocks))
 		}
 		if _, ok := dl.ownHeaders[block.Hash()]; !ok {
 			dl.ownHashes = append(dl.ownHashes, block.Hash())
@@ -325,7 +325,7 @@ func (dl *downloadTester) InsertReceiptChain(blocks types.Blocks, receipts []typ
 		}
 		if _, ok := dl.ancientBlocks[blocks[i].ParentHash()]; !ok {
 			if _, ok := dl.ownBlocks[blocks[i].ParentHash()]; !ok {
-				return i, errors.New("InsertReceiptChain: unknown parent")
+				return i, errors.New("error in InsertReceiptChain: unknown parent")
 			}
 		}
 		if blocks[i].NumberU64() <= ancientLimit {

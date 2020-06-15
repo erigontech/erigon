@@ -225,8 +225,8 @@ func (wc *websocketCodec) pingLoop() {
 			timer.Reset(wsPingInterval)
 		case <-timer.C:
 			wc.jsonCodec.encMu.Lock()
-			wc.conn.SetWriteDeadline(time.Now().Add(wsPingWriteTimeout))
-			wc.conn.WriteMessage(websocket.PingMessage, nil)
+			wc.conn.SetWriteDeadline(time.Now().Add(wsPingWriteTimeout)) //nolint:errcheck
+			wc.conn.WriteMessage(websocket.PingMessage, nil)             //nolint:errcheck
 			wc.jsonCodec.encMu.Unlock()
 			timer.Reset(wsPingInterval)
 		}

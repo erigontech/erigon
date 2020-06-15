@@ -67,7 +67,7 @@ type Interpreter interface {
 type callCtx struct {
 	memory   *Memory
 	stack    *stack.Stack
-	rstack   *ReturnStack
+	rstack   *stack.ReturnStack
 	contract *Contract
 }
 
@@ -97,8 +97,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-		case evm.chainRules.IsYoloV1:
-			jt = yoloV1InstructionSet
+	case evm.chainRules.IsYoloV1:
+		jt = &yoloV1InstructionSet
 	case evm.chainRules.IsIstanbul:
 		jt = &istanbulInstructionSet
 	case evm.chainRules.IsConstantinople:
@@ -161,10 +161,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	var (
-		op          OpCode             // current opcode
-		mem         = NewMemory()      // bound memory
+		op          OpCode        // current opcode
+		mem         = NewMemory() // bound memory
 		locStack    = pool.StackPool.Get()
-		returns     = newReturnStack() // local returns stack
+		returns     = stack.NewReturnStack() // local returns stack
 		callContext = &callCtx{
 			memory:   mem,
 			stack:    locStack,

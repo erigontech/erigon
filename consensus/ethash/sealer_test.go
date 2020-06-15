@@ -99,7 +99,7 @@ func TestRemoteMultiNotify(t *testing.T) {
 	// Provide a results reader.
 	// Otherwise the unread results will be logged asynchronously
 	// and this can happen after the test is finished, causing a panic.
-	results := make(chan *types.Block, cap(sink))
+	results := make(chan consensus.ResultWithContext, cap(sink))
 
 	// Stream a lot of work task and ensure all the notifications bubble out.
 	for i := 0; i < cap(sink); i++ {
