@@ -268,8 +268,8 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the first block, we deploy the "factory" contract Poly, which can create children contracts via CREATE2 opcode
 	// In the second block, we create the first child contract
 	// In the third block, we cause the first child contract to selfdestruct
-	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
-	// i.e. without any storage items that "inherited" from the first child contract by mistake
+	// In the forth block, we create the second child contract
+	// In the 5th block, we delete and re-create the child contract twice
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 5, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction

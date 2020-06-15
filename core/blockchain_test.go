@@ -2680,7 +2680,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 // Tx 2: Re-create A, set slots 3 and 4
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
-func TestDeleteRecreateSlots1(t *testing.T) {
+func TestDeleteRecreateSlots(t *testing.T) {
 	var (
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
