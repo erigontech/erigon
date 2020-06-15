@@ -235,9 +235,7 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 	return res, nil
 }
 
-func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
-	var err error
-	var val []byte
+func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
 	err = db.bolt.View(func(tx *bolt.Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)
 		if v != nil {

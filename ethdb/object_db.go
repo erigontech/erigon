@@ -108,10 +108,10 @@ func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.St
 }
 
 // Get returns the value for a given key if it's present.
-func (db *ObjectDatabase) Get(bucket, key []byte) ([]byte, error) {
+func (db *ObjectDatabase) Get(bucket, key []byte) (dat []byte, err error) {
 	// Retrieve the key and increment the miss counter if not found
 	if getter, ok := db.kv.(NativeGet); ok {
-		dat, err := getter.Get(context.Background(), bucket, key)
+		dat, err = getter.Get(context.Background(), bucket, key)
 		if err != nil {
 			return nil, err
 		}
@@ -121,8 +121,11 @@ func (db *ObjectDatabase) Get(bucket, key []byte) ([]byte, error) {
 		return dat, nil
 	}
 
-	var dat []byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
+	return db.get(bucket, key)
+}
+
+func (db *ObjectDatabase) get(bucket, key []byte) (dat []byte, err error) {
+	err = db.kv.View(context.Background(), func(tx Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)
 		if v != nil {
 			dat = make([]byte, len(v))
@@ -133,7 +136,7 @@ func (db *ObjectDatabase) Get(bucket, key []byte) ([]byte, error) {
 	if dat == nil {
 		return nil, ErrKeyNotFound
 	}
-	return dat, err
+	return dat, nil
 }
 
 // GetIndexChunk returns proper index chunk or return error if index is not created.

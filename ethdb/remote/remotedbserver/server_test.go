@@ -50,6 +50,7 @@ const (
 
 func TestCmdVersion(t *testing.T) {
 	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
@@ -76,6 +77,7 @@ func TestCmdVersion(t *testing.T) {
 
 func TestCmdBeginEndError(t *testing.T) {
 	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
@@ -118,6 +120,7 @@ func TestCmdBeginEndError(t *testing.T) {
 
 func TestCmdBucket(t *testing.T) {
 	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
@@ -129,7 +132,7 @@ func TestCmdBucket(t *testing.T) {
 	decoder := codecpool.Decoder(&outBuf)
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
-	var name = dbutils.CurrentStateBucket
+	var name = dbutils.Buckets[0]
 	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBegin")
 
 	assert.Nil(encoder.Encode(remote.CmdBucket), "Could not encode CmdBucket")
@@ -154,6 +157,7 @@ func TestCmdBucket(t *testing.T) {
 
 func TestCmdGet(t *testing.T) {
 	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
@@ -166,7 +170,7 @@ func TestCmdGet(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = dbutils.CurrentStateBucket
+	var name = dbutils.Buckets[0]
 	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
 	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 
@@ -217,6 +221,7 @@ func TestCmdGet(t *testing.T) {
 
 func TestCmdSeek(t *testing.T) {
 	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
@@ -229,7 +234,7 @@ func TestCmdSeek(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = dbutils.CurrentStateBucket
+	var name = dbutils.Buckets[0]
 	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
 	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBeginTx")
@@ -280,6 +285,7 @@ func TestCmdSeek(t *testing.T) {
 
 func TestCursorOperations(t *testing.T) {
 	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
@@ -292,7 +298,7 @@ func TestCursorOperations(t *testing.T) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = dbutils.CurrentStateBucket
+	var name = dbutils.Buckets[0]
 	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
 	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 
@@ -380,6 +386,7 @@ func TestCursorOperations(t *testing.T) {
 
 func TestTxYield(t *testing.T) {
 	assert, db := assert.New(t), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	errors := make(chan error, 10)
 	writeDoneNotify := make(chan struct{}, 1)
@@ -394,7 +401,7 @@ func TestTxYield(t *testing.T) {
 
 		// Long read-only transaction
 		if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-			b := tx.Bucket(dbutils.CurrentStateBucket)
+			b := tx.Bucket(dbutils.Buckets[0])
 			var keyBuf [8]byte
 			var i uint64
 			for {
@@ -424,7 +431,7 @@ func TestTxYield(t *testing.T) {
 
 	// Expand the database
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket(dbutils.Buckets[0])
 		var keyBuf, valBuf [8]byte
 		for i := uint64(0); i < 10000; i++ {
 			binary.BigEndian.PutUint64(keyBuf[:], i)
@@ -449,6 +456,7 @@ func TestTxYield(t *testing.T) {
 
 func BenchmarkRemoteCursorFirst(b *testing.B) {
 	assert, require, ctx, db := assert.New(b), require.New(b), context.Background(), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
 
@@ -462,7 +470,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
-	var name = dbutils.CurrentStateBucket
+	var name = dbutils.Buckets[0]
 
 	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
 	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
@@ -528,9 +536,10 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 
 func BenchmarkKVCursorFirst(b *testing.B) {
 	assert, require, db := assert.New(b), require.New(b), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	// ---------- Start of boilerplate code
-	var name = dbutils.CurrentStateBucket
+	var name = dbutils.Buckets[0]
 	require.NoError(db.Put(name, []byte(key1), []byte(value1)))
 	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 	require.NoError(db.Put(name, []byte(key3), []byte(value3)))
