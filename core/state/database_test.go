@@ -17,6 +17,7 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -357,7 +358,6 @@ func TestCreate2Polymorth(t *testing.T) {
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
-	fmt.Printf("incarnation after block 1: %x\n", st.GetIncarnation(create2address))
 
 	// BLOCK 2
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
@@ -378,8 +378,12 @@ func TestCreate2Polymorth(t *testing.T) {
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
-	fmt.Printf("code after block 2: %x\n", st.GetCode(create2address))
-	fmt.Printf("incarnation after block 2: %x\n", st.GetIncarnation(create2address))
+	if !bytes.Equal(st.GetCode(create2address), common.FromHex("6002ff")) {
+		t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", st.GetCode(create2address))
+	}
+	if st.GetIncarnation(create2address) != 1 {
+		t.Errorf("expected incarnation 1, got %d", st.GetIncarnation(create2address))
+	}
 
 	// BLOCK 3
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
@@ -389,8 +393,6 @@ func TestCreate2Polymorth(t *testing.T) {
 	if st.Exist(create2address) {
 		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
 	}
-	fmt.Printf("code after block 3: %x\n", st.GetCode(create2address))
-	fmt.Printf("incarnation after block 3: %x\n", st.GetIncarnation(create2address))
 
 	// BLOCK 4
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
@@ -410,8 +412,12 @@ func TestCreate2Polymorth(t *testing.T) {
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 4", create2address.String())
 	}
-	fmt.Printf("code after block 4: %x\n", st.GetCode(create2address))
-	fmt.Printf("incarnation after block 4: %x\n", st.GetIncarnation(create2address))
+	if !bytes.Equal(st.GetCode(create2address), common.FromHex("6004ff")) {
+		t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", st.GetCode(create2address))
+	}
+	if st.GetIncarnation(create2address) != 2 {
+		t.Errorf("expected incarnation 2, got %d", st.GetIncarnation(create2address))
+	}
 
 	// BLOCK 5
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
@@ -431,8 +437,12 @@ func TestCreate2Polymorth(t *testing.T) {
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 5", create2address.String())
 	}
-	fmt.Printf("code after block 5: %x\n", st.GetCode(create2address))
-	fmt.Printf("incarnation after block 5: %x\n", st.GetIncarnation(create2address))
+	if !bytes.Equal(st.GetCode(create2address), common.FromHex("6005ff")) {
+		t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", st.GetCode(create2address))
+	}
+	if st.GetIncarnation(create2address) != 4 {
+		t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", st.GetIncarnation(create2address))
+	}
 }
 
 
