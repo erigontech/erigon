@@ -86,7 +86,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 }
 
 func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
-	if getter, ok := db.kv.(NativeHas); ok {
+	if getter, ok := db.kv.(NativeGet); ok {
 		return getter.Has(context.Background(), bucket, key)
 	}
 

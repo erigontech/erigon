@@ -22,7 +22,7 @@ var boltKV *ethdb.BoltKV
 //var badgerDb ethdb.KV
 var lmdbKV *ethdb.LmdbKV
 
-var keysAmount = 1_000_000
+var keysAmount = 100_000
 
 func setupDatabases() func() {
 	//vsize, ctx := 10, context.Background()
@@ -34,12 +34,15 @@ func setupDatabases() func() {
 		os.RemoveAll("test4")
 		os.RemoveAll("test5")
 	}
-	boltKV = ethdb.NewBolt().Path("/Users/alex.sharov/Library/Ethereum/geth-remove-me2/geth/chaindata").ReadOnly().MustOpen().(*ethdb.BoltKV)
+	//boltKV = ethdb.NewBolt().Path("/Users/alex.sharov/Library/Ethereum/geth-remove-me2/geth/chaindata").ReadOnly().MustOpen().(*ethdb.BoltKV)
+	boltKV = ethdb.NewBolt().Path("test1").MustOpen().(*ethdb.BoltKV)
 	//badgerDb = ethdb.NewBadger().Path("test2").MustOpen()
-	lmdbKV = ethdb.NewLMDB().Path("/Users/alex.sharov/Library/Ethereum/geth-remove-me4/geth/chaindata_lmdb").ReadOnly().MustOpen().(*ethdb.LmdbKV)
-	//lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen().(*ethdb.LmdbKV)
+	//lmdbKV = ethdb.NewLMDB().Path("/Users/alex.sharov/Library/Ethereum/geth-remove-me4/geth/chaindata_lmdb").ReadOnly().MustOpen().(*ethdb.LmdbKV)
+	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen().(*ethdb.LmdbKV)
 	var errOpen error
-	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{KeysPrefixCompressionDisable: true})
+	o := bolt.DefaultOptions
+	o.KeysPrefixCompressionDisable = true
+	boltOriginDb, errOpen = bolt.Open("test3", 0600, o)
 	if errOpen != nil {
 		panic(errOpen)
 	}
@@ -49,10 +52,17 @@ func setupDatabases() func() {
 	//	panic(errOpen)
 	//}
 
-	_ = boltOriginDb.Update(func(tx *bolt.Tx) error {
-		_, _ = tx.CreateBucketIfNotExists(dbutils.CurrentStateBucket, false)
+	if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
+		for _, name := range dbutils.Buckets {
+			_, createErr := tx.CreateBucketIfNotExists(name, false)
+			if createErr != nil {
+				return createErr
+			}
+		}
 		return nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 
 	//if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
 	//	defer func(t time.Time) { fmt.Println("origin bolt filled:", time.Since(t)) }(time.Now())
@@ -213,20 +223,21 @@ func BenchmarkGet(b *testing.B) {
 func BenchmarkPut(b *testing.B) {
 	clean := setupDatabases()
 	defer clean()
-	tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
-	for i := 0; i < keysAmount; i++ {
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, uint64(i))
-		v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-		tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
-	}
-	sort.Sort(tuples)
 
 	b.Run("bolt", func(b *testing.B) {
-		db := ethdb.NewWrapperBoltDatabase(boltOriginDb).NewBatch()
+		tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
+		for i := 0; i < keysAmount; i++ {
+			k := make([]byte, 8)
+			j := rand.Uint64() % 100_000_000
+			binary.BigEndian.PutUint64(k, j)
+			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+			tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
+		}
+		sort.Sort(tuples)
+		db := ethdb.NewWrapperBoltDatabase(boltOriginDb)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = db.MultiPut(tuples...)
-			_, _ = db.Commit()
 		}
 	})
 	//b.Run("badger", func(b *testing.B) {
@@ -236,11 +247,20 @@ func BenchmarkPut(b *testing.B) {
 	//	}
 	//})
 	b.Run("lmdb", func(b *testing.B) {
+		tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
+		for i := 0; i < keysAmount; i++ {
+			k := make([]byte, 8)
+			j := rand.Uint64() % 100_000_000
+			binary.BigEndian.PutUint64(k, j)
+			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+			tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
+		}
+		sort.Sort(tuples)
 		var kv ethdb.KV = lmdbKV
-		db := ethdb.NewObjectDatabase(kv).NewBatch()
+		db := ethdb.NewObjectDatabase(kv)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = db.MultiPut(tuples...)
-			_, _ = db.Commit()
 		}
 	})
 }
