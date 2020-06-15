@@ -49,7 +49,7 @@ const (
 )
 
 func TestCmdVersion(t *testing.T) {
-	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -64,6 +64,8 @@ func TestCmdVersion(t *testing.T) {
 	// ---------- End of boilerplate code
 	assert.Nil(encoder.Encode(remote.CmdVersion), "Could not encode CmdVersion")
 
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
@@ -76,7 +78,7 @@ func TestCmdVersion(t *testing.T) {
 }
 
 func TestCmdBeginEndError(t *testing.T) {
-	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -99,6 +101,8 @@ func TestCmdBeginEndError(t *testing.T) {
 	// Second CmdEndTx
 	assert.Nil(encoder.Encode(remote.CmdEndTx), "Could not encode CmdEndTx")
 
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
@@ -121,9 +125,6 @@ func TestCmdBeginEndError(t *testing.T) {
 func TestCmdBucket(t *testing.T) {
 	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
-	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
-
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
@@ -140,6 +141,8 @@ func TestCmdBucket(t *testing.T) {
 	assert.Nil(encoder.Encode(remote.CmdBucket), "Could not encode CmdBucket")
 	assert.Nil(encoder.Encode(&name), "Could not encode name for CmdBucket")
 
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
@@ -158,7 +161,7 @@ func TestCmdBucket(t *testing.T) {
 }
 
 func TestCmdGet(t *testing.T) {
-	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -193,6 +196,8 @@ func TestCmdGet(t *testing.T) {
 	assert.Nil(encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
 	assert.Nil(encoder.Encode(&key), "Could not encode key for CmdGet")
 
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
@@ -222,7 +227,7 @@ func TestCmdGet(t *testing.T) {
 }
 
 func TestCmdSeek(t *testing.T) {
-	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -255,6 +260,9 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(encoder.Encode(remote.CmdCursorSeek), "Could not encode CmdCursorSeek")
 	assert.Nil(encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
 	assert.Nil(encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
+
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
@@ -286,7 +294,7 @@ func TestCmdSeek(t *testing.T) {
 }
 
 func TestCursorOperations(t *testing.T) {
-	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -339,6 +347,8 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
 	assert.Nil(encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
 
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
@@ -457,7 +467,7 @@ func TestTxYield(t *testing.T) {
 }
 
 func BenchmarkRemoteCursorFirst(b *testing.B) {
-	assert, require, ctx, db := assert.New(b), require.New(b), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(b), require.New(b), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -478,6 +488,8 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	require.NoError(db.Put(name, []byte(key2), []byte(value2)))
 	require.NoError(db.Put(name, []byte(key3), []byte(value3)))
 
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	go func() {
