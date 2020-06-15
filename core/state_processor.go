@@ -235,7 +235,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	}
 
 	*usedGas += result.UsedGas
-	fmt.Printf("%x %d %d\n", tx.Hash(), result.UsedGas, *usedGas)
+	//fmt.Printf("%x %d %d\n", tx.Hash(), result.UsedGas, *usedGas)
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
 	// based on the eip phase, we're passing whether the root touch-delete accounts.

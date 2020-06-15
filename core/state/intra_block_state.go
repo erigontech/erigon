@@ -425,7 +425,7 @@ func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.H
 		value.Clear()
 	}
 	//if sdb.txIndex == 172 {
-		fmt.Printf("%d GetCommittedState %x %x = %x\n", sdb.txIndex, addr, *key, value.Bytes())
+	//	fmt.Printf("%d GetCommittedState %x %x = %x\n", sdb.txIndex, addr, *key, value.Bytes())
 	//}
 }
 
@@ -434,10 +434,18 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 	defer sdb.Unlock()
 
 	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		return stateObject.suicided
+	if stateObject == nil {
+		//fmt.Printf("HasSuicided %x, stateObject==nil\n", addr)
+		return false
 	}
-	return false
+	//fmt.Printf("HasSuicided %x: deleted=%t, suicided=%t\n", addr, stateObject.deleted, stateObject.suicided)
+	if stateObject.deleted {
+		return false
+	}
+	if stateObject.created {
+		return false
+	}
+	return stateObject.suicided
 }
 
 /*
