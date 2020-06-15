@@ -206,7 +206,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
 	// We expect number 0x42 in the position [4], because it is the block number 4
-	key4 := common.BigToHash(big.NewInt(3))
+	key4 := common.BigToHash(big.NewInt(4))
 	var check4 uint256.Int
 	st.GetState(create2address, &key4, &check4)
 	if check4.Uint64() != 0x42 {
