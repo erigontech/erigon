@@ -133,6 +133,9 @@ func (db *ObjectDatabase) get(bucket, key []byte) (dat []byte, err error) {
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	if dat == nil {
 		return nil, ErrKeyNotFound
 	}
