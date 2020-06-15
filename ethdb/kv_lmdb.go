@@ -332,6 +332,12 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
+	select {
+	case <-tx.ctx.Done():
+		return nil
+	default:
+	}
+
 	id, ok := dbutils.BucketsIndex[string(name)]
 	if !ok {
 		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
