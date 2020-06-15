@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:errcheck
 package vm
 
 import (
@@ -96,6 +97,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
@@ -107,7 +109,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		stack.Push(x)
 		stack.Push(y)
-		opFn(&pc, evmInterpreter, &callCtx{nil, stack, nil})
+		opFn(&pc, evmInterpreter, &callCtx{nil, stack, rstack, nil})
 		actual := stack.Pop()
 
 		if actual.Cmp(expected) != 0 {
@@ -194,6 +196,7 @@ func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcas
 	var (
 		dests       = NewDestsCache(100)
 		env         = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack      = stack.NewReturnStack()
 		stack       = stack.New()
 		pc          = uint64(0)
 		interpreter = env.interpreter.(*EVMInterpreter)
@@ -204,7 +207,7 @@ func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcas
 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(param.y))
 		stack.Push(x)
 		stack.Push(y)
-		opFn(&pc, interpreter, &callCtx{nil, stack, nil})
+		opFn(&pc, interpreter, &callCtx{nil, stack, rstack, nil})
 		actual := stack.Pop()
 		result[i] = TwoOperandTestcase{param.x, param.y, fmt.Sprintf("%064x", actual)}
 	}
@@ -245,6 +248,7 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 	)
@@ -262,7 +266,7 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 			a := new(uint256.Int).SetBytes(arg)
 			stack.Push(a)
 		}
-		op(&pc, evmInterpreter, &callCtx{nil, stack, nil})
+		op(&pc, evmInterpreter, &callCtx{nil, stack, rstack, nil})
 		stack.Pop()
 	}
 }
@@ -479,6 +483,7 @@ func TestOpMstore(t *testing.T) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
@@ -490,13 +495,13 @@ func TestOpMstore(t *testing.T) {
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	stack.Push(new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
 	stack.Push(new(uint256.Int))
-	opMstore(&pc, evmInterpreter, &callCtx{mem, stack, nil})
+	opMstore(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	stack.Push(new(uint256.Int).SetOne())
 	stack.Push(new(uint256.Int))
-	opMstore(&pc, evmInterpreter, &callCtx{mem, stack, nil})
+	opMstore(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
 	}
@@ -506,6 +511,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
@@ -521,7 +527,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	for i := 0; i < bench.N; i++ {
 		stack.Push(value)
 		stack.Push(memStart)
-		opMstore(&pc, evmInterpreter, &callCtx{mem, stack, nil})
+		opMstore(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	}
 }
 
@@ -529,6 +535,7 @@ func BenchmarkOpSHA3(bench *testing.B) {
 	var (
 		dests          = NewDestsCache(100)
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
@@ -542,7 +549,7 @@ func BenchmarkOpSHA3(bench *testing.B) {
 	for i := 0; i < bench.N; i++ {
 		stack.Push(uint256.NewInt().SetUint64(32))
 		stack.Push(start)
-		opSha3(&pc, evmInterpreter, &callCtx{mem, stack, nil})
+		opSha3(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	}
 }
 
