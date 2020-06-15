@@ -440,7 +440,6 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		}
 	}
 
-	//fmt.Printf("Checking HasSuicided %x = %t\n", contract.Address(), evm.IntraBlockState.HasSuicided(contract.Address()))
 	if !evm.IntraBlockState.HasSuicided(contract.Address()) {
 		evm.IntraBlockState.AddRefund(params.SelfdestructRefundGas)
 	}

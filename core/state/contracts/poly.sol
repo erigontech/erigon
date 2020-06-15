@@ -11,10 +11,8 @@ contract Poly {
 
     /* Deploys self-destructing contract with given salt and emits DeployEvent with the address of the created contract */
     function deploy(uint256 salt) public {
-        // PUSH1 0x42; NUMBER; SSTORE; PUSH1 0x30; PUSH1 0; MSTORE8; PUSH1 0xff; PUSH1 1; MSTORE8; PUSH1 2; PUSH1 0; RETURN;
         // PUSH1 0x60; PUSH1 0; MSTORE8; NUMBER; PUSH1 1; MSTORE8; PUSH1 0xff; PUSH1 2; MSTORE8; PUSH1 3; PUSH1 0; RETURN;
-        // Stores constant 0x42 in the storage position equal to the current block number, then returns code 60<N>ff, which is
-        // PUSH1 <N>; SELFDESTRUCT
+        // Returns code 60<N>ff, which is PUSH1 <N>; SELFDESTRUCT. Value <N> is determined by the block number where deploy function is called
         bytes memory init_code = hex"60606000534360015360ff60025360036000f3";
         address payable d;
         assembly{

@@ -47,7 +47,6 @@ func (r *PlainStateReader) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
 }
 
 func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	//trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	var enc []byte
 	var ok bool
 	if r.accountCache != nil {
@@ -74,7 +73,6 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	//trace := address == common.HexToAddress("0x000000000000006F6502B7F2bbaC8C30A3f67E9a")
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	if r.storageCache != nil {
 		if enc, ok := r.storageCache.HasGet(nil, compositeKey); ok {

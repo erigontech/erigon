@@ -241,7 +241,6 @@ func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) 
 	for key, value := range so.dirtyStorage {
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
-		//fmt.Printf("WriteAccountStorage %x %d %x %x\n", so.address, so.data.GetIncarnation(), key, value.Bytes())
 		if err := stateWriter.WriteAccountStorage(ctx, so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
 			return err
 		}

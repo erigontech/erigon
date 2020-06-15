@@ -424,9 +424,6 @@ func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.H
 	} else {
 		value.Clear()
 	}
-	//if sdb.txIndex == 172 {
-	//	fmt.Printf("%d GetCommittedState %x %x = %x\n", sdb.txIndex, addr, *key, value.Bytes())
-	//}
 }
 
 func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
@@ -435,10 +432,8 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil {
-		//fmt.Printf("HasSuicided %x, stateObject==nil\n", addr)
 		return false
 	}
-	//fmt.Printf("HasSuicided %x: deleted=%t, suicided=%t\n", addr, stateObject.deleted, stateObject.suicided)
 	if stateObject.deleted {
 		return false
 	}
@@ -802,7 +797,7 @@ func (a *Addresses) Swap(i, j int) {
 	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
-func updateAccount(_ int, ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
@@ -850,7 +845,7 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			continue
 		}
 
-		if err := updateAccount(sdb.txIndex, ctx, stateWriter, addr, stateObject, true); err != nil {
+		if err := updateAccount(ctx, stateWriter, addr, stateObject, true); err != nil {
 			return err
 		}
 
@@ -872,7 +867,7 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(sdb.txIndex, ctx, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(ctx, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err
 		}
 	}
