@@ -103,12 +103,12 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			if storage {
 				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
 			} else {
-				data, err = changeset.AccountChangeSetPlainBytes(changeSetData).FindLast(key)
+				data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
 			}
 		} else if storage {
 			data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
 		} else {
-			data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
+			data, err = changeset.AccountChangeSetBytes(changeSetData).Find(key)
 		}
 		if err != nil {
 			if !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -156,7 +156,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 				if storage {
 					data, err = changeset.StorageChangeSetPlainBytes(v).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
 				} else {
-					data, err = changeset.AccountChangeSetPlainBytes(v).FindLast(key)
+					data, err = changeset.AccountChangeSetPlainBytes(v).Find(key)
 				}
 				if err == nil {
 					break

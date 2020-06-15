@@ -51,7 +51,7 @@ func walkAccountChangeSet(b []byte, keyLen uint32, f func(k, v []byte) error) er
 	return nil
 }
 
-func findLastKeyInAccountChangeSet(b []byte, k []byte, keyLen int) ([]byte, error) {
+func findInAccountChangeSetBytes(b []byte, k []byte, keyLen int) ([]byte, error) {
 	if len(b) == 0 {
 		return nil, ErrNotFound
 	}
@@ -68,7 +68,6 @@ func findLastKeyInAccountChangeSet(b []byte, k []byte, keyLen int) ([]byte, erro
 
 	valOffset := 4 + n*keyLen + 4*n
 	if len(b) < valOffset {
-		fmt.Println("FindLastAccounts account")
 		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
 	}
 
@@ -77,20 +76,26 @@ func findLastKeyInAccountChangeSet(b []byte, k []byte, keyLen int) ([]byte, erro
 		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
 	}
 
-	for i := n - 1; int(i) >= 0; i-- {
-		key := b[4+i*keyLen : 4+(i+1)*keyLen]
-		idx0 := 0
-		if i > 0 {
-			idx0 = int(binary.BigEndian.Uint32(b[4+n*keyLen+4*(i-1):]))
-		}
-		idx1 := int(binary.BigEndian.Uint32(b[4+n*keyLen+4*i:]))
-		val := b[valOffset+idx0 : valOffset+idx1]
+	id := sort.Search(n, func(i int) bool {
+		res := bytes.Compare(b[4+i*keyLen:4+(i+1)*keyLen], k)
+		return res >= 0
+	})
 
-		if bytes.Equal(key, k) {
-			return val, nil
-		}
+	if id >= n {
+		return nil, ErrNotFound
 	}
-	return nil, ErrNotFound
+
+	if !bytes.Equal(b[4+id*keyLen:4+(id+1)*keyLen], k) {
+		return nil, ErrNotFound
+	}
+
+	idx0 := 0
+	if id > 0 {
+		idx0 = int(binary.BigEndian.Uint32(b[4+n*keyLen+4*(id-1):]))
+	}
+
+	idx1 := int(binary.BigEndian.Uint32(b[4+n*keyLen+4*id:]))
+	return common.CopyBytes(b[valOffset+idx0 : valOffset+idx1]), nil
 }
 
 func decodeAccountsWithKeyLen(b []byte, keyLen uint32, h *ChangeSet) error {

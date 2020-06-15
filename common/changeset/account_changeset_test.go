@@ -12,7 +12,7 @@ import (
 
 type csAccountBytes interface {
 	Walk(func([]byte, []byte) error) error
-	FindLast([]byte) ([]byte, error)
+	Find([]byte) ([]byte, error)
 }
 
 func TestEncodingAccountHashed(t *testing.T) {
@@ -35,7 +35,7 @@ func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
 		common.FromHex("b1e9b5c16355eede662031dd621d08faf4ea"),
 		common.FromHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"),
 	}
-	numOfElements := 3
+	numOfElements := 10
 	for i := 0; i < numOfElements; i++ {
 		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 		if isHashed {
@@ -88,7 +88,6 @@ func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
 	}
 
 	var csBytes csAccountBytes
-
 	if isHashed {
 		csBytes = AccountChangeSetBytes(b)
 	} else {
@@ -112,7 +111,7 @@ func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
 	}
 
 	for _, v := range ch.Changes {
-		val, err := csBytes.FindLast(v.Key)
+		val, err := csBytes.Find(v.Key)
 		if err != nil {
 			t.Fatal(err)
 		}
