@@ -540,22 +540,22 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	prefix         []byte
-	prefetchSize   uint
 	prefetchValues bool
+	initialized    bool
+	cursorHandle   uint64
+	prefetchSize   uint
+	cacheLastIdx   uint
+	cacheIdx       uint
+	prefix         []byte
 
 	ctx            context.Context
 	in             io.Reader
 	out            io.Writer
-	cursorHandle   uint64
-	cacheLastIdx   uint
-	cacheIdx       uint
 	cacheKeys      [][]byte
 	cacheValues    [][]byte
 	cacheValueSize []uint32
 
-	bucket      *Bucket
-	initialized bool
+	bucket *Bucket
 }
 
 func (c *Cursor) Prefix(v []byte) *Cursor {

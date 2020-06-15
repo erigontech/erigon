@@ -57,7 +57,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		err = env.SetMapSize(32 << 20) // 32MB
+		err = env.SetMapSize(64 << 20) // 64MB
 		logger = log.New("lmdb", "inMem")
 		if err != nil {
 			return nil, err
@@ -87,7 +87,15 @@ func (opts lmdbOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	buckets := make([]lmdb.DBI, len(dbutils.Buckets))
+	db := &LmdbKV{
+		opts:            opts,
+		env:             env,
+		log:             logger,
+		lmdbTxPool:      lmdbpool.NewTxnPool(env),
+		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
+	}
+
+	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
 	if opts.readOnly {
 		if err := env.View(func(tx *lmdb.Txn) error {
 			for _, name := range dbutils.Buckets {
@@ -95,7 +103,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 				if createErr != nil {
 					return createErr
 				}
-				buckets[dbutils.BucketsIndex[string(name)]] = dbi
+				db.buckets[dbutils.BucketsIndex[string(name)]] = dbi
 			}
 			return nil
 		}); err != nil {
@@ -108,7 +116,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 				if createErr != nil {
 					return createErr
 				}
-				buckets[dbutils.BucketsIndex[string(name)]] = dbi
+				db.buckets[dbutils.BucketsIndex[string(name)]] = dbi
 			}
 			return nil
 		}); err != nil {
@@ -116,22 +124,15 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}
 	}
 
-	db := &LmdbKV{
-		opts:            opts,
-		env:             env,
-		log:             logger,
-		buckets:         buckets,
-		lmdbTxPool:      lmdbpool.NewTxnPool(env),
-		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
+	if !opts.inMem {
+		ctx, ctxCancel := context.WithCancel(context.Background())
+		db.stopStaleReadsCheck = ctxCancel
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			db.staleReadsCheckLoop(ctx, ticker)
+		}()
 	}
-
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	db.stopStaleReadsCheck = ctxCancel
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		db.staleReadsCheckLoop(ctx, ticker)
-	}()
 
 	return db, nil
 }
@@ -212,19 +213,15 @@ func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 }
 
 func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
-	id, ok := dbutils.BucketsIndex[string(bucket)]
-	if !ok {
-		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
+	if id, ok := dbutils.BucketsIndex[string(bucket)]; ok {
+		return db.buckets[id]
 	}
-	return db.buckets[id]
+	panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
 }
 
-func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
-	dbi := db.dbi(bucket)
-	var err error
-	var val []byte
+func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
 	err = db.View(ctx, func(tx Tx) error {
-		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
+		v, err2 := tx.(*lmdbTx).tx.Get(db.dbi(bucket), key)
 		if err2 != nil {
 			if lmdb.IsNotFound(err2) {
 				return nil
@@ -243,13 +240,9 @@ func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (db *LmdbKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
-	dbi := db.dbi(bucket)
-
-	var err error
-	var has bool
+func (db *LmdbKV) Has(ctx context.Context, bucket, key []byte) (has bool, err error) {
 	err = db.View(ctx, func(tx Tx) error {
-		v, err2 := tx.(*lmdbTx).tx.Get(dbi, key)
+		v, err2 := tx.(*lmdbTx).tx.Get(db.dbi(bucket), key)
 		if err2 != nil {
 			if lmdb.IsNotFound(err2) {
 				return nil
@@ -283,10 +276,12 @@ func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	}
 
 	tx.RawRead = true
+	tx.Pooled = false
 
 	t := lmdbKvTxPool.Get().(*lmdbTx)
 	t.ctx = ctx
 	t.tx = tx
+	t.db = db
 	return t, nil
 }
 
@@ -310,10 +305,6 @@ type lmdbCursor struct {
 	prefix []byte
 
 	cursor *lmdb.Cursor
-
-	k   []byte
-	v   []byte
-	err error
 }
 
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
@@ -323,8 +314,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t.db = db
 	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
-		tx.Pooled = true
-		tx.RawRead = true
+		tx.Pooled, tx.RawRead = true, true
 		t.tx = tx
 		return f(t)
 	})
@@ -351,8 +341,8 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 
 	b := lmdbKvBucketPool.Get().(*lmdbBucket)
 	b.tx = tx
-	b.dbi = tx.db.buckets[id]
 	b.id = id
+	b.dbi = tx.db.buckets[id]
 
 	// add to auto-close on end of transactions
 	if b.tx.buckets == nil {
@@ -412,12 +402,6 @@ func (c *lmdbCursor) NoValues() NoValuesCursor {
 }
 
 func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
-	select {
-	case <-b.tx.ctx.Done():
-		return nil, b.tx.ctx.Err()
-	default:
-	}
-
 	val, err = b.tx.tx.Get(b.dbi, key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
@@ -468,19 +452,17 @@ func (b *lmdbBucket) Size() (uint64, error) {
 }
 
 func (b *lmdbBucket) Cursor() Cursor {
+	tx := b.tx
 	c := lmdbKvCursorPool.Get().(*lmdbCursor)
-	c.ctx = b.tx.ctx
+	c.ctx = tx.ctx
 	c.bucket = b
 	c.prefix = nil
-	c.k = nil
-	c.v = nil
-	c.err = nil
 	c.cursor = nil
 	// add to auto-close on end of transactions
-	if b.tx.cursors == nil {
-		b.tx.cursors = make([]*lmdbCursor, 0, 1)
+	if tx.cursors == nil {
+		tx.cursors = make([]*lmdbCursor, 0, 1)
 	}
-	b.tx.cursors = append(b.tx.cursors, c)
+	tx.cursors = append(tx.cursors, c)
 	return c
 }
 
@@ -521,13 +503,7 @@ func (c *lmdbCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
-func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, nil, c.ctx.Err()
-	default:
-	}
-
+func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, nil, err
@@ -535,46 +511,46 @@ func (c *lmdbCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	if seek == nil {
-		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
-		c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetRange)
+		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
 	}
-	if c.err != nil {
-		if lmdb.IsNotFound(c.err) {
+	if err != nil {
+		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Seek(): %w, key: %x", c.err, seek)
+		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Seek(): %w, key: %x", err, seek)
 	}
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+		k, v = nil, nil
 	}
 
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
 func (c *lmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	return c.Seek(seek)
 }
 
-func (c *lmdbCursor) Next() ([]byte, []byte, error) {
+func (c *lmdbCursor) Next() (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
-	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.Next)
-	if c.err != nil {
-		if lmdb.IsNotFound(c.err) {
+	k, v, err = c.cursor.Get(nil, nil, lmdb.Next)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Next(): %w", c.err)
+		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Next(): %w", err)
 	}
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+		k, v = nil, nil
 	}
 
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
 func (c *lmdbCursor) Delete(key []byte) error {
@@ -653,79 +629,76 @@ func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, err
 	return nil
 }
 
-func (c *lmdbNoValuesCursor) First() ([]byte, uint32, error) {
+func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, 0, err
 		}
 	}
 
+	var val []byte
 	if len(c.prefix) == 0 {
-		c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.First)
+		k, val, err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
-		c.k, c.v, c.err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
+		k, val, err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
 	}
-	if c.err != nil {
-		if lmdb.IsNotFound(c.err) {
-			return []byte{}, uint32(len(c.v)), nil
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return []byte{}, uint32(len(val)), nil
 		}
-		return []byte{}, 0, c.err
+		return []byte{}, 0, err
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+		k, val = nil, nil
 	}
-	return c.k, uint32(len(c.v)), c.err
+	return k, uint32(len(val)), err
 }
 
-func (c *lmdbNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, 0, c.ctx.Err()
-	default:
-	}
-
+func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, v uint32, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, 0, err
 		}
 	}
 
-	c.k, c.v, c.err = c.cursor.Get(seek, nil, lmdb.SetKey)
-	if c.err != nil {
-		if lmdb.IsNotFound(c.err) {
-			return []byte{}, uint32(len(c.v)), nil
+	var val []byte
+	k, val, err = c.cursor.Get(seek, nil, lmdb.SetKey)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return []byte{}, uint32(len(val)), nil
 		}
-		return []byte{}, 0, c.err
+		return []byte{}, 0, err
 	}
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+		k, val = nil, nil
 	}
 
-	return c.k, uint32(len(c.v)), c.err
+	return k, uint32(len(val)), err
 }
 
 func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
 	return c.Seek(seek)
 }
 
-func (c *lmdbNoValuesCursor) Next() ([]byte, uint32, error) {
+func (c *lmdbNoValuesCursor) Next() (k []byte, v uint32, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
-	c.k, c.v, c.err = c.cursor.Get(nil, nil, lmdb.Next)
-	if c.err != nil {
-		if lmdb.IsNotFound(c.err) {
-			return []byte{}, uint32(len(c.v)), nil
+	var val []byte
+	k, val, err = c.cursor.Get(nil, nil, lmdb.Next)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return []byte{}, uint32(len(val)), nil
 		}
-		return []byte{}, 0, c.err
+		return []byte{}, 0, err
 	}
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+		k, val = nil, nil
 	}
 
-	return c.k, uint32(len(c.v)), c.err
+	return k, uint32(len(val)), err
 }
