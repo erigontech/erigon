@@ -445,7 +445,6 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 }
 
-
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
