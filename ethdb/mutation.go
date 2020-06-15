@@ -6,9 +6,13 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
+
+var fullBatchCommitTimer = metrics.NewRegisteredTimer("db/full_batch/commit_time", nil)
 
 type mutation struct {
 	puts   *puts // Map buckets to map[key]value
@@ -141,6 +145,12 @@ func (m *mutation) Delete(bucket, key []byte) error {
 }
 
 func (m *mutation) Commit() (uint64, error) {
+	if metrics.Enabled {
+		if m.db.IdealBatchSize() <= m.puts.Len() {
+			t := time.Now()
+			defer fullBatchCommitTimer.Update(time.Since(t))
+		}
+	}
 	if m.db == nil {
 		return 0, nil
 	}

@@ -16,9 +16,6 @@ type KV interface {
 
 type NativeGet interface {
 	Get(ctx context.Context, bucket, key []byte) ([]byte, error)
-}
-
-type NativeHas interface {
 	Has(ctx context.Context, bucket, key []byte) (bool, error)
 }
 
