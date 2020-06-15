@@ -2706,10 +2706,10 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	initCode := []byte{
 		byte(vm.PUSH1), 0x3, // value
 		byte(vm.PUSH1), 0x3, // location
-		byte(vm.SSTORE),     // Set slot[3] = 1
+		byte(vm.SSTORE),     // Set slot[3] = 3
 		byte(vm.PUSH1), 0x4, // value
 		byte(vm.PUSH1), 0x4, // location
-		byte(vm.SSTORE), // Set slot[4] = 1
+		byte(vm.SSTORE), // Set slot[4] = 4
 		// Slots are set, now return the code
 		byte(vm.PUSH2), byte(vm.PC), byte(vm.SELFDESTRUCT), // Push code on stack
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -2789,23 +2789,23 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	var got uint256.Int
 	statedb.GetState(aa, &key1, &got)
 	if !got.IsZero() {
-		t.Errorf("got %x exp %x", got, 0)
+		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	key2 := common.HexToHash("02")
 	statedb.GetState(aa, &key2, &got)
 	if !got.IsZero() {
-		t.Errorf("got %x exp %x", got, 0)
+		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	// Also, 3 and 4 should be set
 	key3 := common.HexToHash("03")
 	statedb.GetState(aa, &key3, &got)
 	if got.Uint64() != 3 {
-		t.Fatalf("got %x exp %x", got, 3)
+		t.Errorf("got %d exp %d", got.Uint64(), 3)
 	}
 	key4 := common.HexToHash("04")
 	statedb.GetState(aa, &key4, &got)
 	if got.Uint64() != 4 {
-		t.Fatalf("got %x exp %x", got, 4)
+		t.Errorf("got %d exp %d", got.Uint64(), 4)
 	}
 }
 
@@ -3005,7 +3005,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			e.exist = false
 			e.values = nil
 		}
-		t.Logf("block %d; adding destruct\n", e.blocknum)
+		//t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
 	var newResurrect = func(e *expectation) *types.Transaction {
@@ -3016,7 +3016,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			e.exist = true
 			e.values = map[int]int{3: e.blocknum + 1, 4: 4}
 		}
-		t.Logf("block %d; adding resurrect\n", e.blocknum)
+		//t.Logf("block %d; adding resurrect\n", e.blocknum)
 		return tx
 	}
 
@@ -3090,7 +3090,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		exp := expectations[i]
 		if exp.exist {
 			if !statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %v to exist, it did not", blockNum, aa)
+				t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
 			}
 			for slot, val := range exp.values {
 				key := asHash(slot)
@@ -3102,7 +3102,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			}
 		} else {
 			if statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %v to not exist, it did", blockNum, aa)
+				t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
 			}
 		}
 	}

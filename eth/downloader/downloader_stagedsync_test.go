@@ -254,7 +254,6 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 func TestStagedBase(t *testing.T) {
 	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	// Same as testChainForkLightA but much shorter
-	//testChainBasePlus1 := testChainBase.makeFork(1, false, 1)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester := newStagedSyncTester()
 	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
@@ -263,12 +262,13 @@ func TestStagedBase(t *testing.T) {
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestCompareChains(t *testing.T) {
-	for i := 8388; i < 8395; i++ {
-		fmt.Printf("testChainForkLightA[%d]=%x\n", i, testChainForkLightA.chain[i])
-		fmt.Printf("testChainForkHeavy[%d]=%x\n", i, testChainForkHeavy.chain[i])
+	currentHeader := tester.CurrentHeader()
+	expectedHash := testChainBase.chain[len(testChainBase.chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(testChainBase.chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(testChainBase.chain)-1, currentHeader.Number.Uint64())
+	}
+	if currentHeader.Hash() != expectedHash {
+		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
 	}
 }
 
