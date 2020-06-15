@@ -122,7 +122,9 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}); err != nil {
 			return nil, err
 		}
+	}
 
+	if !opts.inMem {
 		ctx, ctxCancel := context.WithCancel(context.Background())
 		db.stopStaleReadsCheck = ctxCancel
 		go func() {
