@@ -119,8 +119,10 @@ func TestCmdBeginEndError(t *testing.T) {
 }
 
 func TestCmdBucket(t *testing.T) {
-	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
+	assert, require, parentCtx, db := assert.New(t), require.New(t), context.Background(), ethdb.NewMemDatabase()
 	defer db.Close()
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 
 	// ---------- Start of boilerplate code
 	// Prepare input buffer with one command CmdVersion
