@@ -2455,12 +2455,9 @@ func testStage4(chaindata string, block uint64) error {
 	ch := make(chan struct{})
 	stageState := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
 	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	//batch := db.NewBatch()
-	batch := db
-	if err = stagedsync.SpawnExecuteBlocksStage(stageState, batch, blockchain, block, ch, nil, false); err != nil {
+	if err = stagedsync.SpawnExecuteBlocksStage(stageState, db, blockchain, block, ch, nil, false); err != nil {
 		return err
 	}
-	//batch.Rollback()
 	return nil
 }
 

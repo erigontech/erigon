@@ -2709,7 +2709,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		byte(vm.SSTORE),     // Set slot[3] = 3
 		byte(vm.PUSH1), 0x4, // value
 		byte(vm.PUSH1), 0x4, // location
-		byte(vm.SSTORE), // Set slot[4] = 3
+		byte(vm.SSTORE), // Set slot[4] = 4
 		// Slots are set, now return the code
 		byte(vm.PUSH2), byte(vm.PC), byte(vm.SELFDESTRUCT), // Push code on stack
 		byte(vm.PUSH1), 0x0, // memory start on stack
