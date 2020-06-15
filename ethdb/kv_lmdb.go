@@ -87,7 +87,15 @@ func (opts lmdbOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	buckets := make([]lmdb.DBI, len(dbutils.Buckets))
+	db := &LmdbKV{
+		opts:            opts,
+		env:             env,
+		log:             logger,
+		lmdbTxPool:      lmdbpool.NewTxnPool(env),
+		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
+	}
+
+	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
 	if opts.readOnly {
 		if err := env.View(func(tx *lmdb.Txn) error {
 			for _, name := range dbutils.Buckets {
@@ -95,7 +103,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 				if createErr != nil {
 					return createErr
 				}
-				buckets[dbutils.BucketsIndex[string(name)]] = dbi
+				db.buckets[dbutils.BucketsIndex[string(name)]] = dbi
 			}
 			return nil
 		}); err != nil {
@@ -108,30 +116,21 @@ func (opts lmdbOpts) Open() (KV, error) {
 				if createErr != nil {
 					return createErr
 				}
-				buckets[dbutils.BucketsIndex[string(name)]] = dbi
+				db.buckets[dbutils.BucketsIndex[string(name)]] = dbi
 			}
 			return nil
 		}); err != nil {
 			return nil, err
 		}
-	}
 
-	db := &LmdbKV{
-		opts:            opts,
-		env:             env,
-		log:             logger,
-		buckets:         buckets,
-		lmdbTxPool:      lmdbpool.NewTxnPool(env),
-		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
+		ctx, ctxCancel := context.WithCancel(context.Background())
+		db.stopStaleReadsCheck = ctxCancel
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			db.staleReadsCheckLoop(ctx, ticker)
+		}()
 	}
-
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	db.stopStaleReadsCheck = ctxCancel
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		db.staleReadsCheckLoop(ctx, ticker)
-	}()
 
 	return db, nil
 }
