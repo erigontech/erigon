@@ -424,6 +424,9 @@ func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.H
 	} else {
 		value.Clear()
 	}
+	//if sdb.txIndex == 172 {
+		fmt.Printf("%d GetCommittedState %x %x = %x\n", sdb.txIndex, addr, *key, value.Bytes())
+	//}
 }
 
 func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
