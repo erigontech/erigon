@@ -68,7 +68,7 @@ type FlatDbSubTrieLoader struct {
 
 	receiver        StreamReceiver
 	defaultReceiver *DefaultReceiver
-	hc HashCollector
+	hc              HashCollector
 }
 
 type DefaultReceiver struct {
