@@ -1371,10 +1371,9 @@ func makeCreators(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	check(err)
+	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	f, err := os.OpenFile("/Volumes/tb41/turbo-geth/creators.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
@@ -1421,10 +1420,9 @@ func makeCreators(blockNum uint64) {
 
 func storageUsage() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
 	/*
 		creatorsFile, err := os.Open("creators.csv")
@@ -1436,8 +1434,8 @@ func storageUsage() {
 			creators[common.HexToAddress(records[0])] = common.HexToAddress(records[1])
 		}
 	*/
-	addrFile, err := os.Open("addresses.csv")
-	check(err)
+	addrFile, openErr := os.Open("addresses.csv")
+	check(openErr)
 	defer addrFile.Close()
 	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[common.Address]string)
@@ -1452,13 +1450,16 @@ func storageUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	var leafSize uint64
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) == 32 {
 				continue
 			}
@@ -1484,8 +1485,9 @@ func storageUsage() {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Average leaf size: %d/%d\n", leafSize, count)
 	iba := NewIntSorterAddr(len(itemsByAddress))
@@ -1539,21 +1541,20 @@ func storageUsage() {
 
 func tokenUsage() {
 	startTime := time.Now()
-	//remoteDB, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//remoteDB, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	//remoteDB := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
+	//remoteDB := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
-	tokensFile, err := os.Open("tokens.csv")
-	check(err)
+	tokensFile, errOpen := os.Open("tokens.csv")
+	check(errOpen)
 	defer tokensFile.Close()
 	tokensReader := csv.NewReader(bufio.NewReader(tokensFile))
 	tokens := make(map[common.Address]struct{})
 	for records, _ := tokensReader.Read(); records != nil; records, _ = tokensReader.Read() {
 		tokens[common.HexToAddress(records[0])] = struct{}{}
 	}
-	addrFile, err := os.Open("addresses.csv")
-	check(err)
+	addrFile, errOpen := os.Open("addresses.csv")
+	check(errOpen)
 	defer addrFile.Close()
 	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[common.Address]string)
@@ -1565,13 +1566,16 @@ func tokenUsage() {
 	itemsByAddress := make(map[common.Address]int)
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) == 32 {
 				continue
 			}
@@ -1585,8 +1589,9 @@ func tokenUsage() {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	iba := NewIntSorterAddr(len(itemsByAddress))
 	idx := 0
@@ -1618,21 +1623,20 @@ func tokenUsage() {
 
 func nonTokenUsage() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
+	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
-	tokensFile, err := os.Open("tokens.csv")
-	check(err)
+	tokensFile, errOpen := os.Open("tokens.csv")
+	check(errOpen)
 	defer tokensFile.Close()
 	tokensReader := csv.NewReader(bufio.NewReader(tokensFile))
 	tokens := make(map[common.Address]struct{})
 	for records, _ := tokensReader.Read(); records != nil; records, _ = tokensReader.Read() {
 		tokens[common.HexToAddress(records[0])] = struct{}{}
 	}
-	addrFile, err := os.Open("addresses.csv")
-	check(err)
+	addrFile, errOpen := os.Open("addresses.csv")
+	check(errOpen)
 	defer addrFile.Close()
 	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[common.Address]string)
@@ -1644,13 +1648,16 @@ func nonTokenUsage() {
 	itemsByAddress := make(map[common.Address]int)
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) == 32 {
 				continue
 			}
@@ -1664,8 +1671,9 @@ func nonTokenUsage() {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	iba := NewIntSorterAddr(len(itemsByAddress))
 	idx := 0
@@ -1775,10 +1783,9 @@ func oldStorage() {
 
 func dustEOA() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
+	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
 	count := 0
 	eoas := 0
@@ -1786,13 +1793,16 @@ func dustEOA() {
 	// Go through the current state
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) != 32 {
 				continue
 			}
@@ -1814,8 +1824,9 @@ func dustEOA() {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	fmt.Printf("Total accounts: %d, EOAs: %d\n", count, eoas)
 	tsi := NewTimeSorterInt(len(thresholdMap))
 	idx := 0
@@ -1951,10 +1962,9 @@ func makeSha3Preimages(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	check(err)
+	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	f, err := bolt.Open("/Volumes/tb4/turbo-geth/sha3preimages", 0600, &bolt.Options{})
 	check(err)

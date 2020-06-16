@@ -20,7 +20,7 @@ func printError(name string, err error) {
 	}
 }
 
-func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, boltPath string) error {
+func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaindata string) error {
 	r := gin.Default()
 	root := r.Group("api/v1")
 	allowCORS(root)
@@ -35,8 +35,12 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, boltPa
 	var err error
 	if remoteDBAddress != "" {
 		db, err = ethdb.NewRemote().Path(remoteDBAddress).Open()
-	} else if boltPath != "" {
-		db, err = ethdb.NewBolt().Path(boltPath).ReadOnly().Open()
+	} else if chaindata != "" {
+		database, errOpen := ethdb.Open(chaindata)
+		if errOpen != nil {
+			return errOpen
+		}
+		db = database.KV()
 	} else {
 		err = fmt.Errorf("either remote db or bolt db must be specified")
 	}
@@ -47,7 +51,7 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, boltPa
 	e := &apis.Env{
 		DB:              db,
 		RemoteDBAddress: remoteDBAddress,
-		BoltPath:        boltPath,
+		Chaindata:       chaindata,
 	}
 
 	if err = apis.RegisterRemoteDBAPI(root.Group("remote-db"), e); err != nil {

@@ -3,7 +3,9 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +113,7 @@ type boltTx struct {
 type boltBucket struct {
 	tx      *boltTx
 	bolt    *bolt.Bucket
+	id      int
 	nameLen uint
 }
 
@@ -145,9 +148,17 @@ func (opts boltOpts) Path(path string) boltOpts {
 	return opts
 }
 
-// WrapBoltDB provides a way for the code to gradually migrate
-// to the abstract interface
-func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
+func (opts boltOpts) Open() (KV, error) {
+	if !opts.Bolt.MemOnly {
+		if err := os.MkdirAll(path.Dir(opts.path), 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
+	}
+
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -175,14 +186,6 @@ func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 	}
 
 	return db, nil
-}
-
-func (opts boltOpts) Open() (db KV, err error) {
-	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
-	if err != nil {
-		return nil, err
-	}
-	return opts.WrapBoltDB(boltDB)
 }
 
 func (opts boltOpts) MustOpen() KV {
@@ -233,6 +236,10 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 		}
 	}
 	return res, nil
+}
+
+func (db *BoltKV) IdealBatchSize() int {
+	return 50 * 1024 * 1024 // 50 Mb
 }
 
 func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
@@ -322,7 +329,7 @@ func (tx *boltTx) Yield() {
 }
 
 func (tx *boltTx) Bucket(name []byte) Bucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name))}
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
 	b.bolt = tx.bolt.Bucket(name)
 	return b
 }
@@ -348,6 +355,18 @@ func (c *boltCursor) NoValues() NoValuesCursor {
 func (b boltBucket) Size() (uint64, error) {
 	st := b.bolt.Stats()
 	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
+}
+
+func (b boltBucket) Clear() error {
+	err := b.tx.bolt.DeleteBucket(dbutils.Buckets[b.id])
+	if err != nil {
+		return err
+	}
+	_, err = b.tx.bolt.CreateBucket(dbutils.Buckets[b.id], false)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b boltBucket) Get(key []byte) (val []byte, err error) {
@@ -400,12 +419,11 @@ func (b boltBucket) Cursor() Cursor {
 func (c *boltCursor) First() ([]byte, []byte, error) {
 	if len(c.prefix) == 0 {
 		c.k, c.v = c.bolt.First()
-	} else {
-		c.k, c.v = c.bolt.Seek(c.prefix)
+		return c.k, c.v, nil
 	}
-
+	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+		return nil, nil, nil
 	}
 	return c.k, c.v, nil
 }
@@ -418,8 +436,10 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -432,8 +452,10 @@ func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.SeekTo(seek)
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -446,8 +468,10 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			c.k, c.v = nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -512,7 +536,7 @@ func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
 
 	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+		return nil, 0, nil
 	}
 	return c.k, uint32(len(c.v)), nil
 }
@@ -525,8 +549,10 @@ func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, uint32(len(c.v)), nil
 }
@@ -539,8 +565,10 @@ func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, 0, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, uint32(len(c.v)), nil
 }

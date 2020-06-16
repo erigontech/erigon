@@ -2,6 +2,7 @@ package stateless
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -10,8 +11,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
-	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -31,27 +31,37 @@ func (a *KeyItem) Less(b llrb.Item) bool {
 	return bytes.Compare(a.key[:], bi.key[:]) < 0
 }
 
-func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
+//nolint
+func storageRoot(db ethdb.KV, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
-	err := db.View(func(tx *bolt.Tx) error {
-		enc, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(crypto.Keccak256(contract[:]))
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		enc, err := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(crypto.Keccak256(contract[:]))
+		if err != nil {
+			return err
+		}
 		if enc == nil {
 			return fmt.Errorf("could find account %x", contract)
 		}
 		storageRoot = common.BytesToHash(common.CopyBytes(enc))
 		return nil
-	})
-	return storageRoot, err
+	}); err != nil {
+		return storageRoot, err
+	}
+	return storageRoot, nil
 }
 
-func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
+//nolint
+func actualContractSize(db ethdb.KV, contract common.Address) (int, error) {
 	var fk [52]byte
 	copy(fk[:], contract[:])
 	actual := 0
-	if err := db.View(func(tx *bolt.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor()
-		for k, _ := c.Seek(fk[:]); k != nil && bytes.HasPrefix(k, contract[:]); k, _ = c.Next() {
+		for k, _, err := c.Seek(fk[:]); k != nil && bytes.HasPrefix(k, contract[:]); k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) == 32 {
 				continue
 			}
@@ -267,10 +277,9 @@ func estimateContract(
 
 func estimate() {
 	startTime := time.Now()
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
 	defer db.Close()
 	maxi := 20
 	maxj := 50
@@ -299,13 +308,16 @@ func estimate() {
 	var current *llrb.LLRB
 	count := 0
 	contractCount := 0
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		st := tx.Bucket(dbutils.CurrentStateBucket)
 		if st == nil {
 			return nil
 		}
 		c := st.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
@@ -321,7 +333,7 @@ func estimate() {
 			}
 			if _, ok := itemsByAddress[addr]; !ok {
 				if current != nil {
-					seed, err := storageRoot(db, addr)
+					seed, err := storageRoot(db.KV(), addr)
 					check(err)
 					//if contractCount == 4 {
 					done := estimateContract(contractCount, current, seed, valMap, maxValMap, valCount, maxi, maxj, trace)
@@ -346,8 +358,9 @@ func estimate() {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 
 	for category, vals := range valMap {
 		for i := 1; i < maxi; i++ {

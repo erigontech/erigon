@@ -2,20 +2,18 @@ package generate
 
 import (
 	"errors"
+	"os"
+	"os/signal"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"os"
-	"os/signal"
-	"time"
 )
 
 func RegenerateIndex(chaindata string, csBucket []byte) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(chaindata)
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
 	signal.Notify(ch, os.Interrupt)

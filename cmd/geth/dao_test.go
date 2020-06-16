@@ -125,10 +125,7 @@ func testDAOForkBlockNewChain(t *testing.T, test int, genesis string, expectBloc
 	}
 	// Retrieve the DAO config flag from the database
 	path := filepath.Join(datadir, "geth", "chaindata")
-	db, err := ethdb.NewBoltDatabase(path)
-	if err != nil {
-		t.Fatalf("test %d: failed to open test database: %v", test, err)
-	}
+	db := ethdb.MustOpen(path)
 	defer db.Close()
 
 	genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
@@ -137,7 +134,7 @@ func testDAOForkBlockNewChain(t *testing.T, test int, genesis string, expectBloc
 	}
 	config := rawdb.ReadChainConfig(db, genesisHash)
 	if config == nil {
-		t.Errorf("test %d: failed to retrieve chain config: %v", test, err)
+		t.Errorf("test %d: failed to retrieve chain config", test)
 		return // we want to return here, the other checks can't make it past this point (nil panic).
 	}
 	// Validate the DAO hard-fork block number against the expected value

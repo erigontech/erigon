@@ -19,7 +19,7 @@ func ExportFile(filePath, chaindataPath string) error {
 	}
 
 	createDb := func(path string) (ethdb.Database, error) {
-		return ethdb.NewBoltDatabase(path)
+		return ethdb.Open(path)
 	}
 
 	chaindata, err := stateless.NewBlockProviderFromDB(chaindataPath, createDb)

@@ -172,7 +172,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			if _, err = batch.Commit(); err != nil {
 				return err
 			}
-			log.Info("Batch committed", "in", time.Since(start))
+			log.Info("Batch committed", "in", time.Since(start), "size", common.StorageSize(batch.BatchSize()))
 		}
 
 		if prof {

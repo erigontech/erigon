@@ -167,10 +167,9 @@ func transactionStats(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	check(err)
+	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	f, err := os.OpenFile("txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
