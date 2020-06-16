@@ -141,6 +141,10 @@ func (db *badgerKV) BucketsStat(_ context.Context) (map[string]common.StorageBuc
 	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
+func (db *badgerKV) IdealBatchSize() int {
+	return int(db.badger.MaxBatchSize() / 2)
+}
+
 func (db *badgerKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	t := badgerTxPool.Get().(*badgerTx)
 	defer badgerTxPool.Put(t)

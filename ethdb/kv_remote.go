@@ -128,6 +128,10 @@ func (db *RemoteKV) BucketsStat(ctx context.Context) (map[string]common.StorageB
 	return db.remote.BucketsStat(ctx)
 }
 
+func (db *RemoteKV) IdealBatchSize() int {
+	panic("not supported")
+}
+
 func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }

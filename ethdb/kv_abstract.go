@@ -12,6 +12,7 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
+	IdealBatchSize() int
 }
 
 type NativeGet interface {

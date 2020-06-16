@@ -230,6 +230,10 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 	return res, nil
 }
 
+func (db *BoltKV) IdealBatchSize() int {
+	return 50 * 1024 * 1024 // 50 Mb
+}
+
 func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
 	err = db.bolt.View(func(tx *bolt.Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)

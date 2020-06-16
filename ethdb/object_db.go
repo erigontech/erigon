@@ -100,11 +100,17 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 }
 
 func (db *ObjectDatabase) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	return db.kv.(HasStats).DiskSize(ctx)
+	if casted, ok := db.kv.(HasStats); ok {
+		return casted.DiskSize(ctx)
+	}
+	return common.StorageSize(0), nil
 }
 
 func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return db.kv.(HasStats).BucketsStat(ctx)
+	if casted, ok := db.kv.(HasStats); ok {
+		return casted.BucketsStat(ctx)
+	}
+	return nil, nil
 }
 
 // Get returns the value for a given key if it's present.
@@ -370,7 +376,7 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *ObjectDatabase) IdealBatchSize() int {
-	return 50 * 1024 * 1024 // 50 Mb
+	return db.kv.IdealBatchSize()
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

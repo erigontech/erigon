@@ -634,8 +634,8 @@ func trieChart() {
 }
 
 func mgrSchedule(chaindata string, block uint64) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
+	defer db.Close()
 
 	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
@@ -780,11 +780,10 @@ func mgrSchedule(chaindata string, block uint64) {
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
-	blockDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	blockDb := openDB(chaindata)
+	defer blockDb.Close()
 	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
-	defer blockDb.Close()
 	if fromScratch {
 		os.Remove("statedb")
 	}
@@ -868,8 +867,7 @@ func extractTrie(block int) {
 }
 
 func testRewind(chaindata string, block, rewind int) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
@@ -929,9 +927,8 @@ func testRewind(chaindata string, block, rewind int) {
 
 func testStartup() {
 	startTime := time.Now()
-	//ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	check(err)
+	//ethDb := openDB(node.DefaultDataDir() + "/geth/chaindata")
+	ethDb := openDB("/home/akhounov/.ethereum/geth/chaindata")
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
@@ -968,8 +965,7 @@ func dbSlice(chaindata string, bucket []byte, prefix []byte) {
 
 func testResolve(chaindata string) {
 	startTime := time.Now()
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
 	defer ethDb.Close()
 	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	//check(err)
@@ -1075,8 +1071,8 @@ func testDifficulty() {
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
+	defer ethDb.Close()
 	blocksToSearch := 10000000
 	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
 		hash := rawdb.ReadCanonicalHash(ethDb, i)
@@ -1091,8 +1087,7 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 }
 
 func printCurrentBlockNumber(chaindata string) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
 	defer ethDb.Close()
 	hash := rawdb.ReadHeadBlockHash(ethDb)
 	number := rawdb.ReadHeaderNumber(ethDb, hash)
@@ -1100,8 +1095,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func printTxHashes() {
-	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
-	check(err)
+	ethDb := openDB(node.DefaultDataDir() + "/geth/chaindata")
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
 		hash := rawdb.ReadCanonicalHash(ethDb, b)
@@ -1116,30 +1110,29 @@ func printTxHashes() {
 }
 
 func relayoutKeys() {
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open(node.DefaultDataDir()+"/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	//db := openDB("/home/akhounov/.ethereum/geth/chaindata")
+	db := openDB(node.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	var accountChangeSetCount, storageChangeSetCount int
-	err = db.View(func(tx *bolt.Tx) error {
+	err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountChangeSetBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
 			accountChangeSetCount++
 		}
 		return nil
 	})
 	check(err)
-	err = db.View(func(tx *bolt.Tx) error {
+	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.StorageChangeSetBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
 			storageChangeSetCount++
 		}
 		return nil
@@ -1224,8 +1217,7 @@ func invTree(wrong, right, diff string, name string) {
 }
 
 func preimage(chaindata string, image common.Hash) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
 	defer ethDb.Close()
 	p, err := ethDb.Get(dbutils.PreimagePrefix, image[:])
 	check(err)
@@ -1233,17 +1225,15 @@ func preimage(chaindata string, image common.Hash) {
 }
 
 func addPreimage(chaindata string, image common.Hash, preimage []byte) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
 	defer ethDb.Close()
-	err = ethDb.Put(dbutils.PreimagePrefix, image[:], preimage)
+	err := ethDb.Put(dbutils.PreimagePrefix, image[:], preimage)
 	check(err)
 }
 
 func printBranches(block uint64) {
-	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/testnet/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	check(err)
+	//ethDb := openDB("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := openDB(node.DefaultDataDir() + "/testnet/geth/chaindata")
 	defer ethDb.Close()
 	fmt.Printf("All headers at the same height %d\n", block)
 	{
@@ -1266,8 +1256,8 @@ func printBranches(block uint64) {
 }
 
 func readPlainAccount(chaindata string, address common.Address) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
+	defer ethDb.Close()
 	var acc accounts.Account
 	enc, err := ethDb.Get(dbutils.PlainStateBucket, address[:])
 	if err != nil {
@@ -1282,8 +1272,8 @@ func readPlainAccount(chaindata string, address common.Address) {
 }
 
 func readAccount(chaindata string, account common.Address, block uint64, rewind uint64) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
+	defer ethDb.Close()
 	secKey := crypto.Keccak256(account[:])
 	var a accounts.Account
 	ok, err := rawdb.ReadAccount(ethDb, common.BytesToHash(secKey), &a)
@@ -1323,8 +1313,8 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 }
 
 func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
+	defer ethDb.Close()
 	var a accounts.Account
 	if ok, err := rawdb.ReadAccount(ethDb, addrHash, &a); err != nil {
 		panic(err)
@@ -1338,8 +1328,8 @@ func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash)
 }
 
 func nextIncarnation(chaindata string, addrHash common.Hash) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	ethDb := openDB(chaindata)
+	defer ethDb.Close()
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
@@ -1457,10 +1447,9 @@ func printBucket(chaindata string) {
 
 func GenerateTxLookups(chaindata string) {
 	startTime := time.Now()
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
-	//nolint: errcheck
-	db.ClearBuckets(dbutils.TxLookupPrefix)
+	db := openDB(chaindata)
+	defer db.Close()
+	check(db.ClearBuckets(dbutils.TxLookupPrefix))
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
 	startTime = time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -1623,8 +1612,8 @@ func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, star
 
 func GenerateTxLookups1(chaindata string, block int) {
 	startTime := time.Now()
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
+	defer db.Close()
 	//nolint: errcheck
 	db.ClearBuckets(dbutils.TxLookupPrefix)
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
@@ -1650,7 +1639,7 @@ func GenerateTxLookups1(chaindata string, block int) {
 		for _, tx := range body.Transactions {
 			txcount++
 			n.SetInt64(int64(blockNum))
-			err = batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
+			err := batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
 			check(err)
 			if txcount%100000 == 0 {
 				_, err = batch.Commit()
@@ -1678,7 +1667,7 @@ func GenerateTxLookups1(chaindata string, block int) {
 			break
 		}
 	}
-	_, err = batch.Commit()
+	_, err := batch.Commit()
 	check(err)
 	log.Info("Commited", "transactions", txcount)
 	log.Info("Processed", "blocks", blockNum)
@@ -1687,8 +1676,8 @@ func GenerateTxLookups1(chaindata string, block int) {
 
 func GenerateTxLookups2(chaindata string) {
 	startTime := time.Now()
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
+	defer db.Close()
 	//nolint: errcheck
 	db.ClearBuckets(dbutils.TxLookupPrefix)
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
@@ -1768,7 +1757,7 @@ func insertInFileForLookups2(file *os.File, entries Entries, it uint64) {
 	log.Info("File Insertion Occured")
 }
 
-func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+func generateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan bool) {
 	var bufferLen int = 143360 // 35 * 4096
 	var count uint64 = 5000000
 	var entries Entries = make([]byte, count*35)
@@ -1894,8 +1883,8 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 
 func ValidateTxLookups2(chaindata string) {
 	startTime := time.Now()
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
+	defer db.Close()
 	//nolint: errcheck
 	startTime = time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -1910,7 +1899,7 @@ func ValidateTxLookups2(chaindata string) {
 	log.Info("All done", "duration", time.Since(startTime))
 }
 
-func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh chan bool) {
 	blockNum := startBlock
 	iterations := 0
 	var interrupt bool
@@ -1948,9 +1937,7 @@ func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 }
 
 func indexSize(chaindata string) {
-	//db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
 	defer db.Close()
 	fStorage, err := os.Create("index_sizes_storage.csv")
 	check(err)
@@ -2021,19 +2008,17 @@ func indexSize(chaindata string) {
 }
 
 func getModifiedAccounts(chaindata string) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
+	defer db.Close()
 	addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
 	check(err)
 	fmt.Printf("Len(addrs)=%d\n", len(addrs))
 }
 
 func resetState(chaindata string) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
 	defer db.Close()
-	//nolint:errcheck
-	db.ClearBuckets(
+	check(db.ClearBuckets(
 		dbutils.CurrentStateBucket,
 		dbutils.AccountChangeSetBucket,
 		dbutils.StorageChangeSetBucket,
@@ -2044,8 +2029,8 @@ func resetState(chaindata string) {
 		dbutils.PlainContractCodeBucket,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
-	)
-	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+	))
+	_, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	core.UsePlainStateExecution = true
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
@@ -2056,30 +2041,25 @@ func resetState(chaindata string) {
 }
 
 func resetHashedState(chaindata string) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
 	defer db.Close()
-	//nolint:errcheck
-	db.ClearBuckets(
+	check(db.ClearBuckets(
 		dbutils.IntermediateTrieHashBucket,
 		dbutils.IntermediateTrieHashBucket,
-	)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
+	))
+	err := stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
 	fmt.Printf("Reset hashed state done\n")
 }
 
 func resetHistoryIndex(chaindata string) {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
+	db := openDB(chaindata)
 	defer db.Close()
-	//nolint:errcheck
-	db.ClearBuckets(
+	check(db.ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
-	)
-	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
+	))
+	err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
 	check(err)
@@ -2151,8 +2131,7 @@ func (r *Receiver) Result() trie.SubTries {
 
 func regenerate(chaindata string) error {
 	var m runtime.MemStats
-	db, dberr := ethdb.NewBoltDatabase(chaindata)
-	check(dberr)
+	db := openDB(chaindata)
 	defer db.Close()
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -2196,8 +2175,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	db, dberr := ethdb.NewBoltDatabase(chaindata)
-	check(dberr)
+	db := openDB(chaindata)
 	defer db.Close()
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -2337,10 +2315,9 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 }
 
 func testSeek(chaindata string) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	db := openDB(chaindata)
 	defer db.Close()
-	if err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor()
 		//kk := common.FromHex("0x434751")
@@ -2361,21 +2338,17 @@ func testSeek(chaindata string) {
 }
 
 func testStage5(chaindata string, reset bool) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := openDB(chaindata)
 	defer db.Close()
 	if reset {
-		if err = db.ClearBuckets(
+		check(db.ClearBuckets(
 			dbutils.CurrentStateBucket,
 			dbutils.ContractCodeBucket,
 			dbutils.IntermediateTrieHashBucket,
 			dbutils.IntermediateWitnessSizeBucket,
-		); err != nil {
-			return err
-		}
+		))
 	}
+	var err error
 	if err = stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
 		return err
 	}
@@ -2395,11 +2368,9 @@ func testStage5(chaindata string, reset bool) error {
 }
 
 func printStages(chaindata string) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := openDB(chaindata)
 	defer db.Close()
+	var err error
 	var progress uint64
 	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
 		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
@@ -2411,11 +2382,9 @@ func printStages(chaindata string) error {
 }
 
 func testStage4(chaindata string, block uint64) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := openDB(chaindata)
 	defer db.Close()
+	var err error
 	var progress uint64
 	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
 		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
@@ -2474,6 +2443,16 @@ func searchChangeSet(chaindata string, key []byte) error {
 		return nil
 	})
 	return err
+}
+
+func openDB(chaindata string) *ethdb.ObjectDatabase {
+	if strings.HasSuffix(chaindata, "_lmdb") {
+		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MustOpen())
+	}
+	if strings.HasSuffix(chaindata, "_badger") {
+		return ethdb.NewObjectDatabase(ethdb.NewBadger().Path(chaindata).MustOpen())
+	}
+	return ethdb.NewObjectDatabase(ethdb.NewBolt().Path(chaindata).MustOpen())
 }
 
 func main() {
