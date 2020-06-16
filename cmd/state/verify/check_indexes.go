@@ -3,7 +3,6 @@ package verify
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -13,10 +12,7 @@ import (
 )
 
 func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		log.Fatal(err)
-	}
+	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 
 	var walker func([]byte) changeset.Walker
@@ -32,15 +28,15 @@ func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) er
 		}
 	}
 
-	err = db.Walk(changeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+	if err := db.Walk(changeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		blockNum, _ := dbutils.DecodeTimestamp(k)
 		if blockNum%100_000 == 0 {
 			fmt.Printf("Processed %dK, %s\n", blockNum/1000, time.Since(startTime))
 		}
 
-		err = walker(v).Walk(func(key, val []byte) error {
+		if err := walker(v).Walk(func(key, val []byte) error {
 			indexBytes, innerErr := db.GetIndexChunk(indexBucket, key, blockNum)
-			if err != nil {
+			if innerErr != nil {
 				return innerErr
 			}
 
@@ -49,14 +45,11 @@ func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) er
 				return fmt.Errorf("%v,%v,%v", blockNum, findVal, common.Bytes2Hex(key))
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			return false, err
 		}
 		return true, nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 

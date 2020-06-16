@@ -63,13 +63,11 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
-// Example text code:
-//  writeDb, errOpen = ethdb.NewBolt().InMem().Open(ctx)
-//	require.NoError(t, errOpen)
+// Example test code:
+//  writeDb = ethdb.NewMemDatabase().KV()
 //	serverIn, clientOut := io.Pipe()
 //	clientIn, serverOut := io.Pipe()
-//	readDBs, errOpen = ethdb.NewRemote().InMem(clientIn, clientOut).Open(ctx)
-//	require.NoError(t, errOpen)
+//	readDBs = ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen()
 //  go func() {
 // 	    if err := remotedbserver.Server(ctx, writeDb, serverIn, serverOut, nil); err != nil {
 //		    require.NoError(t, err)
@@ -128,6 +126,10 @@ func (db *RemoteKV) BucketsStat(ctx context.Context) (map[string]common.StorageB
 	return db.remote.BucketsStat(ctx)
 }
 
+func (db *RemoteKV) IdealBatchSize() int {
+	panic("not supported")
+}
+
 func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
@@ -182,6 +184,10 @@ func (c *remoteCursor) NoValues() NoValuesCursor {
 
 func (b remoteBucket) Size() (uint64, error) {
 	panic("not implemented")
+}
+
+func (b remoteBucket) Clear() error {
+	panic("not supporte")
 }
 
 func (b remoteBucket) Get(key []byte) (val []byte, err error) {

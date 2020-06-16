@@ -425,14 +425,22 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(bucket); err != nil {
+func (db *BoltDatabase) ClearBuckets(buckets ...[]byte) error {
+	for _, bucket := range buckets {
+		bucket := bucket
+		if err := db.db.Update(func(tx *bolt.Tx) error {
+			if err := tx.DeleteBucket(bucket); err != nil {
+				return err
+			}
+			if _, err := tx.CreateBucket(bucket, false); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		return nil
-	})
-	return err
+	}
+	return nil
 }
 
 func (db *BoltDatabase) Close() {

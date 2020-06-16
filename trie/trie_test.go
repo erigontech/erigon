@@ -474,11 +474,7 @@ func tempDB() (string, ethdb.Database) {
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary directory: %v", err))
 	}
-	diskdb, err := ethdb.NewBoltDatabase(dir)
-	if err != nil {
-		panic(fmt.Sprintf("can't create temporary database: %v", err))
-	}
-	return dir, diskdb
+	return dir, ethdb.MustOpen(dir)
 }
 
 func getString(trie *Trie, k string) []byte {

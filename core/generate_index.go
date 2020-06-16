@@ -5,15 +5,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"os"
-	"runtime"
-	"time"
 )
 
 func NewIndexGenerator(db ethdb.Database, quitCh chan struct{}) *IndexGenerator {
@@ -203,7 +204,7 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 	//todo add truncate to all db
 	if bolt, ok := ig.db.(*ethdb.BoltDatabase); ok {
 		log.Warn("Remove bucket", "bucket", string(bucket))
-		err := bolt.DeleteBucket(bucket)
+		err := bolt.ClearBuckets(bucket)
 		if err != nil {
 			return err
 		}
