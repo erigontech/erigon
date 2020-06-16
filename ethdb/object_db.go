@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -52,22 +53,20 @@ func MustOpen(path string) *ObjectDatabase {
 	return db
 }
 
+// Open - main method to open database. Choosing driver based on path suffix.
+// If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
 func Open(path string) (*ObjectDatabase, error) {
-	if strings.HasSuffix(path, "_lmdb") {
-		kv, err := NewLMDB().Path(path).Open()
-		if err != nil {
-			return nil, err
-		}
-		return NewObjectDatabase(kv), nil
+	var kv KV
+	var err error
+	testDB := debug.TestDB()
+	switch true {
+	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
+		kv, err = NewLMDB().Path(path).Open()
+	case testDB == "badger" || strings.HasSuffix(path, "_badger"):
+		kv, err = NewBadger().Path(path).Open()
+	default:
+		kv, err = NewBolt().Path(path).Open()
 	}
-	if strings.HasSuffix(path, "_badger") {
-		kv, err := NewBadger().Path(path).Open()
-		if err != nil {
-			return nil, err
-		}
-		return NewObjectDatabase(kv), nil
-	}
-	kv, err := NewBolt().Path(path).Open()
 	if err != nil {
 		return nil, err
 	}
