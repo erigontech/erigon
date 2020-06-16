@@ -419,12 +419,11 @@ func (b boltBucket) Cursor() Cursor {
 func (c *boltCursor) First() ([]byte, []byte, error) {
 	if len(c.prefix) == 0 {
 		c.k, c.v = c.bolt.First()
-	} else {
-		c.k, c.v = c.bolt.Seek(c.prefix)
+		return c.k, c.v, nil
 	}
-
+	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+		return nil, nil, nil
 	}
 	return c.k, c.v, nil
 }
@@ -437,8 +436,10 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -451,8 +452,10 @@ func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.SeekTo(seek)
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -465,8 +468,10 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			c.k, c.v = nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -531,7 +536,7 @@ func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
 
 	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+		return nil, 0, nil
 	}
 	return c.k, uint32(len(c.v)), nil
 }
@@ -544,8 +549,10 @@ func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, uint32(len(c.v)), nil
 }
@@ -558,8 +565,10 @@ func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, 0, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, uint32(len(c.v)), nil
 }
