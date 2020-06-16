@@ -2340,6 +2340,34 @@ func testStage5(chaindata string, reset bool) error {
 	return nil
 }
 
+func testStage6(chaindata string, reset bool) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if reset {
+		check(db.ClearBuckets(
+			dbutils.IntermediateTrieHashBucket,
+			dbutils.IntermediateWitnessSizeBucket,
+		))
+	}
+	var err error
+	if err = stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
+		return err
+	}
+	var stage5progress uint64
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+		return err
+	}
+	log.Info("Stage5", "progress", stage5progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes}
+	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
 func printStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2576,6 +2604,11 @@ func main() {
 	}
 	if *action == "stage4" {
 		if err := testStage4(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage6" {
+		if err := testStage6(*chaindata, true /* reset */); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

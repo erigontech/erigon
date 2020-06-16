@@ -338,7 +338,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	if retain { // can't use ih as is, need go to children
 		// Collect deletions
 		if fstl.hc != nil {
-			if err := fstl.hc(fstl.minKeyAsNibbles.Bytes(), nil); err != nil {
+			if err = fstl.hc(fstl.minKeyAsNibbles.Bytes(), nil); err != nil {
 				return err
 			}
 		}
