@@ -122,7 +122,7 @@ func dataDependencies(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig

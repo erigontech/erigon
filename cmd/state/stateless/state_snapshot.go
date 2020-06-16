@@ -293,7 +293,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 }
 
 func VerifySnapshot(path string) {
-	ethDb, err := ethdb.NewBoltDatabase(path)
+	ethDb, err := ethdb.NewDatabase(path)
 	check(err)
 	defer ethDb.Close()
 	hash := rawdb.ReadHeadBlockHash(ethDb)

@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -39,6 +40,29 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 		kv:  kv,
 		log: logger,
 	}
+}
+
+func NewDatabase(path string) (*ObjectDatabase, error) {
+	var kv KV
+	var err error
+	if strings.HasSuffix(path, "_lmdb") {
+		kv, err = NewLMDB().Path(path).Open()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.HasSuffix(path, "_badger") {
+		kv, err = NewBadger().Path(path).Open()
+		if err != nil {
+			return nil, err
+		}
+	}
+	kv, err = NewBolt().Path(path).Open()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewObjectDatabase(kv), nil
 }
 
 // Put inserts or updates a single entry.

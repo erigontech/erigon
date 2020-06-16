@@ -128,9 +128,9 @@ func makeTokens(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -190,9 +190,9 @@ func makeTokens(blockNum uint64) {
 }
 
 func makeTokenBalances() {
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
@@ -410,9 +410,9 @@ func tokenBalances() {
 }
 
 func makeTokenAllowances() {
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)

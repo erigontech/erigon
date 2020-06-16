@@ -13,7 +13,7 @@ import (
 )
 
 func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
+	db, err := ethdb.NewDatabase(chaindata)
 	if err != nil {
 		log.Fatal(err)
 	}

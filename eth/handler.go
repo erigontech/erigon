@@ -999,7 +999,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 
 		_ = os.Remove("simulator")
-		ethDb, err := ethdb.NewBoltDatabase("simulator")
+		ethDb, err := ethdb.NewDatabase("simulator")
 		if err != nil {
 			return err
 		}

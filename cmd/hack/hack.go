@@ -848,7 +848,7 @@ Loop:
 }
 
 func extractTrie(block int) {
-	stateDb, err := ethdb.NewBoltDatabase("statedb")
+	stateDb, err := ethdb.NewDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
 	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
@@ -1144,8 +1144,8 @@ func relayoutKeys() {
 }
 
 func upgradeBlocks() {
-	//ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewDatabase(node.DefaultDataDir() + "/geth/chaindata")
+	ethDb, err := ethdb.NewDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	start := []byte{}
@@ -2446,13 +2446,11 @@ func searchChangeSet(chaindata string, key []byte) error {
 }
 
 func openDB(chaindata string) *ethdb.ObjectDatabase {
-	if strings.HasSuffix(chaindata, "_lmdb") {
-		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MustOpen())
+	db, err := ethdb.NewDatabase(chaindata)
+	if err != nil {
+		panic(err)
 	}
-	if strings.HasSuffix(chaindata, "_badger") {
-		return ethdb.NewObjectDatabase(ethdb.NewBadger().Path(chaindata).MustOpen())
-	}
-	return ethdb.NewObjectDatabase(ethdb.NewBolt().Path(chaindata).MustOpen())
+	return db
 }
 
 func main() {

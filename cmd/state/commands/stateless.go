@@ -61,7 +61,7 @@ var statelessCmd = &cobra.Command{
 	Short: "Stateless Ethereum prototype",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		createDb := func(path string) (ethdb.Database, error) {
-			return ethdb.NewBoltDatabase(path)
+			return ethdb.NewDatabase(path)
 		}
 		ctx := rootContext()
 

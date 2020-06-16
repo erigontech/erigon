@@ -65,7 +65,7 @@ func benchmarkBloomBits(b *testing.B, sectionSize uint64) {
 	benchDataDir := node.DefaultDataDir() + "/geth/chaindata"
 	b.Log("Running bloombits benchmark   section size:", sectionSize)
 
-	db, err := ethdb.NewBoltDatabase(benchDataDir)
+	db, err := ethdb.NewDatabase(benchDataDir)
 	if err != nil {
 		b.Fatalf("error opening database at %v: %v", benchDataDir, err)
 	}
@@ -126,7 +126,7 @@ func benchmarkBloomBits(b *testing.B, sectionSize uint64) {
 	for i := 0; i < benchFilterCnt; i++ {
 		if i%20 == 0 {
 			db.Close()
-			db, _ = ethdb.NewBoltDatabase(benchDataDir)
+			db, _ = ethdb.NewDatabase(benchDataDir)
 			backend = &testBackend{db: db, sections: cnt}
 		}
 		var addr common.Address
@@ -155,7 +155,7 @@ func clearBloomBits(db ethdb.Database) {
 func BenchmarkNoBloomBits(b *testing.B) {
 	benchDataDir := node.DefaultDataDir() + "/geth/chaindata"
 	fmt.Println("Running benchmark without bloombits")
-	db, err := ethdb.NewBoltDatabase(benchDataDir)
+	db, err := ethdb.NewDatabase(benchDataDir)
 	if err != nil {
 		b.Fatalf("error opening database at %v: %v", benchDataDir, err)
 	}

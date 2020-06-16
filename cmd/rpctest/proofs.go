@@ -24,13 +24,13 @@ import (
 
 func proofs(chaindata string, url string, block int) {
 	fileName := "trie.txt"
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	ethDb, err := ethdb.NewDatabase(chaindata)
 	if err != nil {
 		panic(err)
 	}
 	defer ethDb.Close()
 	var t *trie.Trie
-	if _, err = os.Stat(fileName); err != nil {
+	if _, err := os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			// Resolve 6 top levels of the accounts trie
 			l := trie.NewSubTrieLoader(uint64(block))
@@ -91,7 +91,7 @@ func proofs(chaindata string, url string, block int) {
 			}
 			var account common.Address
 			var found bool
-			err = ethDb.Walk(dbutils.PreimagePrefix, startKey[:], 4*len(diffKey), func(k, v []byte) (bool, error) {
+			err := ethDb.Walk(dbutils.PreimagePrefix, startKey[:], 4*len(diffKey), func(k, v []byte) (bool, error) {
 				if len(v) == common.AddressLength {
 					copy(account[:], v)
 					found = true
@@ -172,7 +172,7 @@ func proofs(chaindata string, url string, block int) {
 }
 
 func fixState(chaindata string, url string) {
-	stateDb, err := ethdb.NewBoltDatabase(chaindata)
+	stateDb, err := ethdb.NewDatabase(chaindata)
 	if err != nil {
 		panic(err)
 	}

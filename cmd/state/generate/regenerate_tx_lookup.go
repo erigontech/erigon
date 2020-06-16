@@ -3,6 +3,7 @@ package generate
 import (
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -13,12 +14,9 @@ import (
 )
 
 func RegenerateTxLookup(chaindata string) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
-	err = db.ClearBuckets(dbutils.TxLookupPrefix)
-	if err != nil {
+	db := openDB(chaindata)
+	defer db.Close()
+	if err := db.ClearBuckets(dbutils.TxLookupPrefix); err != nil {
 		return err
 	}
 	startTime := time.Now()
@@ -46,4 +44,14 @@ func RegenerateTxLookup(chaindata string) error {
 	}
 	log.Info("TxLookup index is successfully regenerated", "it took", time.Since(startTime))
 	return nil
+}
+
+func openDB(chaindata string) *ethdb.ObjectDatabase {
+	if strings.HasSuffix(chaindata, "_lmdb") {
+		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MustOpen())
+	}
+	if strings.HasSuffix(chaindata, "_badger") {
+		return ethdb.NewObjectDatabase(ethdb.NewBadger().Path(chaindata).MustOpen())
+	}
+	return ethdb.NewObjectDatabase(ethdb.NewBolt().Path(chaindata).MustOpen())
 }

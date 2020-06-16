@@ -474,7 +474,7 @@ func tempDB() (string, ethdb.Database) {
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary directory: %v", err))
 	}
-	diskdb, err := ethdb.NewBoltDatabase(dir)
+	diskdb, err := ethdb.NewDatabase(dir)
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary database: %v", err))
 	}

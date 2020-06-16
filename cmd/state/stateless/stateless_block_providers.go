@@ -140,7 +140,7 @@ func getTempFileName() string {
 }
 
 func mustCreateTempDatabase() ethdb.Database {
-	db, err := ethdb.NewBoltDatabase(getTempFileName())
+	db, err := ethdb.NewDatabase(getTempFileName())
 	if err != nil {
 		panic(fmt.Errorf("failed to create a temp db for headers: %w", err))
 	}

@@ -3,17 +3,18 @@ package hack
 import (
 	"bytes"
 	"fmt"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"testing"
 )
 
 func TestDecodeNewStorageDebug(t *testing.T) {
 	t.Skip("debug test")
 	pathToDB := ""
-	db, err := ethdb.NewBoltDatabase(pathToDB)
+	db, err := ethdb.NewDatabase(pathToDB)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,18 +4,19 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"log"
 	"os"
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func IndexStats(chaindata string, indexBucket []byte, statsFile string) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
+	db, err := ethdb.NewDatabase(chaindata)
 	if err != nil {
 		return err
 	}
