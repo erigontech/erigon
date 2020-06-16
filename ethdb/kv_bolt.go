@@ -3,7 +3,9 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -147,6 +149,12 @@ func (opts boltOpts) Path(path string) boltOpts {
 }
 
 func (opts boltOpts) Open() (KV, error) {
+	if !opts.Bolt.MemOnly {
+		if err := os.MkdirAll(path.Dir(opts.path), 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
+	}
+
 	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
 	if err != nil {
 		return nil, err

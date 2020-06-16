@@ -3,6 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -42,6 +44,12 @@ func (opts badgerOpts) Open() (KV, error) {
 
 	if opts.Badger.InMemory {
 		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
+	}
+
+	if !opts.Badger.InMemory {
+		if err := os.MkdirAll(opts.Badger.Dir, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.Badger.Dir, err)
+		}
 	}
 
 	badgerDB, err := badger.Open(opts.Badger)
