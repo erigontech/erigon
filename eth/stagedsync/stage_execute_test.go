@@ -11,9 +11,11 @@ import (
 
 func TestUnwindExecutionStageHashedStatic(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
+	defer initialDb.Close()
 	generateBlocks(t, 1, 50, hashedWriterGen(initialDb), staticCodeStaticIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
+	defer mutation.Close()
 	generateBlocks(t, 1, 100, hashedWriterGen(mutation), staticCodeStaticIncarnations)
 
 	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
@@ -33,9 +35,11 @@ func TestUnwindExecutionStageHashedStatic(t *testing.T) {
 
 func TestUnwindExecutionStageHashedWithIncarnationChanges(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
+	defer initialDb.Close()
 	generateBlocks(t, 1, 50, hashedWriterGen(initialDb), changeCodeWithIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
+	defer mutation.Close()
 	generateBlocks(t, 1, 100, hashedWriterGen(mutation), changeCodeWithIncarnations)
 
 	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
@@ -56,9 +60,11 @@ func TestUnwindExecutionStageHashedWithIncarnationChanges(t *testing.T) {
 func TestUnwindExecutionStageHashedWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
 	initialDb := ethdb.NewMemDatabase()
+	defer initialDb.Close()
 	generateBlocks(t, 1, 50, hashedWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
+	defer mutation.Close()
 	generateBlocks(t, 1, 100, hashedWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
 
 	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
@@ -77,9 +83,11 @@ func TestUnwindExecutionStageHashedWithCodeChanges(t *testing.T) {
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
+	defer initialDb.Close()
 	generateBlocks(t, 1, 50, plainWriterGen(initialDb), staticCodeStaticIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
+	defer mutation.Close()
 	generateBlocks(t, 1, 100, plainWriterGen(mutation), staticCodeStaticIncarnations)
 
 	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
@@ -99,9 +107,11 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	initialDb := ethdb.NewMemDatabase()
+	defer initialDb.Close()
 	generateBlocks(t, 1, 50, plainWriterGen(initialDb), changeCodeWithIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
+	defer mutation.Close()
 	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeWithIncarnations)
 
 	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
@@ -122,9 +132,11 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
 	initialDb := ethdb.NewMemDatabase()
+	defer initialDb.Close()
 	generateBlocks(t, 1, 50, plainWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
 
 	mutation := ethdb.NewMemDatabase()
+	defer mutation.Close()
 	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
 
 	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)

@@ -3,6 +3,11 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"os"
+	"sync"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -16,10 +21,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"math/big"
-	"os"
-	"sync"
-	"testing"
 )
 
 type stagedSyncTester struct {
@@ -30,7 +31,7 @@ type stagedSyncTester struct {
 	lock       sync.RWMutex
 }
 
-func newStagedSyncTester() *stagedSyncTester {
+func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester := &stagedSyncTester{
 		peers:   make(map[string]*stagedSyncTesterPeer),
 		genesis: testGenesis,
@@ -41,7 +42,10 @@ func newStagedSyncTester() *stagedSyncTester {
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
 	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
-	return tester
+	clear := func() {
+		tester.db.Close()
+	}
+	return tester, clear
 }
 
 // newPeer registers a new block download source into the downloader.
@@ -255,7 +259,8 @@ func TestStagedBase(t *testing.T) {
 	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	// Same as testChainForkLightA but much shorter
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	tester := newStagedSyncTester()
+	tester, clear := newStagedSyncTester()
+	defer clear()
 	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +280,8 @@ func TestStagedBase(t *testing.T) {
 func TestUnwind(t *testing.T) {
 	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	tester := newStagedSyncTester()
+	tester, clear := newStagedSyncTester()
+	defer clear()
 	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
 	}

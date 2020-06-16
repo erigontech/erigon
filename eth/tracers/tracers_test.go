@@ -173,7 +173,9 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), big.NewInt(1))
-	statedb, _, err := tests.MakePreState(ctx, ethdb.NewMemDatabase(), alloc, 0)
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	statedb, _, err := tests.MakePreState(ctx, db, alloc, 0)
 	if err != nil {
 		t.Errorf("Could not make prestate: %v", err)
 	}
@@ -250,6 +252,7 @@ func TestCallTracer(t *testing.T) {
 				GasPrice:    tx.GasPrice().ToBig(),
 			}
 			db := ethdb.NewMemDatabase()
+			defer db.Close()
 
 			ctx := test.Genesis.Config.WithEIPsFlags(context.Background(), big.NewInt(1))
 			statedb, _, err := tests.MakePreState(ctx, db, test.Genesis.Alloc, 0)
