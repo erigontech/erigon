@@ -47,7 +47,7 @@ func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64,
 	return incrementIntermediateHashes(s, db, from, to, datadir, expectedRootHash, quit)
 }
 
-func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func regenerateIntermediateHashes(db ethdb.Database, _ string, expectedRootHash common.Hash, quit chan struct{}) error {
 	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
