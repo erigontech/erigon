@@ -337,6 +337,18 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	if err := p.Promote(s, from, to, true /* storage */, 0x02, r); err != nil {
 		return err
 	}
+	for ks, acc := range r.accountMap {
+		if acc != nil {
+			// Fill the code hashes
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+					copy(acc.CodeHash[:], codeHash)
+				} else {
+					return err1
+				}
+			}
+		}
+	}
 	unfurl := trie.NewRetainList(0)
 	for _, ks := range r.unfurlList {
 		unfurl.AddKey([]byte(ks))
@@ -388,6 +400,18 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	}
 	if err := p.Unwind(s, u, true /* storage */, 0x02, r); err != nil {
 		return err
+	}
+	for ks, acc := range r.accountMap {
+		if acc != nil {
+			// Fill the code hashes
+			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+					copy(acc.CodeHash[:], codeHash)
+				} else {
+					return err1
+				}
+			}
+		}
 	}
 	unfurl := trie.NewRetainList(0)
 	for _, ks := range r.unfurlList {
