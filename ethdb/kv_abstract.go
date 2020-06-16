@@ -33,6 +33,7 @@ type Bucket interface {
 	Cursor() Cursor
 
 	Size() (uint64, error)
+	Clear() error
 }
 
 type Cursor interface {

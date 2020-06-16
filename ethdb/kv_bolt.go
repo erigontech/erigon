@@ -111,6 +111,7 @@ type boltTx struct {
 type boltBucket struct {
 	tx      *boltTx
 	bolt    *bolt.Bucket
+	id      int
 	nameLen uint
 }
 
@@ -145,9 +146,11 @@ func (opts boltOpts) Path(path string) boltOpts {
 	return opts
 }
 
-// WrapBoltDB provides a way for the code to gradually migrate
-// to the abstract interface
-func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
+func (opts boltOpts) Open() (KV, error) {
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -175,14 +178,6 @@ func (opts boltOpts) WrapBoltDB(boltDB *bolt.DB) (KV, error) {
 	}
 
 	return db, nil
-}
-
-func (opts boltOpts) Open() (db KV, err error) {
-	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
-	if err != nil {
-		return nil, err
-	}
-	return opts.WrapBoltDB(boltDB)
 }
 
 func (opts boltOpts) MustOpen() KV {
@@ -322,7 +317,7 @@ func (tx *boltTx) Yield() {
 }
 
 func (tx *boltTx) Bucket(name []byte) Bucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name))}
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
 	b.bolt = tx.bolt.Bucket(name)
 	return b
 }
@@ -348,6 +343,18 @@ func (c *boltCursor) NoValues() NoValuesCursor {
 func (b boltBucket) Size() (uint64, error) {
 	st := b.bolt.Stats()
 	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
+}
+
+func (b boltBucket) Clear() error {
+	err := b.tx.bolt.DeleteBucket(dbutils.Buckets[b.id])
+	if err != nil {
+		return err
+	}
+	_, err = b.tx.bolt.CreateBucket(dbutils.Buckets[b.id], false)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b boltBucket) Get(key []byte) (val []byte, err error) {

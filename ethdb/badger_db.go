@@ -376,6 +376,15 @@ func (db *BadgerDatabase) DiskSize(_ context.Context) (common.StorageSize, error
 	return common.StorageSize(lsm + vlog), nil
 }
 
+func (db *BadgerDatabase) ClearBuckets(buckets ...[]byte) error {
+	for _, bucket := range buckets {
+		if err := db.db.DropPrefix(bucket); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (db *BadgerDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
 	return nil, nil
 }

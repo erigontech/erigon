@@ -282,8 +282,17 @@ func (db *ObjectDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-func (db *ObjectDatabase) DeleteBucket(bucket []byte) error {
-	panic("not implemented") // probably need replace by TruncateBucket()?
+func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
+	for _, bucket := range buckets {
+		bucket := bucket
+		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+			return tx.Bucket(bucket).Clear()
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (db *ObjectDatabase) Close() {

@@ -147,7 +147,9 @@ var bloomBitsPrefix = []byte("BloomBits")
 
 func clearBloomBits(db ethdb.Database) {
 	fmt.Println("Clearing bloombits data...")
-	db.(*ethdb.BoltDatabase).DeleteBucket(bloomBitsPrefix)
+	if err := db.(*ethdb.BoltDatabase).ClearBuckets(bloomBitsPrefix); err != nil {
+		panic(err)
+	}
 }
 
 func BenchmarkNoBloomBits(b *testing.B) {

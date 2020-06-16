@@ -450,6 +450,10 @@ func (b *lmdbBucket) Size() (uint64, error) {
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
+func (b *lmdbBucket) Clear() error {
+	return b.tx.tx.Drop(b.dbi, false)
+}
+
 func (b *lmdbBucket) Cursor() Cursor {
 	tx := b.tx
 	c := lmdbKvCursorPool.Get().(*lmdbCursor)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -161,6 +162,7 @@ type badgerBucket struct {
 	nameLen uint
 	tx      *badgerTx
 	prefix  []byte
+	id      int
 }
 
 type badgerCursor struct {
@@ -201,7 +203,7 @@ func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 }
 
 func (tx *badgerTx) Bucket(name []byte) Bucket {
-	b := badgerBucket{tx: tx, nameLen: uint(len(name))}
+	b := badgerBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
 	b.prefix = name
 	return b
 }
@@ -298,6 +300,10 @@ func (b badgerBucket) Delete(key []byte) error {
 
 func (b badgerBucket) Size() (uint64, error) {
 	panic("not implemented")
+}
+
+func (b badgerBucket) Clear() error {
+	return b.tx.db.badger.DropPrefix(dbutils.Buckets[b.id])
 }
 
 func (b badgerBucket) Cursor() Cursor {

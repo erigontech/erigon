@@ -1197,7 +1197,8 @@ func upgradeBlocks() {
 			fmt.Printf("Upgraded keys: %d\n", i)
 		}
 	}
-	check(ethDb.DeleteBucket([]byte("r")))
+
+	check(ethDb.ClearBuckets(dbutils.BlockReceiptsPrefix))
 }
 
 func readTrie(filename string) *trie.Trie {
@@ -1459,7 +1460,7 @@ func GenerateTxLookups(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	//nolint: errcheck
-	db.DeleteBucket(dbutils.TxLookupPrefix)
+	db.ClearBuckets(dbutils.TxLookupPrefix)
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
 	startTime = time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -1625,7 +1626,7 @@ func GenerateTxLookups1(chaindata string, block int) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	//nolint: errcheck
-	db.DeleteBucket(dbutils.TxLookupPrefix)
+	db.ClearBuckets(dbutils.TxLookupPrefix)
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
 	startTime = time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -1689,7 +1690,7 @@ func GenerateTxLookups2(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	//nolint: errcheck
-	db.DeleteBucket(dbutils.TxLookupPrefix)
+	db.ClearBuckets(dbutils.TxLookupPrefix)
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
 	startTime = time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -2032,25 +2033,18 @@ func resetState(chaindata string) {
 	check(err)
 	defer db.Close()
 	//nolint:errcheck
-	db.DeleteBucket(dbutils.CurrentStateBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.AccountChangeSetBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.StorageChangeSetBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.ContractCodeBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.PlainStateBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.PlainAccountChangeSetBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.PlainStorageChangeSetBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.PlainContractCodeBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.IncarnationMapBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.CodeBucket)
+	db.ClearBuckets(
+		dbutils.CurrentStateBucket,
+		dbutils.AccountChangeSetBucket,
+		dbutils.StorageChangeSetBucket,
+		dbutils.ContractCodeBucket,
+		dbutils.PlainStateBucket,
+		dbutils.PlainAccountChangeSetBucket,
+		dbutils.PlainStorageChangeSetBucket,
+		dbutils.PlainContractCodeBucket,
+		dbutils.IncarnationMapBucket,
+		dbutils.CodeBucket,
+	)
 	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	core.UsePlainStateExecution = true
@@ -2065,23 +2059,11 @@ func resetHashedState(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer db.Close()
-	/*
-		//nolint:errcheck
-		db.DeleteBucket(dbutils.CurrentStateBucket)
-		//nolint:errcheck
-		db.DeleteBucket(dbutils.AccountChangeSetBucket)
-		//nolint:errcheck
-		db.DeleteBucket(dbutils.StorageChangeSetBucket)
-		_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
-		check(err)
-	*/
-	err = db.Bolt().Update(func(tx *bolt.Tx) error {
-		_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
-		_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
-		_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
-		return nil
-	})
+	//nolint:errcheck
+	db.ClearBuckets(
+		dbutils.IntermediateTrieHashBucket,
+		dbutils.IntermediateTrieHashBucket,
+	)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
 	check(err)
@@ -2093,9 +2075,10 @@ func resetHistoryIndex(chaindata string) {
 	check(err)
 	defer db.Close()
 	//nolint:errcheck
-	db.DeleteBucket(dbutils.AccountsHistoryBucket)
-	//nolint:errcheck
-	db.DeleteBucket(dbutils.StorageHistoryBucket)
+	db.ClearBuckets(
+		dbutils.AccountsHistoryBucket,
+		dbutils.StorageHistoryBucket,
+	)
 	err = stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
@@ -2384,19 +2367,12 @@ func testStage5(chaindata string, reset bool) error {
 	}
 	defer db.Close()
 	if reset {
-		if err = db.DeleteBucket(dbutils.CurrentStateBucket); err != nil {
-			return err
-		}
-		if err = db.DeleteBucket(dbutils.ContractCodeBucket); err != nil {
-			return err
-		}
-		if err = db.Bolt().Update(func(tx *bolt.Tx) error {
-			_ = tx.DeleteBucket(dbutils.IntermediateTrieHashBucket)
-			_, _ = tx.CreateBucket(dbutils.IntermediateTrieHashBucket, false)
-			_ = tx.DeleteBucket(dbutils.IntermediateWitnessSizeBucket)
-			_, _ = tx.CreateBucket(dbutils.IntermediateWitnessSizeBucket, false)
-			return nil
-		}); err != nil {
+		if err = db.ClearBuckets(
+			dbutils.CurrentStateBucket,
+			dbutils.ContractCodeBucket,
+			dbutils.IntermediateTrieHashBucket,
+			dbutils.IntermediateWitnessSizeBucket,
+		); err != nil {
 			return err
 		}
 	}

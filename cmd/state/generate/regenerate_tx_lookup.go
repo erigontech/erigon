@@ -1,14 +1,15 @@
 package generate
 
 import (
+	"os"
+	"os/signal"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"os"
-	"os/signal"
-	"time"
 )
 
 func RegenerateTxLookup(chaindata string) error {
@@ -16,7 +17,10 @@ func RegenerateTxLookup(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	db.DeleteBucket(dbutils.TxLookupPrefix) //nolint
+	err = db.ClearBuckets(dbutils.TxLookupPrefix)
+	if err != nil {
+		return err
+	}
 	startTime := time.Now()
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
