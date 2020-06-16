@@ -2106,6 +2106,10 @@ func regenerate(chaindata string) error {
 	var m runtime.MemStats
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	check(db.ClearBuckets(
+		dbutils.IntermediateTrieHashBucket,
+		dbutils.IntermediateWitnessSizeBucket,
+	))
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
@@ -2131,10 +2135,12 @@ func regenerate(chaindata string) error {
 	} else {
 		return err
 	}
+	/*
 	quitCh := make(chan struct{})
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
+	*/
 	log.Info("Regeneration ended")
 	return nil
 }
