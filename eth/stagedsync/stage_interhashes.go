@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -17,7 +18,7 @@ import (
 
 //nolint:interfacer
 func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
-	syncHeadNumber, err := s.ExecutionAt(stateDB)
+	syncHeadNumber, _, err := stages.GetStageProgress(stateDB, stages.HashState)
 	if err != nil {
 		return err
 	}
