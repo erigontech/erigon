@@ -55,6 +55,8 @@ var (
 // with the given number of blocks already known, and potential notification
 // channels for different events.
 func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func(int, *core.BlockGen), newtx chan<- []*types.Transaction) (*ProtocolManager, ethdb.Database, error) {
+	dbGen := ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
+	defer dbGen.Close()
 	var (
 		evmux  = new(event.TypeMux)
 		engine = ethash.NewFaker()
@@ -62,7 +64,6 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{testBank: {Balance: big.NewInt(1000000)}},
 		}
-		dbGen   = ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
 		genesis = gspec.MustCommit(dbGen)
 	)
 	var chain []*types.Block
@@ -95,12 +96,17 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 // with the given number of blocks already known, and potential notification
 // channels for different events. In case of an error, the constructor force-
 // fails the test.
-func newTestProtocolManagerMust(t *testing.T, mode downloader.SyncMode, blocks int, generator func(int, *core.BlockGen), newtx chan<- []*types.Transaction) (*ProtocolManager, ethdb.Database) {
+func newTestProtocolManagerMust(t *testing.T, mode downloader.SyncMode, blocks int, generator func(int, *core.BlockGen), newtx chan<- []*types.Transaction) (*ProtocolManager, func()) {
 	pm, db, err := newTestProtocolManager(mode, blocks, generator, newtx)
 	if err != nil {
 		t.Fatalf("Failed to create protocol manager: %v", err)
 	}
-	return pm, db
+	clear := func() {
+		pm.Stop()
+		pm.blockchain.Stop()
+		db.Close()
+	}
+	return pm, clear
 }
 
 // testTxPool is a fake, helper transaction pool for testing purposes
