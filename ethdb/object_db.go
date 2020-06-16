@@ -45,23 +45,21 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 }
 
 func NewDatabase(path string) (*ObjectDatabase, error) {
-	var kv KV
-	var err error
 	if strings.HasSuffix(path, "_lmdb") {
-		kv, err = NewLMDB().Path(path).Open()
+		kv, err := NewLMDB().Path(path).Open()
 		if err != nil {
 			return nil, err
 		}
 		return NewObjectDatabase(kv), nil
 	}
 	if strings.HasSuffix(path, "_badger") {
-		kv, err = NewBadger().Path(path).Open()
+		kv, err := NewBadger().Path(path).Open()
 		if err != nil {
 			return nil, err
 		}
 		return NewObjectDatabase(kv), nil
 	}
-	kv, err = NewBolt().Path(path).Open()
+	kv, err := NewBolt().Path(path).Open()
 	if err != nil {
 		return nil, err
 	}
