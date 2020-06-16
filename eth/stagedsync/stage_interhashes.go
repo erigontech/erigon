@@ -84,6 +84,14 @@ type Receiver struct {
 	currentIdx      int
 }
 
+func NewReceiver() *Receiver {
+	return &Receiver{
+		defaultReceiver: trie.NewDefaultReceiver(),
+		accountMap: make(map[string]*accounts.Account),
+		storageMap: make(map[string][]byte),
+	}
+}
+
 func (r *Receiver) Receive(
 	itemType trie.StreamItem,
 	accountKey []byte,
@@ -254,7 +262,7 @@ func (p *HashUpdater) Update(s *StageState, from, to uint64, storage bool, index
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
 	updater := NewHashUpdater(db, quit)
 	updater.TempDir = datadir
-	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver()}
+	r := NewReceiver()
 	if err := updater.Update(s, from, to, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
@@ -265,7 +273,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	for _, ks := range r.unfurlList {
 		unfurl.AddKey([]byte(ks))
 	}
-	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
