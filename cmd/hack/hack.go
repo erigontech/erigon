@@ -2359,10 +2359,18 @@ func testStage6(chaindata string, reset bool) error {
 	if err = stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
 		return err
 	}
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	if err = stages.SaveStageProgress(db, stages.HashState, stage4progress, nil); err != nil {
+		return err
+	}
 	var stage5progress uint64
 	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
 		return err
 	}
+	log.Info("Stage4", "progress", stage4progress)
 	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
