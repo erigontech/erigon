@@ -42,12 +42,12 @@ func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64,
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 	if s.BlockNumber == 0 {
-		return regenerateIntermediateHashes(s, db, to, datadir, expectedRootHash, quit)
+		return regenerateIntermediateHashes(db, to, datadir, expectedRootHash, quit)
 	}
 	return incrementIntermediateHashes(s, db, from, to, datadir, expectedRootHash, quit)
 }
 
-func regenerateIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func regenerateIntermediateHashes(db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
 	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
