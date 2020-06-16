@@ -70,17 +70,16 @@ func (opts lmdbOpts) Open() (KV, error) {
 			return nil, err
 		}
 	}
+	if err = os.MkdirAll(opts.path, 0744); err != nil {
+		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+	}
 
-	flags := uint(0)
+	var flags uint = lmdb.NoReadahead
 	if opts.readOnly {
 		flags |= lmdb.Readonly
 	}
 	if opts.inMem {
-		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.WriteMap
-	}
-	flags |= lmdb.NoReadahead
-	if err = os.MkdirAll(opts.path, 0744); err != nil {
-		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		flags |= lmdb.NoSync | lmdb.NoMetaSync | lmdb.NoMemInit
 	}
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
