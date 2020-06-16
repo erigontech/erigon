@@ -35,7 +35,7 @@ func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
 		common.FromHex("b1e9b5c16355eede662031dd621d08faf4ea"),
 		common.FromHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"),
 	}
-	numOfElements := 10
+	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
 		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 		if isHashed {
