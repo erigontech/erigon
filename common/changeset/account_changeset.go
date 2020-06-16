@@ -32,8 +32,8 @@ func (b AccountChangeSetBytes) Walk(f func(k, v []byte) error) error {
 	return walkAccountChangeSet(b, common.HashLength, f)
 }
 
-func (b AccountChangeSetBytes) FindLast(k []byte) ([]byte, error) {
-	return findLastKeyInAccountChangeSet(b, k, common.HashLength)
+func (b AccountChangeSetBytes) Find(k []byte) ([]byte, error) {
+	return findInAccountChangeSetBytes(b, k, common.HashLength)
 }
 
 /* Plain changesets (key is a common.Address) */
@@ -64,6 +64,6 @@ func (b AccountChangeSetPlainBytes) Walk(f func(k, v []byte) error) error {
 	return walkAccountChangeSet(b, common.AddressLength, f)
 }
 
-func (b AccountChangeSetPlainBytes) FindLast(k []byte) ([]byte, error) {
-	return findLastKeyInAccountChangeSet(b, k, common.AddressLength)
+func (b AccountChangeSetPlainBytes) Find(k []byte) ([]byte, error) {
+	return findInAccountChangeSetBytes(b, k, common.AddressLength)
 }
