@@ -73,7 +73,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 
 	lastProcessedBlockNumber := s.BlockNumber
 	nextBlockNumber := new(uint64)
-	*nextBlockNumber = lastProcessedBlockNumber + 1
+	*nextBlockNumber = lastProcessedBlockNumber
 
 	mutation := &mutationSafe{mutation: stateDB.NewBatch()}
 	defer func() {
@@ -82,7 +82,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		}
 	}()
 
-	firstBlockToProceed := lastProcessedBlockNumber
+	firstBlockToProceed := lastProcessedBlockNumber+1
 
 	onlySecondStage := false
 	var filePath string
@@ -110,7 +110,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 			go func() {
 				defer common.SafeClose(doneCh)
 				for {
-					nextNumber := atomic.LoadUint64(nextBlockNumber)
+					nextNumber := atomic.AddUint64(nextBlockNumber, 1)
 
 					if err := common.Stopped(quitCh); err != nil {
 						errCh <- err
@@ -132,8 +132,6 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 					}
 
 					jobs <- job
-
-					atomic.AddUint64(nextBlockNumber, 1)
 				}
 			}()
 		}
