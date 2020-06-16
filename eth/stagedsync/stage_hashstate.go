@@ -21,23 +21,21 @@ import (
 var cbor codec.CborHandle
 
 func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
-	hashProgress := s.BlockNumber
-
 	syncHeadNumber, err := s.ExecutionAt(stateDB)
 	if err != nil {
 		return err
 	}
 
-	if hashProgress == syncHeadNumber {
+	if s.BlockNumber == syncHeadNumber {
 		// we already did hash check for this block
-		// we don't do the obvious `if hashProgress > syncHeadNumber` to support reorgs more naturally
+		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally
 		s.Done()
 		return nil
 	}
 
 	if core.UsePlainStateExecution {
-		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
-		err := promoteHashedState(s, stateDB, hashProgress, syncHeadNumber, datadir, quit)
+		log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
+		err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit)
 		if err != nil {
 			return err
 		}
