@@ -83,6 +83,22 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 
 func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
+
+	// ignore headers that we already have
+	alreadyCanonicalIndex := 0
+	for _, h := range headers {
+		number := h.Number.Uint64()
+		if h.Hash() == rawdb.ReadCanonicalHash(db, number) {
+			alreadyCanonicalIndex++
+		} else {
+			break
+		}
+	}
+	headers = headers[alreadyCanonicalIndex:]
+	if len(headers) < 1 {
+		return false, 0, nil
+	}
+
 	if rawdb.ReadHeaderNumber(db, headers[0].ParentHash) == nil {
 		return false, 0, errors.New("unknown parent")
 	}
@@ -129,6 +145,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
 	// Please refer to http://www.cs.cornell.edu/~ie53/publications/btcProcFC.pdf
 	newCanonical := externTd.Cmp(localTd) > 0
+
 	if !newCanonical && externTd.Cmp(localTd) == 0 {
 		if lastHeader.Number.Uint64() < *headNumber {
 			newCanonical = true
@@ -147,18 +164,23 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	// Do a full insert if pre-checks passed
 	td := new(big.Int).Set(parentTd)
 	for _, header := range headers {
+		// we always add header difficulty to TD, because next blocks might
+		// be inserted and we need the right value for them
+		td = td.Add(td, header.Difficulty)
 		if rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
 			ignored++
 			continue
 		}
 		number := header.Number.Uint64()
-		if newCanonical && !deepFork && forkBlockNumber == 0 && header.Hash() != rawdb.ReadCanonicalHash(batch, number) {
+		hashesMatch := header.Hash() == rawdb.ReadCanonicalHash(batch, number)
+		if newCanonical && !deepFork && forkBlockNumber == 0 && !hashesMatch {
 			forkBlockNumber = number - 1
+		} else if newCanonical && hashesMatch {
+			forkBlockNumber = number
 		}
 		if newCanonical {
 			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
 		}
-		td = td.Add(td, header.Difficulty)
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		rawdb.WriteHeader(context.Background(), batch, header)
 	}
