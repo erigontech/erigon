@@ -218,6 +218,10 @@ func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
 	panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
 }
 
+func (db *LmdbKV) IdealBatchSize() int {
+	return 50 * 1024 * 1024 // 50 Mb
+}
+
 func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
 	err = db.View(ctx, func(tx Tx) error {
 		v, err2 := tx.(*lmdbTx).tx.Get(db.dbi(bucket), key)
@@ -448,6 +452,10 @@ func (b *lmdbBucket) Size() (uint64, error) {
 		return 0, err
 	}
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
+}
+
+func (b *lmdbBucket) Clear() error {
+	return b.tx.tx.Drop(b.dbi, false)
 }
 
 func (b *lmdbBucket) Cursor() Cursor {

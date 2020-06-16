@@ -12,6 +12,7 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
+	IdealBatchSize() int
 }
 
 type NativeGet interface {
@@ -33,6 +34,7 @@ type Bucket interface {
 	Cursor() Cursor
 
 	Size() (uint64, error)
+	Clear() error
 }
 
 type Cursor interface {

@@ -2,32 +2,34 @@ package stateless
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
-	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 func countDepths() {
 	startTime := time.Now()
-	db, err := bolt.Open("/Volumes/tb41/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	db := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer db.Close()
 	var occups [64]int // Occupancy of the current level
 	var counts [64][17]int
 	var prev [32]byte
 	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) != 32 {
 				continue
 			}
@@ -81,8 +83,9 @@ func countDepths() {
 		}
 		fmt.Printf("Processed %d account records\n", count)
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	nodes := 0
 	for i := 0; i < 64; i++ {
 		exists := false
@@ -110,8 +113,7 @@ func countDepths() {
 
 func countStorageDepths() {
 	startTime := time.Now()
-	db, err := bolt.Open("/Volumes/tb41/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	db := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer db.Close()
 	var occups [64]int // Occupancy of the current level
 	var counts [64][17]int
@@ -120,13 +122,16 @@ func countStorageDepths() {
 	var accountExists bool
 	var filtered int
 	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		st := tx.Bucket(dbutils.CurrentStateBucket)
 		if st == nil {
 			return nil
 		}
 		c := st.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) == 32 {
 				continue
 			}
@@ -210,8 +215,9 @@ func countStorageDepths() {
 		}
 		fmt.Printf("Processed %d storage records, filtered accounts: %d\n", count, filtered)
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	nodes := 0
 	for i := 0; i < 64; i++ {
 		exists := false

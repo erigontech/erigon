@@ -3,11 +3,14 @@ package ethdb
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -41,6 +44,12 @@ func (opts badgerOpts) Open() (KV, error) {
 
 	if opts.Badger.InMemory {
 		opts.Badger = opts.Badger.WithEventLogging(false).WithNumCompactors(1)
+	}
+
+	if !opts.Badger.InMemory {
+		if err := os.MkdirAll(opts.Badger.Dir, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.Badger.Dir, err)
+		}
 	}
 
 	badgerDB, err := badger.Open(opts.Badger)
@@ -140,6 +149,10 @@ func (db *badgerKV) BucketsStat(_ context.Context) (map[string]common.StorageBuc
 	return map[string]common.StorageBucketWriteStats{}, nil
 }
 
+func (db *badgerKV) IdealBatchSize() int {
+	return int(db.badger.MaxBatchSize() / 2)
+}
+
 func (db *badgerKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	t := badgerTxPool.Get().(*badgerTx)
 	defer badgerTxPool.Put(t)
@@ -161,6 +174,7 @@ type badgerBucket struct {
 	nameLen uint
 	tx      *badgerTx
 	prefix  []byte
+	id      int
 }
 
 type badgerCursor struct {
@@ -201,7 +215,7 @@ func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 }
 
 func (tx *badgerTx) Bucket(name []byte) Bucket {
-	b := badgerBucket{tx: tx, nameLen: uint(len(name))}
+	b := badgerBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
 	b.prefix = name
 	return b
 }
@@ -298,6 +312,10 @@ func (b badgerBucket) Delete(key []byte) error {
 
 func (b badgerBucket) Size() (uint64, error) {
 	panic("not implemented")
+}
+
+func (b badgerBucket) Clear() error {
+	return b.tx.db.badger.DropPrefix(dbutils.Buckets[b.id])
 }
 
 func (b badgerBucket) Cursor() Cursor {

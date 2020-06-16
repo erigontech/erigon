@@ -52,8 +52,9 @@ func BenchmarkFilters(b *testing.B) {
 	}
 	defer os.RemoveAll(dir)
 
+	db := ethdb.MustOpen(dir)
+	defer db.Close()
 	var (
-		db, _   = ethdb.NewBoltDatabase(dir)
 		backend = &testBackend{db: db}
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
@@ -61,7 +62,6 @@ func BenchmarkFilters(b *testing.B) {
 		addr3   = common.BytesToAddress([]byte("ethereum"))
 		addr4   = common.BytesToAddress([]byte("random addresses please"))
 	)
-	defer db.Close()
 
 	genesis := core.GenesisBlockForTesting(db, addr1, big.NewInt(1000000))
 	chain, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {

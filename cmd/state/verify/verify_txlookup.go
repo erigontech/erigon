@@ -3,22 +3,20 @@ package verify
 import (
 	"bytes"
 	"fmt"
+	"math/big"
+	"os"
+	"os/signal"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"math/big"
-	"os"
-	"os/signal"
-	"time"
 )
 
 func ValidateTxLookups(chaindata string) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(chaindata)
 
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})

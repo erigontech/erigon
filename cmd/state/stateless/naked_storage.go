@@ -111,8 +111,7 @@ func storageReadWrites(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
-	check(err)
+	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	srwFile, err := os.OpenFile("/Volumes/tb41/turbo-geth/storage_read_writes.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)

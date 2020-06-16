@@ -38,17 +38,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		interruptCh <- true
 	}()
 
-	chainDb, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	chainDb := ethdb.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
 	if chaindata != historyfile {
-		historyDb, err = ethdb.NewBoltDatabase(historyfile)
-		if err != nil {
-			return err
-		}
+		historyDb = ethdb.MustOpen(historyfile)
 	}
 
 	chainConfig := genesis.Config

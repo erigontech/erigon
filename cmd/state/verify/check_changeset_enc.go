@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"reflect"
+	"runtime"
+	"sync/atomic"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"golang.org/x/sync/errgroup"
-	"reflect"
-	"runtime"
-	"sync/atomic"
-	"time"
 )
 
 type Walker interface {
@@ -21,10 +22,8 @@ type Walker interface {
 }
 
 func CheckEnc(chaindata string) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
 	var (
 		currentSize uint64
 		newSize     uint64
@@ -84,7 +83,7 @@ func CheckEnc(chaindata string) error {
 					}
 					j := 0
 
-					err = walker.Walk(func(kk, vv []byte) error {
+					err := walker.Walk(func(kk, vv []byte) error {
 						if !bytes.Equal(kk, cs2.Changes[j].Key) {
 							return fmt.Errorf("incorrect order. block: %d, element: %v", blockNum, j)
 						}
@@ -139,7 +138,7 @@ func CheckEnc(chaindata string) error {
 			return true, nil
 		})
 	})
-	err = g.Wait()
+	err := g.Wait()
 	if err != nil {
 		return err
 	}
