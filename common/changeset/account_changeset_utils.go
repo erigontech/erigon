@@ -95,7 +95,7 @@ func findInAccountChangeSetBytes(b []byte, k []byte, keyLen int) ([]byte, error)
 	}
 
 	idx1 := int(binary.BigEndian.Uint32(b[4+n*keyLen+4*id:]))
-	return common.CopyBytes(b[valOffset+idx0 : valOffset+idx1]), nil
+	return b[valOffset+idx0 : valOffset+idx1], nil
 }
 
 func decodeAccountsWithKeyLen(b []byte, keyLen uint32, h *ChangeSet) error {
