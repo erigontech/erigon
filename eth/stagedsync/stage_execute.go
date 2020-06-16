@@ -79,7 +79,7 @@ func (l *progressLogger) Stop() {
 
 const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
 const ChangeBatchSize = 1024 * 2014     // 1 Mb
-const prof = false
+const prof = true
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache) error {
 	lastProcessedBlockNumber := s.BlockNumber

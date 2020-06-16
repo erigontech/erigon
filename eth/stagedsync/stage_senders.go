@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"os"
 	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -22,31 +24,60 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var numOfGoroutines int
-var cryptoContexts []*secp256k1.Context
-
-func init() {
-	// To avoid bothering with creating/releasing the resources
-	// but still not leak the contexts
-	numOfGoroutines = 3 // We never get more than 3x improvement even if we use 8 goroutines
-	if numOfGoroutines > runtime.NumCPU() {
-		numOfGoroutines = runtime.NumCPU()
-	}
-	cryptoContexts = make([]*secp256k1.Context, numOfGoroutines)
-	for i := 0; i < numOfGoroutines; i++ {
-		cryptoContexts[i] = secp256k1.NewContext()
-	}
+type stage3Config struct {
+	batchSize       int
+	blockSize       int
+	bufferSize      int
+	startTrace      bool
+	prof            bool
+	toProcess       int
+	numOfGoroutines int
+	readChLen       int
+	now             time.Time
 }
 
-func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
+func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
+	if cfg.startTrace {
+		filePath := fmt.Sprintf("/mnt/sdb/trace_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
+		f1, err := os.Create(filePath)
+		if err != nil {
+			return err
+		}
+		err = trace.Start(f1)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			trace.Stop()
+			f1.Close()
+		}()
+	}
+	if cfg.prof {
+		f2, err := os.Create(fmt.Sprintf("/mnt/sdb/cpu_%d_%d_%d.prof", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute()))
+		if err != nil {
+			log.Error("could not create CPU profile", "error", err)
+			return err
+		}
+		defer f2.Close()
+		if err = pprof.StartCPUProfile(f2); err != nil {
+			log.Error("could not start CPU profile", "error", err)
+			return err
+		}
+	}
+
 	if err := common.Stopped(quitCh); err != nil {
 		return err
 	}
 
+	//fixme remove. only for debug
+	s.BlockNumber = 4_400_000
+
 	lastProcessedBlockNumber := s.BlockNumber
-	nextBlockNumber := lastProcessedBlockNumber + 1
+	nextBlockNumber := new(uint64)
+	*nextBlockNumber = lastProcessedBlockNumber + 1
 
 	mutation := &mutationSafe{mutation: stateDB.NewBatch()}
 	defer func() {
@@ -55,95 +86,96 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 		}
 	}()
 
-	blockNumber := big.NewInt(0)
 	firstBlockToProceed := lastProcessedBlockNumber
 
-	const batchSize = 10000
-
-	onlySecondStage := true
+	onlySecondStage := false
 	var filePath string
 	if !onlySecondStage {
 		fmt.Println("START 3.1")
 
-		jobs := make(chan *senderRecoveryJob, 50*batchSize)
-		out := make(chan TxsFroms, batchSize)
+		jobs := make(chan *senderRecoveryJob, cfg.numOfGoroutines*cfg.batchSize)
+		out := make(chan TxsFroms, cfg.batchSize)
 
 		wg := &sync.WaitGroup{}
-		numOfGoroutines := numOfGoroutines
-
-		numOfGoroutines = 32
-		ctxLength := len(cryptoContexts)
-		if ctxLength < numOfGoroutines {
-			for i := 0; i < numOfGoroutines-ctxLength; i++ {
-				cryptoContexts = append(cryptoContexts, secp256k1.NewContext())
-			}
-		}
-
-		fmt.Println("=================", ctxLength, numOfGoroutines)
-
-		wg.Add(numOfGoroutines)
-		for i := 0; i < numOfGoroutines; i++ {
-			// each goroutine gets it's own crypto context to make sure they are really parallel
-			ctx := cryptoContexts[i]
-			go recoverSenders(ctx, jobs, out, quitCh, wg)
-		}
-		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", numOfGoroutines)
-
-		firstBlock := new(uint64)
-
-		errCh := make(chan error)
-		doneCh := make(chan struct{}, 1)
-		go func() {
-			defer func() {
-				close(jobs)
-				wg.Wait()
-				close(doneCh)
-				close(errCh)
+		wg.Add(cfg.numOfGoroutines)
+		for i := 0; i < cfg.numOfGoroutines; i++ {
+			go func() {
+				runtime.LockOSThread()
+				defer runtime.UnlockOSThread()
+				// each goroutine gets it's own crypto context to make sure they are really parallel
+				recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh, wg)
 			}()
+		}
+		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
 
-			for {
-				if err := common.Stopped(quitCh); err != nil {
-					errCh <- err
-					return
+		errCh := make(chan error, cfg.readChLen)
+		doneCh := make(chan struct{})
+		for i := 0; i < cfg.readChLen; i++ {
+			go func() {
+				defer common.SafeClose(doneCh)
+				for {
+					nextNumber := atomic.LoadUint64(nextBlockNumber)
+
+					if err := common.Stopped(quitCh); err != nil {
+						errCh <- err
+						return
+					}
+
+					job := getBlockTxs(mutation, nextNumber)
+					if job == nil {
+						break
+					}
+
+					if cfg.prof || cfg.startTrace {
+						if nextNumber == uint64(cfg.toProcess) {
+							// Flush the profiler
+							pprof.StopCPUProfile()
+							common.SafeClose(quitCh)
+							break
+						}
+					}
+
+					jobs <- job
+
+					atomic.AddUint64(nextBlockNumber, 1)
 				}
-
-				job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
-				if job == nil {
-					break
-				}
-
-				if atomic.LoadUint64(firstBlock) == 0 {
-					atomic.StoreUint64(firstBlock, job.nextBlockNumber)
-				}
-
-				jobs <- job
-
-				atomic.AddUint64(&nextBlockNumber, 1)
-			}
-		}()
+			}()
+		}
 
 		fmt.Println("DONE?")
-		now := time.Now()
 
-		filePath := fmt.Sprintf("/mnt/sdb/turbo-geth/froms_%d_%d_%d.out", now.Day(), now.Hour(), now.Minute())
-		f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND, 0664)
+		filePath := fmt.Sprintf("/home/eugene/eth/froms_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
+		f, err := os.Create(filePath)
 		if err != nil {
 			return err
 		}
 
-		const blockSize = 4096
-		const batch = (blockSize * 10 / 20) * 10000 // 20*4096
-		buf := NewAddressBuffer(f, batch, true)
+		buf := NewAddressBuffer(f, cfg.bufferSize, true)
 
 		fmt.Println("Storing into a file")
-		firstBlock = new(uint64)
-		err = writeOnDiskBatch(buf, firstBlock, out, quitCh, jobs, doneCh)
+		err = writeOnDiskBatch(cfg, buf, firstBlockToProceed, out, quitCh, jobs, doneCh)
 		fmt.Println("Storing into a file - DONE")
 
 		if err != nil {
 			buf.Close()
+
+			// fixme simplify
+			close(jobs)
+			wg.Wait()
+			close(errCh)
+			close(out)
+
 			return err
 		}
+
+		// fixme simplify
+		<-doneCh
+		fmt.Println("reading bodies is finished")
+
+		close(jobs)
+		wg.Wait()
+		close(errCh)
+		close(out)
 
 		err = <-errCh
 		buf.Close()
@@ -157,7 +189,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	if onlySecondStage {
 		filePath = "/mnt/sdb/turbo-geth/froms_13_0_17.out"
 	}
-	err := recoverSendersFromDisk(s, stateDB, config, mutation, quitCh, firstBlockToProceed, filePath)
+	err := recoverSendersFromDisk(cfg, s, stateDB, config, mutation, quitCh, firstBlockToProceed, filePath)
 
 	fmt.Println("DONE!")
 	if err != nil && err != io.EOF {
@@ -170,22 +202,25 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 	return nil
 }
 
-func recoverSendersFromDisk(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, mutation *mutationSafe, quitCh chan struct{}, lastProcessedBlockNumber uint64, filePath string) error {
+func recoverSendersFromDisk(cfg stage3Config, s *StageState, stateDB ethdb.Database, config *params.ChainConfig, mutation *mutationSafe, quitCh chan struct{}, lastProcessedBlockNumber uint64, filePath string) error {
 	f, err := os.OpenFile(filePath, os.O_RDONLY, 0664)
 	if err != nil {
 		return err
 	}
 
-	const blockSize = 4096
-	const batch = (blockSize * 10 / 20) * 10000 //20*4096
-	buf := NewAddressBuffer(f, batch, false)
+	buf := NewAddressBuffer(f, cfg.bufferSize, false)
 	defer buf.Close()
 
 	return writeBatchFromDisk(buf, s, stateDB, config, mutation, quitCh, lastProcessedBlockNumber)
 }
 
-// fixme refactor to get rid of blockNumber
-func getBlockBody(mutation *mutationSafe, config *params.ChainConfig, blockNumber *big.Int, nextBlockNumber uint64) *senderRecoveryJob {
+type blockData struct {
+	body   *types.Body
+	hash   common.Hash
+	number uint64
+}
+
+func getBlockBody(mutation *mutationSafe, nextBlockNumber uint64) *blockData {
 	hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
 	if hash.IsEmpty() {
 		return nil
@@ -196,10 +231,17 @@ func getBlockBody(mutation *mutationSafe, config *params.ChainConfig, blockNumbe
 		return nil
 	}
 
-	blockNumber.SetUint64(nextBlockNumber)
-	s := types.MakeSigner(config, blockNumber)
+	return &blockData{body, hash, nextBlockNumber}
+}
 
-	return &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
+func getBlockTxs(mutation *mutationSafe, nextBlockNumber uint64) *senderRecoveryJob {
+	hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
+	if hash.IsEmpty() {
+		return nil
+	}
+	v := rawdb.ReadBodyRLP(mutation, hash, nextBlockNumber)
+
+	return &senderRecoveryJob{v, hash, nextBlockNumber, nil}
 }
 
 type mutationSafe struct {
@@ -255,15 +297,11 @@ type TxsFroms struct {
 	err         error
 }
 
-func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob, doneCh chan struct{}) error {
+func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob, doneCh chan struct{}) error {
 	n := 0
 
-	defer func() {
-		buf.Write()
-	}()
-
-	toSort := uint64(1000)
-	buffer := make([]TxsFroms, 0, 50_000)
+	toSort := uint64(cfg.numOfGoroutines * cfg.batchSize)
+	buffer := make([]TxsFroms, 0, 2*toSort)
 	var writeFroms []TxsFroms
 
 	total := 0
@@ -273,35 +311,31 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 	m := &runtime.MemStats{}
 
 	defer func() {
+		fmt.Println("+++Block END+++")
 		// store last blocks
-		sort.SliceStable(buffer, func(i, j int) bool {
+		sort.Slice(buffer, func(i, j int) bool {
 			return buffer[i].blockNumber < buffer[j].blockNumber
 		})
 
 		for _, job := range buffer {
 			totalFroms += len(job.froms)
 			for i := range job.froms {
-				buf.buf = append(buf.buf, job.froms[i][:]...)
+				buf.Add(job.froms[i][:])
 			}
-			written, err = buf.Write()
-			if err != nil {
-				panic(err)
-			}
-			total += written
 		}
+
+		written, err = buf.Write()
+		if err != nil {
+			panic(err)
+		}
+		total += written
 	}()
 
 	fmt.Println("xxx writeOnDiskBatch")
 
-	isFirst := true
-	currentBlock := uint64(0)
-	for j := range out {
-		if isFirst {
-			// fixme make a normal fromBlock param
-			currentBlock = atomic.LoadUint64(firstBlock)
-			isFirst = false
-		}
+	currentBlock := firstBlock
 
+	for j := range out {
 		if j.err != nil {
 			return err
 		}
@@ -312,7 +346,7 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 			return nil
 		}
 
-		if j.blockNumber%10000 == 0 {
+		if j.blockNumber%uint64(cfg.batchSize) == 0 {
 			runtime.ReadMemStats(m)
 			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", buf.Len(), "toWriteCap", buf.Cap(),
 				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
@@ -323,46 +357,48 @@ func writeOnDiskBatch(buf *AddressBuffer, firstBlock *uint64, out chan TxsFroms,
 		}
 
 		buffer = append(buffer, j)
-		sort.SliceStable(buffer, func(i, j int) bool {
-			return buffer[i].blockNumber < buffer[j].blockNumber
-		})
 
-		// check if we have 10 sequential blocks
-		hasRow := true
-		if uint64(len(buffer)) < toSort {
-			hasRow = false
-		} else {
-			for i := range buffer {
-				if uint64(i) > toSort {
-					break
-				}
-				if buffer[i].blockNumber != currentBlock+uint64(i) {
-					hasRow = false
-					break
+		if j.blockNumber%(toSort/2) == 0 {
+			sort.Slice(buffer, func(i, j int) bool {
+				return buffer[i].blockNumber < buffer[j].blockNumber
+			})
+
+			// check if we have toSort sequential blocks
+			hasRow := true
+			if uint64(len(buffer)) < toSort {
+				hasRow = false
+			} else {
+				for i := range buffer {
+					if uint64(i) > toSort {
+						break
+					}
+					if buffer[i].blockNumber != currentBlock+uint64(i) {
+						hasRow = false
+						break
+					}
 				}
 			}
-		}
-		if !hasRow {
-			continue
-		}
+			if !hasRow {
+				continue
+			}
 
-		currentBlock += toSort
-		writeFroms = buffer[:toSort]
-		buffer = buffer[toSort:]
+			currentBlock += toSort
+			writeFroms = buffer[:toSort]
+			buffer = buffer[toSort:]
 
-		for _, jobToWrite := range writeFroms {
-			totalFroms += len(jobToWrite.froms)
-			for i := range jobToWrite.froms {
-				n++
-				buf.Add(jobToWrite.froms[i][:])
-				if 20*n >= buf.size {
-					written, err = buf.Write()
-					if err != nil {
-						return err
+			for _, jobToWrite := range writeFroms {
+				totalFroms += len(jobToWrite.froms)
+				for i := range jobToWrite.froms {
+					n++
+					buf.Add(jobToWrite.froms[i][:])
+					if 20*n >= buf.size {
+						written, err = buf.Write()
+						if err != nil {
+							return err
+						}
+						total += written
+						n = 0
 					}
-					total += written
-
-					n = 0
 				}
 			}
 		}
@@ -375,25 +411,40 @@ type AddressBuffer struct {
 	buf        []byte
 	size       int
 	currentIdx int
+	isOpen     bool
 	io.ReadWriteCloser
+	sync.RWMutex
 }
 
 func NewAddressBuffer(f io.ReadWriteCloser, size int, fullLength bool) *AddressBuffer {
 	length := size * len(common.Address{})
 	var buf []byte
 	if fullLength {
+		fmt.Println("STARTED BUF=1", size, fullLength, len(buf), cap(buf))
 		buf = make([]byte, 0, length)
-		buf = buf[0:0:len(buf)]
+		fmt.Println("STARTED BUF=2", size, fullLength, len(buf), cap(buf))
+		buf = buf[0:0:length]
+		fmt.Println("STARTED BUF=3", size, fullLength, len(buf), cap(buf))
 	} else {
+		fmt.Println("STARTED BUF=1", size, fullLength, len(buf), cap(buf))
 		buf = make([]byte, length)
+		fmt.Println("STARTED BUF=2", size, fullLength, len(buf), cap(buf))
 	}
 
+	fmt.Println("STARTED BUF=XXX", size, fullLength, len(buf), cap(buf))
+
 	return &AddressBuffer{
-		buf, size, -1, f,
+		buf, size, -1, true, f, sync.RWMutex{},
 	}
 }
 
 func (a *AddressBuffer) Write() (int, error) {
+	a.Lock()
+	defer a.Unlock()
+
+	if !a.isOpen {
+		return 0, nil
+	}
 	if len(a.buf) > 0 {
 		n, err := a.ReadWriteCloser.Write(a.buf)
 		if err != nil {
@@ -407,6 +458,12 @@ func (a *AddressBuffer) Write() (int, error) {
 }
 
 func (a *AddressBuffer) Read() (int, error) {
+	a.RLock()
+	defer a.RUnlock()
+
+	if !a.isOpen {
+		return 0, nil
+	}
 	return a.ReadWriteCloser.Read(a.buf)
 }
 
@@ -426,8 +483,28 @@ func (a *AddressBuffer) Cap() int {
 	return cap(a.buf)
 }
 
+func (a *AddressBuffer) Close() error {
+	fmt.Println("AddressBuffer Close")
+	a.Lock()
+	defer a.Unlock()
+
+	if !a.isOpen {
+		return nil
+	}
+	err := a.ReadWriteCloser.Close()
+	if err != nil {
+		return err
+	}
+	a.isOpen = false
+	return nil
+}
+
 func (a *AddressBuffer) Next() (common.Address, error) {
-	if (a.currentIdx+2)*20 > len(a.buf){
+	if !a.isOpen {
+		return common.Address{}, nil
+	}
+
+	if (a.currentIdx+2)*20 > len(a.buf) {
 		a.currentIdx = -1
 	}
 
@@ -467,24 +544,24 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 
 	for {
 		// insert for
-		job := getBlockBody(mutation, config, blockNumber, nextBlockNumber)
+		job := getBlockBody(mutation, nextBlockNumber)
 		if job == nil {
 			fmt.Println("111 1", blockNumber.String(), nextBlockNumber)
 			break
 		}
 		nextBlockNumber++
 
-		for i := range job.blockBody.Transactions {
+		for i := range job.body.Transactions {
 			addr, err = buf.Next()
 			if err != nil {
 				fmt.Println("111 2", err)
 				return err
 			}
 
-			job.blockBody.Transactions[i].SetFrom(addr)
+			job.body.Transactions[i].SetFrom(addr)
 		}
 
-		rawdb.WriteBody(context.Background(), mutation, job.hash, job.nextBlockNumber, job.blockBody)
+		rawdb.WriteBody(context.Background(), mutation, job.hash, job.number, job.body)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if err := s.Update(mutation, nextBlockNumber); err != nil {
@@ -508,14 +585,13 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 }
 
 type senderRecoveryJob struct {
-	signer          types.Signer
-	blockBody       *types.Body
+	blockTxs        rlp.RawValue
 	hash            common.Hash
 	nextBlockNumber uint64
 	err             error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}, wg *sync.WaitGroup) {
+func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	fmt.Println("recoverSenders started")
@@ -525,8 +601,14 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 			return
 		}
 
+		txs := rawdb.DecodeBlockTxs(job.blockTxs)
+		if txs == nil {
+			return
+		}
+		s := types.MakeSigner(config, big.NewInt(int64(job.nextBlockNumber)))
+
 		res := TxsFroms{blockNumber: job.nextBlockNumber}
-		froms, err := recoverFrom(cryptoContext, job.blockBody, job.signer)
+		froms, err := recoverFrom(cryptoContext, txs, s)
 		if err != nil {
 			res.err = err
 		} else {
@@ -546,9 +628,9 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 	}
 }
 
-func recoverFrom(cryptoContext *secp256k1.Context, blockBody *types.Body, signer types.Signer) ([]common.Address, error) {
-	froms := make([]common.Address, len(blockBody.Transactions))
-	for i, tx := range blockBody.Transactions {
+func recoverFrom(cryptoContext *secp256k1.Context, blockTxs []*types.Transaction, signer types.Signer) ([]common.Address, error) {
+	froms := make([]common.Address, len(blockTxs))
+	for i, tx := range blockTxs {
 		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
 			return nil, errors.New("invalid chainId")
 		}

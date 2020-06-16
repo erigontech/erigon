@@ -2,6 +2,8 @@ package stagedsync
 
 import (
 	"fmt"
+	"runtime"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -42,7 +44,21 @@ func DoStagedSyncWithFetchers(
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
 			ExecFunc: func(s *StageState) error {
-				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), datadir, quitCh)
+				const batchSize = 10000
+				const blockSize = 4096
+				n := runtime.NumCPU()
+
+				cfg := stage3Config{
+					batchSize:       batchSize,
+					blockSize:       blockSize,
+					bufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
+					startTrace:      false,
+					prof:            false,
+					numOfGoroutines: n,
+					readChLen:       2,
+					now:             time.Now(),
+				}
+				return spawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), datadir, quitCh)
 			},
 		},
 		{
