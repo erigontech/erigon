@@ -63,13 +63,11 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
-// Example text code:
-//  writeDb, errOpen = ethdb.NewBolt().InMem().Open(ctx)
-//	require.NoError(t, errOpen)
+// Example test code:
+//  writeDb = ethdb.NewMemDatabase().KV()
 //	serverIn, clientOut := io.Pipe()
 //	clientIn, serverOut := io.Pipe()
-//	readDBs, errOpen = ethdb.NewRemote().InMem(clientIn, clientOut).Open(ctx)
-//	require.NoError(t, errOpen)
+//	readDBs = ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen()
 //  go func() {
 // 	    if err := remotedbserver.Server(ctx, writeDb, serverIn, serverOut, nil); err != nil {
 //		    require.NoError(t, err)

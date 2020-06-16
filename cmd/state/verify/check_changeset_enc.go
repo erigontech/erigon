@@ -22,7 +22,10 @@ type Walker interface {
 }
 
 func CheckEnc(chaindata string) error {
-	db := ethdb.NewObjectDatabase(ethdb.NewBolt().Path(chaindata).MustOpen())
+	db, err := ethdb.NewDatabase(chaindata)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 	var (
 		currentSize uint64
@@ -83,7 +86,7 @@ func CheckEnc(chaindata string) error {
 					}
 					j := 0
 
-					err := walker.Walk(func(kk, vv []byte) error {
+					err = walker.Walk(func(kk, vv []byte) error {
 						if !bytes.Equal(kk, cs2.Changes[j].Key) {
 							return fmt.Errorf("incorrect order. block: %d, element: %v", blockNum, j)
 						}
@@ -138,7 +141,7 @@ func CheckEnc(chaindata string) error {
 			return true, nil
 		})
 	})
-	err := g.Wait()
+	err = g.Wait()
 	if err != nil {
 		return err
 	}

@@ -52,7 +52,10 @@ func BenchmarkFilters(b *testing.B) {
 	}
 	defer os.RemoveAll(dir)
 
-	db := ethdb.NewObjectDatabase(ethdb.NewBolt().Path(dir).MustOpen())
+	db, err := ethdb.NewDatabase(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
