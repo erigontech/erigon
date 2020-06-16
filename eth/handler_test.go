@@ -52,7 +52,7 @@ func TestGetBlockHeaders63(t *testing.T) { testGetBlockHeaders(t, 63) }
 func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
 
 func testGetBlockHeaders(t *testing.T, protocol int) {
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxHashFetch+15, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxHashFetch+15, nil, nil)
 	defer clear()
 
 	// Create a "random" unknown hash for testing
@@ -222,7 +222,7 @@ func TestGetBlockBodies63(t *testing.T) { testGetBlockBodies(t, 63) }
 func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
 
 func testGetBlockBodies(t *testing.T, protocol int) {
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxBlockFetch+15, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxBlockFetch+15, nil, nil)
 	defer clear()
 
 	// Create a batch of tests for various scenarios
@@ -387,7 +387,7 @@ func testGetReceipt(t *testing.T, protocol int) {
 		}
 	}
 	// Assemble the test environment
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
 	defer clear()
 	peer, _ := newTestPeer("peer", protocol, pm, true)
 	defer peer.close()
@@ -662,7 +662,7 @@ func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehos
 		}
 	}
 
-	pm, _, pmClear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	pm, pmClear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 
 	clear := func() {
@@ -749,7 +749,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 		block.AddTx(tx)
 	}
 
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
 	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
@@ -887,7 +887,7 @@ func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address, func
 		}
 	}
 
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
 	return pm, addr, clear
 }
 
@@ -984,7 +984,7 @@ func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address, func
 		}
 	}
 
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
 	return pm, addr, clear
 }
 
@@ -1300,7 +1300,7 @@ func TestFirehoseBytecode(t *testing.T) {
 		}
 	}
 
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()

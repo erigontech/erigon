@@ -18,6 +18,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strconv"
 	"testing"
@@ -82,6 +83,8 @@ var eip2200Tests = []struct {
 
 func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
+		tt := tt
+		i := i
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
 			address := common.BytesToAddress([]byte("contract"))
@@ -107,7 +110,7 @@ func TestEIP2200(t *testing.T) {
 			vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}}, dests)
 
 			_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int))
-			if err != tt.failure {
+			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
 			if used := tt.gaspool - gas; used != tt.used {

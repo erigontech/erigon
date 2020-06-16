@@ -50,7 +50,7 @@ var testAccount, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6
 
 // Tests that handshake failures are detected and reported correctly.
 func TestStatusMsgErrors63(t *testing.T) {
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
 	defer clear()
 	var (
 		genesis = pm.blockchain.Genesis()
@@ -101,7 +101,7 @@ func TestStatusMsgErrors63(t *testing.T) {
 }
 
 func TestStatusMsgErrors64(t *testing.T) {
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
 	defer clear()
 	var (
 		genesis = pm.blockchain.Genesis()
@@ -259,7 +259,7 @@ func TestRecvTransactions65(t *testing.T) { testRecvTransactions(t, 65) }
 
 func testRecvTransactions(t *testing.T, protocol int) {
 	txAdded := make(chan []*types.Transaction)
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, txAdded)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, txAdded)
 	defer clear()
 	pm.acceptTxs = 1 // mark synced to accept transactions
 	p, _ := newTestPeer("peer", protocol, pm, true)
@@ -287,7 +287,7 @@ func TestSendTransactions64(t *testing.T) { testSendTransactions(t, 64) }
 func TestSendTransactions65(t *testing.T) { testSendTransactions(t, 65) }
 
 func testSendTransactions(t *testing.T, protocol int) {
-	pm, _, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
 	defer clear()
 
 	// Fill the pool with big transactions (use a subscription to wait until all
@@ -380,9 +380,9 @@ func TestTransactionAnnouncement(t *testing.T) { testSyncTransaction(t, false) }
 
 func testSyncTransaction(t *testing.T, propagtion bool) {
 	// Create a protocol manager for transaction fetcher and sender
-	pmFetcher, _, fetcherClear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pmFetcher, fetcherClear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
 	defer fetcherClear()
-	pmSender, _, senderClear := newTestProtocolManagerMust(t, downloader.FullSync, 1024, nil, nil)
+	pmSender, senderClear := newTestProtocolManagerMust(t, downloader.FullSync, 1024, nil, nil)
 	defer senderClear()
 	pmSender.broadcastTxAnnouncesOnly = !propagtion
 
