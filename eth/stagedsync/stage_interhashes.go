@@ -305,7 +305,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 }
 
 //nolint:interfacer
-func unwindIntermediateHashesStage(u *UnwindState, _ *StageState, stateDB ethdb.Database, _ string, _ chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, _ *StageState, stateDB ethdb.Database, _ string, _ chan struct{}) error {
 	if err := u.Done(stateDB); err != nil {
 		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
 	}
