@@ -62,7 +62,7 @@ func PrepareStagedSync(
 					startTrace:      false,
 					prof:            false,
 					numOfGoroutines: n,
-					readChLen:       2,
+					readChLen:       4,
 					now:             time.Now(),
 				}
 				return spawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), datadir, quitCh)
@@ -139,7 +139,7 @@ func PrepareStagedSync(
 		},
 	}
 
-	state := NewState(stages)
+	state := NewState(stages[2:3])
 	if err := state.LoadUnwindInfo(stateDB); err != nil {
 		return nil, err
 	}

@@ -107,8 +107,10 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		errCh := make(chan error, cfg.readChLen)
 		doneCh := make(chan struct{})
 		for i := 0; i < cfg.readChLen; i++ {
+			i := i
 			go func() {
 				defer common.SafeClose(doneCh)
+				defer fmt.Println("close sender", i)
 				for {
 					nextNumber := atomic.AddUint64(nextBlockNumber, 1)
 
