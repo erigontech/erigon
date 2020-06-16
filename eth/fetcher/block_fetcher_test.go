@@ -50,6 +50,7 @@ var (
 // reassembly.
 func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common.Hash]*types.Block) {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
 	blocks, _ := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})

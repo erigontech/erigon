@@ -63,6 +63,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 	if err != nil {
 		return nil, err
 	}
+	if k == nil {
+		return nil, ethdb.ErrKeyNotFound
+	}
 	if storage {
 		if plain {
 			if !bytes.Equal(k[:common.AddressLength], key[:common.AddressLength]) ||

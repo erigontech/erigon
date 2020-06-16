@@ -33,17 +33,18 @@ import (
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
 	// Create a simple chain to verify
+	testdb := ethdb.NewMemDatabase()
+	defer testdb.Close()
 	var (
-		testdb  = ethdb.NewMemDatabase()
 		gspec   = &Genesis{Config: params.TestChainConfig}
 		genesis = gspec.MustCommit(testdb)
 	)
 	dests := vm.NewDestsCache(100)
 	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
-	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	defer chain.Stop()
+	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb.MemCopy(), 8, nil)
+	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb.NewBatch(), 8, nil)
 
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {

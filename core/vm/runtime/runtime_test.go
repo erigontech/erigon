@@ -104,6 +104,7 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	tds := state.NewTrieDbState(common.Hash{}, db, 0)
 	state := state.New(tds)
 	address := common.HexToAddress("0x0a")
@@ -160,8 +161,10 @@ func BenchmarkCall(b *testing.B) {
 	}
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		tds      = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		tds      = state.NewTrieDbState(common.Hash{}, db, 0)
 		statedb  = state.New(tds)
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
@@ -388,8 +391,10 @@ func (s *stepCounter) CaptureAccountWrite(account common.Address) error {
 }
 
 func TestJumpSub1024Limit(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		tds     = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
 		state   = state.New(tds)
 		address = common.HexToAddress("0x0a")
 	)
@@ -428,8 +433,10 @@ func TestJumpSub1024Limit(t *testing.T) {
 }
 
 func TestReturnSubShallow(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		tds     = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
 		state   = state.New(tds)
 		address = common.HexToAddress("0x0a")
 	)

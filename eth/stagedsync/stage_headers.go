@@ -80,17 +80,17 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (int, bool, uint64, error) {
+func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 	if rawdb.ReadHeaderNumber(db, headers[0].ParentHash) == nil {
-		return 0, false, 0, errors.New("unknown parent")
+		return false, 0, errors.New("unknown parent")
 	}
 	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
 			if header.ParentHash != headers[i-1].Hash() {
-				return i, false, 0, errors.New("unknown parent")
+				return false, 0, errors.New("unknown parent")
 			}
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
@@ -114,10 +114,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	defer close(abort)
 
 	// Iterate over the headers and ensure they all check out
-	for i := range headers {
+	for i := 0; i < len(headers); i++ {
 		// Otherwise wait for headers checks and ensure they pass
 		if err := <-results; err != nil {
-			return i, false, 0, err
+			return false, 0, err
 		}
 	}
 	headHash := rawdb.ReadHeadHeaderHash(db)
@@ -184,7 +184,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {
-		return 0, false, 0, fmt.Errorf("write header markers into disk: %w", err)
+		return false, 0, fmt.Errorf("write header markers into disk: %w", err)
 	}
 	// Report some public statistics so the user has a clue what's going on
 	ctx := []interface{}{
@@ -198,5 +198,5 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		ctx = append(ctx, []interface{}{"ignored", ignored}...)
 	}
 	log.Info("Imported new block headers", ctx...)
-	return len(headers), reorg, forkBlockNumber, nil
+	return reorg, forkBlockNumber, nil
 }

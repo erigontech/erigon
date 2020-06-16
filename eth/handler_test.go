@@ -52,7 +52,8 @@ func TestGetBlockHeaders63(t *testing.T) { testGetBlockHeaders(t, 63) }
 func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
 
 func testGetBlockHeaders(t *testing.T, protocol int) {
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxHashFetch+15, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxHashFetch+15, nil, nil)
+	defer clear()
 
 	// Create a "random" unknown hash for testing
 	var unknown common.Hash
@@ -221,7 +222,8 @@ func TestGetBlockBodies63(t *testing.T) { testGetBlockBodies(t, 63) }
 func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
 
 func testGetBlockBodies(t *testing.T, protocol int) {
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxBlockFetch+15, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxBlockFetch+15, nil, nil)
+	defer clear()
 
 	// Create a batch of tests for various scenarios
 	limit := downloader.MaxBlockFetch
@@ -297,7 +299,8 @@ func testGetNodeData(t *testing.T, protocol int) {
 	debug.OverrideGetNodeData(true)
 	defer debug.OverrideGetNodeData(false)
 	// Assemble the test environment
-	pm, addr := setUpStorageContractA(t)
+	pm, addr, clear := setUpStorageContractA(t)
+	defer clear()
 	peer, _ := newTestPeer("peer", protocol, pm, true)
 	defer peer.close()
 
@@ -384,7 +387,8 @@ func testGetReceipt(t *testing.T, protocol int) {
 		}
 	}
 	// Assemble the test environment
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
+	defer clear()
 	peer, _ := newTestPeer("peer", protocol, pm, true)
 	defer peer.close()
 
@@ -448,8 +452,9 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	syncChallengeTimeout = 250 * time.Millisecond
 
 	// Initialize a chain and generate a fake CHT if checkpointing is enabled
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db     = ethdb.NewMemDatabase()
 		config = new(params.ChainConfig)
 	)
 	(&core.Genesis{Config: config}).MustCommit(db) // Commit genesis block
@@ -547,10 +552,11 @@ func TestBroadcastBlock(t *testing.T) {
 }
 
 func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
 		evmux   = new(event.TypeMux)
 		pow     = ethash.NewFaker()
-		db      = ethdb.NewMemDatabase()
 		config  = &params.ChainConfig{}
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
@@ -559,6 +565,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
+	defer blockchain.Stop()
 	cht := &params.TrustedCheckpoint{}
 	pm, err := NewProtocolManager(config, cht, downloader.FullSync, DefaultConfig.NetworkID, evmux, &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, pow, blockchain, db, nil)
 	if err != nil {
@@ -609,7 +616,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 var frhsAmnt = uint256.NewInt().SetUint64(10000)
 var addrHash = make([]common.Hash, 5)
 
-func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer) {
+func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer, func()) {
 	addr1 := common.HexToAddress("0x3b4fc1530da632624fa1e223a91d99dbb07c2d42")
 	addr2 := common.HexToAddress("0xb574d96f69c1324e3b49e63f4cc899736dd52789")
 	addr3 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af00")
@@ -655,18 +662,22 @@ func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehos
 		}
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	pm, pmClear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 
-	return pm, peer
+	clear := func() {
+		peer.close()
+		pmClear()
+	}
+	return pm, peer, clear
 }
 
 func TestFirehoseStateRanges(t *testing.T) {
 	// TODO: remove or recover
 	t.Skip()
 
-	pm, peer := setUpDummyAccountsForFirehose(t)
-	defer peer.close()
+	pm, peer, clear := setUpDummyAccountsForFirehose(t)
+	defer clear()
 
 	block4 := pm.blockchain.GetBlockByNumber(4)
 
@@ -738,7 +749,8 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 		block.AddTx(tx)
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
+	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -829,7 +841,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 }
 
 // 2 storage items starting from different nibbles
-func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address) {
+func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address, func()) {
 	// This contract initially sets its 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
 	// When called, it updates the 0th storage to the input provided.
@@ -875,8 +887,8 @@ func setUpStorageContractA(t *testing.T) (*ProtocolManager, common.Address) {
 		}
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
-	return pm, addr
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
+	return pm, addr, clear
 }
 
 func storageNodesOfContractA(t *testing.T, blockNbr uint64) (node0Rlp, node1Rlp, branchRlp []byte) {
@@ -926,7 +938,7 @@ func storageNodesOfContractA(t *testing.T, blockNbr uint64) (node0Rlp, node1Rlp,
 }
 
 // 2 storage items starting with the same nibble
-func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address) {
+func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address, func()) {
 	// This contract initially sets its 6th storage to 0x2a
 	// and its 8st storage to 0x01c9.
 	// When called, it updates the 8th storage to the input provided.
@@ -972,15 +984,16 @@ func setUpStorageContractB(t *testing.T) (*ProtocolManager, common.Address) {
 		}
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
-	return pm, addr
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
+	return pm, addr, clear
 }
 
 func TestFirehoseStorageRanges(t *testing.T) {
 	// TODO: remove or recover
 	t.Skip()
 
-	pm, addr := setUpStorageContractA(t)
+	pm, addr, clear := setUpStorageContractA(t)
+	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -1035,7 +1048,8 @@ func TestFirehoseStorageNodesA(t *testing.T) {
 	// TODO: remove or recover
 	t.Skip()
 
-	pm, addr := setUpStorageContractA(t)
+	pm, addr, clear := setUpStorageContractA(t)
+	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -1075,7 +1089,8 @@ func TestFirehoseStorageNodesB(t *testing.T) {
 	// TODO: remove or recover
 	t.Skip()
 
-	pm, addr := setUpStorageContractB(t)
+	pm, addr, clear := setUpStorageContractB(t)
+	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -1151,8 +1166,8 @@ func TestFirehoseStateNodes(t *testing.T) {
 	// TODO: remove or recover
 	t.Skip()
 
-	pm, peer := setUpDummyAccountsForFirehose(t)
-	defer peer.close()
+	pm, peer, clear := setUpDummyAccountsForFirehose(t)
+	defer clear()
 
 	// ------------------------------------------------------------------
 	// Firstly test the latest state where account3 has double the amount
@@ -1285,7 +1300,8 @@ func TestFirehoseBytecode(t *testing.T) {
 		}
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -1317,9 +1333,10 @@ func TestFirehoseBytecode(t *testing.T) {
 // with the hashes in the header) gets discarded and not broadcast forward.
 func TestBroadcastMalformedBlock(t *testing.T) {
 	// Create a live node to test propagation with
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
 		engine  = ethash.NewFaker()
-		db      = ethdb.NewMemDatabase()
 		config  = &params.ChainConfig{}
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)

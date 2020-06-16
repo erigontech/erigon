@@ -135,6 +135,7 @@ func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
 	t.Skip("disable test, because pruner doesn't delete anything yet, just printing")
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	defer db.Close()
 
 	storageKey := func(k string) []byte {
 		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))

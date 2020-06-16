@@ -117,7 +117,7 @@ func (tc *testChain) copy(newlen int) *testChain {
 		tdm:      make(map[common.Hash]*big.Int, newlen),
 	}
 	if tc.db != nil {
-		cpy.db = tc.db.MemCopy()
+		cpy.db = tc.db.NewBatch()
 	}
 	for i := 0; i < len(tc.chain) && i < newlen; i++ {
 		hash := tc.chain[i]

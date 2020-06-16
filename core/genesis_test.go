@@ -33,15 +33,17 @@ import (
 )
 
 func TestDefaultGenesisBlock(t *testing.T) {
-	block, _, _, _ := DefaultGenesisBlock().ToBlock(nil, true)
+	block, _, tds, _ := DefaultGenesisBlock().ToBlock(nil, true)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
+	defer tds.Database().Close()
 	var err error
-	block, _, _, err = DefaultRopstenGenesisBlock().ToBlock(nil, true)
+	block, _, tds, err = DefaultRopstenGenesisBlock().ToBlock(nil, true)
 	if err != nil {
 		t.Errorf("error: %w", err)
 	}
+	defer tds.Database().Close()
 	if block.Hash() != params.RopstenGenesisHash {
 		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
 	}
@@ -85,7 +87,6 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				DefaultGenesisBlock().MustCommit(db)
 				return SetupGenesisBlock(db, nil, true /* history */)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -130,7 +131,7 @@ func TestSetupGenesis(t *testing.T) {
 				defer bc.Stop()
 				ctx := bc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-				blocks, _ := GenerateChain(ctx, oldcustomg.Config, genesis, ethash.NewFaker(), db.MemCopy(), 4, nil)
+				blocks, _ := GenerateChain(ctx, oldcustomg.Config, genesis, ethash.NewFaker(), db.NewBatch(), 4, nil)
 				_, _ = bc.InsertChain(context.Background(), blocks)
 				bc.CurrentBlock()
 				// This should return a compatibility error.
@@ -148,25 +149,28 @@ func TestSetupGenesis(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		db := ethdb.NewMemDatabase()
-		config, hash, _, err := test.fn(db)
-		// Check the return values.
-		if !reflect.DeepEqual(err, test.wantErr) {
-			spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}
-			t.Errorf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
-		}
-		if !reflect.DeepEqual(config, test.wantConfig) {
-			t.Errorf("%s:\nreturned %v\nwant     %v", test.name, config, test.wantConfig)
-		}
-		if hash != test.wantHash {
-			t.Errorf("%s: returned hash %s, want %s", test.name, hash.Hex(), test.wantHash.Hex())
-		} else if err == nil {
-			// Check database content.
-			stored := rawdb.ReadBlock(db, test.wantHash, 0)
-			if stored.Hash() != test.wantHash {
-				t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			db := ethdb.NewMemDatabase()
+			defer db.Close()
+			config, hash, _, err := test.fn(db)
+			// Check the return values.
+			if !reflect.DeepEqual(err, test.wantErr) {
+				spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}
+				t.Errorf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
 			}
-		}
-		db.Close()
+			if !reflect.DeepEqual(config, test.wantConfig) {
+				t.Errorf("%s:\nreturned %v\nwant     %v", test.name, config, test.wantConfig)
+			}
+			if hash != test.wantHash {
+				t.Errorf("%s: returned hash %s, want %s", test.name, hash.Hex(), test.wantHash.Hex())
+			} else if err == nil {
+				// Check database content.
+				stored := rawdb.ReadBlock(db, test.wantHash, 0)
+				if stored.Hash() != test.wantHash {
+					t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)
+				}
+			}
+		})
 	}
 }
