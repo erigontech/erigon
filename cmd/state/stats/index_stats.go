@@ -4,21 +4,19 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"log"
 	"os"
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func IndexStats(chaindata string, indexBucket []byte, statsFile string) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := common.HashLength
 	if bytes.HasPrefix(indexBucket, dbutils.StorageHistoryBucket) {
@@ -37,7 +35,7 @@ func IndexStats(chaindata string, indexBucket []byte, statsFile string) error {
 	count := uint64(1)
 	added := false
 	i := uint64(0)
-	err = db.Walk(indexBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+	if err := db.Walk(indexBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		if i%100_000 == 0 {
 			fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
 		}
@@ -72,8 +70,7 @@ func IndexStats(chaindata string, indexBucket []byte, statsFile string) error {
 		}
 
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 

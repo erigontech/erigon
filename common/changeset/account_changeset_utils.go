@@ -3,7 +3,6 @@ package changeset
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"sort"
 
@@ -52,46 +51,51 @@ func walkAccountChangeSet(b []byte, keyLen uint32, f func(k, v []byte) error) er
 	return nil
 }
 
-func findLastKeyInAccountChangeSet(b []byte, k []byte, keyLen uint32) ([]byte, error) {
+func findInAccountChangeSetBytes(b []byte, k []byte, keyLen int) ([]byte, error) {
 	if len(b) == 0 {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 
 	if len(b) < 8 {
 		return nil, fmt.Errorf("decode: input too short (%d bytes)", len(b))
 	}
 
-	n := binary.BigEndian.Uint32(b[0:4])
+	n := int(binary.BigEndian.Uint32(b[0:]))
 
 	if n == 0 {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 
 	valOffset := 4 + n*keyLen + 4*n
-	if uint32(len(b)) < valOffset {
-		fmt.Println("FindLastAccounts account")
+	if len(b) < valOffset {
 		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
 	}
 
-	totalValLength := binary.BigEndian.Uint32(b[valOffset-4 : valOffset])
-	if uint32(len(b)) < valOffset+totalValLength {
+	totalValLength := int(binary.BigEndian.Uint32(b[valOffset-4:]))
+	if len(b) < valOffset+totalValLength {
 		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
 	}
 
-	for i := n - 1; int(i) >= 0; i-- {
-		key := b[4+i*keyLen : 4+(i+1)*keyLen]
-		idx0 := uint32(0)
-		if i > 0 {
-			idx0 = binary.BigEndian.Uint32(b[4+n*keyLen+4*(i-1) : 4+n*keyLen+4*i])
-		}
-		idx1 := binary.BigEndian.Uint32(b[4+n*keyLen+4*i : 4+n*keyLen+4*(i+1)])
-		val := b[valOffset+idx0 : valOffset+idx1]
+	id := sort.Search(n, func(i int) bool {
+		res := bytes.Compare(b[4+i*keyLen:4+(i+1)*keyLen], k)
+		return res >= 0
+	})
 
-		if bytes.Equal(key, k) {
-			return val, nil
-		}
+	if id >= n {
+		return nil, ErrNotFound
 	}
-	return nil, errors.New("not found")
+
+	if !bytes.Equal(b[4+id*keyLen:4+(id+1)*keyLen], k) {
+		return nil, ErrNotFound
+	}
+
+	idx0 := 0
+	if id > 0 {
+		idx0 = int(binary.BigEndian.Uint32(b[4+n*keyLen+4*(id-1):]))
+	}
+
+	idx1 := int(binary.BigEndian.Uint32(b[4+n*keyLen+4*id:]))
+	return b[valOffset+idx0 : valOffset+idx1], nil
 }
 
 func decodeAccountsWithKeyLen(b []byte, keyLen uint32, h *ChangeSet) error {

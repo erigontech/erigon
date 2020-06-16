@@ -161,8 +161,9 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 func TestBlockSubscription(t *testing.T) {
 	t.Parallel()
 
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db          = ethdb.NewMemDatabase()
 		backend     = &testBackend{db: db}
 		api         = NewPublicFilterAPI(backend, false)
 		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
@@ -213,8 +214,10 @@ func TestBlockSubscription(t *testing.T) {
 func TestPendingTxFilter(t *testing.T) {
 	t.Parallel()
 
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+
 	var (
-		db      = ethdb.NewMemDatabase()
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, false)
 
@@ -268,8 +271,9 @@ func TestPendingTxFilter(t *testing.T) {
 // TestLogFilterCreation test whether a given filter criteria makes sense.
 // If not it must return an error.
 func TestLogFilterCreation(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db      = ethdb.NewMemDatabase()
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, false)
 
@@ -311,9 +315,9 @@ func TestLogFilterCreation(t *testing.T) {
 // when the filter is created.
 func TestInvalidLogFilterCreation(t *testing.T) {
 	t.Parallel()
-
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db      = ethdb.NewMemDatabase()
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, false)
 	)
@@ -334,8 +338,9 @@ func TestInvalidLogFilterCreation(t *testing.T) {
 }
 
 func TestInvalidGetLogsRequest(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db        = ethdb.NewMemDatabase()
 		backend   = &testBackend{db: db}
 		api       = NewPublicFilterAPI(backend, false)
 		blockHash = common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
@@ -359,8 +364,9 @@ func TestInvalidGetLogsRequest(t *testing.T) {
 func TestLogFilter(t *testing.T) {
 	t.Parallel()
 
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db      = ethdb.NewMemDatabase()
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, false)
 
@@ -473,8 +479,9 @@ func TestLogFilter(t *testing.T) {
 func TestPendingLogsSubscription(t *testing.T) {
 	t.Parallel()
 
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db      = ethdb.NewMemDatabase()
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, false)
 

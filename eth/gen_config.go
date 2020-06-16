@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -22,7 +23,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		NetworkID               uint64
 		SyncMode                downloader.SyncMode
 		DiscoveryURLs           []string
-		Pruning               bool
+		Pruning                 bool
 		NoPrefetch              bool
 		TxLookupLimit           uint64                 `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
@@ -97,7 +98,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
 		DiscoveryURLs           []string
-		Pruning               *bool
+		Pruning                 *bool
 		NoPrefetch              *bool
 		TxLookupLimit           *uint64                `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
@@ -158,7 +159,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Whitelist = dec.Whitelist
 	}
 	if dec.Mode != nil {
-		mode, err := StorageModeFromString(*dec.Mode)
+		mode, err := ethdb.StorageModeFromString(*dec.Mode)
 		if err != nil {
 			return err
 		}

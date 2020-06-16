@@ -134,7 +134,7 @@ type testWorkerBackend struct {
 	uncleBlock *types.Block
 }
 
-func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) *testWorkerBackend {
+func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) (*testWorkerBackend, func()) {
 	var (
 		gspec = core.Genesis{
 			Config: chainConfig,
@@ -175,6 +175,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 		}
 
 		dbSide = db.MemCopy()
+		defer dbSide.Close()
 		parentSide = chain.CurrentBlock()
 
 		ctx := chain.WithContext(context.Background(), big.NewInt(parentSide.Number().Int64()+1))
@@ -199,12 +200,16 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	})
 
 	return &testWorkerBackend{
-		db:         db,
-		chain:      chain,
-		txPool:     txpool,
-		genesis:    &gspec,
-		uncleBlock: sideBlocks[0],
-	}
+			db:         db,
+			chain:      chain,
+			txPool:     txpool,
+			genesis:    &gspec,
+			uncleBlock: sideBlocks[0],
+		}, func() {
+			chain.Stop()
+			chain.ChainDb().Close()
+			db.Close()
+		}
 }
 
 func (b *testWorkerBackend) BlockChain() *core.BlockChain { return b.chain }
@@ -229,8 +234,8 @@ func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensu
 	return w
 }
 
-func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) *testWorkerBackend {
-	backend := newTestWorkerBackend(t, testCase, chainConfig, engine, db, blocks)
+func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*testWorkerBackend, func()) {
+	backend, clear := newTestWorkerBackend(t, testCase, chainConfig, engine, db, blocks)
 
 	errs := backend.txPool.AddLocals(testCase.pendingTxs)
 	for _, err := range errs {
@@ -239,7 +244,7 @@ func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainC
 		}
 	}
 
-	return backend
+	return backend, clear
 }
 
 func TestGenerateBlockAndImportEthash(t *testing.T) {
@@ -276,7 +281,8 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 		engine = ethash.NewFaker()
 	}
 
-	b := newTestBackend(t, testCase, chainConfig, engine, db, 0)
+	b, clear := newTestBackend(t, testCase, chainConfig, engine, db, 0)
+	defer clear()
 	w := newTestWorker(testCase, chainConfig, engine, b, hooks{}, false)
 	defer w.close()
 
@@ -368,7 +374,8 @@ func TestPendingStateAndBlockClique(t *testing.T) {
 func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine) {
 	defer engine.Close()
 
-	b := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	b, clear := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	defer clear()
 	w := newTestWorker(testCase, chainConfig, engine, b, hooks{}, true)
 	defer w.close()
 
@@ -434,7 +441,8 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 		},
 	}
 
-	backend := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	backend, clear := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	defer clear()
 	w := newTestWorker(testCase, chainConfig, engine, backend, h, true)
 	defer w.close()
 
@@ -477,7 +485,8 @@ func TestStreamUncleBlock(t *testing.T) {
 		t.Error(err)
 	}
 
-	b := newTestBackend(t, testCase, testCase.ethashChainConfig, ethash, ethdb.NewMemDatabase(), 1)
+	b, clear := newTestBackend(t, testCase, testCase.ethashChainConfig, ethash, ethdb.NewMemDatabase(), 1)
+	defer clear()
 
 	var taskCh = make(chan struct{}, 1)
 	taskIndex := 0
@@ -573,7 +582,9 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 		},
 	}
 
-	b := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	b, clear := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	defer clear()
+
 	w := newTestWorker(testCase, chainConfig, engine, b, h, true)
 	defer w.close()
 
@@ -666,7 +677,8 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 		},
 	}
 
-	backend := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	backend, clear := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
+	defer clear()
 	w := newTestWorker(testCase, chainConfig, engine, backend, h, true)
 	defer w.close()
 

@@ -28,7 +28,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -161,6 +161,7 @@ The export-preimages command export hash preimages to an RLP encoded stream`,
 			utils.RinkebyFlag,
 			utils.TxLookupLimitFlag,
 			utils.GoerliFlag,
+			utils.YoloV1Flag,
 			utils.LegacyTestnetFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
@@ -210,6 +211,7 @@ Use "ethereum dump 0" to dump the genesis block.`,
 			utils.RopstenFlag,
 			utils.RinkebyFlag,
 			utils.GoerliFlag,
+			utils.YoloV1Flag,
 			utils.LegacyTestnetFlag,
 			utils.SyncModeFlag,
 		},
@@ -413,13 +415,10 @@ func copyDb(ctx *cli.Context) error {
 	if syncMode == downloader.FastSync {
 		//syncBloom = trie.NewSyncBloom(uint64(ctx.GlobalInt(utils.CacheFlag.Name)/2), chainDb)
 	}
-	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, true)
+	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, ethdb.DefaultStorageMode)
 
 	// Create a source peer to satisfy downloader requests from
-	db, err := ethdb.NewBoltDatabase(ctx.Args().First())
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(ctx.Args().First())
 	hc, err := core.NewHeaderChain(db, chain.Config(), chain.Engine(), func() bool { return false })
 	if err != nil {
 		return err
@@ -479,7 +478,7 @@ func removeDB(ctx *cli.Context) error {
 // confirmAndRemoveDB prompts the user for a last confirmation and removes the
 // folder if accepted.
 func confirmAndRemoveDB(database string, kind string) {
-	confirm, err := console.Stdin.PromptConfirm(fmt.Sprintf("Remove %s (%s)?", kind, database))
+	confirm, err := prompt.Stdin.PromptConfirm(fmt.Sprintf("Remove %s (%s)?", kind, database))
 	switch {
 	case err != nil:
 		utils.Fatalf("%v", err)

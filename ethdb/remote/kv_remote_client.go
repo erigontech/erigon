@@ -275,7 +275,7 @@ func (closer notifyOnClose) Close() error {
 	return closer.internal.Close()
 }
 
-func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
+func Open(opts DbOpts) (*DB, error) {
 	if opts.DialFunc == nil {
 		opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
 			if opts.DialAddress == "" {
@@ -296,10 +296,6 @@ func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 	}
 
 	ctx, cancelConnections := context.WithCancel(context.Background())
-	go func() {
-		<-parentCtx.Done()
-		cancelConnections()
-	}()
 	db.cancelConnections = cancelConnections
 
 	pingTicker := time.NewTicker(db.opts.PingEvery)
@@ -544,22 +540,22 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	prefix         []byte
-	prefetchSize   uint
 	prefetchValues bool
+	initialized    bool
+	cursorHandle   uint64
+	prefetchSize   uint
+	cacheLastIdx   uint
+	cacheIdx       uint
+	prefix         []byte
 
 	ctx            context.Context
 	in             io.Reader
 	out            io.Writer
-	cursorHandle   uint64
-	cacheLastIdx   uint
-	cacheIdx       uint
 	cacheKeys      [][]byte
 	cacheValues    [][]byte
 	cacheValueSize []uint32
 
-	bucket      *Bucket
-	initialized bool
+	bucket *Bucket
 }
 
 func (c *Cursor) Prefix(v []byte) *Cursor {

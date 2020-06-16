@@ -221,7 +221,7 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(so1)
 
 	so1 = state.getStateObject(stateobjaddr1)
-	if so1 != nil {
+	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
 	}
 
@@ -238,7 +238,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// deleted should be nil, both before and after restore of state copy
 	so1Restored := state.getStateObject(stateobjaddr1)
-	if so1Restored != nil {
+	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
 }

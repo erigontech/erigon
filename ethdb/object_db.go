@@ -20,9 +20,11 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -30,6 +32,7 @@ import (
 type ObjectDatabase struct {
 	kv  KV
 	log log.Logger
+	id  uint64
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
@@ -38,7 +41,36 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv:  kv,
 		log: logger,
+		id:  id(),
 	}
+}
+
+func MustOpen(path string) *ObjectDatabase {
+	db, err := Open(path)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+// Open - main method to open database. Choosing driver based on path suffix.
+// If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
+func Open(path string) (*ObjectDatabase, error) {
+	var kv KV
+	var err error
+	testDB := debug.TestDB()
+	switch true {
+	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
+		kv, err = NewLMDB().Path(path).Open()
+	case testDB == "badger" || strings.HasSuffix(path, "_badger"):
+		kv, err = NewBadger().Path(path).Open()
+	default:
+		kv, err = NewBolt().Path(path).Open()
+	}
+	if err != nil {
+		return nil, err
+	}
+	return NewObjectDatabase(kv), nil
 }
 
 // Put inserts or updates a single entry.
@@ -59,24 +91,19 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			b := tx.Bucket(tuples[bucketStart])
 			c := b.Cursor()
 			l := (bucketEnd - bucketStart) / 3
-			pairs := make([][]byte, 2*l)
 			for i := 0; i < l; i++ {
-				pairs[2*i] = tuples[bucketStart+3*i+1]
-				pairs[2*i+1] = tuples[bucketStart+3*i+2]
-				if pairs[2*i+1] == nil {
-					if err := c.Delete(pairs[2*i]); err != nil {
+				k := tuples[bucketStart+3*i+1]
+				v := tuples[bucketStart+3*i+2]
+				if v == nil {
+					if err := c.Delete(k); err != nil {
 						return err
 					}
 				} else {
-					if err := c.Put(pairs[2*i], pairs[2*i+1]); err != nil {
+					if err := c.Put(k, v); err != nil {
 						return err
 					}
 				}
 			}
-			// TODO: Add MultiPut to abstraction
-			//if err := b.MultiPut(pairs...); err != nil {
-			//	return err
-			//}
 
 			bucketStart = bucketEnd
 		}
@@ -91,6 +118,10 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 }
 
 func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
+	if getter, ok := db.kv.(NativeGet); ok {
+		return getter.Has(context.Background(), bucket, key)
+	}
+
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)
@@ -101,18 +132,38 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 }
 
 func (db *ObjectDatabase) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	return db.kv.(HasStats).DiskSize(ctx)
+	if casted, ok := db.kv.(HasStats); ok {
+		return casted.DiskSize(ctx)
+	}
+	return common.StorageSize(0), nil
 }
 
 func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return db.kv.(HasStats).BucketsStat(ctx)
+	if casted, ok := db.kv.(HasStats); ok {
+		return casted.BucketsStat(ctx)
+	}
+	return nil, nil
 }
 
 // Get returns the value for a given key if it's present.
-func (db *ObjectDatabase) Get(bucket, key []byte) ([]byte, error) {
+func (db *ObjectDatabase) Get(bucket, key []byte) (dat []byte, err error) {
 	// Retrieve the key and increment the miss counter if not found
-	var dat []byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
+	if getter, ok := db.kv.(NativeGet); ok {
+		dat, err = getter.Get(context.Background(), bucket, key)
+		if err != nil {
+			return nil, err
+		}
+		if dat == nil {
+			return nil, ErrKeyNotFound
+		}
+		return dat, nil
+	}
+
+	return db.get(bucket, key)
+}
+
+func (db *ObjectDatabase) get(bucket, key []byte) (dat []byte, err error) {
+	err = db.kv.View(context.Background(), func(tx Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)
 		if v != nil {
 			dat = make([]byte, len(v))
@@ -120,10 +171,13 @@ func (db *ObjectDatabase) Get(bucket, key []byte) ([]byte, error) {
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	if dat == nil {
 		return nil, ErrKeyNotFound
 	}
-	return dat, err
+	return dat, nil
 }
 
 // GetIndexChunk returns proper index chunk or return error if index is not created.
@@ -150,12 +204,12 @@ func (db *ObjectDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([
 }
 
 // getChangeSetByBlockNoLock returns changeset by block and dbi
-func (db *ObjectDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
+func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
 
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket)).Get(key)
+		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(true /* plain */, storage)).Get(key)
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
@@ -266,8 +320,17 @@ func (db *ObjectDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-func (db *ObjectDatabase) DeleteBucket(bucket []byte) error {
-	panic("not implemented") // probably need replace by TruncateBucket()?
+func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
+	for _, bucket := range buckets {
+		bucket := bucket
+		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+			return tx.Bucket(bucket).Clear()
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (db *ObjectDatabase) Close() {
@@ -304,11 +367,11 @@ func (db *ObjectDatabase) MemCopy() Database {
 	// Open the db and recover any potential corruptions
 	switch db.kv.(type) {
 	case *LmdbKV:
-		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	case *BoltKV:
-		mem = NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
-	case *badgerDB:
-		mem = NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
+		mem = NewObjectDatabase(NewBolt().InMem().MustOpen())
+	case *badgerKV:
+		mem = NewObjectDatabase(NewBadger().InMem().MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
@@ -345,7 +408,7 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *ObjectDatabase) IdealBatchSize() int {
-	return 50 * 1024 * 1024 // 50 Mb
+	return db.kv.IdealBatchSize()
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
@@ -360,6 +423,5 @@ func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 }
 
 func (db *ObjectDatabase) ID() uint64 {
-	panic("not implemented")
-	//return db.id
+	return db.id
 }

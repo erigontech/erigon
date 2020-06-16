@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/console"
+	prompt2 "github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/urfave/cli"
@@ -247,12 +247,12 @@ func getPassPhrase(prompt string, confirmation bool, i int, passwords []string) 
 	if prompt != "" {
 		fmt.Println(prompt)
 	}
-	password, err := console.Stdin.PromptPassword("Password: ")
+	password, err := prompt2.Stdin.PromptPassword("Password: ")
 	if err != nil {
 		utils.Fatalf("Failed to read password: %v", err)
 	}
 	if confirmation {
-		confirm, err := console.Stdin.PromptPassword("Repeat password: ")
+		confirm, err := prompt2.Stdin.PromptPassword("Repeat password: ")
 		if err != nil {
 			utils.Fatalf("Failed to read password confirmation: %v", err)
 		}

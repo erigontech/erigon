@@ -47,7 +47,7 @@ func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Addr
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, contract *Contract, depth int, err error) error {
+func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *Contract, depth int, err error) error {
 	log := StructLog{
 		Pc:            pc,
 		Op:            op,
@@ -64,6 +64,7 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 	}
 	if !l.cfg.DisableStack {
 		log.Stack = make([]*big.Int, len(stack.GetData()))
+		log.ReturnStack = rStack.Data()
 		for i, item := range stack.GetData() {
 			log.Stack[i] = item.ToBig()
 		}
@@ -72,7 +73,7 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 }
 
 // CaptureFault outputs state information on the logger.
-func (l *JSONLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, contract *Contract, depth int, err error) error {
+func (l *JSONLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *Contract, depth int, err error) error {
 	return nil
 }
 

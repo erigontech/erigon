@@ -73,6 +73,12 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 	var seekKey []byte
 
 	for {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
+
 		// Make sure we are not blocking the resizing of the memory map
 		if tx != nil {
 			type Yieldable interface {

@@ -176,11 +176,10 @@ type BlockChain struct {
 	txLookupCache *lru.Cache // Cache for the most recent transaction lookup data.
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
-	quit    chan struct{} // blockchain quit channel
-	running int32         // running must be called atomically
-	// procInterrupt must be atomically called
-	procInterrupt int32          // interrupt signaler for block processing
+	quit          chan struct{}  // blockchain quit channel
 	wg            sync.WaitGroup // chain processing wait group for shutting down
+	running       int32          // 0 if chain is running, 1 when stopped (must be called atomically)
+	procInterrupt int32          // interrupt signaler for block processing
 	quitMu        sync.RWMutex
 
 	engine     consensus.Engine
@@ -257,7 +256,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
-	bc.hc, err = NewHeaderChain(cdb, chainConfig, engine, bc.getProcInterrupt)
+	bc.hc, err = NewHeaderChain(cdb, chainConfig, engine, bc.insertStopped)
 	if err != nil {
 		return nil, err
 	}
@@ -389,10 +388,6 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*
 		return tds, nil
 	}
 	return bc.trieDbState, nil
-}
-
-func (bc *BlockChain) getProcInterrupt() bool {
-	return atomic.LoadInt32(&bc.procInterrupt) == 1
 }
 
 // GetVMConfig returns the block chain VM config.
@@ -884,12 +879,27 @@ func (bc *BlockChain) Stop() {
 	bc.scope.Close()
 	close(bc.quit)
 
-	bc.waitJobs()
+	bc.quitMu.Lock()
+	bc.StopInsert()
+	bc.wg.Wait()
+	bc.quitMu.Unlock()
 
 	if bc.pruner != nil {
 		bc.pruner.Stop()
 	}
 	log.Info("Blockchain stopped")
+}
+
+// StopInsert interrupts all insertion methods, causing them to return
+// errInsertionInterrupted as soon as possible. Insertion is permanently disabled after
+// calling this method.
+func (bc *BlockChain) StopInsert() {
+	atomic.StoreInt32(&bc.procInterrupt, 1)
+}
+
+// insertStopped returns true after StopInsert has been called.
+func (bc *BlockChain) insertStopped() bool {
+	return atomic.LoadInt32(&bc.procInterrupt) == 1
 }
 
 func (bc *BlockChain) procFutureBlocks() {
@@ -1037,7 +1047,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		size  = 0
 	)
 	// updateHead updates the head fast sync block if the inserted blocks are better
-	// and returns a indicator whether the inserted blocks are canonical.
+	// and returns an indicator whether the inserted blocks are canonical.
 	updateHead := func(head *types.Block) bool {
 		bc.chainmu.Lock()
 
@@ -1154,7 +1164,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		batch := bc.db.NewBatch()
 		for i, block := range blockChain {
 			// Short circuit insertion if shutting down or processing failed
-			if bc.getProcInterrupt() {
+			if bc.insertStopped() {
 				return 0, errInsertionInterrupted
 			}
 			// Short circuit if the owner header is unknown
@@ -1392,7 +1402,6 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 	if len(chain) == 0 {
 		return 0, nil
 	}
-
 	// Remove already known canon-blocks
 	var (
 		block, prev *types.Block
@@ -1488,7 +1497,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
 
 	// If the chain is terminating, don't even bother starting u
-	if bc.getProcInterrupt() {
+	if bc.insertStopped() {
 		return 0, nil
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
@@ -1616,8 +1625,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 
 		// If the chain is terminating, stop processing blocks
-		if bc.getProcInterrupt() {
-			log.Debug("Premature abort during blocks processing")
+		if bc.insertStopped() {
+			log.Debug("Abort during block processing")
 			break
 		}
 
@@ -2156,106 +2165,6 @@ func (bc *BlockChain) rollbackBadBlock(block *types.Block, receipts types.Receip
 	}
 }
 
-func (bc *BlockChain) insertHeaderChainStaged(chain []*types.Header) (int, int, int, bool, uint64, error) {
-	// The function below will insert headers, and track the lowest block
-	// number that have replace the canonical chain. This number will be
-	// used to trigger invalidation of further sync stages
-	var newCanonical bool
-	var lowestCanonicalNumber uint64
-	whFunc := func(header *types.Header) error {
-		status, err := bc.hc.WriteHeader(context.Background(), header)
-		if err != nil {
-			return err
-		}
-		if status == CanonStatTy {
-			number := header.Number.Uint64()
-			if !newCanonical || number < lowestCanonicalNumber {
-				lowestCanonicalNumber = number
-				newCanonical = true
-			}
-		}
-		return nil
-	}
-	// Collect some import statistics to report on
-	stats := struct{ processed, ignored int }{}
-	// All headers passed verification, import them into the database
-	for i, header := range chain {
-		// Short circuit insertion if shutting down
-		if bc.hc.procInterrupt() {
-			log.Debug("Premature abort during headers import")
-			return i, stats.processed, stats.ignored, newCanonical, lowestCanonicalNumber, errors.New("aborted")
-		}
-		// If the header's already known, skip it, otherwise store
-		hash := header.Hash()
-		if bc.hc.HasHeader(hash, header.Number.Uint64()) {
-			externTd := bc.hc.GetTd(bc.hc.chainDb, hash, header.Number.Uint64())
-			localTd := bc.hc.GetTd(bc.hc.chainDb, bc.hc.currentHeaderHash, bc.hc.CurrentHeader().Number.Uint64())
-			if externTd == nil || externTd.Cmp(localTd) <= 0 {
-				stats.ignored++
-				continue
-			}
-		}
-		if err := whFunc(header); err != nil {
-			return i, stats.processed, stats.ignored, newCanonical, lowestCanonicalNumber, err
-		}
-		stats.processed++
-	}
-	// Everything processed without errors
-	return len(chain), stats.processed, stats.ignored, newCanonical, lowestCanonicalNumber, nil
-}
-
-// InsertHeaderChainStaged attempts to add the chunk of headers to the headerchain
-// It return the following values
-// 1. (type int) number of items in the input chain that have been successfully processed and committed
-// 2. (type bool) whether the insertion of this chunk has changed the canonical chain
-// 3. (type uint64) the lowest block number that has been displaced from the canonical chain (this is to be used to invalidate further sync stages)
-// 4. (type error) error happed during processing
-func (bc *BlockChain) InsertHeaderChainStaged(chain []*types.Header, checkFreq int) (int, bool, uint64, error) {
-	start := time.Now()
-	if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
-		return i, false, 0, err
-	}
-
-	// Make sure only one thread manipulates the chain at once
-	bc.chainmu.Lock()
-	defer bc.chainmu.Unlock()
-
-	if err := bc.addJob(); err != nil {
-		return 0, false, 0, err
-	}
-	defer bc.doneJob()
-
-	n, processed, ignored, newCanonical, lowestCanonicalNumber, err := bc.insertHeaderChainStaged(chain)
-
-	// Report some public statistics so the user has a clue what's going on
-	last := chain[len(chain)-1]
-
-	ctx := []interface{}{
-		"count", processed, "elapsed", common.PrettyDuration(time.Since(start)),
-		"number", last.Number, "hash", last.Hash(),
-	}
-	if timestamp := time.Unix(int64(last.Time), 0); time.Since(timestamp) > time.Minute {
-		ctx = append(ctx, []interface{}{"age", common.PrettyAge(timestamp)}...)
-	}
-	if ignored > 0 {
-		ctx = append(ctx, []interface{}{"ignored", ignored}...)
-	}
-	log.Info("Imported new block headers", ctx...)
-
-	var written uint64
-	var err1 error
-	if written, err1 = bc.db.Commit(); err1 != nil {
-		log.Error("Could not commit chainDb", "error", err1)
-		return 0, false, 0, err1
-	}
-	size, err := bc.db.(ethdb.HasStats).DiskSize(context.Background())
-	if err != nil {
-		return 0, false, 0, err
-	}
-	log.Info("Database", "size", size, "written", written)
-	return n, newCanonical, lowestCanonicalNumber, err
-}
-
 // InsertHeaderChain attempts to insert the given header chain in to the local
 // chain, possibly creating a reorg. If an error is returned, it will return the
 // index number of the failing header as well an error describing what went wrong.
@@ -2455,7 +2364,7 @@ type Pruner interface {
 func (bc *BlockChain) addJob() error {
 	bc.quitMu.RLock()
 	defer bc.quitMu.RUnlock()
-	if bc.getProcInterrupt() {
+	if bc.insertStopped() {
 		return errors.New("blockchain is stopped")
 	}
 	bc.wg.Add(1)
@@ -2467,16 +2376,9 @@ func (bc *BlockChain) doneJob() {
 	bc.wg.Done()
 }
 
-func (bc *BlockChain) waitJobs() {
-	bc.quitMu.Lock()
-	atomic.StoreInt32(&bc.procInterrupt, 1)
-	bc.wg.Wait()
-	bc.quitMu.Unlock()
-}
-
-// ExecuteBlockEuphemerally runs a block from provided stateReader and
+// ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
-func ExecuteBlockEuphemerally(
+func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,
 	chainContext ChainContext,
@@ -2485,7 +2387,7 @@ func ExecuteBlockEuphemerally(
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	dests vm.Cache,
-) error {
+) (types.Receipts, error) {
 	ibs := state.New(stateReader)
 	header := block.Header()
 	var receipts types.Receipts
@@ -2500,7 +2402,7 @@ func ExecuteBlockEuphemerally(
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, dests)
 		if err != nil {
-			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
@@ -2508,23 +2410,23 @@ func ExecuteBlockEuphemerally(
 	if chainConfig.IsByzantium(header.Number) {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
-			return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
-		return fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
 	}
 
-	return nil
+	return receipts, nil
 }

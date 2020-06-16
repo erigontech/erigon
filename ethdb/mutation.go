@@ -6,14 +6,19 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
+var fullBatchCommitTimer = metrics.NewRegisteredTimer("db/full_batch/commit_time", nil)
+
 type mutation struct {
-	puts *puts // Map buckets to map[key]value
-	mu   sync.RWMutex
-	db   Database
+	puts   *puts // Map buckets to map[key]value
+	mu     sync.RWMutex
+	db     Database
+	tuples MultiPutTuples
 }
 
 func (m *mutation) KV() KV {
@@ -140,27 +145,37 @@ func (m *mutation) Delete(bucket, key []byte) error {
 }
 
 func (m *mutation) Commit() (uint64, error) {
+	if metrics.Enabled {
+		if m.db.IdealBatchSize() <= m.puts.Len() {
+			t := time.Now()
+			defer fullBatchCommitTimer.Update(time.Since(t))
+		}
+	}
 	if m.db == nil {
 		return 0, nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	tuples := make(MultiPutTuples, 0, m.puts.Len()*3)
+	if m.tuples == nil {
+		m.tuples = make(MultiPutTuples, 0, m.puts.Len()*3)
+	}
+	m.tuples = m.tuples[:0]
 	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			value, _ := bt.GetStr(key)
-			tuples = append(tuples, bucketB, []byte(key), value)
+			m.tuples = append(m.tuples, bucketB, []byte(key), value)
 		}
 	}
-	sort.Sort(tuples)
+	sort.Sort(m.tuples)
 
-	written, err := m.db.MultiPut(tuples...)
+	written, err := m.db.MultiPut(m.tuples...)
 	if err != nil {
 		return 0, fmt.Errorf("db.MultiPut failed: %w", err)
 	}
 
 	m.puts = newPuts()
+	m.tuples = m.tuples[:0]
 	return written, nil
 }
 
@@ -168,6 +183,7 @@ func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts = newPuts()
+	m.tuples = m.tuples[:0]
 }
 
 func (m *mutation) Keys() ([][]byte, error) {

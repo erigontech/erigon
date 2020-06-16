@@ -4,10 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+)
+
+var (
+	remoteTxPool = sync.Pool{New: func() interface{} { return &remoteTx{} }}
 )
 
 type remoteOpts struct {
@@ -46,7 +51,7 @@ type remoteCursor struct {
 }
 
 type remoteNoValuesCursor struct {
-	remoteCursor
+	*remoteCursor
 }
 
 func (opts remoteOpts) ReadOnly() remoteOpts {
@@ -58,15 +63,11 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
-//
-//
-// Example text code:
-//  writeDb, errOpen = ethdb.NewBolt().InMem().Open(ctx)
-//	require.NoError(t, errOpen)
+// Example test code:
+//  writeDb = ethdb.NewMemDatabase().KV()
 //	serverIn, clientOut := io.Pipe()
 //	clientIn, serverOut := io.Pipe()
-//	readDBs, errOpen = ethdb.NewRemote().InMem(clientIn, clientOut).Open(ctx)
-//	require.NoError(t, errOpen)
+//	readDBs = ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen()
 //  go func() {
 // 	    if err := remotedbserver.Server(ctx, writeDb, serverIn, serverOut, nil); err != nil {
 //		    require.NoError(t, err)
@@ -80,21 +81,21 @@ func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
-	db, err := remote.Open(ctx, opts.Remote)
+func (opts remoteOpts) Open() (KV, error) {
+	remoteDB, err := remote.Open(opts.Remote)
 	if err != nil {
 		return nil, err
 	}
 
 	return &RemoteKV{
 		opts:   opts,
-		remote: db,
+		remote: remoteDB,
 		log:    log.New("remote_db", opts.Remote.DialAddress),
 	}, nil
 }
 
-func (opts remoteOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts remoteOpts) MustOpen() KV {
+	db, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
@@ -125,12 +126,19 @@ func (db *RemoteKV) BucketsStat(ctx context.Context) (map[string]common.StorageB
 	return db.remote.BucketsStat(ctx)
 }
 
+func (db *RemoteKV) IdealBatchSize() int {
+	panic("not supported")
+}
+
 func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &remoteTx{db: db, ctx: ctx}
+	t := remoteTxPool.Get().(*remoteTx)
+	defer remoteTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
 	return db.remote.View(ctx, func(tx *remote.Tx) error {
 		t.remote = tx
 		return f(t)
@@ -155,10 +163,6 @@ func (tx *remoteTx) Bucket(name []byte) Bucket {
 	return b
 }
 
-func (tx *remoteTx) cleanup() {
-	// nothing to cleanup
-}
-
 func (c *remoteCursor) Prefix(v []byte) Cursor {
 	c.remote = c.remote.Prefix(v)
 	return c
@@ -175,7 +179,15 @@ func (c *remoteCursor) Prefetch(v uint) Cursor {
 
 func (c *remoteCursor) NoValues() NoValuesCursor {
 	c.remote = c.remote.NoValues()
-	return &remoteNoValuesCursor{remoteCursor: *c}
+	return &remoteNoValuesCursor{remoteCursor: c}
+}
+
+func (b remoteBucket) Size() (uint64, error) {
+	panic("not implemented")
+}
+
+func (b remoteBucket) Clear() error {
+	panic("not supporte")
 }
 
 func (b remoteBucket) Get(key []byte) (val []byte, err error) {

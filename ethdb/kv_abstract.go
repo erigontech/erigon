@@ -12,6 +12,12 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
+	IdealBatchSize() int
+}
+
+type NativeGet interface {
+	Get(ctx context.Context, bucket, key []byte) ([]byte, error)
+	Has(ctx context.Context, bucket, key []byte) (bool, error)
 }
 
 type Tx interface {
@@ -26,6 +32,9 @@ type Bucket interface {
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
 	Cursor() Cursor
+
+	Size() (uint64, error)
+	Clear() error
 }
 
 type Cursor interface {
@@ -62,4 +71,5 @@ const (
 	Bolt DbProvider = iota
 	Badger
 	Remote
+	Lmdb
 )

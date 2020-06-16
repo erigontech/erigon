@@ -2,20 +2,25 @@ run:
   deadline: 10m
 
 linters:
+  disable-all: true
   enable:
     - errcheck
     - goconst
     - gofmt
-#    - golint
+    - golint
     - interfacer
-
-  disable-all: true
 
 linters-settings:
   golint:
-    min-confidence: 1
+    min-confidence: 0
   goconst:
     min-len: 2
     min-occurrences: 2
   gofmt:
     auto-fix: false
+
+issues:
+  exclude-rules:
+    - linters:
+        - golint
+      text: "should be"

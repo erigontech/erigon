@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -77,19 +76,10 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-const StateBatchSize = 50 * 1024 * 1024 // 50 Mb
-const ChangeBatchSize = 1024 * 2014     // 1 Mb
-const prof = true
-
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache) error {
-	lastProcessedBlockNumber := s.BlockNumber
-
-	nextBlockNumber := uint64(0)
-
-	atomic.StoreUint64(&nextBlockNumber, lastProcessedBlockNumber+1)
-	profileNumber := atomic.LoadUint64(&nextBlockNumber)
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
+	nextBlockNumber := s.BlockNumber
 	if prof {
-		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", profileNumber))
+		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
 		if err != nil {
 			log.Error("could not create CPU profile", "error", err)
 			return err
@@ -100,10 +90,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 	}
 
-	stateBatch := stateDB.NewBatch()
-	changeBatch := stateDB.NewBatch()
+	batch := stateDB.NewBatch()
 
-	progressLogger := NewProgressLogger(logInterval, stateBatch)
+	progressLogger := NewProgressLogger(logInterval, batch)
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
@@ -115,20 +104,23 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
+	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1)
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
 
-		blockNum := atomic.LoadUint64(&nextBlockNumber)
+		blockNum := atomic.LoadUint64(&nextBlockNumber) + 1
 		if limit > 0 && blockNum >= limit {
 			break
 		}
 
-		block := blockchain.GetBlockByNumber(blockNum)
+		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
+		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
 		if block == nil {
 			break
 		}
+		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
 		type cacheSetter interface {
 			SetAccountCache(cache *fastcache.Cache)
@@ -146,11 +138,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			cacheSetter
 		}
 		if core.UsePlainStateExecution {
-			stateReader = state.NewPlainStateReader(stateBatch)
-			stateWriter = state.NewPlainStateWriter(stateBatch, changeBatch, blockNum)
+			stateReader = state.NewPlainStateReader(batch)
+			stateWriter = state.NewPlainStateWriter(batch, blockNum)
 		} else {
-			stateReader = state.NewDbStateReader(stateBatch)
-			stateWriter = state.NewDbStateWriter(stateBatch, changeBatch, blockNum)
+			stateReader = state.NewDbStateReader(batch)
+			stateWriter = state.NewDbStateWriter(batch, blockNum)
 		}
 		stateReader.SetAccountCache(accountCache)
 		stateReader.SetStorageCache(storageCache)
@@ -163,64 +155,55 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
-		err := core.ExecuteBlockEuphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
+		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
 		if err != nil {
 			return err
 		}
 
-		if err = s.Update(stateBatch, blockNum); err != nil {
-			return err
+		if writeReceipts {
+			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
 		}
 
-		atomic.AddUint64(&nextBlockNumber, 1)
-
-		if stateBatch.BatchSize() >= StateBatchSize {
+		if batch.BatchSize() >= stateDB.IdealBatchSize() {
+			if err = s.Update(batch, blockNum); err != nil {
+				return err
+			}
 			start := time.Now()
-			if _, err = stateBatch.Commit(); err != nil {
+			if _, err = batch.Commit(); err != nil {
 				return err
 			}
-			log.Info("State batch committed", "in", time.Since(start))
-		}
-		if changeBatch.BatchSize() >= ChangeBatchSize {
-			if _, err = changeBatch.Commit(); err != nil {
-				return err
-			}
+			log.Info("Batch committed", "in", time.Since(start), "size", common.StorageSize(batch.BatchSize()))
 		}
 
 		if prof {
-			if blockNum-profileNumber == 100000 {
-				// Flush the profiler
+			if blockNum-s.BlockNumber == 100000 {
+				// Flush the CPU profiler
 				pprof.StopCPUProfile()
+
+				// And the memory profiler
+				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
+				defer f.Close()
+				runtime.GC()
+				if err = pprof.WriteHeapProfile(f); err != nil {
+					log.Error("could not save memory profile", "error", err)
+				}
 			}
 		}
 	}
 
-	_, err := stateBatch.Commit()
-	if err != nil {
-		return fmt.Errorf("sync Execute: failed to write state batch commit: %v", err)
+	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
+		return err
 	}
-	_, err = changeBatch.Commit()
-	if err != nil {
-		return fmt.Errorf("sync Execute: failed to write change batch commit: %v", err)
+	if _, err := batch.Commit(); err != nil {
+		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	log.Info("Completed on", "block", atomic.LoadUint64(&nextBlockNumber))
 	s.Done()
 	return nil
 }
 
-func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Execution)
-	if err != nil {
-		return fmt.Errorf("unwind Execution: get stage progress: %v", err)
-	}
-
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.Execution, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Execution: reset: %v", err)
-		}
-		return nil
-	}
-	log.Info("Unwind Execution stage", "from", lastProcessedBlockNumber, "to", unwindPoint)
+func unwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 
 	rewindFunc := ethdb.RewindData
@@ -243,7 +226,7 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		recoverCodeHashFunc = recoverCodeHashPlain
 	}
 
-	accountMap, storageMap, err := rewindFunc(stateDB, lastProcessedBlockNumber, unwindPoint)
+	accountMap, storageMap, err := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
@@ -278,14 +261,13 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 		}
 	}
 
-	for i := lastProcessedBlockNumber; i > unwindPoint; i-- {
+	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
 		if err = deleteChangeSets(mutation, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
 		}
 	}
 
-	err = stages.SaveStageUnwind(mutation, stages.Execution, 0)
-	if err != nil {
+	if err = u.Done(mutation); err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
 
@@ -293,7 +275,6 @@ func unwindExecutionStage(unwindPoint uint64, stateDB ethdb.Database) error {
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
-
 	return nil
 }
 
@@ -324,7 +305,7 @@ func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) erro
 		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
 			return rawdb.PlainReadAccount(db, address, out)
 		},
-		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address, inc) },
+		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
 		return err
 	}
@@ -370,7 +351,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Getter, key string) {
 	var address common.Address
 	copy(address[:], []byte(key))
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address, acc.Incarnation)); err2 == nil {
+		if codeHash, err2 := db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}

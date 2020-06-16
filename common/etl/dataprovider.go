@@ -10,11 +10,10 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ugorji/go/codec"
 )
 
 type dataProvider interface {
-	Next(*codec.Decoder) ([]byte, []byte, error)
+	Next(decoder Decoder) ([]byte, []byte, error)
 	Dispose() error
 }
 
@@ -23,8 +22,13 @@ type fileDataProvider struct {
 	reader io.Reader
 }
 
-func FlushToDisk(currentKey []byte, b *sortableBuffer, datadir string) (dataProvider, error) {
-	if len(b.entries) == 0 {
+type Encoder interface {
+	Encode(toWrite interface{}) error
+	Reset(writer io.Writer)
+}
+
+func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (dataProvider, error) {
+	if b.Len() == 0 {
 		return nil, nil
 	}
 	bufferFile, err := ioutil.TempFile(datadir, "tg-sync-sortable-buf")
@@ -37,11 +41,9 @@ func FlushToDisk(currentKey []byte, b *sortableBuffer, datadir string) (dataProv
 	defer func() {
 		bufferFile.Sync() //nolint:errcheck
 	}()
-
-	b.encoder.Reset(w)
-
-	for i := range b.entries {
-		err = writeToDisk(b.encoder, b.entries[i].key, b.entries[i].value)
+	encoder.Reset(w)
+	for _, entry := range b.GetEntries() {
+		err = writeToDisk(encoder, entry.key, entry.value)
 		if err != nil {
 			return nil, fmt.Errorf("error writing entries to disk: %v", err)
 		}
@@ -61,13 +63,12 @@ func FlushToDisk(currentKey []byte, b *sortableBuffer, datadir string) (dataProv
 		"current key", currentKeyStr,
 		"name", bufferFile.Name(),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	b.entries = b.entries[:0] // keep the capacity
-	b.size = 0
+	b.Reset()
 
 	return &fileDataProvider{bufferFile, nil}, nil
 }
 
-func (p *fileDataProvider) Next(decoder *codec.Decoder) ([]byte, []byte, error) {
+func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 	if p.reader == nil {
 		_, err := p.file.Seek(0, 0)
 		if err != nil {
@@ -95,7 +96,7 @@ func (p *fileDataProvider) String() string {
 	return fmt.Sprintf("%T(file: %s)", p, p.file.Name())
 }
 
-func writeToDisk(encoder *codec.Encoder, key []byte, value []byte) error {
+func writeToDisk(encoder Encoder, key []byte, value []byte) error {
 	toWrite := [][]byte{key, value}
 	return encoder.Encode(toWrite)
 }
@@ -107,15 +108,15 @@ func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
 }
 
 type memoryDataProvider struct {
-	buffer       *sortableBuffer
+	buffer       Buffer
 	currentIndex int
 }
 
-func KeepInRAM(buffer *sortableBuffer) dataProvider {
+func KeepInRAM(buffer Buffer) dataProvider {
 	return &memoryDataProvider{buffer, 0}
 }
 
-func (p *memoryDataProvider) Next(decoder *codec.Decoder) ([]byte, []byte, error) {
+func (p *memoryDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 	if p.currentIndex >= p.buffer.Len() {
 		return nil, nil, io.EOF
 	}

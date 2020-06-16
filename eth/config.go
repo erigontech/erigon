@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"fmt"
 	"math/big"
 	"os"
 	"os/user"
@@ -30,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -53,7 +53,7 @@ var DefaultConfig = Config{
 	TrieCleanCache:     256,
 	TrieDirtyCache:     256,
 	TrieTimeout:        60 * time.Minute,
-	StorageMode:        DefaultStorageMode,
+	StorageMode:        ethdb.DefaultStorageMode,
 	Miner: miner.Config{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -88,52 +88,6 @@ func init() {
 	}
 }
 
-type StorageMode struct {
-	History   bool
-	Receipts  bool
-	TxIndex   bool
-	Preimages bool
-}
-
-var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true}
-
-func (m StorageMode) ToString() string {
-	modeString := ""
-	if m.History {
-		modeString += "h"
-	}
-	if m.Preimages {
-		modeString += "p"
-	}
-	if m.Receipts {
-		modeString += "r"
-	}
-	if m.TxIndex {
-		modeString += "t"
-	}
-	return modeString
-}
-
-func StorageModeFromString(flags string) (StorageMode, error) {
-	mode := StorageMode{}
-	for _, flag := range flags {
-		switch flag {
-		case 'h':
-			mode.History = true
-		case 'r':
-			mode.Receipts = true
-		case 't':
-			mode.TxIndex = true
-		case 'p':
-			mode.Preimages = true
-		default:
-			return mode, fmt.Errorf("unexpected flag found: %c", flag)
-		}
-	}
-
-	return mode, nil
-}
-
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Config struct {
@@ -153,7 +107,7 @@ type Config struct {
 	NoPrefetch    bool   // Whether to disable prefetching and only load state on demand
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
-	StorageMode StorageMode
+	StorageMode ethdb.StorageMode
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them

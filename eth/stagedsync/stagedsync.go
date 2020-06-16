@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"fmt"
 	"runtime"
 	"time"
 
@@ -12,38 +11,46 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func DoStagedSyncWithFetchers(
+const prof = false // whether to profile
+
+func PrepareStagedSync(
 	d DownloaderGlue,
 	blockchain BlockChain,
 	stateDB ethdb.Database,
 	pid string,
-	history bool,
+	storageMode ethdb.StorageMode,
 	datadir string,
 	quitCh chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
-) error {
+) (*State, error) {
 	defer log.Info("Staged sync finished")
 
 	stages := []*Stage{
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState) error {
-				return DownloadHeaders(s, d, stateDB, headersFetchers, datadir, quitCh)
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnHeaderDownloadStage(s, u, d, headersFetchers)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodies",
-			ExecFunc: func(s *StageState) error {
-				return spawnBodyDownloadStage(s, d, pid)
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return spawnBodyDownloadStage(s, u, d, pid)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindBodyDownloadStage(u, stateDB)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				const batchSize = 10000
 				const blockSize = 4096
 				n := runtime.NumCPU()
@@ -60,83 +67,81 @@ func DoStagedSyncWithFetchers(
 				}
 				return spawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), datadir, quitCh)
 			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindSendersStage(u, stateDB)
+			},
 		},
 		{
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
-			ExecFunc: func(s *StageState) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests)
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindExecutionStage(u, s, stateDB)
 			},
 		},
 		{
 			ID:          stages.HashState,
 			Description: "Hashing the key in the state",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindHashStateStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generating intermediate hashes and validating final hash",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
 			ID:                  stages.AccountHistoryIndex,
 			Description:         "Generating account history index",
-			Disabled:            !history,
+			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindAccountHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
 			},
 		},
 		{
 			ID:                  stages.StorageHistoryIndex,
 			Description:         "Generating storage history index",
-			Disabled:            !history,
+			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
-			ExecFunc: func(s *StageState) error {
+			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindStorageHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
+			},
+		},
+		{
+			ID:                  stages.TxLookup,
+			Description:         "Generating tx lookup index",
+			Disabled:            !storageMode.TxIndex,
+			DisabledDescription: "Enable by adding `t` to --storage-mode",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return spawnTxLookup(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindTxLookup(u, stateDB, quitCh)
 			},
 		},
 	}
 
-	state := NewState(stages[2:3])
-
-	for !state.IsDone() {
-		index, stage := state.CurrentStage()
-
-		if stage.Disabled {
-			message := fmt.Sprintf(
-				"Sync stage %d/%d. %v disabled. %s",
-				index+1,
-				state.Len(),
-				stage.Description,
-				stage.DisabledDescription,
-			)
-
-			log.Info(message)
-
-			state.NextStage()
-			continue
-		}
-
-		stageState, err := state.StageState(stage.ID, stateDB)
-		if err != nil {
-			return err
-		}
-
-		message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, state.Len(), stage.Description)
-		log.Info(message)
-
-		err = stage.ExecFunc(stageState)
-		if err != nil {
-			return err
-		}
-
-		log.Info(fmt.Sprintf("%s DONE!", message))
+	state := NewState(stages)
+	if err := state.LoadUnwindInfo(stateDB); err != nil {
+		return nil, err
 	}
-
-	return nil
+	return state, nil
 }

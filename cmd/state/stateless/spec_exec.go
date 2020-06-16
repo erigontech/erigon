@@ -70,7 +70,7 @@ func (ct *CombTracer) ResetSets() {
 func (ct *CombTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
-func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	if op == vm.SSTORE {
 		addr := contract.Address()
 		if stack.Len() == 0 {
@@ -120,7 +120,7 @@ func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 	}
 	return nil
 }
-func (ct *CombTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (ct *CombTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (ct *CombTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
@@ -158,8 +158,7 @@ func speculativeExecution(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
-	check(err)
+	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	depFile, err := os.OpenFile("/Volumes/tb41/turbo-geth/spec_execution.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)

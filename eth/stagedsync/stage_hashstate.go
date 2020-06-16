@@ -1,15 +1,9 @@
 package stagedsync
 
 import (
-	"bufio"
-	"bytes"
-	"container/heap"
+	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
-	"runtime"
-	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -17,12 +11,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 
-	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 )
 
@@ -45,83 +37,124 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 
 	if core.UsePlainStateExecution {
 		log.Info("Promoting plain state", "from", hashProgress, "to", syncHeadNumber)
-		err := promoteHashedState(stateDB, hashProgress, syncHeadNumber, datadir, quit)
+		err := promoteHashedState(s, stateDB, hashProgress, syncHeadNumber, datadir, quit)
+		if err != nil {
+			return err
+		}
+	}
+	if err := verifyRootHash(stateDB, syncHeadNumber); err != nil {
+		return err
+	}
+	return s.DoneAndUpdate(stateDB, syncHeadNumber)
+}
+
+func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
+	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
+	syncHeadHeader := rawdb.ReadHeader(stateDB, hash, syncHeadNumber)
+	log.Info("Validating root hash", "block", syncHeadNumber, "blockRoot", syncHeadHeader.Root.Hex())
+	loader := trie.NewSubTrieLoader(syncHeadNumber)
+	rl := trie.NewRetainList(0)
+	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
+	if err1 != nil {
+		return fmt.Errorf("checking root hash failed (err=%v)", err1)
+	}
+	if len(subTries.Hashes) != 1 {
+		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
+	}
+	if subTries.Hashes[0] != syncHeadHeader.Root {
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadHeader.Root)
+	}
+	return nil
+}
+
+func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
+		return err
+	}
+	if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
+		return err
+	}
+	if err := u.Done(stateDB); err != nil {
+		return fmt.Errorf("unwind HashState: reset: %v", err)
+	}
+	return nil
+}
+
+func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+	// Currently it does not require unwinding because it does not create any Intemediate Hash records
+	// and recomputes the state root from scratch
+	prom := NewPromoter(stateDB, quit)
+	prom.TempDir = datadir
+	if err := prom.Unwind(s, u, dbutils.PlainAccountChangeSetBucket, 0x00); err != nil {
+		return err
+	}
+	if err := prom.Unwind(s, u, dbutils.PlainStorageChangeSetBucket, 0x01); err != nil {
+		return err
+	}
+	return nil
+}
+
+func promoteHashedState(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
+	if from == 0 {
+		return promoteHashedStateCleanly(s, db, to, datadir, quit)
+	}
+	return promoteHashedStateIncrementally(s, from, to, db, datadir, quit)
+}
+
+func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, datadir string, quit chan struct{}) error {
+	var err error
+	if err = common.Stopped(quit); err != nil {
+		return err
+	}
+	var loadStartKey []byte
+	skipCurrentState := false
+	if len(s.StageData) == 1 && s.StageData[0] == byte(0xFF) {
+		skipCurrentState = true
+	} else if len(s.StageData) > 0 {
+		loadStartKey, err = etl.NextKey(s.StageData[1:])
 		if err != nil {
 			return err
 		}
 	}
 
-	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
-	syncHeadBlock := rawdb.ReadBlock(stateDB, hash, syncHeadNumber)
-
-	blockNr := syncHeadBlock.Header().Number.Uint64()
-
-	log.Info("Validating root hash", "block", blockNr, "blockRoot", syncHeadBlock.Root().Hex())
-	loader := trie.NewSubTrieLoader(blockNr)
-	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
-	if err1 != nil {
-		return errors.Wrap(err1, "checking root hash failed")
-	}
-	if len(subTries.Hashes) != 1 {
-		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
-	}
-	if subTries.Hashes[0] != syncHeadBlock.Root() {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadBlock.Root())
-	}
-
-	return s.DoneAndUpdate(stateDB, blockNr)
-}
-
-func unwindHashStateStage(unwindPoint uint64, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.HashState)
-	if err != nil {
-		return fmt.Errorf("unwind HashCheck: get stage progress: %v", err)
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.HashState, 0)
-		if err != nil {
-			return fmt.Errorf("unwind HashCheck: reset: %v", err)
+	if !skipCurrentState {
+		toStateStageData := func(k []byte) []byte {
+			return append([]byte{0xFF}, k...)
 		}
-		return nil
-	}
-	prom := NewPromoter(stateDB, quit)
-	prom.TempDir = datadir
-	if err = prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
-		return err
-	}
-	if err = prom.Unwind(lastProcessedBlockNumber, unwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(stateDB, stages.HashState, 0); err != nil {
-		return fmt.Errorf("unwind HashCheck: reset: %v", err)
-	}
-	return nil
-}
 
-func promoteHashedState(db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
-	if from == 0 {
-		return promoteHashedStateCleanly(db, datadir, quit)
-	}
-	return promoteHashedStateIncrementally(from, to, db, datadir, quit)
-}
+		err = etl.Transform(
+			db,
+			dbutils.PlainStateBucket,
+			dbutils.CurrentStateBucket,
+			datadir,
+			keyTransformExtractFunc(transformPlainStateKey),
+			etl.IdentityLoadFunc,
+			etl.TransformArgs{
+				Quit:         quit,
+				LoadStartKey: loadStartKey,
+				OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
+					if isDone {
+						return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(nil))
+					}
+					return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(key))
+				},
+			},
+		)
 
-func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan struct{}) error {
-	if err := common.Stopped(quit); err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
-	err := etl.Transform(
-		db,
-		dbutils.PlainStateBucket,
-		dbutils.CurrentStateBucket,
-		datadir,
-		keyTransformExtractFunc(transformPlainStateKey),
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{Quit: quit},
-	)
 
-	if err != nil {
-		return err
+	toCodeStageData := func(k []byte) []byte {
+		return append([]byte{0xCD}, k...)
+	}
+
+	if len(s.StageData) > 0 && s.StageData[0] == byte(0xCD) {
+		loadStartKey, err = etl.NextKey(s.StageData[1:])
+		if err != nil {
+			return err
+		}
 	}
 
 	return etl.Transform(
@@ -131,7 +164,16 @@ func promoteHashedStateCleanly(db ethdb.Database, datadir string, quit chan stru
 		datadir,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
-		etl.TransformArgs{Quit: quit},
+		etl.TransformArgs{
+			Quit:         quit,
+			LoadStartKey: loadStartKey,
+			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return s.UpdateWithStageData(batch, to, nil)
+				}
+				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
+			},
+		},
 	)
 }
 
@@ -185,16 +227,12 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 	return compositeKey, nil
 }
 
-func keyTransformLoadFunc(k []byte, valueDecoder etl.Decoder, state etl.State, next etl.LoadNextFunc) error {
-	var v []byte
-	if err := valueDecoder.Decode(&v); err != nil {
-		return err
-	}
+func keyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
 	newK, err := transformPlainStateKey(k)
 	if err != nil {
 		return err
 	}
-	return next(newK, v)
+	return next(newK, value)
 }
 
 func NewPromoter(db ethdb.Database, quitCh chan struct{}) *Promoter {
@@ -231,355 +269,170 @@ var promoterMapper = map[string]struct {
 		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
 		Template: "st-prom-",
 	},
+	string(dbutils.AccountChangeSetBucket): {
+		WalkerAdapter: func(v []byte) changeset.Walker {
+			return changeset.AccountChangeSetBytes(v)
+		},
+		KeySize:  common.HashLength,
+		Template: "acc-prom-",
+	},
+	string(dbutils.StorageChangeSetBucket): {
+		WalkerAdapter: func(v []byte) changeset.Walker {
+			return changeset.StorageChangeSetBytes(v)
+		},
+		KeySize:  common.HashLength + common.IncarnationLength + common.HashLength,
+		Template: "st-prom-",
+	},
 }
 
-func (p *Promoter) fillChangeSetBuffer(bucket []byte, blockNum, to uint64, changesets []byte, offsets []int) (bool, uint64, []int, error) {
-	offset := 0
-	offsets = offsets[:0]
-	startKey := dbutils.EncodeTimestamp(blockNum)
-	done := true
-	if err := p.db.Walk(bucket, startKey, 0, func(k, v []byte) (bool, error) {
-		if err := common.Stopped(p.quitCh); err != nil {
-			return false, err
+func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
+	mapping, ok := promoterMapper[string(changeSetBucket)]
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		if !ok {
+			return fmt.Errorf("unknown bucket type: %s", changeSetBucket)
 		}
-		blockNum, _ = dbutils.DecodeTimestamp(k)
-		if blockNum > to {
-			return false, nil
-		}
-		if offset+len(v) > len(changesets) { // Adding the current changeset would overflow the buffer
-			done = false
-			return false, nil
-		}
-		copy(changesets[offset:], v)
-		offset += len(v)
-		offsets = append(offsets, offset)
-		return true, nil
-	}); err != nil {
-		return true, blockNum, offsets, fmt.Errorf("walking over account changeset for block %d: %v", blockNum, err)
+		return mapping.WalkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			return next(k, k, nil)
+		})
 	}
-	return done, blockNum, offsets, nil
 }
 
-// writeBufferMapToTempFile creates temp file in the datadir and writes bufferMap into it
-// if sucessful, returns the name of the created file. File is closed
-func (p *Promoter) writeBufferMapToTempFile(pattern string, bufferMap map[string]struct{}) (string, error) {
-	var filename string
-	keys := make([]string, len(bufferMap))
-	i := 0
-	for key := range bufferMap {
-		keys[i] = key
-		i++
-	}
-	sort.Strings(keys)
-	var w *bufio.Writer
-	if bufferFile, err := ioutil.TempFile(p.TempDir, pattern); err == nil {
-		//nolint:errcheck
-		defer bufferFile.Close()
-		filename = bufferFile.Name()
-		w = bufio.NewWriter(bufferFile)
-	} else {
-		return filename, fmt.Errorf("creating temp buf file %s: %v", pattern, err)
-	}
-	for _, key := range keys {
-		if _, err := w.Write([]byte(key)); err != nil {
-			return filename, err
+func getUnwindExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
+	mapping, ok := promoterMapper[string(changeSetBucket)]
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		if !ok {
+			return fmt.Errorf("unknown bucket type: %s", changeSetBucket)
 		}
+		return mapping.WalkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			return next(k, k, v)
+		})
 	}
-	if err := w.Flush(); err != nil {
-		return filename, fmt.Errorf("flushing file %s: %v", filename, err)
-	}
-	return filename, nil
 }
 
-func (p *Promoter) writeUnwindBufferMapToTempFile(pattern string, bufferMap map[string][]byte) (string, error) {
-	var filename string
-	keys := make([]string, len(bufferMap))
-	i := 0
-	for key := range bufferMap {
-		keys[i] = key
-		i++
-	}
-	sort.Strings(keys)
-	var w *bufio.Writer
-	if bufferFile, err := ioutil.TempFile(p.TempDir, pattern); err == nil {
-		//nolint:errcheck
-		defer bufferFile.Close()
-		filename = bufferFile.Name()
-		w = bufio.NewWriter(bufferFile)
-	} else {
-		return filename, fmt.Errorf("creating temp buf file %s: %v", pattern, err)
-	}
-	for _, key := range keys {
-		if _, err := w.Write([]byte(key)); err != nil {
-			return filename, err
+func getFromPlainStateAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
+	return func(k []byte, _ []byte, state etl.State, next etl.LoadNextFunc) error {
+		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
+		value, err := db.Get(dbutils.PlainStateBucket, k)
+		if err == nil || errors.Is(err, ethdb.ErrKeyNotFound) {
+			return loadFunc(k, value, state, next)
 		}
-		value := bufferMap[key]
-		if err := w.WriteByte(byte(len(value))); err != nil {
-			return filename, err
-		}
-		if _, err := w.Write(value); err != nil {
-			return filename, err
-		}
-	}
-	if err := w.Flush(); err != nil {
-		return filename, fmt.Errorf("flushing file %s: %v", filename, err)
-	}
-	return filename, nil
-}
-
-func (p *Promoter) mergeFilesAndCollect(bufferFileNames []string, keyLength int, collector *etl.Collector) error {
-	h := &etl.Heap{}
-	heap.Init(h)
-	readers := make([]io.Reader, len(bufferFileNames))
-	for i, fileName := range bufferFileNames {
-		if f, err := os.Open(fileName); err == nil {
-			readers[i] = bufio.NewReader(f)
-			//nolint:errcheck
-			defer f.Close()
-		} else {
-			return err
-		}
-		// Read first key
-		keyBuf := make([]byte, keyLength)
-		if n, err := io.ReadFull(readers[i], keyBuf); err == nil && n == keyLength {
-			heap.Push(h, etl.HeapElem{keyBuf, i, nil})
-		} else {
-			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
-		}
-	}
-	// By now, the heap has one element for each buffer file
-	var prevKey []byte
-	for h.Len() > 0 {
-		if err := common.Stopped(p.quitCh); err != nil {
-			return err
-		}
-		element := (heap.Pop(h)).(etl.HeapElem)
-		if !bytes.Equal(element.Key, prevKey) {
-			// Ignore all the repeating keys
-			prevKey = common.CopyBytes(element.Key)
-			if v, err := p.db.Get(dbutils.PlainStateBucket, element.Key); err == nil || err == ethdb.ErrKeyNotFound {
-				if err1 := collector.Collect(element.Key, v); err1 != nil {
-					return err1
-				}
-			} else {
-				return err
-			}
-		}
-		reader := readers[element.TimeIdx]
-		// Try to read the next key (reuse the element)
-		if n, err := io.ReadFull(reader, element.Key); err == nil && n == keyLength {
-			heap.Push(h, element)
-		} else if err != io.EOF {
-			// If it is EOF, we simply do not return anything into the heap
-			return fmt.Errorf("next reading from account buffer file: %d %x %v", n, element.Key[:n], err)
-		}
-	}
-	return nil
-}
-
-func (p *Promoter) mergeUnwindFilesAndCollect(bufferFileNames []string, keyLength int, collector *etl.Collector) error {
-	h := &etl.Heap{}
-	heap.Init(h)
-	readers := make([]io.Reader, len(bufferFileNames))
-	for i, fileName := range bufferFileNames {
-		if f, err := os.Open(fileName); err == nil {
-			readers[i] = bufio.NewReader(f)
-			//nolint:errcheck
-			defer f.Close()
-		} else {
-			return err
-		}
-		// Read first key
-		keyBuf := make([]byte, keyLength)
-		if n, err := io.ReadFull(readers[i], keyBuf); err != nil || n != keyLength {
-			return fmt.Errorf("init reading from account buffer file: %d %x %v", n, keyBuf[:n], err)
-		}
-		var l [1]byte
-		if n, err := io.ReadFull(readers[i], l[:]); err != nil || n != 1 {
-			return fmt.Errorf("init reading from account buffer file: %d %v", n, err)
-		}
-		var valBuf []byte
-		valLength := int(l[0])
-		if valLength > 0 {
-			valBuf = make([]byte, valLength)
-			if n, err := io.ReadFull(readers[i], valBuf); err != nil || n != valLength {
-				return fmt.Errorf("init reading from account buffer file: %d %v", n, err)
-			}
-		}
-		heap.Push(h, etl.HeapElem{keyBuf, i, valBuf})
-	}
-	// By now, the heap has one element for each buffer file
-	var prevKey []byte
-	for h.Len() > 0 {
-		if err := common.Stopped(p.quitCh); err != nil {
-			return err
-		}
-		element := (heap.Pop(h)).(etl.HeapElem)
-		if !bytes.Equal(element.Key, prevKey) {
-			// Ignore all the repeating keys, and take the earlist
-			prevKey = common.CopyBytes(element.Key)
-			if err := collector.Collect(element.Key, element.Value); err != nil {
-				return err
-			}
-		}
-		reader := readers[element.TimeIdx]
-		// Try to read the next key (reuse the element)
-		if n, err := io.ReadFull(reader, element.Key); err == nil && n == keyLength {
-			var l [1]byte
-			if n1, err1 := io.ReadFull(reader, l[:]); err1 != nil || n1 != 1 {
-				return fmt.Errorf("reading from account buffer file: %d %v", n1, err1)
-			}
-			var valBuf []byte
-			valLength := int(l[0])
-			if valLength > 0 {
-				valBuf = make([]byte, valLength)
-				if n1, err1 := io.ReadFull(reader, valBuf); err1 != nil || n1 != valLength {
-					return fmt.Errorf("reading from account buffer file: %d %v", n1, err1)
-				}
-			}
-			element.Value = valBuf
-			heap.Push(h, element)
-		} else if err != io.EOF {
-			// If it is EOF, we simply do not return anything into the heap
-			return fmt.Errorf("next reading from account buffer file: %d %x %v", n, element.Key[:n], err)
-		}
-	}
-	return nil
-}
-
-func (p *Promoter) Promote(from, to uint64, changeSetBucket []byte) error {
-	v, ok := promoterMapper[string(changeSetBucket)]
-	if !ok {
-		return fmt.Errorf("unknown bucket type: %s", changeSetBucket)
-	}
-	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
-	var m runtime.MemStats
-	var bufferFileNames []string
-	changesets := make([]byte, p.ChangeSetBufSize) // 256 Mb buffer by default
-	var offsets []int
-	var done = false
-	blockNum := from + 1
-	for !done {
-		if newDone, newBlockNum, newOffsets, err := p.fillChangeSetBuffer(changeSetBucket, blockNum, to, changesets, offsets); err == nil {
-			done = newDone
-			blockNum = newBlockNum
-			offsets = newOffsets
-		} else {
-			return err
-		}
-		if len(offsets) == 0 {
-			break
-		}
-
-		bufferMap := make(map[string]struct{})
-		prevOffset := 0
-		for _, offset := range offsets {
-			if err := v.WalkerAdapter(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
-				bufferMap[string(k)] = struct{}{}
-				return nil
-			}); err != nil {
-				return err
-			}
-			prevOffset = offset
-		}
-
-		if filename, err := p.writeBufferMapToTempFile(v.Template, bufferMap); err == nil {
-			defer func() {
-				//nolint:errcheck
-				os.Remove(filename)
-			}()
-			bufferFileNames = append(bufferFileNames, filename)
-			runtime.ReadMemStats(&m)
-			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		} else {
-			return err
-		}
-	}
-	if len(offsets) > 0 {
-		collector := etl.NewCollector(p.TempDir)
-		if err := p.mergeFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
-			return err
-		}
-		if err := collector.Load(p.db, dbutils.CurrentStateBucket, keyTransformLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *Promoter) Unwind(from, to uint64, changeSetBucket []byte) error {
-	v, ok := promoterMapper[string(changeSetBucket)]
-	if !ok {
-		return fmt.Errorf("unknown bucket type: %s", changeSetBucket)
-	}
-	log.Info("Unwinding started", "from", from, "to", to, "csbucket", string(changeSetBucket))
-	var m runtime.MemStats
-	var bufferFileNames []string
-	changesets := make([]byte, p.ChangeSetBufSize) // 256 Mb buffer by default
-	var offsets []int
-	var done = false
-	blockNum := to + 1
-	for !done {
-		if newDone, newBlockNum, newOffsets, err := p.fillChangeSetBuffer(changeSetBucket, blockNum, from, changesets, offsets); err == nil {
-			done = newDone
-			blockNum = newBlockNum
-			offsets = newOffsets
-		} else {
-			return err
-		}
-		if len(offsets) == 0 {
-			break
-		}
-
-		bufferMap := make(map[string][]byte)
-		prevOffset := 0
-		for _, offset := range offsets {
-			if err := v.WalkerAdapter(changesets[prevOffset:offset]).Walk(func(k, v []byte) error {
-				ks := string(k)
-				if _, ok := bufferMap[ks]; !ok {
-					// Do not replace the existing values, so we end up with the earlier possible values
-					bufferMap[ks] = v
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			prevOffset = offset
-		}
-
-		if filename, err := p.writeUnwindBufferMapToTempFile(v.Template, bufferMap); err == nil {
-			defer func() {
-				//nolint:errcheck
-				os.Remove(filename)
-			}()
-			bufferFileNames = append(bufferFileNames, filename)
-			runtime.ReadMemStats(&m)
-			log.Info("Created a buffer file", "name", filename, "up to block", blockNum,
-				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		} else {
-			return err
-		}
-	}
-	if len(offsets) > 0 {
-		collector := etl.NewCollector(p.TempDir)
-		if err := p.mergeUnwindFilesAndCollect(bufferFileNames, v.KeySize, collector); err != nil {
-			return err
-		}
-		if err := collector.Load(p.db, dbutils.CurrentStateBucket, keyTransformLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func promoteHashedStateIncrementally(from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
-	prom := NewPromoter(db, quit)
-	prom.TempDir = datadir
-	if err := prom.Promote(from, to, dbutils.PlainAccountChangeSetBucket); err != nil {
 		return err
 	}
-	if err := prom.Promote(from, to, dbutils.PlainStorageChangeSetBucket); err != nil {
+}
+
+func (p *Promoter) Promote(s *StageState, from, to uint64, changeSetBucket []byte, index byte) error {
+	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+
+	startkey := dbutils.EncodeTimestamp(from + 1)
+	skip := false
+
+	var loadStartKey []byte
+	if len(s.StageData) != 0 {
+		// we have finished this stage but didn't start the next one
+		if len(s.StageData) == 1 && s.StageData[0] == index {
+			skip = true
+			// we are already at the next stage
+		} else if s.StageData[0] > index {
+			skip = true
+			// if we at the current stage and we have something meaningful at StageData
+		} else if s.StageData[0] == index {
+			var err error
+			loadStartKey, err = etl.NextKey(s.StageData[1:])
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if skip {
+		return nil
+	}
+
+	return etl.Transform(
+		p.db,
+		changeSetBucket,
+		dbutils.CurrentStateBucket,
+		p.TempDir,
+		getExtractFunc(changeSetBucket),
+		// here we avoid getting the state from changesets,
+		// we just care about the accounts that did change,
+		// so we can directly read from the PlainTextBuffer
+		getFromPlainStateAndLoad(p.db, keyTransformLoadFunc),
+		etl.TransformArgs{
+			BufferType:      etl.SortableAppendBuffer,
+			ExtractStartKey: startkey,
+			LoadStartKey:    loadStartKey,
+			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return s.UpdateWithStageData(putter, from, []byte{index})
+				}
+				return s.UpdateWithStageData(putter, from, append([]byte{index}, key...))
+			},
+			Quit: p.quitCh,
+		},
+	)
+}
+
+func (p *Promoter) Unwind(s *StageState, u *UnwindState, changeSetBucket []byte, index byte) error {
+	from := s.BlockNumber
+	to := u.UnwindPoint
+
+	log.Info("Unwinding started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+
+	startkey := dbutils.EncodeTimestamp(to + 1)
+
+	var loadStartKey []byte
+	skip := false
+
+	if len(u.StageData) != 0 {
+		// we have finished this stage but didn't start the next one
+		if len(u.StageData) == 1 && u.StageData[0] == index {
+			skip = true
+			// we are already at the next stage
+		} else if u.StageData[0] > index {
+			skip = true
+			// if we at the current stage and we have something meaningful at StageData
+		} else if u.StageData[0] == index {
+			var err error
+			loadStartKey, err = etl.NextKey(u.StageData[1:])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if skip {
+		return nil
+	}
+
+	return etl.Transform(
+		p.db,
+		changeSetBucket,
+		dbutils.CurrentStateBucket,
+		p.TempDir,
+		getUnwindExtractFunc(changeSetBucket),
+		keyTransformLoadFunc,
+		etl.TransformArgs{
+			BufferType:      etl.SortableOldestAppearedBuffer,
+			LoadStartKey:    loadStartKey,
+			ExtractStartKey: startkey,
+			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return u.UpdateWithStageData(putter, []byte{index})
+				}
+				return u.UpdateWithStageData(putter, append([]byte{index}, key...))
+			},
+			Quit: p.quitCh,
+		},
+	)
+}
+
+func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
+	prom := NewPromoter(db, quit)
+	prom.TempDir = datadir
+	if err := prom.Promote(s, from, to, dbutils.PlainAccountChangeSetBucket, 0x01); err != nil {
+		return err
+	}
+	if err := prom.Promote(s, from, to, dbutils.PlainStorageChangeSetBucket, 0x02); err != nil {
 		return err
 	}
 	return nil

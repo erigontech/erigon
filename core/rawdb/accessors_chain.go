@@ -213,9 +213,6 @@ func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
 	if err != nil {
 		log.Crit("Failed to RLP encode header", "err", err)
 	}
-	if common.IsCanceled(ctx) {
-		return
-	}
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), data); err != nil {
 		log.Crit("Failed to store header", "err", err)
 	}

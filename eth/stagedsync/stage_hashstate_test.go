@@ -27,13 +27,13 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(m2, 0, 50, getDataDir(), nil)
+	err := promoteHashedState(&StageState{}, m2, 0, 50, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket, dbutils.ContractCodeBucket)
@@ -49,26 +49,26 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(m2, 0, 50, getDataDir(), nil)
+	err := promoteHashedState(&StageState{}, m2, 0, 50, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 
 	generateBlocks(t, 51, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 = db2.NewBatch()
-	err = promoteHashedState(m2, 50, 101, getDataDir(), nil)
+	err = promoteHashedState(&StageState{BlockNumber: 50}, m2, 50, 101, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
@@ -85,14 +85,14 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 51, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(m2, 50, 101, getDataDir(), nil)
+	err := promoteHashedState(&StageState{}, m2, 50, 101, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 
 	_, err = m2.Commit()
 	if err != nil {
-		t.Errorf("error while commiting state: %v", err)
+		t.Errorf("error while committing state: %v", err)
 	}
 	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
 }
@@ -106,11 +106,13 @@ func TestUnwindHashed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
-	err := promoteHashedState(db2, 0, 100, getDataDir(), nil)
+	err := promoteHashedState(&StageState{}, db2, 0, 100, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
-	err = unwindHashStateStage(50, db2, getDataDir(), nil)
+	u := &UnwindState{UnwindPoint: 50}
+	s := &StageState{BlockNumber: 100}
+	err = unwindHashStateStageImpl(u, s, db2, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}

@@ -8,13 +8,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // externsions for downloader needed for staged sync
-func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, error) {
+func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState, u stagedsync.Unwinder) (bool, error) {
+	d.bodiesState = s
+	d.bodiesUnwinder = u
+	defer func() {
+		d.bodiesState = nil
+		d.bodiesUnwinder = nil
+	}()
+
+	origin := s.BlockNumber
 	// Create cancel channel for aborting mid-flight and mark the master peer
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
@@ -36,7 +44,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 		}
 
 		// Skip non relevant records
-		if len(k) == 8+len(dbutils.HeaderHashSuffix) && bytes.Equal(k[8:], dbutils.HeaderHashSuffix) {
+		if dbutils.CheckCanonicalKey(k) {
 			// This is how we learn about canonical chain
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			if blockNumber != currentNumber {
@@ -47,10 +55,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 			currentNumber++
 			if hashCount < len(hashes) {
 				copy(hashes[hashCount][:], v)
-			}
-			hashCount++
-			if hashCount > len(hashes) { // We allow hashCount to go +1 over what it should be, to let headers to be read
-				return false, nil
+				hashCount++
 			}
 			return true, nil
 		}
@@ -63,27 +68,27 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 			return false, err1
 		}
 		headers[common.BytesToHash(k[8:])] = header
-		return true, nil
+		return hashCount < len(hashes), nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("walking over canonical hashes: %w", err)
 	}
 	if missingHeader != 0 {
-		if err1 := stages.SaveStageProgress(d.stateDB, stages.Headers, missingHeader); err1 != nil {
+		if err1 := u.UnwindTo(missingHeader, d.stateDB); err1 != nil {
 			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
 		}
 		// This will cause the sync return to the header stage
 		return false, nil
 	}
 	d.queue.Reset()
-	if hashCount <= 1 {
+	if hashCount == 0 {
 		// No more bodies to download
 		return false, nil
 	}
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
-	d.queue.ScheduleBodies(from, hashes[:hashCount-1], headers)
-	to := from + uint64(hashCount-1)
+	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
+	to := from + uint64(hashCount)
 
 	select {
 	case d.bodyWakeCh <- true:
@@ -98,11 +103,10 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, origin uint64) (bool, err
 		func() error { return d.processBodiesStage(to) },
 	}
 
-	if err := d.spawnSync(fetchers); err == nil {
-		return true, nil
+	if err := d.spawnSync(fetchers); err != nil {
+		return false, err
 	}
-	log.Error("Trying to rollback 1 block due to error")
-	return true, stages.SaveStageProgress(d.stateDB, stages.Bodies, origin-1)
+	return true, nil
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
@@ -132,6 +136,24 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 	}
 }
 
-func (d *Downloader) SpawnSync(fetchers []func() error) error {
+func (d *Downloader) SpawnHeaderDownloadStage(
+	fetchers []func() error,
+	s *stagedsync.StageState,
+	u stagedsync.Unwinder,
+) error {
+	d.headersState = s
+	d.headersUnwinder = u
+	d.bodiesState = s
+	d.bodiesUnwinder = u
+	defer func() {
+		d.headersState = nil
+		d.headersUnwinder = nil
+		d.bodiesState = nil
+		d.bodiesUnwinder = nil
+	}()
+	d.cancelLock.Lock()
+	d.cancelCh = make(chan struct{})
+	d.cancelLock.Unlock()
+	defer d.Cancel() // No matter what, we can't leave the cancel channel open
 	return d.spawnSync(fetchers)
 }

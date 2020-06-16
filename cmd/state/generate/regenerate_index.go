@@ -1,27 +1,46 @@
 package generate
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"errors"
+	"os"
+	"os/signal"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"time"
 )
 
 func RegenerateIndex(chaindata string, csBucket []byte) error {
-	db, err := ethdb.NewBoltDatabase(chaindata)
-	if err != nil {
-		return err
-	}
-	ig := core.NewIndexGenerator(db, make(chan struct{}))
+	db := ethdb.MustOpen(chaindata)
+	ch := make(chan os.Signal, 1)
+	quitCh := make(chan struct{})
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		<-ch
+		close(quitCh)
+	}()
 
-	err = ig.DropIndex(dbutils.AccountsHistoryBucket)
+	lastExecutedBlock, _, err := stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		//There could be headers without block in the end
+		log.Error("Cant get last executed block", "err", err)
+	}
+
+	ig := core.NewIndexGenerator(db, quitCh)
+	cs, ok := core.CSMapper[string(csBucket)]
+	if !ok {
+		return errors.New("unknown changeset")
+	}
+
+	err = ig.DropIndex(cs.IndexBucket)
 	if err != nil {
 		return err
 	}
 	startTime := time.Now()
 	log.Info("Index generation started", "start time", startTime)
-	err = ig.GenerateIndex(0, csBucket)
+	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket)
 	if err != nil {
 		return err
 	}

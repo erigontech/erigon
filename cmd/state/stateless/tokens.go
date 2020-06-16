@@ -69,10 +69,10 @@ func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Add
 	tt.startMode[depth] = true
 	return nil
 }
-func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
-func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (tt TokenTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
@@ -128,10 +128,9 @@ func makeTokens(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	check(err)
+	//ethDb err := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	tt := NewTokenTracer()
@@ -190,10 +189,9 @@ func makeTokens(blockNum uint64) {
 }
 
 func makeTokenBalances() {
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	check(err)
+	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
@@ -410,10 +408,9 @@ func tokenBalances() {
 }
 
 func makeTokenAllowances() {
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	check(err)
+	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)
