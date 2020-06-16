@@ -31,6 +31,7 @@ import (
 type ObjectDatabase struct {
 	kv  KV
 	log log.Logger
+	id  uint64
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
@@ -39,6 +40,7 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv:  kv,
 		log: logger,
+		id:  id(),
 	}
 }
 
@@ -50,18 +52,19 @@ func NewDatabase(path string) (*ObjectDatabase, error) {
 		if err != nil {
 			return nil, err
 		}
+		return NewObjectDatabase(kv), nil
 	}
 	if strings.HasSuffix(path, "_badger") {
 		kv, err = NewBadger().Path(path).Open()
 		if err != nil {
 			return nil, err
 		}
+		return NewObjectDatabase(kv), nil
 	}
 	kv, err = NewBolt().Path(path).Open()
 	if err != nil {
 		return nil, err
 	}
-
 	return NewObjectDatabase(kv), nil
 }
 
@@ -415,6 +418,5 @@ func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 }
 
 func (db *ObjectDatabase) ID() uint64 {
-	panic("not implemented")
-	//return db.id
+	return db.id
 }
