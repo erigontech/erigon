@@ -87,8 +87,8 @@ type Receiver struct {
 func NewReceiver() *Receiver {
 	return &Receiver{
 		defaultReceiver: trie.NewDefaultReceiver(),
-		accountMap: make(map[string]*accounts.Account),
-		storageMap: make(map[string][]byte),
+		accountMap:      make(map[string]*accounts.Account),
+		storageMap:      make(map[string][]byte),
 	}
 }
 
