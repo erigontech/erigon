@@ -27,21 +27,20 @@ func feemarket(blockNum uint64) {
 		<-sigs
 		interruptCh <- true
 	}()
-	ethDb, err := ethdb.NewDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewDatabase("/home/akhounov/.ethereum/geth/chaindata1")
-	check(err)
+	ethDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata1")
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
-	fmFile, err := os.OpenFile("fee_market.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	check(err)
+	fmFile, openErr := os.OpenFile("fee_market.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(openErr)
 	defer fmFile.Close()
 	w := bufio.NewWriter(fmFile)
 	defer w.Flush()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil, nil, nil)
-	check(err)
+	bcb, openErr := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil, nil, nil)
+	check(openErr)
 	interrupt := false
 	txCount := 0
 	MinFeeMaxChangeDenominator := big.NewInt(8)

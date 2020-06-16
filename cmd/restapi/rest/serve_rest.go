@@ -36,7 +36,7 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 	if remoteDBAddress != "" {
 		db, err = ethdb.NewRemote().Path(remoteDBAddress).Open()
 	} else if chaindata != "" {
-		database, errOpen := ethdb.NewDatabase(chaindata)
+		database, errOpen := ethdb.Open(chaindata)
 		if errOpen != nil {
 			return errOpen
 		}

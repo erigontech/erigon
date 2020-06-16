@@ -122,8 +122,7 @@ func dataDependencies(blockNum uint64) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	check(err)
+	ethDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	depFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/data_dependencies.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)

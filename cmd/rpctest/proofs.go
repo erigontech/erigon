@@ -24,10 +24,7 @@ import (
 
 func proofs(chaindata string, url string, block int) {
 	fileName := "trie.txt"
-	ethDb, err := ethdb.NewDatabase(chaindata)
-	if err != nil {
-		panic(err)
-	}
+	ethDb := ethdb.MustOpen(chaindata)
 	defer ethDb.Close()
 	var t *trie.Trie
 	if _, err := os.Stat(fileName); err != nil {
@@ -172,16 +169,13 @@ func proofs(chaindata string, url string, block int) {
 }
 
 func fixState(chaindata string, url string) {
-	stateDb, err := ethdb.NewDatabase(chaindata)
-	if err != nil {
-		panic(err)
-	}
+	stateDb := ethdb.MustOpen(chaindata)
 	defer stateDb.Close()
 	engine := ethash.NewFullFaker()
 	chainConfig := params.MainnetChainConfig
-	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil, nil, nil)
-	if err != nil {
-		panic(err)
+	bc, errOpen := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil, nil, nil)
+	if errOpen != nil {
+		panic(errOpen)
 	}
 	currentBlock := bc.CurrentBlock()
 	blockNum := currentBlock.NumberU64()
@@ -194,7 +188,7 @@ func fixState(chaindata string, url string) {
 		Timeout: time.Second * 600,
 	}
 
-	err = stateDb.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+	if err := stateDb.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
 		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {
@@ -209,8 +203,7 @@ func fixState(chaindata string, url string) {
 		}
 
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		panic(err)
 	}
 	for addrHash, account := range roots {
@@ -230,7 +223,7 @@ func fixState(chaindata string, url string) {
 				for nextKey != nil {
 					reqID++
 					var sr DebugStorageRange
-					if err = post(client, url, fmt.Sprintf(template, blockHash, 0, address, *nextKey, 1024, reqID), &sr); err != nil {
+					if err := post(client, url, fmt.Sprintf(template, blockHash, 0, address, *nextKey, 1024, reqID), &sr); err != nil {
 						fmt.Printf("Could not get storageRange: %v\n", err)
 						return
 					}
@@ -254,7 +247,7 @@ func fixState(chaindata string, url string) {
 					value := bytes.TrimLeft(entry.Value[:], "\x00")
 					if !bytes.Equal(dbValue, value) {
 						fmt.Printf("Key: %x, value: %x, dbValue: %x\n", key, value, dbValue)
-						if err = stateDb.Put(dbutils.CurrentStateBucket, cKey[:], value); err != nil {
+						if err := stateDb.Put(dbutils.CurrentStateBucket, cKey[:], value); err != nil {
 							fmt.Printf("%v\n", err)
 						}
 					}
@@ -262,24 +255,20 @@ func fixState(chaindata string, url string) {
 				var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 				copy(cKey[:], addrHash[:])
 				binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
-				err = stateDb.Walk(dbutils.CurrentStateBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
+				if err := stateDb.Walk(dbutils.CurrentStateBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
 					var kh common.Hash
 					copy(kh[:], k[common.HashLength+common.IncarnationLength:])
 					if _, ok := sm[kh]; !ok {
 						fmt.Printf("Key: %x, dbValue: %x\n", kh, v)
-						if err = stateDb.Delete(dbutils.CurrentStateBucket, k); err != nil {
+						if err := stateDb.Delete(dbutils.CurrentStateBucket, k); err != nil {
 							fmt.Printf("%v\n", err)
 						}
 					}
 					return true, nil
-				})
-				if err != nil {
+				}); err != nil {
 					panic(err)
 				}
 			}
 		}
-	}
-	if err != nil {
-		panic(err)
 	}
 }

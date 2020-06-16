@@ -13,13 +13,9 @@ import (
 )
 
 func RegenerateTxLookup(chaindata string) error {
-	db, err := ethdb.NewDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	err = db.ClearBuckets(dbutils.TxLookupPrefix)
-	if err != nil {
+	if err := db.ClearBuckets(dbutils.TxLookupPrefix); err != nil {
 		return err
 	}
 	startTime := time.Now()

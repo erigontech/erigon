@@ -16,10 +16,7 @@ import (
 )
 
 func ValidateTxLookups(chaindata string) error {
-	db, err := ethdb.NewDatabase(chaindata)
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(chaindata)
 
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})

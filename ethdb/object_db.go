@@ -44,7 +44,15 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 	}
 }
 
-func NewDatabase(path string) (*ObjectDatabase, error) {
+func MustOpen(path string) *ObjectDatabase {
+	db, err := Open(path)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func Open(path string) (*ObjectDatabase, error) {
 	if strings.HasSuffix(path, "_lmdb") {
 		kv, err := NewLMDB().Path(path).Open()
 		if err != nil {

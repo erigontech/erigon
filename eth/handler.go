@@ -999,10 +999,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 
 		_ = os.Remove("simulator")
-		ethDb, err := ethdb.NewDatabase("simulator")
-		if err != nil {
-			return err
-		}
+		ethDb := ethdb.MustOpen("simulator")
 		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis, true /* history */)
 		if err != nil {
 			return fmt.Errorf("SetupGenesisBlock: %w", err)

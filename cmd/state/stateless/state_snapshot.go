@@ -2,6 +2,7 @@ package stateless
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -150,19 +151,23 @@ func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
 	return err
 }
 
-func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
+//nolint
+func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
-	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
-	check(err)
+
+	diskDb := ethdb.MustOpen(filename)
 	defer diskDb.Close()
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
 		preimage := tx.Bucket(dbutils.PreimagePrefix)
 		count := 0
-		err = diskDb.View(func(txDisk *bolt.Tx) error {
+		if err := diskDb.KV().View(context.Background(), func(txDisk ethdb.Tx) error {
 			bDisk := txDisk.Bucket(dbutils.CurrentStateBucket)
 			cDisk := bDisk.Cursor()
-			for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
+			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
+				if err != nil {
+					return err
+				}
 				if len(k) != 32 {
 					continue
 				}
@@ -178,7 +183,10 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 			}
 			count = 0
 			cDisk = bDisk.Cursor()
-			for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
+			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
+				if err != nil {
+					return err
+				}
 				if len(k) == 32 {
 					continue
 				}
@@ -193,7 +201,10 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 			}
 			count = 0
 			c := b.Cursor()
-			for k, v := c.First(); k != nil; k, v = c.Next() {
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
 				if len(k) != 32 {
 					continue
 				}
@@ -208,7 +219,10 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 				}
 			}
 			c = b.Cursor()
-			for k, v := c.First(); k != nil; k, v = c.Next() {
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
 				if len(k) == 32 {
 					continue
 				}
@@ -223,13 +237,13 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 				}
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
@@ -293,8 +307,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 }
 
 func VerifySnapshot(path string) {
-	ethDb, err := ethdb.NewDatabase(path)
-	check(err)
+	ethDb := ethdb.MustOpen(path)
 	defer ethDb.Close()
 	hash := rawdb.ReadHeadBlockHash(ethDb)
 	number := rawdb.ReadHeaderNumber(ethDb, hash)

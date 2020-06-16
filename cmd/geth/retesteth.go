@@ -421,7 +421,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	}
 	api.engine = engine
 	api.blockchain = blockchain
-	//api.db = state.NewDatabase(api.ethDb)
+	//api.db = state.Open(api.ethDb)
 	api.txMap = make(map[common.Address]map[uint64]*types.Transaction)
 	api.txSenders = make(map[common.Address]struct{})
 	api.blockInterval = 0

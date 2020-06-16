@@ -125,7 +125,7 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 	stream := rlp.NewStream(reader, 0)
 	engine := ethash.NewFullFaker()
 	// keeping all the past block headers in memory
-	headersDB := mustCreateTempDatabase()
+	headersDB := ethdb.MustOpen(getTempFileName())
 	return &ExportFileBlockProvider{stream, engine, headersDB, nil, fh, reader, -1}, nil
 }
 
@@ -137,14 +137,6 @@ func getTempFileName() string {
 	tmpfile.Close()
 	fmt.Printf("creating a temp headers db @ %s\n", tmpfile.Name())
 	return tmpfile.Name()
-}
-
-func mustCreateTempDatabase() ethdb.Database {
-	db, err := ethdb.NewDatabase(getTempFileName())
-	if err != nil {
-		panic(fmt.Errorf("failed to create a temp db for headers: %w", err))
-	}
-	return db
 }
 
 func (p *ExportFileBlockProvider) Close() error {

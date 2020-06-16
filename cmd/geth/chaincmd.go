@@ -418,10 +418,7 @@ func copyDb(ctx *cli.Context) error {
 	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, ethdb.DefaultStorageMode)
 
 	// Create a source peer to satisfy downloader requests from
-	db, err := ethdb.NewDatabase(ctx.Args().First())
-	if err != nil {
-		return err
-	}
+	db := ethdb.MustOpen(ctx.Args().First())
 	hc, err := core.NewHeaderChain(db, chain.Config(), chain.Engine(), func() bool { return false })
 	if err != nil {
 		return err
