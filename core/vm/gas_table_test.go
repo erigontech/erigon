@@ -19,6 +19,7 @@ package vm
 import (
 	"context"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -81,36 +82,40 @@ var eip2200Tests = []struct {
 
 func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
-		address := common.BytesToAddress([]byte("contract"))
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
+			address := common.BytesToAddress([]byte("contract"))
 
-		db := ethdb.NewMemDatabase()
-		tds := state.NewTrieDbState(common.Hash{}, db, 0)
-		s := state.New(tds)
-		s.CreateAccount(address, true)
-		s.SetCode(address, hexutil.MustDecode(tt.input))
-		s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
+			db := ethdb.NewMemDatabase()
+			defer db.Close()
+			tds := state.NewTrieDbState(common.Hash{}, db, 0)
+			s := state.New(tds)
+			s.CreateAccount(address, true)
+			s.SetCode(address, hexutil.MustDecode(tt.input))
+			s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
 
-		s.CommitBlock(context.Background(), tds.DbStateWriter())
+			_ = s.CommitBlock(context.Background(), tds.DbStateWriter())
 
-		// re-initialize the state
-		state := state.New(state.NewDbStateReader(db))
+			// re-initialize the state
+			state := state.New(state.NewDbStateReader(db))
 
-		vmctx := Context{
-			CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
-			Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int) {},
-		}
-		dests := NewDestsCache(100)
-		vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}}, dests)
+			vmctx := Context{
+				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
+				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int) {},
+			}
+			dests := NewDestsCache(100)
+			vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}}, dests)
 
-		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int))
-		if err != tt.failure {
-			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
-		}
-		if used := tt.gaspool - gas; used != tt.used {
-			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
-		}
-		if refund := vmenv.IntraBlockState.GetRefund(); refund != tt.refund {
-			t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
-		}
+			_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int))
+			if err != tt.failure {
+				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+			}
+			if used := tt.gaspool - gas; used != tt.used {
+				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
+			}
+			if refund := vmenv.IntraBlockState.GetRefund(); refund != tt.refund {
+				t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
+			}
+		})
 	}
 }

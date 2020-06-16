@@ -260,7 +260,9 @@ func testParallelPutGet(db MinDatabase) {
 }
 
 func TestMemoryDB_Walk(t *testing.T) {
-	testWalk(NewMemDatabase(), t)
+	db := NewMemDatabase()
+	defer db.Close()
+	testWalk(db, t)
 }
 
 func TestBoltDB_Walk(t *testing.T) {
