@@ -14,9 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
@@ -82,12 +85,38 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		}
 	}()
 
-	firstBlockToProceed := lastProcessedBlockNumber+1
+	firstBlockToProceed := lastProcessedBlockNumber + 1
 
 	onlySecondStage := false
 	var filePath string
 	if !onlySecondStage {
 		fmt.Println("START 3.1")
+
+		// collect canonical hashes
+		t1 := time.Now()
+		fmt.Println("collect hashes", t1)
+		// fixme: it'd be great to have lastBlockNum and optimize next make()
+		canonical := make([]common.Hash, 0, 1_000_000)
+		n:=0
+		err := stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(atomic.LoadUint64(nextBlockNumber)+1), 0, func(k, v []byte) (bool, error) {
+			if err := common.Stopped(quitCh); err != nil {
+				return false, err
+			}
+
+			// Skip non relevant records
+			if dbutils.CheckCanonicalKey(k) {
+				canonical = append(canonical, common.BytesToHash(k[8:]))
+			}
+			n++
+			if n%10000 == 0 {
+				fmt.Println("collect hashes", n)
+			}
+			return true, nil
+		})
+		fmt.Println("collect hashes done", time.Since(t1))
+		if err != nil {
+			return err
+		}
 
 		jobs := make(chan *senderRecoveryJob, cfg.numOfGoroutines*cfg.batchSize)
 		out := make(chan TxsFroms, cfg.batchSize)
@@ -104,43 +133,50 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		}
 		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
 
-		errCh := make(chan error, cfg.readChLen)
+		errCh := make(chan error, 1)
 		doneCh := make(chan struct{})
-		for i := 0; i < cfg.readChLen; i++ {
-			i := i
-			go func() {
-				defer common.SafeClose(doneCh)
-				defer fmt.Println("close sender", i)
-				for {
-					nextNumber := atomic.AddUint64(nextBlockNumber, 1)
+		go func() {
+			defer common.SafeClose(doneCh)
 
-					if err := common.Stopped(quitCh); err != nil {
-						errCh <- err
-						return
-					}
-
-					job := getBlockTxs(mutation, nextNumber)
-					if job == nil {
-						break
-					}
-
-					if cfg.prof || cfg.startTrace {
-						if nextNumber == uint64(cfg.toProcess) {
-							// Flush the profiler
-							pprof.StopCPUProfile()
-							common.SafeClose(quitCh)
-							break
-						}
-					}
-
-					jobs <- job
+			err = stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(atomic.AddUint64(nextBlockNumber, 1)), 0, func(k, v []byte) (bool, error) {
+				if err := common.Stopped(quitCh); err != nil {
+					return false, err
 				}
-			}()
-		}
+				data := v
+				if debug.IsBlockCompressionEnabled() && len(data) > 0 {
+					var err1 error
+					data, err1 = snappy.Decode(nil, v)
+					if err1 != nil {
+						return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err1)
+					}
+				}
+
+				blockNumber := atomic.LoadUint64(nextBlockNumber)
+				job := getBlockTxs(mutation, blockNumber, canonical[blockNumber])
+				if job == nil {
+					return false, nil
+				}
+
+				if cfg.prof || cfg.startTrace {
+					if blockNumber == uint64(cfg.toProcess) {
+						// Flush the profiler
+						pprof.StopCPUProfile()
+						common.SafeClose(quitCh)
+						return false, nil
+					}
+				}
+
+				jobs <- job
+
+				return true, nil
+			})
+
+			errCh <- err
+		}()
 
 		fmt.Println("DONE?")
 
-		filePath := fmt.Sprintf("/home/eugene/eth/froms_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
+		filePath = fmt.Sprintf("/home/eugene/eth/froms_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
 		f, err := os.Create(filePath)
 		if err != nil {
 			return err
@@ -182,9 +218,6 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	}
 
 	fmt.Println("START 3.2")
-	if onlySecondStage {
-		filePath = "/mnt/sdb/turbo-geth/froms_13_0_17.out"
-	}
 	err := recoverSendersFromDisk(cfg, s, stateDB, config, mutation, quitCh, firstBlockToProceed, filePath)
 
 	fmt.Println("DONE!")
@@ -230,14 +263,10 @@ func getBlockBody(mutation *mutationSafe, nextBlockNumber uint64) *blockData {
 	return &blockData{body, hash, nextBlockNumber}
 }
 
-func getBlockTxs(mutation *mutationSafe, nextBlockNumber uint64) *senderRecoveryJob {
-	hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
-	if hash.IsEmpty() {
-		return nil
-	}
+func getBlockTxs(mutation *mutationSafe, nextBlockNumber uint64, hash common.Hash) *senderRecoveryJob {
 	v := rawdb.ReadBodyRLP(mutation, hash, nextBlockNumber)
 
-	return &senderRecoveryJob{v, hash, nextBlockNumber, nil}
+	return &senderRecoveryJob{v, hash, nextBlockNumber}
 }
 
 type mutationSafe struct {
@@ -534,7 +563,6 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 
 	var err error
 	var addr common.Address
-	blockNumber := big.NewInt(0)
 	nextBlockNumber := lastBlockNumber + 1
 	m := &runtime.MemStats{}
 
@@ -542,7 +570,6 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 		// insert for
 		job := getBlockBody(mutation, nextBlockNumber)
 		if job == nil {
-			fmt.Println("111 1", blockNumber.String(), nextBlockNumber)
 			break
 		}
 		nextBlockNumber++
@@ -550,7 +577,6 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 		for i := range job.body.Transactions {
 			addr, err = buf.Next()
 			if err != nil {
-				fmt.Println("111 2", err)
 				return err
 			}
 
@@ -561,7 +587,6 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
 			if err := s.Update(mutation, nextBlockNumber); err != nil {
-				fmt.Println("111 3", err)
 				return err
 			}
 
@@ -569,7 +594,6 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 			log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber, "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 
 			if err := mutation.Commit(); err != nil {
-				fmt.Println("111 4", err)
 				return err
 			}
 
@@ -584,7 +608,6 @@ type senderRecoveryJob struct {
 	blockTxs        rlp.RawValue
 	hash            common.Hash
 	nextBlockNumber uint64
-	err             error
 }
 
 func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}, wg *sync.WaitGroup) {
