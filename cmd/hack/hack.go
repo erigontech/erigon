@@ -2382,6 +2382,26 @@ func testStage6(chaindata string, reset bool) error {
 	return nil
 }
 
+func testUnwind6(chaindata string, rewind uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var err error
+	var stage6progress uint64
+	if stage6progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+		return err
+	}
+	log.Info("Stage6", "progress", stage6progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage6progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage6progress}
+	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
 func printStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2623,6 +2643,11 @@ func main() {
 	}
 	if *action == "stage6" {
 		if err := testStage6(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "unwind6" {
+		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

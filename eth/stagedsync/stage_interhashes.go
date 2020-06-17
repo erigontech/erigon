@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-//nolint:interfacer
 func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	syncHeadNumber, _, err := stages.GetStageProgress(stateDB, stages.HashState)
 	if err != nil {
