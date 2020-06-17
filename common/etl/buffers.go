@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"sort"
 	"strconv"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -184,7 +182,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 
 	b.size += len(k)
 	b.size += len(v)
-	b.entries[string(k)] = common.CopyBytes(v)
+	b.entries[string(k)] = v
 }
 
 func (b *oldestEntrySortableBuffer) Size() int {
@@ -195,8 +193,8 @@ func (b *oldestEntrySortableBuffer) Len() int {
 	return len(b.entries)
 }
 func (b *oldestEntrySortableBuffer) Sort() {
-	for i := range b.entries {
-		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
+	for k, v := range b.entries {
+		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
 	sort.Sort(b)
 }

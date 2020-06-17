@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -233,6 +234,21 @@ func keyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.Load
 	return next(newK, value)
 }
 
+type OldestAppearedLoad struct {
+	innerLoadFunc etl.LoadFunc
+	lastKey bytes.Buffer
+}
+
+func (l OldestAppearedLoad) LoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+	if bytes.Equal(k, l.lastKey.Bytes()) {
+		return nil
+	}
+	l.lastKey.Reset()
+	//nolint:errcheck
+	l.lastKey.Write(k)
+	return l.innerLoadFunc(k, value, state, next)
+}
+
 func NewPromoter(db ethdb.Database, quitCh chan struct{}) *Promoter {
 	return &Promoter{
 		db:               db,
@@ -402,13 +418,15 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, changeSetBucket []byte,
 		return nil
 	}
 
+	var l OldestAppearedLoad
+	l.innerLoadFunc = keyTransformLoadFunc
 	return etl.Transform(
 		p.db,
 		changeSetBucket,
 		dbutils.CurrentStateBucket,
 		p.TempDir,
 		getUnwindExtractFunc(changeSetBucket),
-		keyTransformLoadFunc,
+		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			LoadStartKey:    loadStartKey,

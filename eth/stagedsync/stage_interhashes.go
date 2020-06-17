@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -230,11 +231,10 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 	} else {
 		loadFunc = r.accountLoad
 	}
-
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
-		dbutils.CurrentStateBucket,
+		nil,
 		p.TempDir,
 		getExtractFunc(changeSetBucket),
 		// here we avoid getting the state from changesets,
@@ -293,22 +293,19 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	if skip {
 		return nil
 	}
-	var loadFunc etl.LoadFunc
+	var l OldestAppearedLoad
 	if storage {
-		loadFunc = r.storageLoad
+		l.innerLoadFunc = r.storageLoad
 	} else {
-		loadFunc = r.accountLoad
+		l.innerLoadFunc = r.accountLoad
 	}
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
-		dbutils.CurrentStateBucket,
+		nil,
 		p.TempDir,
 		getUnwindExtractFunc(changeSetBucket),
-		// here we avoid getting the state from changesets,
-		// we just care about the accounts that did change,
-		// so we can directly read from the PlainTextBuffer
-		getFromPlainStateAndLoad(p.db, loadFunc),
+		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
@@ -350,6 +347,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		}
 	}
 	unfurl := trie.NewRetainList(0)
+	sort.Strings(r.unfurlList)
 	for _, ks := range r.unfurlList {
 		unfurl.AddKey([]byte(ks))
 	}
@@ -360,6 +358,9 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		}
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
+		if hash == nil {
+			collector.Collect(k, nil)
+		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
@@ -413,6 +414,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 			}
 		}
 	}
+	sort.Strings(r.unfurlList)
 	unfurl := trie.NewRetainList(0)
 	for _, ks := range r.unfurlList {
 		unfurl.AddKey([]byte(ks))
@@ -424,6 +426,9 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		}
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
+		if hash == nil {
+			collector.Collect(k, nil)
+		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
