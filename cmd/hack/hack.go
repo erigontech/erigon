@@ -2665,7 +2665,7 @@ func main() {
 		}
 	}
 	if *action == "unwind4" {
-		if err := testStage4(*chaindata, uint64(*rewind)); err != nil {
+		if err := testUnwind4(*chaindata, uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
