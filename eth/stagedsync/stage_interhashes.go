@@ -359,7 +359,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			collector.Collect(k, nil)
+			return collector.Collect(k, nil)
 		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
@@ -427,7 +427,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			collector.Collect(k, nil)
+			return collector.Collect(k, nil)
 		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}

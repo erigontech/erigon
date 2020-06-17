@@ -236,7 +236,7 @@ func keyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.Load
 
 type OldestAppearedLoad struct {
 	innerLoadFunc etl.LoadFunc
-	lastKey bytes.Buffer
+	lastKey       bytes.Buffer
 }
 
 func (l OldestAppearedLoad) LoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
