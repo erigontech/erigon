@@ -3,14 +3,15 @@ package etl
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"fmt"
-	"io"
-	"runtime"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
+	"golang.org/x/sync/errgroup"
+	"io"
+	"runtime"
 )
 
 type LoadNextFunc func(k []byte, v []byte) error
@@ -96,6 +97,16 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	}
 	batch := db.NewBatch()
 	state := &bucketState{batch, bucket, args.Quit}
+	batchCh:=make(chan ethdb.DbWithPendingMutations,2)
+	batchPool:=make(chan ethdb.DbWithPendingMutations,2)
+	getBatch:= func() ethdb.DbWithPendingMutations {
+		select {
+		case bt:=<-batchPool:
+			return bt
+		default:
+			return db.NewBatch()
+		}
+	}
 
 	loadNextFunc := func(k, v []byte) error {
 		// we ignore everything that is before this key
@@ -118,9 +129,8 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 					return err
 				}
 			}
-			if _, err := batch.Commit(); err != nil {
-				return err
-			}
+			batchCh <- batch
+			batch = getBatch()
 			var currentKeyStr string
 			if len(k) < 4 {
 				currentKeyStr = fmt.Sprintf("%x", k)
@@ -138,28 +148,56 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		return nil
 	}
 
-	for h.Len() > 0 {
-		if err := common.Stopped(args.Quit); err != nil {
-			return err
-		}
+	wg,_:=errgroup.WithContext(context.TODO())
+	stopWg:=make(chan struct{})
+	wg.Go(func() error {
+		defer close(stopWg)
+		for h.Len() > 0 {
+			if err := common.Stopped(args.Quit); err != nil {
+				return err
+			}
 
-		element := (heap.Pop(h)).(HeapElem)
-		provider := providers[element.TimeIdx]
-		err := loadFunc(element.Key, element.Value, state, loadNextFunc)
-		if err != nil {
-			return err
+			element := (heap.Pop(h)).(HeapElem)
+			provider := providers[element.TimeIdx]
+			err := loadFunc(element.Key, element.Value, state, loadNextFunc)
+			if err != nil {
+				return err
+			}
+			if element.Key, element.Value, err = provider.Next(decoder); err == nil {
+				heap.Push(h, element)
+			} else if err != io.EOF {
+				return fmt.Errorf("error while reading next element from disk: %v", err)
+			}
 		}
-		if element.Key, element.Value, err = provider.Next(decoder); err == nil {
-			heap.Push(h, element)
-		} else if err != io.EOF {
-			return fmt.Errorf("error while reading next element from disk: %v", err)
+		if args.OnLoadCommit != nil {
+			if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
+				return err
+			}
 		}
-	}
-	if args.OnLoadCommit != nil {
-		if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
-			return err
+		_, err := batch.Commit()
+
+		return err
+	})
+	wg.Go(func() error {
+		for {
+			select {
+			case batchToCommit:=<-batchCh:
+				if _, err := batchToCommit.Commit(); err != nil {
+					return err
+				}
+			case <-stopWg:
+				return nil
+			}
 		}
-	}
-	_, err := batch.Commit()
-	return err
+	})
+
+	return wg.Wait()
 }
+
+//INFO [06-16|20:57:07.639] Extraction finished                      it took=1h8m46.590603325s
+//INFO [06-16|22:04:17.115] Collection finished                      it took=1h7m9.476399923s
+//INFO [06-16|22:04:17.115] TxLookup index is successfully regenerated it took=2h15m56.067223609s
+
+//INFO [06-17|01:43:18.207] Extraction finished                      it took=1h5m57.488568422s
+//INFO [06-17|02:24:09.151] Collection finished                      it took=40m50.944475494s
+//INFO [06-17|02:24:09.208] TxLookup index is successfully regenerated it took=1h46m48.490257434s
