@@ -337,10 +337,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
 					copy(acc.CodeHash[:], codeHash)
 				} else {
-					return err1
+					return fmt.Errorf("adjusting codeHash: %w", err)
 				}
 			}
 		}
@@ -405,10 +405,10 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
 					copy(acc.CodeHash[:], codeHash)
 				} else {
-					return fmt.Errorf("adjusting codeHash: %w", err1)
+					return fmt.Errorf("adjusting codeHash: %w", err)
 				}
 			}
 		}
