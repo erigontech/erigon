@@ -52,11 +52,24 @@ func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
 	syncHeadHeader := rawdb.ReadHeader(stateDB, hash, syncHeadNumber)
 	log.Info("Validating root hash", "block", syncHeadNumber, "blockRoot", syncHeadHeader.Root.Hex())
+	{
+		f, err := os.Create(fmt.Sprintf("hashstate_%d.txt", syncHeadNumber))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err = stateDB.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+			fmt.Fprintf(f, "%x %x\n", k, v)
+			return true, nil
+		}); err != nil {
+			return err
+		}
+	}
 	loader := trie.NewSubTrieLoader(syncHeadNumber)
 	rl := trie.NewRetainList(0)
-	subTries, err1 := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
-	if err1 != nil {
-		return fmt.Errorf("checking root hash failed (err=%v)", err1)
+	subTries, err := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
+	if err != nil {
+		return fmt.Errorf("checking root hash failed (err=%v)", err)
 	}
 	if len(subTries.Hashes) != 1 {
 		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
@@ -312,12 +325,9 @@ var promoterMapper = map[string]struct {
 }
 
 func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	mapping, ok := promoterMapper[string(changeSetBucket)]
+	walkerAdapter := promoterMapper[string(changeSetBucket)].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		if !ok {
-			return fmt.Errorf("unknown bucket type: %s", changeSetBucket)
-		}
-		return mapping.WalkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 			return next(k, k, nil)
 		})
 	}
@@ -469,7 +479,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Info("Unwinding started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
@@ -498,15 +508,16 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	}
 
 	var l OldestAppearedLoad
-	l.innerLoadFunc = etl.IdentityLoadFunc
 	var loadBucket []byte
 	var extractFunc etl.ExtractFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
 		extractFunc = getCodeUnwindExtractFunc(p.db)
+		l.innerLoadFunc = codeKeyTransformLoadFunc
 	} else {
 		loadBucket = dbutils.CurrentStateBucket
 		extractFunc = getUnwindExtractFunc(changeSetBucket)
+		l.innerLoadFunc = keyTransformLoadFunc
 	}
 
 	return etl.Transform(
