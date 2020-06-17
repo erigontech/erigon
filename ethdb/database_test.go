@@ -95,7 +95,7 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	t.Parallel()
 
 	for _, k := range testValues {
-		err := db.Put(testBucket, []byte(k), []byte{})
+		err := db.Put(testBucket, []byte(k), []byte{1})
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
@@ -106,8 +106,8 @@ func testPutGet(db MinDatabase, t *testing.T) {
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
-		if len(data) != 0 {
-			t.Fatalf("get returned wrong result, got %q expected nil", string(data))
+		if len(data) != 1 {
+			t.Fatalf("get returned wrong result, got %q expected 1", string(data))
 		}
 	}
 
