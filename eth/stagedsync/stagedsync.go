@@ -61,7 +61,7 @@ func PrepareStagedSync(
 				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindExecutionStage(u, s, stateDB)
+				return UnwindExecutionStage(u, s, stateDB)
 			},
 		},
 		{
