@@ -52,19 +52,6 @@ func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
 	syncHeadHeader := rawdb.ReadHeader(stateDB, hash, syncHeadNumber)
 	log.Info("Validating root hash", "block", syncHeadNumber, "blockRoot", syncHeadHeader.Root.Hex())
-	{
-		f, err := os.Create(fmt.Sprintf("hashstate_%d.txt", syncHeadNumber))
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		if err = stateDB.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
-			fmt.Fprintf(f, "%x %x\n", k, v)
-			return true, nil
-		}); err != nil {
-			return err
-		}
-	}
 	loader := trie.NewSubTrieLoader(syncHeadNumber)
 	rl := trie.NewRetainList(0)
 	subTries, err := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
