@@ -422,6 +422,13 @@ func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	default:
 	}
 
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[b.id])
+	}
+	if len(value) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty values. bucket: %s", dbutils.Buckets[b.id])
+	}
+
 	err := b.tx.tx.Put(b.dbi, key, value, 0)
 	if err != nil {
 		return fmt.Errorf("failed LmdbKV.Put: %w", err)
@@ -517,7 +524,7 @@ func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 	}
 
-	if seek == nil {
+	if len(seek) == 0 {
 		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
 		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
@@ -591,6 +598,12 @@ func (c *lmdbCursor) Put(key []byte, value []byte) error {
 	default:
 	}
 
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
+	}
+	if len(value) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty values. bucket: %s", dbutils.Buckets[c.bucket.id])
+	}
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return err
@@ -637,51 +650,33 @@ func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, err
 }
 
 func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {
-	if c.cursor == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, 0, err
-		}
-	}
-
-	var val []byte
-	if len(c.prefix) == 0 {
-		k, val, err = c.cursor.Get(nil, nil, lmdb.First)
-	} else {
-		k, val, err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
-	}
-	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return []byte{}, uint32(len(val)), nil
-		}
-		return []byte{}, 0, err
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, val = nil, nil
-	}
-	return k, uint32(len(val)), err
+	return c.Seek(c.prefix)
 }
 
-func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, v uint32, err error) {
+func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, vSize uint32, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, 0, err
 		}
 	}
 
-	var val []byte
-	k, val, err = c.cursor.Get(seek, nil, lmdb.SetKey)
+	var v []byte
+	if len(seek) == 0 {
+		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
+	} else {
+		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
+	}
 	if err != nil {
 		if lmdb.IsNotFound(err) {
-			return []byte{}, uint32(len(val)), nil
+			return []byte{}, uint32(len(v)), nil
 		}
 		return []byte{}, 0, err
 	}
 	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, val = nil, nil
+		k, v = nil, nil
 	}
 
-	return k, uint32(len(val)), err
+	return k, uint32(len(v)), err
 }
 
 func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
