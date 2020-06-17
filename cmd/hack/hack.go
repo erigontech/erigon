@@ -2136,10 +2136,10 @@ func regenerate(chaindata string) error {
 		return err
 	}
 	/*
-	quitCh := make(chan struct{})
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-		return err
-	}
+		quitCh := make(chan struct{})
+		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+			return err
+		}
 	*/
 	log.Info("Regeneration ended")
 	return nil
@@ -2315,7 +2315,6 @@ func testSeek(chaindata string) {
 		panic(err)
 	}
 }
-
 
 func testStage4(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
