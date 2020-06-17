@@ -25,7 +25,7 @@ func TestUnwindExecutionStageHashedStatic(t *testing.T) {
 
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestUnwindExecutionStageHashedWithIncarnationChanges(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation)
 
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
@@ -73,7 +73,7 @@ func TestUnwindExecutionStageHashedWithCodeChanges(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	core.UsePlainStateExecution = true
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	core.UsePlainStateExecution = true
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	core.UsePlainStateExecution = true
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
