@@ -2323,8 +2323,6 @@ func testStage5(chaindata string, reset bool) error {
 		check(db.ClearBuckets(
 			dbutils.CurrentStateBucket,
 			dbutils.ContractCodeBucket,
-			dbutils.IntermediateTrieHashBucket,
-			dbutils.IntermediateWitnessSizeBucket,
 		))
 	}
 	var err error
@@ -2346,6 +2344,29 @@ func testStage5(chaindata string, reset bool) error {
 	return nil
 }
 
+func testUnwind5(chaindata string, rewind uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var err error
+	if err = stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
+		return err
+	}
+	var stage5progress uint64
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+		return err
+	}
+	log.Info("Stage5", "progress", stage5progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage5progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage5progress}
+	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
 func testStage6(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2359,18 +2380,10 @@ func testStage6(chaindata string, reset bool) error {
 	if err = stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
 		return err
 	}
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(db, stages.HashState, stage4progress, nil); err != nil {
-		return err
-	}
 	var stage5progress uint64
 	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
 		return err
 	}
-	log.Info("Stage4", "progress", stage4progress)
 	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
@@ -2633,6 +2646,11 @@ func main() {
 	}
 	if *action == "stage5" {
 		if err := testStage5(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "unwind5" {
+		if err := testUnwind5(*chaindata, uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

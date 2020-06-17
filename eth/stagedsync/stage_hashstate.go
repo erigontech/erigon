@@ -67,7 +67,7 @@ func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
 	return nil
 }
 
-func unwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+func UnwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
 		return err
 	}
@@ -508,7 +508,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 		loadBucket = dbutils.CurrentStateBucket
 		extractFunc = getUnwindExtractFunc(changeSetBucket)
 	}
-	
+
 	return etl.Transform(
 		p.db,
 		changeSetBucket,

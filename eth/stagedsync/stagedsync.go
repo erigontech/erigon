@@ -71,7 +71,7 @@ func PrepareStagedSync(
 				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindHashStateStage(u, s, stateDB, datadir, quitCh)
+				return UnwindHashStateStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
