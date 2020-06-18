@@ -92,7 +92,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 		log:             logger,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
-		wg:              sync.WaitGroup{},
+		wg:              &sync.WaitGroup{},
 	}
 
 	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
@@ -155,7 +155,7 @@ type LmdbKV struct {
 	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
 	lmdbCursorPools     []sync.Pool       // pool of lmdb.Cursor objects
 	stopStaleReadsCheck context.CancelFunc
-	wg                  sync.WaitGroup
+	wg                  *sync.WaitGroup
 }
 
 func NewLMDB() lmdbOpts {

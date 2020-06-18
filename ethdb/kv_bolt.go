@@ -99,7 +99,7 @@ type BoltKV struct {
 	bolt        *bolt.DB
 	log         log.Logger
 	stopMetrics context.CancelFunc
-	wg          sync.WaitGroup
+	wg          *sync.WaitGroup
 }
 
 type boltTx struct {
@@ -176,7 +176,7 @@ func (opts boltOpts) Open() (KV, error) {
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-		wg:   sync.WaitGroup{},
+		wg:   &sync.WaitGroup{},
 	}
 
 	if metrics.Enabled {

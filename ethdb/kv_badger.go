@@ -61,7 +61,7 @@ func (opts badgerOpts) Open() (KV, error) {
 		opts:   opts,
 		badger: badgerDB,
 		log:    logger,
-		wg:     sync.WaitGroup{},
+		wg:     &sync.WaitGroup{},
 	}
 
 	if !opts.Badger.InMemory {
@@ -92,7 +92,7 @@ type badgerKV struct {
 	badger *badger.DB
 	log    log.Logger
 	stopGC context.CancelFunc
-	wg     sync.WaitGroup
+	wg     *sync.WaitGroup
 }
 
 func NewBadger() badgerOpts {

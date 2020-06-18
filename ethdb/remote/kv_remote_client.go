@@ -194,7 +194,7 @@ type DB struct {
 	doDial            chan struct{}
 	doPing            <-chan time.Time
 	cancelConnections context.CancelFunc
-	wg                sync.WaitGroup
+	wg                *sync.WaitGroup
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -291,7 +291,7 @@ func Open(opts DbOpts) (*DB, error) {
 		opts:           opts,
 		connectionPool: make(chan *conn, ClientMaxConnections),
 		doDial:         make(chan struct{}, ClientMaxConnections),
-		wg:             sync.WaitGroup{},
+		wg:             &sync.WaitGroup{},
 	}
 
 	for i := uint64(0); i < ClientMaxConnections; i++ {
