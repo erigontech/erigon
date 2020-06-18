@@ -112,9 +112,9 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	if metrics.Enabled {
 		ctx, cancel := context.WithCancel(context.Background())
 		bdb.stopMetrics = cancel
-		db.wg.Add(1)
+		bdb.wg.Add(1)
 		go func() {
-			defer db.wg.Done()
+			defer bdb.wg.Done()
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
 			collectBoltMetrics(ctx, db, ticker)
