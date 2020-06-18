@@ -11,11 +11,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/trie"
 
 	"github.com/ugorji/go/codec"
 )
@@ -42,38 +40,13 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 			return err
 		}
 	}
-	//if err := verifyRootHash(stateDB, syncHeadNumber); err != nil {
-	//	return err
-	//}
 	return s.DoneAndUpdate(stateDB, syncHeadNumber)
-}
-
-func verifyRootHash(stateDB ethdb.Database, syncHeadNumber uint64) error {
-	hash := rawdb.ReadCanonicalHash(stateDB, syncHeadNumber)
-	syncHeadHeader := rawdb.ReadHeader(stateDB, hash, syncHeadNumber)
-	log.Info("Validating root hash", "block", syncHeadNumber, "blockRoot", syncHeadHeader.Root.Hex())
-	loader := trie.NewSubTrieLoader(syncHeadNumber)
-	rl := trie.NewRetainList(0)
-	subTries, err := loader.LoadFromFlatDB(stateDB, rl, nil /*HashCollector*/, [][]byte{nil}, []int{0}, false)
-	if err != nil {
-		return fmt.Errorf("checking root hash failed (err=%v)", err)
-	}
-	if len(subTries.Hashes) != 1 {
-		return fmt.Errorf("expected 1 hash, got %d", len(subTries.Hashes))
-	}
-	if subTries.Hashes[0] != syncHeadHeader.Root {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], syncHeadHeader.Root)
-	}
-	return nil
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
 	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
 		return err
 	}
-	//if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
-	//	return err
-	//}
 	if err := u.Done(stateDB); err != nil {
 		return fmt.Errorf("unwind HashState: reset: %v", err)
 	}
