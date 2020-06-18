@@ -101,7 +101,6 @@ func newPersistentDB(path string) (*DB, error) {
 		return nil, err
 	}
 	kv := db.KV()
-	fmt.Printf("%s %T\n", path, kv)
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.
 	currentVer := make([]byte, binary.MaxVarintLen64)

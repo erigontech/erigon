@@ -662,7 +662,6 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	}
 
 	log.Info("Opening Database (LMDB)")
-	fmt.Printf("%s\n", n.config.ResolvePath(name))
 	return ethdb.Open(n.config.ResolvePath(name))
 }
 
