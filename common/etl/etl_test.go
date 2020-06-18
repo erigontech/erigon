@@ -428,6 +428,7 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) e
 }
 
 func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 []byte, startKey []byte) {
+	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.Walk(b1, startKey, len(startKey), func(k, v []byte) (bool, error) {
 		b1Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)

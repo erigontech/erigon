@@ -97,11 +97,14 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	}
 	batch := db.NewBatch()
 	state := &bucketState{batch, bucket, args.Quit}
-	batchCh:=make(chan ethdb.DbWithPendingMutations,2)
-	batchPool:=make(chan ethdb.DbWithPendingMutations,2)
-	getBatch:= func() ethdb.DbWithPendingMutations {
+	batchCh := make(chan struct {
+		db         ethdb.DbWithPendingMutations
+		currentKey string
+	}, 2)
+	batchPool := make(chan ethdb.DbWithPendingMutations, 2)
+	getBatch := func() ethdb.DbWithPendingMutations {
 		select {
-		case bt:=<-batchPool:
+		case bt := <-batchPool:
 			return bt
 		default:
 			return db.NewBatch()
@@ -129,27 +132,23 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 					return err
 				}
 			}
-			batchCh <- batch
-			batch = getBatch()
 			var currentKeyStr string
 			if len(k) < 4 {
 				currentKeyStr = fmt.Sprintf("%x", k)
 			} else {
 				currentKeyStr = fmt.Sprintf("%x...", k[:4])
 			}
-			runtime.ReadMemStats(&m)
-			log.Info(
-				"Committed batch",
-				"bucket", string(bucket),
-				"size", common.StorageSize(batchSize),
-				"current key", currentKeyStr,
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			batchCh <- struct {
+				db         ethdb.DbWithPendingMutations
+				currentKey string
+			}{db: batch, currentKey: currentKeyStr}
+			batch = getBatch()
 		}
 		return nil
 	}
 
-	wg,_:=errgroup.WithContext(context.TODO())
-	stopWg:=make(chan struct{})
+	wg, _ := errgroup.WithContext(context.TODO())
+	stopWg := make(chan struct{})
 	wg.Go(func() error {
 		defer close(stopWg)
 		for h.Len() > 0 {
@@ -181,10 +180,18 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	wg.Go(func() error {
 		for {
 			select {
-			case batchToCommit:=<-batchCh:
-				if _, err := batchToCommit.Commit(); err != nil {
+			case batchToCommit := <-batchCh:
+				batchSize := batchToCommit.db.BatchSize()
+				if _, err := batchToCommit.db.Commit(); err != nil {
 					return err
 				}
+				runtime.ReadMemStats(&m)
+				log.Info(
+					"Committed batch",
+					"bucket", string(bucket),
+					"size", common.StorageSize(batchSize),
+					"current key", batchToCommit.currentKey,
+					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 			case <-stopWg:
 				return nil
 			}
@@ -194,10 +201,3 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	return wg.Wait()
 }
 
-//INFO [06-16|20:57:07.639] Extraction finished                      it took=1h8m46.590603325s
-//INFO [06-16|22:04:17.115] Collection finished                      it took=1h7m9.476399923s
-//INFO [06-16|22:04:17.115] TxLookup index is successfully regenerated it took=2h15m56.067223609s
-
-//INFO [06-17|01:43:18.207] Extraction finished                      it took=1h5m57.488568422s
-//INFO [06-17|02:24:09.151] Collection finished                      it took=40m50.944475494s
-//INFO [06-17|02:24:09.208] TxLookup index is successfully regenerated it took=1h46m48.490257434s
