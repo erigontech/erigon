@@ -178,21 +178,39 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		return err
 	})
 	wg.Go(func() error {
+		commit := func(batchToCommit struct {
+			db         ethdb.DbWithPendingMutations
+			currentKey string
+		}) error {
+			batchSize := batchToCommit.db.BatchSize()
+			if _, err := batchToCommit.db.Commit(); err != nil {
+				return err
+			}
+			runtime.ReadMemStats(&m)
+			log.Info(
+				"Committed batch",
+				"bucket", string(bucket),
+				"size", common.StorageSize(batchSize),
+				"current key", batchToCommit.currentKey,
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			return nil
+		}
+		var err error
 		for {
 			select {
 			case batchToCommit := <-batchCh:
-				batchSize := batchToCommit.db.BatchSize()
-				if _, err := batchToCommit.db.Commit(); err != nil {
+				err = commit(batchToCommit)
+				if err != nil {
 					return err
 				}
-				runtime.ReadMemStats(&m)
-				log.Info(
-					"Committed batch",
-					"bucket", string(bucket),
-					"size", common.StorageSize(batchSize),
-					"current key", batchToCommit.currentKey,
-					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 			case <-stopWg:
+				close(batchCh)
+				for batchToCommit := range batchCh {
+					err = commit(batchToCommit)
+					if err != nil {
+						return err
+					}
+				}
 				return nil
 			}
 		}

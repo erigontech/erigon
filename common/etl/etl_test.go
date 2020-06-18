@@ -176,6 +176,7 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
+	fmt.Println(numberOfCalls)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
 
 	assert.Equal(t, 21, numberOfCalls)
