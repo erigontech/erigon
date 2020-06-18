@@ -327,7 +327,7 @@ func TestDBPersistency(t *testing.T) {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
 	if val := db.fetchInt64(testKey); val != testInt {
-		t.Fatalf("value mismatch: have %v, want %v", val, testInt)
+		t.Fatalf("value mismatch: have %v, want %v, %T", val, testInt, db)
 	}
 	db.Close()
 }
