@@ -2338,9 +2338,6 @@ func testUnwind4(chaindata string, rewind uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	var err error
-	if err = stages.SaveStageProgress(db, stages.Execution, 0, nil); err != nil {
-		return err
-	}
 	var stage4progress uint64
 	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
@@ -2362,6 +2359,8 @@ func testStage5(chaindata string, reset bool) error {
 		if err := db.ClearBuckets(
 			dbutils.CurrentStateBucket,
 			dbutils.ContractCodeBucket,
+			dbutils.IntermediateTrieHashBucket,
+			dbutils.IntermediateWitnessSizeBucket,
 		); err != nil {
 			return err
 		}
@@ -2374,10 +2373,15 @@ func testStage5(chaindata string, reset bool) error {
 	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 		return err
 	}
+	var stage5progress uint64
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+		return err
+	}
 	log.Info("Stage4", "progress", stage4progress)
+	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashState}
+	stageState := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage5progress}
 	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
 		return err
 	}
@@ -2424,10 +2428,15 @@ func testStage6(chaindata string, reset bool) error {
 	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
 		return err
 	}
+	var stage6progress uint64
+	if stage6progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+		return err
+	}
 	log.Info("Stage5", "progress", stage5progress)
+	log.Info("Stage6", "progress", stage6progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes}
+	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage6progress}
 	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
 		return err
 	}

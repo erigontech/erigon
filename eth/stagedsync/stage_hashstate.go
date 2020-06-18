@@ -42,9 +42,9 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 			return err
 		}
 	}
-	if err := verifyRootHash(stateDB, syncHeadNumber); err != nil {
-		return err
-	}
+	//if err := verifyRootHash(stateDB, syncHeadNumber); err != nil {
+	//	return err
+	//}
 	return s.DoneAndUpdate(stateDB, syncHeadNumber)
 }
 
@@ -71,9 +71,9 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
 		return err
 	}
-	if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
-		return err
-	}
+	//if err := verifyRootHash(stateDB, u.UnwindPoint); err != nil {
+	//	return err
+	//}
 	if err := u.Done(stateDB); err != nil {
 		return fmt.Errorf("unwind HashState: reset: %v", err)
 	}
