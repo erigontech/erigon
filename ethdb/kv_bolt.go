@@ -42,15 +42,13 @@ func init() {
 	}
 }
 
-func collectBoltMetrics(ctx context.Context, db *bolt.DB, refresh time.Duration) {
+func collectBoltMetrics(ctx context.Context, db *bolt.DB, ticker *time.Ticker) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 		}
-
-		time.Sleep(refresh)
 
 		stats := db.Stats()
 		boltPagesFreeGauge.Update(int64(stats.FreePageN))
@@ -101,6 +99,7 @@ type BoltKV struct {
 	bolt        *bolt.DB
 	log         log.Logger
 	stopMetrics context.CancelFunc
+	wg          *sync.WaitGroup
 }
 
 type boltTx struct {
@@ -177,12 +176,19 @@ func (opts boltOpts) Open() (KV, error) {
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
+		wg:   &sync.WaitGroup{},
 	}
 
 	if metrics.Enabled {
 		ctx, cancel := context.WithCancel(context.Background())
 		db.stopMetrics = cancel
-		go collectBoltMetrics(ctx, boltDB, 3*time.Second)
+		db.wg.Add(1)
+		go func() {
+			defer db.wg.Done()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			collectBoltMetrics(ctx, boltDB, ticker)
+		}()
 	}
 
 	return db, nil
@@ -208,6 +214,8 @@ func (db *BoltKV) Close() {
 	if db.stopMetrics != nil {
 		db.stopMetrics()
 	}
+
+	db.wg.Wait()
 
 	if db.bolt != nil {
 		if err := db.bolt.Close(); err != nil {

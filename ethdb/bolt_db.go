@@ -22,6 +22,7 @@ import (
 	"context"
 	"os"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
@@ -60,6 +61,7 @@ type BoltDatabase struct {
 	stopNetInterface context.CancelFunc
 	netAddr          string
 	stopMetrics      context.CancelFunc
+	wg               *sync.WaitGroup
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
@@ -105,11 +107,18 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		db:  db,
 		log: logger,
 		id:  id(),
+		wg:  &sync.WaitGroup{},
 	}
 	if metrics.Enabled {
 		ctx, cancel := context.WithCancel(context.Background())
 		bdb.stopMetrics = cancel
-		go collectBoltMetrics(ctx, db, 3*time.Second)
+		bdb.wg.Add(1)
+		go func() {
+			defer bdb.wg.Done()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			collectBoltMetrics(ctx, db, ticker)
+		}()
 	}
 
 	return bdb, nil

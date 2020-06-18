@@ -92,6 +92,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 		log:             logger,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
+		wg:              &sync.WaitGroup{},
 	}
 
 	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
@@ -126,7 +127,9 @@ func (opts lmdbOpts) Open() (KV, error) {
 	if !opts.inMem {
 		ctx, ctxCancel := context.WithCancel(context.Background())
 		db.stopStaleReadsCheck = ctxCancel
+		db.wg.Add(1)
 		go func() {
+			defer db.wg.Done()
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			db.staleReadsCheckLoop(ctx, ticker)
@@ -152,6 +155,7 @@ type LmdbKV struct {
 	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
 	lmdbCursorPools     []sync.Pool       // pool of lmdb.Cursor objects
 	stopStaleReadsCheck context.CancelFunc
+	wg                  *sync.WaitGroup
 }
 
 func NewLMDB() lmdbOpts {
@@ -187,6 +191,7 @@ func (db *LmdbKV) Close() {
 		db.stopStaleReadsCheck()
 	}
 	db.lmdbTxPool.Close()
+	db.wg.Wait()
 
 	if db.env != nil {
 		if err := db.env.Close(); err != nil {
@@ -425,9 +430,6 @@ func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[b.id])
 	}
-	if len(value) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty values. bucket: %s", dbutils.Buckets[b.id])
-	}
 
 	err := b.tx.tx.Put(b.dbi, key, value, 0)
 	if err != nil {
@@ -600,9 +602,6 @@ func (c *lmdbCursor) Put(key []byte, value []byte) error {
 
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
-	}
-	if len(value) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty values. bucket: %s", dbutils.Buckets[c.bucket.id])
 	}
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
