@@ -662,8 +662,8 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	}
 
 	log.Info("Opening Database (LMDB)")
-	dir := n.config.ResolvePath(name)
-	return ethdb.Open(dir)
+	fmt.Printf("%s\n", n.config.ResolvePath(name))
+	return ethdb.Open(n.config.ResolvePath(name))
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

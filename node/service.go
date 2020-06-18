@@ -17,6 +17,7 @@
 package node
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -62,8 +63,8 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 	}
 
 	log.Info("Opening Database (LMDB)")
-	dir := ctx.Config.ResolvePath(name)
-	return ethdb.Open(dir)
+	fmt.Printf("%s\n", ctx.Config.ResolvePath(name))
+	return ethdb.Open(ctx.Config.ResolvePath(name))
 	/*
 		if err != nil {
 			return nil, err
