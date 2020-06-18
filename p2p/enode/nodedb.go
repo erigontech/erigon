@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	"github.com/ledgerwatch/bolt"
@@ -309,7 +310,7 @@ func (db *DB) DeleteNode(id ID) {
 }
 
 func deleteRange(db ethdb.KV, prefix []byte) {
-	db.Update(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.Update(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
 		c := b.Cursor()
 		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
@@ -321,7 +322,9 @@ func deleteRange(db ethdb.KV, prefix []byte) {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Warn("nodeDB.deleteRange failed", "err", err)
+	}
 }
 
 // ensureExpirer is a small helper method ensuring that the data expiration
@@ -360,7 +363,7 @@ func (db *DB) expireNodes() {
 		youngestPong int64
 	)
 	var toDelete [][]byte
-	db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
 		if b == nil {
 			return nil
@@ -400,7 +403,9 @@ func (db *DB) expireNodes() {
 			youngestPong = 0
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Warn("nodeDB.expireNodes failed", "err", err)
+	}
 	for _, td := range toDelete {
 		deleteRange(db.lvl, td)
 	}
@@ -468,7 +473,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		id    ID
 	)
 
-	db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
 		c := b.Cursor()
 	seek:
@@ -512,7 +517,9 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			nodes = append(nodes, n)
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Warn("nodeDB.QuerySeeds failed", "err", err)
+	}
 	return nodes
 }
 
