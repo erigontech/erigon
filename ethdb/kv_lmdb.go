@@ -127,8 +127,8 @@ func (opts lmdbOpts) Open() (KV, error) {
 	if !opts.inMem {
 		ctx, ctxCancel := context.WithCancel(context.Background())
 		db.stopStaleReadsCheck = ctxCancel
+		db.wg.Add(1)
 		go func() {
-			db.wg.Add(1)
 			defer db.wg.Done()
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()

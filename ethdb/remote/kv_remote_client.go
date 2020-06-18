@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -193,6 +194,7 @@ type DB struct {
 	doDial            chan struct{}
 	doPing            <-chan time.Time
 	cancelConnections context.CancelFunc
+	wg                sync.WaitGroup
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -289,6 +291,7 @@ func Open(opts DbOpts) (*DB, error) {
 		opts:           opts,
 		connectionPool: make(chan *conn, ClientMaxConnections),
 		doDial:         make(chan struct{}, ClientMaxConnections),
+		wg:             sync.WaitGroup{},
 	}
 
 	for i := uint64(0); i < ClientMaxConnections; i++ {
@@ -300,7 +303,9 @@ func Open(opts DbOpts) (*DB, error) {
 
 	pingTicker := time.NewTicker(db.opts.PingEvery)
 	db.doPing = pingTicker.C
+	db.wg.Add(1)
 	go func() {
+		defer db.wg.Done()
 		defer pingTicker.Stop()
 
 		for {

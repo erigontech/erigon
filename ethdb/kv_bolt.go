@@ -182,8 +182,8 @@ func (opts boltOpts) Open() (KV, error) {
 	if metrics.Enabled {
 		ctx, cancel := context.WithCancel(context.Background())
 		db.stopMetrics = cancel
+		db.wg.Add(1)
 		go func() {
-			db.wg.Add(1)
 			defer db.wg.Done()
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()

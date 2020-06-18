@@ -67,8 +67,8 @@ func (opts badgerOpts) Open() (KV, error) {
 	if !opts.Badger.InMemory {
 		ctx, ctxCancel := context.WithCancel(context.Background())
 		db.stopGC = ctxCancel
+		db.wg.Add(1)
 		go func() {
-			db.wg.Add(1)
 			defer db.wg.Done()
 			gcTicker := time.NewTicker(gcPeriod)
 			defer gcTicker.Stop()
