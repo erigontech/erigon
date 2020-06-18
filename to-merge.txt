@@ -920,35 +920,3 @@ Date:   Thu Jun 18 23:58:49 2020 +0800
     * lint: Fix linter error
     
     Co-authored-by: Guillaume Ballet <gballet@gmail.com>
-
-commit e029cc6616750e4734e285cfa9fe24b80236777e
-Author: ucwong <ucwong@126.com>
-Date:   Thu Jun 18 19:01:49 2020 +0800
-
-    go.mod: update snappy dependency (#21237)
-
-commit 56a319b9daa5228a6b22ecb1d07f8183ebd98106
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Jun 17 15:46:31 2020 +0800
-
-    cmd, eth, internal, les: add txfee cap (#21212)
-    
-    * cmd, eth, internal, les: add gasprice cap
-    
-    * cmd/utils, eth: add default value for gasprice cap
-    
-    * all: use txfee cap
-    
-    * cmd, eth: add fix
-    
-    * cmd, internal: address comments
-
-commit bcf19bc4be7d37671831c4ca3b5fa527c13afdf2
-Author: zhangsoledad <787953403@qq.com>
-Date:   Wed Jun 17 15:41:07 2020 +0800
-
-    core/rawdb: swap tailId and itemOffset for deleted items in freezer (#21220)
-    
-    * fix(freezer): tailId filenum offset were misplaced
-    
-    * core/rawdb: assume first item in freezer always start from zero
