@@ -200,4 +200,3 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 
 	return wg.Wait()
 }
-
