@@ -203,7 +203,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 

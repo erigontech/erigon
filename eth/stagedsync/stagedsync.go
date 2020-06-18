@@ -61,7 +61,7 @@ func PrepareStagedSync(
 				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindExecutionStage(u, s, stateDB)
+				return UnwindExecutionStage(u, s, stateDB)
 			},
 		},
 		{
@@ -71,7 +71,7 @@ func PrepareStagedSync(
 				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindHashStateStage(u, s, stateDB, datadir, quitCh)
+				return UnwindHashStateStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
@@ -81,7 +81,7 @@ func PrepareStagedSync(
 				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
+				return UnwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
