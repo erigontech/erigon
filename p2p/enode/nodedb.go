@@ -109,7 +109,11 @@ func newPersistentDB(path string) (*DB, error) {
 	var blob []byte
 	if err := kv.Update(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
-		if v, _ := b.Get([]byte(dbVersionKey)); v != nil {
+		v, errGet := b.Get([]byte(dbVersionKey))
+		if errGet != nil {
+			return errGet
+		}
+		if v != nil {
 			// v only lives during transaction tx
 			blob = make([]byte, len(v))
 			copy(blob, v)
@@ -198,7 +202,11 @@ func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
-		if blob, _ := b.Get(key); blob != nil {
+		blob, errGet := b.Get(key)
+		if errGet != nil {
+			return errGet
+		}
+		if blob != nil {
 			if v, read := binary.Varint(blob); read > 0 {
 				val = v
 			}
@@ -207,6 +215,7 @@ func (db *DB) fetchInt64(key []byte) int64 {
 	}); err != nil {
 		return 0
 	}
+
 	return val
 }
 
@@ -224,7 +233,10 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
-		blob, _ := b.Get(key)
+		blob, errGet := b.Get(key)
+		if errGet != nil {
+			return errGet
+		}
 		if blob != nil {
 			val, _ = binary.Uvarint(blob)
 		}
@@ -249,7 +261,11 @@ func (db *DB) Node(id ID) *Node {
 	var blob []byte
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.InodesBucket)
-		if v, _ := b.Get(nodeKey(id)); v != nil {
+		v, errGet := b.Get(nodeKey(id))
+		if errGet != nil {
+			return errGet
+		}
+		if v != nil {
 			blob = make([]byte, len(v))
 			copy(blob, v)
 		}
@@ -501,7 +517,11 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			if blob, _ := b.Get(pongKey); blob != nil {
+			blob, errGet := b.Get(pongKey)
+			if errGet != nil {
+				return errGet
+			}
+			if blob != nil {
 				if v, read := binary.Varint(blob); read > 0 {
 					lastPongReceived = v
 				}
