@@ -64,8 +64,10 @@ func Open(path string) (*ObjectDatabase, error) {
 		kv, err = NewLMDB().Path(path).Open()
 	case testDB == "badger" || strings.HasSuffix(path, "_badger"):
 		kv, err = NewBadger().Path(path).Open()
-	default:
+	case testDB == "bolt" || strings.HasSuffix(path, "_bolt"):
 		kv, err = NewBolt().Path(path).Open()
+	default:
+		kv, err = NewLMDB().Path(path).Open()
 	}
 	if err != nil {
 		return nil, err

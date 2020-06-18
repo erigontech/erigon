@@ -56,19 +56,14 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 		return ethdb.Open(ctx.Config.ResolvePath(name + "_badger"))
 	}
 
-	if ctx.Config.LMDB {
-		log.Info("Opening Database (LMDB)")
-		dir := ctx.Config.ResolvePath(name + "_lmdb")
-		return ethdb.Open(dir)
+	if ctx.Config.Bolt {
+		log.Info("Opening Database (Bolt)")
+		return ethdb.Open(ctx.Config.ResolvePath(name + "_lmdb"))
 	}
 
-	log.Info("Opening Database (Bolt)")
-	boltDb, err := ethdb.Open(ctx.Config.ResolvePath(name))
-	if err != nil {
-		return nil, err
-	}
-
-	return boltDb, nil
+	log.Info("Opening Database (LMDB)")
+	dir := ctx.Config.ResolvePath(name)
+	return ethdb.Open(dir)
 	/*
 		if err != nil {
 			return nil, err
