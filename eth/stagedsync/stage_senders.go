@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -14,12 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
@@ -75,8 +74,6 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	}
 
 	lastProcessedBlockNumber := s.BlockNumber
-	nextBlockNumber := new(uint64)
-	*nextBlockNumber = lastProcessedBlockNumber
 
 	mutation := &mutationSafe{mutation: stateDB.NewBatch()}
 	defer func() {
@@ -96,66 +93,67 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		t1 := time.Now()
 		fmt.Println("collect hashes", t1)
 		// fixme: it'd be great to have lastBlockNum and optimize next make()
-		canonical := make([]common.Hash, 0, 1_000_000)
-		n:=0
-		err := stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(atomic.LoadUint64(nextBlockNumber)+1), 0, func(k, v []byte) (bool, error) {
-			if err := common.Stopped(quitCh); err != nil {
-				return false, err
-			}
+		canonical := make([]common.Hash, 13_000_000)
+		currentHeaderNumber := new(uint64)
+		*currentHeaderNumber = 0
 
-			// Skip non relevant records
-			if dbutils.CheckCanonicalKey(k) {
-				canonical = append(canonical, common.BytesToHash(k[8:]))
-			}
-			n++
-			if n%10000 == 0 {
-				fmt.Println("collect hashes", n)
-			}
-			return true, nil
-		})
-		fmt.Println("collect hashes done", time.Since(t1))
-		if err != nil {
-			return err
-		}
-
-		jobs := make(chan *senderRecoveryJob, cfg.numOfGoroutines*cfg.batchSize)
-		out := make(chan TxsFroms, cfg.batchSize)
-
-		wg := &sync.WaitGroup{}
-		wg.Add(cfg.numOfGoroutines)
-		for i := 0; i < cfg.numOfGoroutines; i++ {
-			go func() {
-				runtime.LockOSThread()
-				defer runtime.UnlockOSThread()
-				// each goroutine gets it's own crypto context to make sure they are really parallel
-				recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh, wg)
-			}()
-		}
-		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
-
-		errCh := make(chan error, 1)
-		doneCh := make(chan struct{})
+		errCh := make(chan error, 2)
+		readWg := sync.WaitGroup{}
+		readWg.Add(2)
 		go func() {
-			defer common.SafeClose(doneCh)
+			defer readWg.Done()
+			err := stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
+				if err := common.Stopped(quitCh); err != nil {
+					fmt.Println("@@@ Head.1")
+					return false, err
+				}
 
-			err = stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(atomic.AddUint64(nextBlockNumber, 1)), 0, func(k, v []byte) (bool, error) {
+				// Skip non relevant records
+				if !dbutils.CheckCanonicalKey(k) {
+					return true, nil
+				}
+
+				n := atomic.AddUint64(currentHeaderNumber, 1)
+				canonical[n-1] = common.BytesToHash(v)
+
+				if n%100000 == 0 {
+					fmt.Println("done some hashes", n)
+				}
+
+				return true, nil
+			})
+
+			fmt.Println("collect hashes done", time.Since(t1))
+			if err != nil {
+				fmt.Println("go headers err", err)
+				errCh <- err
+			}
+		}()
+
+		jobs := make(chan *senderRecoveryJob, 1_000_000)
+		go func() {
+			defer readWg.Done()
+			err := stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
 				if err := common.Stopped(quitCh); err != nil {
 					return false, err
 				}
-				data := v
-				if debug.IsBlockCompressionEnabled() && len(data) > 0 {
-					var err1 error
-					data, err1 = snappy.Decode(nil, v)
-					if err1 != nil {
-						return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err1)
-					}
+
+				blockNumber := binary.BigEndian.Uint64(k[:8])
+				for blockNumber >= atomic.LoadUint64(currentHeaderNumber) {
+					//fixme
+					fmt.Println("walk body wait", blockNumber, atomic.LoadUint64(currentHeaderNumber))
+					time.Sleep(time.Second)
 				}
 
-				blockNumber := atomic.LoadUint64(nextBlockNumber)
-				job := getBlockTxs(mutation, blockNumber, canonical[blockNumber])
-				if job == nil {
-					return false, nil
+				blockHash := common.BytesToHash(k[8:])
+				if canonical[blockNumber-1] != blockHash {
+					// non-canonical case
+					fmt.Println("###", canonical[blockNumber-1].String(), blockHash.String())
+					return true, nil
 				}
+
+				data := make([]byte, len(v))
+				copy(data, v)
 
 				if cfg.prof || cfg.startTrace {
 					if blockNumber == uint64(cfg.toProcess) {
@@ -166,13 +164,37 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 					}
 				}
 
-				jobs <- job
+				if blockNumber%10000 == 0 {
+					fmt.Println("done some bodies", blockNumber)
+				}
+
+				jobs <- &senderRecoveryJob{data, blockHash, blockNumber}
 
 				return true, nil
 			})
 
-			errCh <- err
+			if err != nil {
+				fmt.Println("go bodies err", err)
+				errCh <- err
+			}
 		}()
+
+		out := make(chan TxsFroms, cfg.batchSize)
+		wg := &sync.WaitGroup{}
+		wg.Add(cfg.numOfGoroutines)
+		for i := 0; i < cfg.numOfGoroutines; i++ {
+			go func() {
+				runtime.LockOSThread()
+				defer func() {
+					wg.Done()
+					runtime.UnlockOSThread()
+				}()
+
+				// each goroutine gets it's own crypto context to make sure they are really parallel
+				recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)
+			}()
+		}
+		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
 
 		fmt.Println("DONE?")
 
@@ -184,30 +206,24 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 
 		buf := NewAddressBuffer(f, cfg.bufferSize, true)
 
-		fmt.Println("Storing into a file")
-		err = writeOnDiskBatch(cfg, buf, firstBlockToProceed, out, quitCh, jobs, doneCh)
-		fmt.Println("Storing into a file - DONE")
-
-		if err != nil {
-			buf.Close()
-
-			// fixme simplify
-			close(jobs)
-			wg.Wait()
-			close(errCh)
-			close(out)
-
-			return err
-		}
+		go func() {
+			fmt.Println("Storing into a file")
+			err = writeOnDiskBatch(cfg, buf, firstBlockToProceed, out, quitCh, jobs)
+			if err != nil {
+				fmt.Println("go writeOnDiskBatch err", err)
+				errCh <- err
+			}
+			fmt.Println("Storing into a file - DONE")
+		}()
 
 		// fixme simplify
-		<-doneCh
+		readWg.Wait()
+		close(jobs)
 		fmt.Println("reading bodies is finished")
 
-		close(jobs)
 		wg.Wait()
-		close(errCh)
 		close(out)
+		close(errCh)
 
 		err = <-errCh
 		buf.Close()
@@ -240,7 +256,7 @@ func recoverSendersFromDisk(cfg stage3Config, s *StageState, stateDB ethdb.Datab
 	buf := NewAddressBuffer(f, cfg.bufferSize, false)
 	defer buf.Close()
 
-	return writeBatchFromDisk(buf, s, stateDB, config, mutation, quitCh, lastProcessedBlockNumber)
+	return writeBatchFromDisk(buf, s, stateDB, mutation, quitCh, lastProcessedBlockNumber)
 }
 
 type blockData struct {
@@ -322,7 +338,7 @@ type TxsFroms struct {
 	err         error
 }
 
-func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob, doneCh chan struct{}) error {
+func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, out chan TxsFroms, quitCh chan struct{}, in chan *senderRecoveryJob) error {
 	n := 0
 
 	toSort := uint64(cfg.numOfGoroutines * cfg.batchSize)
@@ -336,7 +352,6 @@ func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, o
 	m := &runtime.MemStats{}
 
 	defer func() {
-		fmt.Println("+++Block END+++")
 		// store last blocks
 		sort.Slice(buffer, func(i, j int) bool {
 			return buffer[i].blockNumber < buffer[j].blockNumber
@@ -356,8 +371,6 @@ func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, o
 		total += written
 	}()
 
-	fmt.Println("xxx writeOnDiskBatch")
-
 	currentBlock := firstBlock
 
 	for j := range out {
@@ -366,9 +379,6 @@ func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, o
 		}
 		if err := common.Stopped(quitCh); err != nil {
 			return err
-		}
-		if err := common.Stopped(doneCh); err != nil {
-			return nil
 		}
 
 		if j.blockNumber%uint64(cfg.batchSize) == 0 {
@@ -399,6 +409,10 @@ func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, o
 					}
 					if buffer[i].blockNumber != currentBlock+uint64(i) {
 						hasRow = false
+						ns := make([]uint64, len(buffer))
+						for i := range buffer {
+							ns[i] = buffer[i].blockNumber
+						}
 						break
 					}
 				}
@@ -445,18 +459,11 @@ func NewAddressBuffer(f io.ReadWriteCloser, size int, fullLength bool) *AddressB
 	length := size * len(common.Address{})
 	var buf []byte
 	if fullLength {
-		fmt.Println("STARTED BUF=1", size, fullLength, len(buf), cap(buf))
 		buf = make([]byte, 0, length)
-		fmt.Println("STARTED BUF=2", size, fullLength, len(buf), cap(buf))
 		buf = buf[0:0:length]
-		fmt.Println("STARTED BUF=3", size, fullLength, len(buf), cap(buf))
 	} else {
-		fmt.Println("STARTED BUF=1", size, fullLength, len(buf), cap(buf))
 		buf = make([]byte, length)
-		fmt.Println("STARTED BUF=2", size, fullLength, len(buf), cap(buf))
 	}
-
-	fmt.Println("STARTED BUF=XXX", size, fullLength, len(buf), cap(buf))
 
 	return &AddressBuffer{
 		buf, size, -1, true, f, sync.RWMutex{},
@@ -555,7 +562,7 @@ func (a *AddressBuffer) Next() (common.Address, error) {
 }
 
 func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
-	stateDB ethdb.Database, config *params.ChainConfig,
+	stateDB ethdb.Database,
 	mutation *mutationSafe,
 	quitCh chan struct{},
 	lastBlockNumber uint64,
@@ -567,6 +574,10 @@ func writeBatchFromDisk(buf *AddressBuffer, s *StageState,
 	m := &runtime.MemStats{}
 
 	for {
+		if err = common.Stopped(quitCh); err != nil {
+			return err
+		}
+
 		// insert for
 		job := getBlockBody(mutation, nextBlockNumber)
 		if job == nil {
@@ -610,9 +621,7 @@ type senderRecoveryJob struct {
 	nextBlockNumber uint64
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}) {
 	fmt.Println("recoverSenders started")
 
 	for job := range in {

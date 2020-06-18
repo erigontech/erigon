@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 
 	"github.com/golang/snappy"
@@ -301,14 +302,25 @@ func ReadBlockTxs(db DatabaseReader, hash common.Hash, number uint64) []*types.T
 }
 
 func DecodeBlockTxs(data rlp.RawValue) []*types.Transaction {
+	if debug.IsBlockCompressionEnabled() && len(data) > 0 {
+		var err1 error
+		data, err1 = snappy.Decode(nil, data)
+		if err1 != nil {
+			log.Error("Invalid block body", "err", fmt.Errorf("unwindTxLookup, snappy err: %w", err1))
+			return nil
+		}
+	}
+
 	if len(data) == 0 {
 		return nil
 	}
+
 	body := new(types.Body)
 	if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
 		log.Error("Invalid block body RLP", "err", err)
 		return nil
 	}
+
 	return body.Transactions
 }
 
