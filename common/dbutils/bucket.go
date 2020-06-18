@@ -150,6 +150,9 @@ var (
 	// Position to where to unwind sync stages
 	SyncStageUnwind = []byte("SSU")
 	CliqueBucket    = []byte("clique-")
+
+	// this bucket stored in separated database
+	InodesBucket = []byte("inodes")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -197,6 +200,7 @@ var Buckets = [][]byte{
 	PlainContractCodeBucket,
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
+	InodesBucket,
 }
 
 var BucketsIndex = map[string]int{}

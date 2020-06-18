@@ -18,6 +18,7 @@ package enode
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -26,14 +27,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	"github.com/ledgerwatch/bolt"
 )
 
 // Keys in the node database.
+
 const (
-	bucket         = "b"
 	dbVersionKey   = "version" // Version of the database to flush if changes
 	dbNodePrefix   = "n:"      // Identifier to prefix node entries with
 	dbLocalPrefix  = "local:"
@@ -63,7 +67,7 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	lvl    *bolt.DB      // Interface to the database itself
+	lvl    ethdb.KV      // Interface to the database itself
 	runner sync.Once     // Ensures we can start at most one expirer
 	quit   chan struct{} // Channel to signal the expiring thread to stop
 }
@@ -79,7 +83,9 @@ func OpenDB(path string) (*DB, error) {
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true, KeysPrefixCompressionDisable: true})
+	opts := bolt.DefaultOptions
+	opts.MemOnly = true
+	db, err := ethdb.NewBolt().InMem().Open()
 	if err != nil {
 		return nil, err
 	}
@@ -89,32 +95,24 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	db, err := bolt.Open(path, 0600, &bolt.Options{})
+	db, err := ethdb.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	kv := db.KV()
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.
 	currentVer := make([]byte, binary.MaxVarintLen64)
 	currentVer = currentVer[:binary.PutVarint(currentVer, int64(dbVersion))]
 
 	var blob []byte
-	if err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		if b != nil {
-			if v, _ := b.Get([]byte(dbVersionKey)); v != nil {
-				// v only lives during transaction tx
-				blob = make([]byte, len(v))
-				copy(blob, v)
-				return nil
-			}
-		}
-		if b == nil {
-			var err error
-			b, err = tx.CreateBucketIfNotExists([]byte(bucket), false)
-			if err != nil {
-				return err
-			}
+	if err := kv.Update(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
+		if v, _ := b.Get([]byte(dbVersionKey)); v != nil {
+			// v only lives during transaction tx
+			blob = make([]byte, len(v))
+			copy(blob, v)
+			return nil
 		}
 		return b.Put([]byte(dbVersionKey), currentVer)
 	}); err != nil {
@@ -127,7 +125,7 @@ func newPersistentDB(path string) (*DB, error) {
 		}
 		return newPersistentDB(path)
 	}
-	return &DB{lvl: db, quit: make(chan struct{})}, nil
+	return &DB{lvl: kv, quit: make(chan struct{})}, nil
 }
 
 // nodeKey returns the database key for a node record.
@@ -197,11 +195,8 @@ func localItemKey(id ID, field string) []byte {
 // fetchInt64 retrieves an integer associated with a particular key.
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
-	if err := db.lvl.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		if b == nil {
-			return nil
-		}
+	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
 		if blob, _ := b.Get(key); blob != nil {
 			if v, read := binary.Varint(blob); read > 0 {
 				val = v
@@ -218,23 +213,16 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket), false)
-		if err != nil {
-			return err
-		}
-		return b.Put(key, blob)
+	return db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
 // fetchUint64 retrieves an integer associated with a particular key.
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
-	if err := db.lvl.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		if b == nil {
-			return nil
-		}
+	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
 		blob, _ := b.Get(key)
 		if blob != nil {
 			val, _ = binary.Uvarint(blob)
@@ -250,23 +238,16 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket), false)
-		if err != nil {
-			return err
-		}
-		return b.Put(key, blob)
+	return db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
 // Node retrieves a node with a given id from the database.
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
-	if err := db.lvl.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		if b == nil {
-			return nil
-		}
+	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
 		if v, _ := b.Get(nodeKey(id)); v != nil {
 			blob = make([]byte, len(v))
 			copy(blob, v)
@@ -300,12 +281,8 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket), false)
-		if err != nil {
-			return err
-		}
-		return b.Put(nodeKey(node.ID()), blob)
+	if err := db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}
@@ -331,14 +308,14 @@ func (db *DB) DeleteNode(id ID) {
 	deleteRange(db.lvl, nodeKey(id))
 }
 
-func deleteRange(db *bolt.DB, prefix []byte) {
-	db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		if b == nil {
-			return nil
-		}
+func deleteRange(db ethdb.KV, prefix []byte) {
+	db.Update(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
 		c := b.Cursor()
-		for k, _ := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if err := b.Delete(k); err != nil {
 				return nil
 			}
@@ -383,8 +360,8 @@ func (db *DB) expireNodes() {
 		youngestPong int64
 	)
 	var toDelete [][]byte
-	db.lvl.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
+	db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
 		if b == nil {
 			return nil
 		}
@@ -392,7 +369,10 @@ func (db *DB) expireNodes() {
 		c := b.Cursor()
 		var prevId ID
 		var empty bool = true
-		for k, v := c.Seek(p); bytes.HasPrefix(k, p); k, v = c.Next() {
+		for k, v, err := c.Seek(p); bytes.HasPrefix(k, p); k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			id, ip, field := splitNodeItemKey(k)
 			if field == dbNodePong {
 				time, _ := binary.Varint(v)
@@ -488,11 +468,8 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		id    ID
 	)
 
-	db.lvl.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		if b == nil {
-			return nil
-		}
+	db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.InodesBucket)
 		c := b.Cursor()
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
@@ -503,7 +480,10 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			rand.Read(id[:])
 			id[0] = ctr + id[0]%16
 			var n *Node
-			for k, v := c.Seek(nodeKey(id)); k != nil && n == nil; k, v = c.Next() {
+			for k, v, err := c.Seek(nodeKey(id)); k != nil && n == nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
 				id, rest := splitNodeKey(k)
 				if string(rest) == dbDiscoverRoot {
 					n = mustDecodeNode(id[:], v)
