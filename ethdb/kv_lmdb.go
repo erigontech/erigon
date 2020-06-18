@@ -425,9 +425,6 @@ func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[b.id])
 	}
-	if len(value) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty values. bucket: %s", dbutils.Buckets[b.id])
-	}
 
 	err := b.tx.tx.Put(b.dbi, key, value, 0)
 	if err != nil {
@@ -600,9 +597,6 @@ func (c *lmdbCursor) Put(key []byte, value []byte) error {
 
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
-	}
-	if len(value) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty values. bucket: %s", dbutils.Buckets[c.bucket.id])
 	}
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
