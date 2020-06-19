@@ -400,9 +400,9 @@ func bucketStats(chaindata string) {
 	case ethdb.Lmdb:
 		env, err := lmdb.NewEnv()
 		check(err)
-		err = env.Open(chaindata, lmdb.Readonly, 0664)
-		check(err)
 		err = env.SetMaxDBs(100)
+		check(err)
+		err = env.Open(chaindata, lmdb.Readonly, 0664)
 		check(err)
 
 		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
