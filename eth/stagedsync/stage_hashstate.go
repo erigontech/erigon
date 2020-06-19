@@ -54,7 +54,9 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, data
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit)
+	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
+		return err
+	}
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind HashState: reset: %v", err)
 	}
