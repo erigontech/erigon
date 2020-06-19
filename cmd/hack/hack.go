@@ -2413,6 +2413,7 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	return nil
 }
 
+/*
 func testStage6(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2467,6 +2468,7 @@ func testUnwind6(chaindata string, rewind uint64) error {
 	close(ch)
 	return nil
 }
+*/
 
 func printStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
@@ -2694,21 +2696,6 @@ func main() {
 	}
 	if *action == "unwind5" {
 		if err := testUnwind5(*chaindata, uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stage6" {
-		if err := testStage6(*chaindata, false /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "reset6" {
-		if err := testStage6(*chaindata, true /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "unwind6" {
-		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

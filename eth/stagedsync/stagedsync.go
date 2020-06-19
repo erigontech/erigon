@@ -75,16 +75,6 @@ func PrepareStagedSync(
 			},
 		},
 		{
-			ID:          stages.IntermediateHashes,
-			Description: "Generating intermediate hashes and validating final hash",
-			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
-			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return UnwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
-			},
-		},
-		{
 			ID:                  stages.AccountHistoryIndex,
 			Description:         "Generating account history index",
 			Disabled:            !storageMode.History,

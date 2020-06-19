@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -40,14 +41,21 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 			return err
 		}
 	}
+	if err := updateIntermediateHashes(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
+		return err
+	}
 	return s.DoneAndUpdate(stateDB, syncHeadNumber)
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
-	if err := unwindHashStateStageImpl(u, s, stateDB, datadir, quit); err != nil {
+func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err
 	}
-	if err := u.Done(stateDB); err != nil {
+	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
+	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
+	expectedRootHash := syncHeadHeader.Root
+	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit)
+	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind HashState: reset: %v", err)
 	}
 	return nil
