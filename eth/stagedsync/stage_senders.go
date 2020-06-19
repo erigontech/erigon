@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/big"
 	"os"
 	"runtime"
@@ -42,7 +43,7 @@ type stage3Config struct {
 
 func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
 	if cfg.startTrace {
-		filePath := fmt.Sprintf("/mnt/sdb/trace_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
+		filePath := fmt.Sprintf("trace_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
 		f1, err := os.Create(filePath)
 		if err != nil {
 			return err
@@ -57,7 +58,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		}()
 	}
 	if cfg.prof {
-		f2, err := os.Create(fmt.Sprintf("/mnt/sdb/cpu_%d_%d_%d.prof", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute()))
+		f2, err := os.Create(fmt.Sprintf("cpu_%d_%d_%d.prof", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute()))
 		if err != nil {
 			log.Error("could not create CPU profile", "error", err)
 			return err
@@ -87,11 +88,9 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	onlySecondStage := false
 	var filePath string
 	if !onlySecondStage {
-		fmt.Println("START 3.1")
-
 		// collect canonical hashes
 		t1 := time.Now()
-		fmt.Println("collect hashes", t1)
+
 		// fixme: it'd be great to have lastBlockNum and optimize next make()
 		canonical := make([]common.Hash, 13_000_000)
 		currentHeaderNumber := new(uint64)
@@ -104,7 +103,6 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 			defer readWg.Done()
 			err := stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
 				if err := common.Stopped(quitCh); err != nil {
-					fmt.Println("@@@ Head.1")
 					return false, err
 				}
 
@@ -117,15 +115,14 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 				canonical[n-1] = common.BytesToHash(v)
 
 				if n%100000 == 0 {
-					fmt.Println("done some hashes", n)
+					log.Info("done some hashes", "n", n)
 				}
 
 				return true, nil
 			})
 
-			fmt.Println("collect hashes done", time.Since(t1))
+			log.Info("collect hashes done", "duration", time.Since(t1))
 			if err != nil {
-				fmt.Println("go headers err", err)
 				errCh <- err
 			}
 		}()
@@ -141,14 +138,13 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 				blockNumber := binary.BigEndian.Uint64(k[:8])
 				for blockNumber >= atomic.LoadUint64(currentHeaderNumber) {
 					//fixme
-					fmt.Println("walk body wait", blockNumber, atomic.LoadUint64(currentHeaderNumber))
+					log.Info("walk body wait", "number", blockNumber, "headerNumber", atomic.LoadUint64(currentHeaderNumber))
 					time.Sleep(time.Second)
 				}
 
 				blockHash := common.BytesToHash(k[8:])
 				if canonical[blockNumber-1] != blockHash {
 					// non-canonical case
-					fmt.Println("###", canonical[blockNumber-1].String(), blockHash.String())
 					return true, nil
 				}
 
@@ -165,7 +161,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 				}
 
 				if blockNumber%10000 == 0 {
-					fmt.Println("done some bodies", blockNumber)
+					log.Info("done some bodies", "n", blockNumber)
 				}
 
 				jobs <- &senderRecoveryJob{data, blockHash, blockNumber}
@@ -174,7 +170,6 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 			})
 
 			if err != nil {
-				fmt.Println("go bodies err", err)
 				errCh <- err
 			}
 		}()
@@ -196,30 +191,26 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		}
 		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
 
-		fmt.Println("DONE?")
-
-		filePath = fmt.Sprintf("/home/eugene/eth/froms_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
-		f, err := os.Create(filePath)
+		filePath = fmt.Sprintf("froms_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
+		bufferFile, err := ioutil.TempFile(datadir, filePath)
 		if err != nil {
 			return err
 		}
 
-		buf := NewAddressBuffer(f, cfg.bufferSize, true)
+		buf := NewAddressBuffer(bufferFile, cfg.bufferSize, true)
 
 		go func() {
-			fmt.Println("Storing into a file")
 			err = writeOnDiskBatch(cfg, buf, firstBlockToProceed, out, quitCh, jobs)
 			if err != nil {
-				fmt.Println("go writeOnDiskBatch err", err)
 				errCh <- err
 			}
-			fmt.Println("Storing into a file - DONE")
+			log.Info("Storing into a file - DONE")
 		}()
 
 		// fixme simplify
 		readWg.Wait()
 		close(jobs)
-		fmt.Println("reading bodies is finished")
+		log.Info("reading bodies is finished")
 
 		wg.Wait()
 		close(out)
@@ -230,20 +221,14 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		if err != nil {
 			return err
 		}
-		fmt.Println("DONE!")
 	}
 
-	fmt.Println("START 3.2")
 	err := recoverSendersFromDisk(cfg, s, stateDB, config, mutation, quitCh, firstBlockToProceed, filePath)
-
-	fmt.Println("DONE!")
 	if err != nil && err != io.EOF {
 		return err
 	}
 
 	s.Done()
-	fmt.Println("DONE!!!")
-	panic("DONE!!!")
 	return nil
 }
 
@@ -254,7 +239,10 @@ func recoverSendersFromDisk(cfg stage3Config, s *StageState, stateDB ethdb.Datab
 	}
 
 	buf := NewAddressBuffer(f, cfg.bufferSize, false)
-	defer buf.Close()
+	defer func() {
+		buf.Close()
+		os.Remove(f.Name())
+	}()
 
 	return writeBatchFromDisk(buf, s, stateDB, mutation, quitCh, lastProcessedBlockNumber)
 }
@@ -516,7 +504,6 @@ func (a *AddressBuffer) Cap() int {
 }
 
 func (a *AddressBuffer) Close() error {
-	fmt.Println("AddressBuffer Close")
 	a.Lock()
 	defer a.Unlock()
 
@@ -622,10 +609,11 @@ type senderRecoveryJob struct {
 }
 
 func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in chan *senderRecoveryJob, out chan TxsFroms, quit chan struct{}) {
-	fmt.Println("recoverSenders started")
-
 	for job := range in {
 		if job == nil {
+			return
+		}
+		if err := common.Stopped(quit); err != nil {
 			return
 		}
 

@@ -139,7 +139,7 @@ func PrepareStagedSync(
 		},
 	}
 
-	state := NewState(stages[2:3])
+	state := NewState(stages)
 	if err := state.LoadUnwindInfo(stateDB); err != nil {
 		return nil, err
 	}
