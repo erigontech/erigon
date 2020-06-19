@@ -385,7 +385,6 @@ func bucketStats(chaindata string) {
 	case ethdb.Bolt:
 		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 		check(err)
-		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
 
 		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 		_ = db.View(func(tx *bolt.Tx) error {
@@ -408,7 +407,10 @@ func bucketStats(chaindata string) {
 		_ = env.View(func(tx *lmdb.Txn) error {
 			for _, bucket := range bucketList {
 				dbi, bucketErr := tx.OpenDBI(string(bucket), lmdb.Readonly)
-				check(bucketErr)
+				if bucketErr != nil {
+					fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
+					continue
+				}
 				bs, statErr := tx.Stat(dbi)
 				check(statErr)
 				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
