@@ -402,6 +402,8 @@ func bucketStats(chaindata string) {
 		check(err)
 		err = env.Open(chaindata, lmdb.Readonly, 0664)
 		check(err)
+		err = env.SetMaxDBs(100)
+		check(err)
 
 		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 		_ = env.View(func(tx *lmdb.Txn) error {
