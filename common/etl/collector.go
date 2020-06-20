@@ -116,7 +116,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		if bytes.Compare(k, args.LoadStartKey) < 0 {
 			return nil
 		}
-		fmt.Printf("Loading bucket %s, %x\n", bucket, k)
+		fmt.Printf("Loading bucket %s, %x: [%x]\n", bucket, k, v)
 		if len(v) == 0 {
 			if err := batch.Delete(bucket, k); err != nil {
 				return err
@@ -169,14 +169,23 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				return fmt.Errorf("error while reading next element from disk: %v", err)
 			}
 		}
+		batchSize := batch.BatchSize()
 		if args.OnLoadCommit != nil {
 			if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
 				return err
 			}
 		}
-		_, err := batch.Commit()
-
-		return err
+		if _, err := batch.Commit(); err != nil {
+			return err
+		}
+		runtime.ReadMemStats(&m)
+		log.Info(
+			"Committed batch",
+			"bucket", string(bucket),
+			"size", common.StorageSize(batchSize),
+			"current key", "final",
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		return nil
 	})
 	wg.Go(func() error {
 		commit := func(batchToCommit struct {
