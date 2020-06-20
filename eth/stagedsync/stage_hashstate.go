@@ -209,6 +209,9 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	if addrHash == common.HexToHash("0xf3a0c3a055a5519efd6d5ef30a949711615c5fe20fd98924610de25918e57ee1") {
+		fmt.Printf("Address preimage of %x is %x, inc: %d\n", addrHash, address, incarnation)
+	}
 	compositeKey := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
 	return compositeKey, nil
 }
