@@ -388,6 +388,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	skip := false
 
 	var loadStartKey []byte
+	/*
 	if len(s.StageData) != 0 {
 		// we have finished this stage but didn't start the next one
 		if len(s.StageData) == 1 && s.StageData[0] == index {
@@ -404,6 +405,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 			}
 		}
 	}
+	*/
 	if skip {
 		return nil
 	}
