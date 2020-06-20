@@ -116,6 +116,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		if bytes.Compare(k, args.LoadStartKey) < 0 {
 			return nil
 		}
+		fmt.Printf("Loading bucket %s, %x\n", bucket, k)
 		if len(v) == 0 {
 			if err := batch.Delete(bucket, k); err != nil {
 				return err
