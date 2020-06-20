@@ -408,7 +408,9 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
 					copy(acc.CodeHash[:], codeHash)
-				} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				} else if errors.Is(err, ethdb.ErrKeyNotFound) {
+					copy(acc.CodeHash[:], trie.EmptyCodeHash[:])
+				} else {
 					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 				}
 			}
