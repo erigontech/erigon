@@ -385,7 +385,6 @@ func bucketStats(chaindata string) {
 	case ethdb.Bolt:
 		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 		check(err)
-		//bucketList := [][]byte{dbutils.IntermediateTrieHashBucket}
 
 		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 		_ = db.View(func(tx *bolt.Tx) error {
@@ -401,14 +400,19 @@ func bucketStats(chaindata string) {
 	case ethdb.Lmdb:
 		env, err := lmdb.NewEnv()
 		check(err)
+		err = env.SetMaxDBs(100)
+		check(err)
 		err = env.Open(chaindata, lmdb.Readonly, 0664)
 		check(err)
 
 		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 		_ = env.View(func(tx *lmdb.Txn) error {
 			for _, bucket := range bucketList {
-				dbi, bucketErr := tx.OpenDBI(string(bucket), lmdb.Readonly)
-				check(bucketErr)
+				dbi, bucketErr := tx.OpenDBI(string(bucket), 0)
+				if bucketErr != nil {
+					fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
+					continue
+				}
 				bs, statErr := tx.Stat(dbi)
 				check(statErr)
 				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
@@ -2409,6 +2413,7 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	return nil
 }
 
+/*
 func testStage6(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2463,6 +2468,7 @@ func testUnwind6(chaindata string, rewind uint64) error {
 	close(ch)
 	return nil
 }
+*/
 
 func printStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
@@ -2690,21 +2696,6 @@ func main() {
 	}
 	if *action == "unwind5" {
 		if err := testUnwind5(*chaindata, uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stage6" {
-		if err := testStage6(*chaindata, false /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "reset6" {
-		if err := testStage6(*chaindata, true /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "unwind6" {
-		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
