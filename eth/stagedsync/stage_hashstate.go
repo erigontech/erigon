@@ -366,12 +366,12 @@ func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 			return err
 		}
 		newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-		var code []byte
-		code, err = db.Get(dbutils.PlainContractCodeBucket, newK)
+		var codeHash []byte
+		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
 		}
-		return loadFunc(newK, code, state, next)
+		return loadFunc(newK, codeHash, state, next)
 	}
 }
 
@@ -407,14 +407,14 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	if skip {
 		return nil
 	}
+	var l OldestAppearedLoad
 	var loadBucket []byte
-	var loadFunc etl.LoadFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
-		loadFunc = getFromPlainCodesAndLoad(p.db, codeKeyTransformLoadFunc)
+		l.innerLoadFunc = getFromPlainCodesAndLoad(p.db, codeKeyTransformLoadFunc)
 	} else {
 		loadBucket = dbutils.CurrentStateBucket
-		loadFunc = getFromPlainStateAndLoad(p.db, keyTransformLoadFunc)
+		l.innerLoadFunc = getFromPlainStateAndLoad(p.db, keyTransformLoadFunc)
 	}
 
 	return etl.Transform(
@@ -426,9 +426,9 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		// here we avoid getting the state from changesets,
 		// we just care about the accounts that did change,
 		// so we can directly read from the PlainTextBuffer
-		loadFunc,
+		l.LoadFunc,
 		etl.TransformArgs{
-			BufferType:      etl.SortableAppendBuffer,
+			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
 			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
