@@ -371,8 +371,11 @@ func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 		newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 		var codeHash []byte
 		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
-		if err != nil {
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", newK, a.Incarnation, err)
+		}
+		if codeHash == nil {
+			return nil
 		}
 		return loadFunc(newK, codeHash, state, next)
 	}

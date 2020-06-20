@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -339,7 +340,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
 					copy(acc.CodeHash[:], codeHash)
-				} else {
+				} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
 					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 				}
 			}
@@ -407,7 +408,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
 					copy(acc.CodeHash[:], codeHash)
-				} else {
+				} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
 					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 				}
 			}
