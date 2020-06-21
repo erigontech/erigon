@@ -110,6 +110,17 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			return db.NewBatch()
 		}
 	}
+	makeCurrentKeyStr := func(k []byte) string {
+		var currentKeyStr string
+		if k == nil {
+			currentKeyStr = "final"
+		} else if len(k) < 4 {
+			currentKeyStr = fmt.Sprintf("%x", k)
+		} else {
+			currentKeyStr = fmt.Sprintf("%x...", k[:4])
+		}
+		return currentKeyStr
+	}
 
 	loadNextFunc := func(k, v []byte) error {
 		// we ignore everything that is before this key
@@ -132,16 +143,10 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 					return err
 				}
 			}
-			var currentKeyStr string
-			if len(k) < 4 {
-				currentKeyStr = fmt.Sprintf("%x", k)
-			} else {
-				currentKeyStr = fmt.Sprintf("%x...", k[:4])
-			}
 			batchCh <- struct {
 				db         ethdb.DbWithPendingMutations
 				currentKey string
-			}{db: batch, currentKey: currentKeyStr}
+			}{db: batch, currentKey: makeCurrentKeyStr(k)}
 			batch = getBatch()
 		}
 		return nil
@@ -173,9 +178,12 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				return err
 			}
 		}
-		_, err := batch.Commit()
+		batchCh <- struct {
+			db         ethdb.DbWithPendingMutations
+			currentKey string
+		}{db: batch, currentKey: makeCurrentKeyStr(nil)}
 
-		return err
+		return nil
 	})
 	wg.Go(func() error {
 		commit := func(batchToCommit struct {
