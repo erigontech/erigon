@@ -132,16 +132,10 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 					return err
 				}
 			}
-			var currentKeyStr string
-			if len(k) < 4 {
-				currentKeyStr = fmt.Sprintf("%x", k)
-			} else {
-				currentKeyStr = fmt.Sprintf("%x...", k[:4])
-			}
 			batchCh <- struct {
 				db         ethdb.DbWithPendingMutations
 				currentKey string
-			}{db: batch, currentKey: currentKeyStr}
+			}{db: batch, currentKey: makeCurrentKeyStr(k)}
 			batch = getBatch()
 		}
 		return nil
@@ -168,22 +162,16 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				return fmt.Errorf("error while reading next element from disk: %v", err)
 			}
 		}
-		batchSize := batch.BatchSize()
 		if args.OnLoadCommit != nil {
 			if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
 				return err
 			}
 		}
-		if _, err := batch.Commit(); err != nil {
-			return err
-		}
-		runtime.ReadMemStats(&m)
-		log.Info(
-			"Committed batch",
-			"bucket", string(bucket),
-			"size", common.StorageSize(batchSize),
-			"current key", "final",
-			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		batchCh <- struct {
+			db         ethdb.DbWithPendingMutations
+			currentKey string
+		}{db: batch, currentKey: makeCurrentKeyStr(nil)}
+
 		return nil
 	})
 	wg.Go(func() error {
@@ -226,4 +214,16 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	})
 
 	return wg.Wait()
+}
+
+func makeCurrentKeyStr(k []byte) string {
+	var currentKeyStr string
+	if k == nil {
+		currentKeyStr = "final"
+	} else if len(k) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", k)
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+	}
+	return currentKeyStr
 }

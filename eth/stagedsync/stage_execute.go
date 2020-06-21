@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -282,12 +283,35 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database)
 func writeAccountHashed(db ethdb.Database, key string, acc accounts.Account) error {
 	var addrHash common.Hash
 	copy(addrHash[:], []byte(key))
+	if err := cleanupContractCodeBucket(
+		db,
+		dbutils.ContractCodeBucket,
+		acc,
+		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
+			return rawdb.ReadAccount(db, addrHash, out)
+		},
+		func(inc uint64) []byte { return dbutils.GenerateStoragePrefix(addrHash[:], inc) },
+	); err != nil {
+		return err
+	}
 	return rawdb.WriteAccount(db, addrHash, acc)
 }
 
 func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) error {
 	var address common.Address
 	copy(address[:], []byte(key))
+	if err := cleanupContractCodeBucket(
+		db,
+		dbutils.PlainContractCodeBucket,
+		acc,
+		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
+			return rawdb.PlainReadAccount(db, address, out)
+		},
+		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
+	); err != nil {
+		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+	}
+
 	return rawdb.PlainWriteAccount(db, address, acc)
 }
 
@@ -310,7 +334,7 @@ func cleanupContractCodeBucket(
 ) error {
 	var original accounts.Account
 	got, err := readAccountFunc(db, &original)
-	if err != nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return fmt.Errorf("cleanupContractCodeBucket: %w", err)
 	}
 	if got {

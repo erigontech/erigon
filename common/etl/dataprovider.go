@@ -50,17 +50,9 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	var currentKeyStr string
-	if currentKey == nil {
-		currentKeyStr = "final"
-	} else if len(currentKey) < 4 {
-		currentKeyStr = fmt.Sprintf("%x", currentKey)
-	} else {
-		currentKeyStr = fmt.Sprintf("%x...", currentKey[:4])
-	}
 	log.Info(
 		"Flushed buffer file",
-		"current key", currentKeyStr,
+		"current key", makeCurrentKeyStr(currentKey),
 		"name", bufferFile.Name(),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	b.Reset()
