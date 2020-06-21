@@ -110,17 +110,6 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			return db.NewBatch()
 		}
 	}
-	makeCurrentKeyStr := func(k []byte) string {
-		var currentKeyStr string
-		if k == nil {
-			currentKeyStr = "final"
-		} else if len(k) < 4 {
-			currentKeyStr = fmt.Sprintf("%x", k)
-		} else {
-			currentKeyStr = fmt.Sprintf("%x...", k[:4])
-		}
-		return currentKeyStr
-	}
 
 	loadNextFunc := func(k, v []byte) error {
 		// we ignore everything that is before this key
@@ -225,4 +214,16 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	})
 
 	return wg.Wait()
+}
+
+func makeCurrentKeyStr(k []byte) string {
+	var currentKeyStr string
+	if k == nil {
+		currentKeyStr = "final"
+	} else if len(k) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", k)
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+	}
+	return currentKeyStr
 }
