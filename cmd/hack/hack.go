@@ -2496,28 +2496,6 @@ func testStageLoop(chaindata string) error {
 	return nil
 }
 
-<<<<<<< HEAD
-type dummyAccount struct{}
-
-func (dummyAccount) SubBalance(amount *big.Int)                          {}
-func (dummyAccount) AddBalance(amount *big.Int)                          {}
-func (dummyAccount) SetAddress(common.Address)                           {}
-func (dummyAccount) Value() *big.Int                                     { return nil }
-func (dummyAccount) SetBalance(*big.Int)                                 {}
-func (dummyAccount) SetNonce(uint64)                                     {}
-func (dummyAccount) Balance() *big.Int                                   { return nil }
-func (dummyAccount) Address() common.Address                             { return common.Address{} }
-func (dummyAccount) ReturnGas(*big.Int)                                  {}
-func (dummyAccount) SetCode(common.Hash, []byte)                         {}
-func (dummyAccount) ForEachStorage(cb func(key, value common.Hash) bool) {}
-
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-
-=======
 func searchChangeSet(chaindata string, key []byte) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
@@ -2547,7 +2525,6 @@ func searchChangeSet(chaindata string, key []byte) error {
 	return nil
 }
 
->>>>>>> origin/master
 func main() {
 	var (
 		ostream log.Handler
