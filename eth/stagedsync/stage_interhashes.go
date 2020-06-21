@@ -348,9 +348,12 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	}
 	unfurl := trie.NewRetainList(0)
 	sort.Strings(r.unfurlList)
+	fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
+		fmt.Printf("%x\n", ks)
 		unfurl.AddKey([]byte(ks))
 	}
+	fmt.Printf("END OF UNFURL LIST========================\n")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -359,6 +362,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
+			fmt.Printf("Collecting nil for %x\n", k)
 			return collector.Collect(k, nil)
 		}
 		return collector.Collect(k, common.CopyBytes(hash))
