@@ -2413,6 +2413,82 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	return nil
 }
 
+func compareStates(chaindata string, chaindataCopy string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	copyDb := ethdb.MustOpen(chaindataCopy)
+	defer copyDb.Close()
+	count := 0
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		c := b.Cursor()
+		k, v, e := c.First()
+		if e != nil {
+			return e
+		}
+		return copyDb.KV().View(context.Background(), func(copyTx ethdb.Tx) error {
+			copyB := copyTx.Bucket(dbutils.CurrentStateBucket)
+			copyC := copyB.Cursor()
+			copyK, copyV, copyE := copyC.First()
+			if copyE != nil {
+				return copyE
+			}
+			for k != nil || copyK != nil {
+				count++
+				if count % 100000 == 0 {
+					fmt.Printf("Compared %d records\n", count)
+				}
+				if k == nil {
+					fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
+					copyK, copyV, copyE = copyC.Next()
+					if copyE != nil {
+						return copyE
+					}
+				} else if copyK == nil {
+					fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
+					k, v, e = c.Next()
+					if e != nil {
+						return e
+					}
+				} else {
+					switch bytes.Compare(k, copyK) {
+					case -1:
+						fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
+						k, v, e = c.Next()
+						if e != nil {
+							return e
+						}
+					case 1:
+						fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
+						copyK, copyV, copyE = copyC.Next()
+						if copyE != nil {
+							return copyE
+						}
+					case 0:
+						if !bytes.Equal(v, copyV) {
+							fmt.Printf("Different values for %x. db: [%x], copyDb: [%x]\n", k, v, copyV)
+						}
+						k, v, e = c.Next()
+						if e != nil {
+							return e
+						}
+						copyK, copyV, copyE = copyC.Next()
+						if copyE != nil {
+							return copyE
+						}
+					default:
+						fmt.Printf("Unexpected result of bytes.Compare: %d\n", bytes.Compare(k, copyK))
+					}
+				}
+			}
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 /*
 func testStage6(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
@@ -2717,6 +2793,11 @@ func main() {
 	if *action == "printStages" {
 		if err := printStages(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "compare" {
+		if err := compareStates(*chaindata, *chaindata + "-copy"); err != nil {
+			fmt.Printf("Error: %v\n", err)	
 		}
 	}
 }
