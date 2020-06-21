@@ -110,7 +110,7 @@ func walkAsOfThinAccounts(db KV, startkey []byte, fixedbits int, timestamp uint6
 						if changeSetData == nil {
 							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 						}
-						data, err2 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
+						data, err2 := changeset.AccountChangeSetBytes(changeSetData).Find(hK)
 						if err2 != nil {
 							return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d): %v",
 								hK,

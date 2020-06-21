@@ -2,55 +2,61 @@ package abstractbench
 
 import (
 	"context"
-	"fmt"
+	"encoding/binary"
+	"math/rand"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 var boltOriginDb *bolt.DB
-var badgerOriginDb *badger.DB
-var boltDb ethdb.KV
-var badgerDb ethdb.KV
-var lmdbKV ethdb.KV
 
-func setupDatabases() {
-	vsize := 10
-	keysAmount := 100_000
-	ctx := context.Background()
-	boltDb = ethdb.NewBolt().Path("test").MustOpen(ctx)
-	badgerDb = ethdb.NewBadger().Path("test2").MustOpen(ctx)
-	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen(ctx)
+//var badgerOriginDb *badger.DB
+var boltKV *ethdb.BoltKV
+
+//var badgerDb ethdb.KV
+var lmdbKV *ethdb.LmdbKV
+
+var keysAmount = 100_000
+
+func setupDatabases() func() {
+	//vsize, ctx := 10, context.Background()
+
+	clean := func() {
+		os.Remove("test")
+		os.RemoveAll("test2")
+		os.Remove("test3")
+		os.RemoveAll("test4")
+		os.RemoveAll("test5")
+	}
+	//boltKV = ethdb.NewBolt().Path("/Users/alex.sharov/Library/Ethereum/geth-remove-me2/geth/chaindata").ReadOnly().MustOpen().(*ethdb.BoltKV)
+	boltKV = ethdb.NewBolt().Path("test1").MustOpen().(*ethdb.BoltKV)
+	//badgerDb = ethdb.NewBadger().Path("test2").MustOpen()
+	//lmdbKV = ethdb.NewLMDB().Path("/Users/alex.sharov/Library/Ethereum/geth-remove-me4/geth/chaindata_lmdb").ReadOnly().MustOpen().(*ethdb.LmdbKV)
+	lmdbKV = ethdb.NewLMDB().Path("test4").MustOpen().(*ethdb.LmdbKV)
 	var errOpen error
-	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{KeysPrefixCompressionDisable: true})
+	o := bolt.DefaultOptions
+	o.KeysPrefixCompressionDisable = true
+	boltOriginDb, errOpen = bolt.Open("test3", 0600, o)
 	if errOpen != nil {
 		panic(errOpen)
 	}
 
-	badgerOriginDb, errOpen = badger.Open(badger.DefaultOptions("test4"))
-	if errOpen != nil {
-		panic(errOpen)
-	}
-
-	_ = boltOriginDb.Update(func(tx *bolt.Tx) error {
-		_, _ = tx.CreateBucketIfNotExists(dbutils.CurrentStateBucket, false)
-		return nil
-	})
+	//badgerOriginDb, errOpen = badger.Open(badger.DefaultOptions("test4"))
+	//if errOpen != nil {
+	//	panic(errOpen)
+	//}
 
 	if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
-		defer func(t time.Time) { fmt.Println("origin bolt filled:", time.Since(t)) }(time.Now())
-		v := make([]byte, vsize)
-		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
-				return err
+		for _, name := range dbutils.Buckets {
+			_, createErr := tx.CreateBucketIfNotExists(name, false)
+			if createErr != nil {
+				return createErr
 			}
 		}
 		return nil
@@ -58,87 +64,217 @@ func setupDatabases() {
 		panic(err)
 	}
 
-	if err := boltDb.Update(ctx, func(tx ethdb.Tx) error {
-		defer func(t time.Time) { fmt.Println("abstract bolt filled:", time.Since(t)) }(time.Now())
+	//if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
+	//	defer func(t time.Time) { fmt.Println("origin bolt filled:", time.Since(t)) }(time.Now())
+	//	for i := 0; i < keysAmount; i++ {
+	//		v := make([]byte, vsize)
+	//		k := make([]byte, 8)
+	//		binary.BigEndian.PutUint64(k, uint64(i))
+	//		bucket := tx.Bucket(dbutils.CurrentStateBucket)
+	//		if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
+	//			return err
+	//		}
+	//	}
+	//	return nil
+	//}); err != nil {
+	//	panic(err)
+	//}
+	//
+	//if err := boltKV.Update(ctx, func(tx ethdb.Tx) error {
+	//	defer func(t time.Time) { fmt.Println("abstract bolt filled:", time.Since(t)) }(time.Now())
+	//
+	//	for i := 0; i < keysAmount; i++ {
+	//		v := make([]byte, vsize)
+	//		k := make([]byte, 8)
+	//		binary.BigEndian.PutUint64(k, uint64(i))
+	//		bucket := tx.Bucket(dbutils.CurrentStateBucket)
+	//		if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
+	//			panic(err)
+	//		}
+	//	}
+	//
+	//	return nil
+	//}); err != nil {
+	//	panic(err)
+	//}
+	//
+	//if err := badgerDb.Update(ctx, func(tx ethdb.Tx) error {
+	//	defer func(t time.Time) { fmt.Println("abstract badger filled:", time.Since(t)) }(time.Now())
+	//
+	//	//for i := 0; i < keysAmount; i++ {
+	//	//	v := make([]byte, vsize)
+	//	//	k := make([]byte, 8)
+	//	//	binary.BigEndian.PutUint64(k, uint64(i))
+	//	//	bucket := tx.Bucket(dbutils.CurrentStateBucket)
+	//	//	if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
+	//	//		panic(err)
+	//	//	}
+	//	//}
+	//
+	//	return nil
+	//}); err != nil {
+	//	panic(err)
+	//}
+	//
+	//if err := badgerOriginDb.Update(func(tx *badger.Txn) error {
+	//	defer func(t time.Time) { fmt.Println("pure badger filled:", time.Since(t)) }(time.Now())
+	//
+	//	for i := 0; i < keysAmount; i++ {
+	//		v := make([]byte, vsize)
+	//		k := make([]byte, 8)
+	//		binary.BigEndian.PutUint64(k, uint64(i))
+	//		_ = tx.Set(append(dbutils.CurrentStateBucket, k...), common.CopyBytes(v))
+	//	}
+	//
+	//	return nil
+	//}); err != nil {
+	//	panic(err)
+	//}
+	//
+	//if err := lmdbKV.Update(ctx, func(tx ethdb.Tx) error {
+	//	defer func(t time.Time) { fmt.Println("abstract lmdb filled:", time.Since(t)) }(time.Now())
+	//
+	//	bucket := tx.Bucket(dbutils.CurrentStateBucket)
+	//	for i := 0; i < keysAmount; i++ {
+	//		v := make([]byte, vsize)
+	//		k := make([]byte, 8)
+	//		binary.BigEndian.PutUint64(k, uint64(i))
+	//		if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
+	//			panic(err)
+	//		}
+	//	}
+	//
+	//	return nil
+	//}); err != nil {
+	//	panic(err)
+	//}
 
-		v := make([]byte, vsize)
-		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
-				panic(err)
-			}
+	return clean
+}
+
+func BenchmarkGet(b *testing.B) {
+	clean := setupDatabases()
+	defer clean()
+	//b.Run("badger", func(b *testing.B) {
+	//	db := ethdb.NewObjectDatabase(badgerDb)
+	//	for i := 0; i < b.N; i++ {
+	//		_, _ = db.Get(dbutils.CurrentStateBucket, k)
+	//	}
+	//})
+	ctx := context.Background()
+
+	rand.Seed(time.Now().Unix())
+	b.Run("lmdb1", func(b *testing.B) {
+		k := make([]byte, 9)
+		k[8] = dbutils.HeaderHashSuffix[0]
+		//k1 := make([]byte, 8+32)
+		j := rand.Uint64() % 1
+		binary.BigEndian.PutUint64(k, j)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			canonicalHash, _ := lmdbKV.Get(ctx, dbutils.HeaderPrefix, k)
+			_ = canonicalHash
+			//copy(k1[8:], canonicalHash)
+			//binary.BigEndian.PutUint64(k1, uint64(j))
+			//v1, _ := lmdbKV.Get1(ctx, dbutils.HeaderPrefix, k1)
+			//v2, _ := lmdbKV.Get1(ctx, dbutils.BlockBodyPrefix, k1)
+			//_, _, _ = len(canonicalHash), len(v1), len(v2)
 		}
+	})
 
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
-	if err := badgerDb.Update(ctx, func(tx ethdb.Tx) error {
-		defer func(t time.Time) { fmt.Println("abstract badger filled:", time.Since(t)) }(time.Now())
-
-		v := make([]byte, vsize)
-		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
-				panic(err)
-			}
+	b.Run("lmdb2", func(b *testing.B) {
+		db := ethdb.NewObjectDatabase(lmdbKV)
+		k := make([]byte, 9)
+		k[8] = dbutils.HeaderHashSuffix[0]
+		//k1 := make([]byte, 8+32)
+		j := rand.Uint64() % 1
+		binary.BigEndian.PutUint64(k, j)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			canonicalHash, _ := db.Get(dbutils.HeaderPrefix, k)
+			_ = canonicalHash
+			//copy(k1[8:], canonicalHash)
+			//binary.BigEndian.PutUint64(k1, uint64(j))
+			//v1, _ := lmdbKV.Get1(ctx, dbutils.HeaderPrefix, k1)
+			//v2, _ := lmdbKV.Get1(ctx, dbutils.BlockBodyPrefix, k1)
+			//_, _, _ = len(canonicalHash), len(v1), len(v2)
 		}
+	})
 
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	//b.Run("bolt", func(b *testing.B) {
+	//	k := make([]byte, 9)
+	//	k[8] = dbutils.HeaderHashSuffix[0]
+	//	//k1 := make([]byte, 8+32)
+	//	j := rand.Uint64() % 1
+	//	binary.BigEndian.PutUint64(k, j)
+	//	b.ResetTimer()
+	//	for i := 0; i < b.N; i++ {
+	//		canonicalHash, _ := boltKV.Get(ctx, dbutils.HeaderPrefix, k)
+	//		_ = canonicalHash
+	//		//binary.BigEndian.PutUint64(k1, uint64(j))
+	//		//copy(k1[8:], canonicalHash)
+	//		//v1, _ := boltKV.Get(ctx, dbutils.HeaderPrefix, k1)
+	//		//v2, _ := boltKV.Get(ctx, dbutils.BlockBodyPrefix, k1)
+	//		//_, _, _ = len(canonicalHash), len(v1), len(v2)
+	//	}
+	//})
+}
 
-	if err := badgerOriginDb.Update(func(tx *badger.Txn) error {
-		defer func(t time.Time) { fmt.Println("pure badger filled:", time.Since(t)) }(time.Now())
+func BenchmarkPut(b *testing.B) {
+	clean := setupDatabases()
+	defer clean()
 
-		v := make([]byte, vsize)
+	b.Run("bolt", func(b *testing.B) {
+		tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			_ = tx.Set(append(dbutils.CurrentStateBucket, k...), common.CopyBytes(v))
+			k := make([]byte, 8)
+			j := rand.Uint64() % 100_000_000
+			binary.BigEndian.PutUint64(k, j)
+			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+			tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
 		}
-
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
-	if err := lmdbKV.Update(ctx, func(tx ethdb.Tx) error {
-		defer func(t time.Time) { fmt.Println("abstract lmdb filled:", time.Since(t)) }(time.Now())
-
-		v := make([]byte, vsize)
+		sort.Sort(tuples)
+		db := ethdb.NewWrapperBoltDatabase(boltOriginDb)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = db.MultiPut(tuples...)
+		}
+	})
+	//b.Run("badger", func(b *testing.B) {
+	//	db := ethdb.NewObjectDatabase(badgerDb)
+	//	for i := 0; i < b.N; i++ {
+	//		_, _ = db.MultiPut(tuples...)
+	//	}
+	//})
+	b.Run("lmdb", func(b *testing.B) {
+		tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
 		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.CurrentStateBucket)
-			if err := bucket.Put(k, common.CopyBytes(v)); err != nil {
-				panic(err)
-			}
+			k := make([]byte, 8)
+			j := rand.Uint64() % 100_000_000
+			binary.BigEndian.PutUint64(k, j)
+			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+			tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
 		}
-
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
+		sort.Sort(tuples)
+		var kv ethdb.KV = lmdbKV
+		db := ethdb.NewObjectDatabase(kv)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = db.MultiPut(tuples...)
+		}
+	})
 }
 
 func BenchmarkCursor(b *testing.B) {
-	setupDatabases()
-	defer os.Remove("test")
-	defer os.RemoveAll("test2")
-	defer os.Remove("test3")
-	defer os.RemoveAll("test4")
-	defer os.RemoveAll("test5")
+	clean := setupDatabases()
+	defer clean()
 
 	ctx := context.Background()
 
 	b.ResetTimer()
 	b.Run("abstract bolt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
+			if err := boltKV.View(ctx, func(tx ethdb.Tx) error {
 				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 				for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 					if err != nil {
@@ -155,7 +291,7 @@ func BenchmarkCursor(b *testing.B) {
 	})
 	b.Run("abstract lmdb", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
+			if err := boltKV.View(ctx, func(tx ethdb.Tx) error {
 				c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 				for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 					if err != nil {

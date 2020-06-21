@@ -79,21 +79,15 @@ func TestNextKeyErr(t *testing.T) {
 }
 
 func TestFileDataProviders(t *testing.T) {
-	oldSize := bufferOptimalSize
-	bufferOptimalSize = 1 // guarantee file per entry
-	defer func() {
-		bufferOptimalSize = oldSize
-	}()
-
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()
 	sourceBucket := dbutils.Buckets[0]
 
 	generateTestData(t, db, sourceBucket, 10)
 
-	collector := NewCollector("")
+	collector := NewCollector("", NewSortableBuffer(1))
 
-	err := extractBucketIntoFiles(db, sourceBucket, nil, collector, testExtractToMapFunc, nil)
+	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -121,8 +115,8 @@ func TestRAMDataProviders(t *testing.T) {
 	sourceBucket := dbutils.Buckets[0]
 	generateTestData(t, db, sourceBucket, 10)
 
-	collector := NewCollector("")
-	err := extractBucketIntoFiles(db, sourceBucket, nil, collector, testExtractToMapFunc, nil)
+	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
+	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -171,16 +165,18 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{
-			OnLoadCommit: func(_ []byte, isDone bool) {
+			OnLoadCommit: func(_ ethdb.Putter, _ []byte, isDone bool) error {
 				numberOfCalls++
 				if isDone {
 					finalized = true
 				}
+				return nil
 			},
 			loadBatchSize: 1,
 		},
 	)
 	assert.Nil(t, err)
+	fmt.Println(numberOfCalls)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
 
 	assert.Equal(t, 21, numberOfCalls)
@@ -205,11 +201,12 @@ func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{
-			OnLoadCommit: func(_ []byte, isDone bool) {
+			OnLoadCommit: func(_ ethdb.Putter, _ []byte, isDone bool) error {
 				numberOfCalls++
 				if isDone {
 					finalized = true
 				}
+				return nil
 			},
 		},
 	)
@@ -299,11 +296,6 @@ func TestTransformLoadStartKeyLexicography(t *testing.T) {
 }
 
 func TestTransformThroughFiles(t *testing.T) {
-	oldSize := bufferOptimalSize
-	bufferOptimalSize = 1 // guarantee file per entry
-	defer func() {
-		bufferOptimalSize = oldSize
-	}()
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()
 	sourceBucket := dbutils.Buckets[0]
@@ -316,7 +308,9 @@ func TestTransformThroughFiles(t *testing.T) {
 		"", // temp dir
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		TransformArgs{},
+		TransformArgs{
+			BufferSize: 1,
+		},
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
@@ -370,16 +364,27 @@ func generateTestData(t *testing.T, db ethdb.Putter, bucket []byte, count int) {
 }
 
 func testExtractToMapFunc(k, v []byte, next ExtractNextFunc) error {
+	buf := bytes.NewBuffer(nil)
+	encoder := codec.NewEncoder(nil, &cbor)
+
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = v
-	return next(k, k, valueMap)
+	encoder.Reset(buf)
+	encoder.MustEncode(valueMap)
+	return next(k, k, buf.Bytes())
 }
 
 func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
+	buf := bytes.NewBuffer(nil)
+	encoder := codec.NewEncoder(nil, &cbor)
+
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
 	k1 := append(k, 0xAA)
-	err := next(k, k1, valueMap)
+	encoder.Reset(buf)
+	encoder.MustEncode(valueMap)
+
+	err := next(k, k1, buf.Bytes())
 	if err != nil {
 		return err
 	}
@@ -387,10 +392,15 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
-	return next(k, k2, valueMap)
+	buf.Reset()
+	encoder.Reset(buf)
+	encoder.MustEncode(valueMap)
+	return next(k, k2, buf.Bytes())
 }
 
-func testLoadFromMapFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) error {
+func testLoadFromMapFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
+	decoder := codec.NewDecoder(nil, &cbor)
+	decoder.ResetBytes(v)
 	valueMap := make(map[string][]byte)
 	err := decoder.Decode(&valueMap)
 	if err != nil {
@@ -400,9 +410,12 @@ func testLoadFromMapFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) 
 	return next(k, realValue)
 }
 
-func testLoadFromMapDoubleFunc(k []byte, decoder Decoder, _ State, next LoadNextFunc) error {
+func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
+	decoder := codec.NewDecoder(nil, &cbor)
+	decoder.ResetBytes(v)
+
 	valueMap := make(map[string][]byte)
-	err := decoder.Decode(&valueMap)
+	err := decoder.Decode(valueMap)
 	if err != nil {
 		return err
 	}
@@ -416,6 +429,7 @@ func testLoadFromMapDoubleFunc(k []byte, decoder Decoder, _ State, next LoadNext
 }
 
 func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 []byte, startKey []byte) {
+	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.Walk(b1, startKey, len(startKey), func(k, v []byte) (bool, error) {
 		b1Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
@@ -432,6 +446,7 @@ func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 []byte, startKey []b
 }
 
 func compareBucketsDouble(t *testing.T, db ethdb.Database, b1, b2 []byte) {
+	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.Walk(b1, nil, 0, func(k, v []byte) (bool, error) {
 		b1Map[fmt.Sprintf("%x", append(k, 0xAA))] = fmt.Sprintf("%x", append(v, 0xAA))

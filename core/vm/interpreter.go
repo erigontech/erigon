@@ -67,6 +67,7 @@ type Interpreter interface {
 type callCtx struct {
 	memory   *Memory
 	stack    *stack.Stack
+	rstack   *stack.ReturnStack
 	contract *Contract
 }
 
@@ -96,6 +97,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.chainRules.IsYoloV1:
+		jt = &yoloV1InstructionSet
 	case evm.chainRules.IsIstanbul:
 		jt = &istanbulInstructionSet
 	case evm.chainRules.IsConstantinople:
@@ -161,9 +164,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = pool.StackPool.Get()
+		returns     = stack.NewReturnStack() // local returns stack
 		callContext = &callCtx{
 			memory:   mem,
 			stack:    locStack,
+			rstack:   returns,
 			contract: contract,
 		}
 		// For optimisation reason we're using uint64 as the program counter.
@@ -184,9 +189,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					_ = in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
+					_ = in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
 				} else {
-					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
+					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
 				}
 			}
 		}()
@@ -269,7 +274,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			_ = in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
+			_ = in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
 			logged = true
 		}
 

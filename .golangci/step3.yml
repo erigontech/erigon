@@ -2,6 +2,7 @@ run:
   deadline: 10m
 
 linters:
+  disable-all: true
   enable:
     - unconvert
     - unparam
@@ -10,5 +11,4 @@ linters:
     - nakedret
     - prealloc
     - deadcode
-
-  disable-all: true
+    - gosimple

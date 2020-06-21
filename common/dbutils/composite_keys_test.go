@@ -47,7 +47,7 @@ func TestPlainParseStoragePrefix(t *testing.T) {
 	expectedAddr := common.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c")
 	expectedIncarnation := uint64(999000999)
 
-	prefix := PlainGenerateStoragePrefix(expectedAddr, expectedIncarnation)
+	prefix := PlainGenerateStoragePrefix(expectedAddr[:], expectedIncarnation)
 
 	addr, incarnation := PlainParseStoragePrefix(prefix)
 

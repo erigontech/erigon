@@ -75,7 +75,7 @@ func TestDB() string {
 	getTestDB.Do(func() {
 		testDB, _ = os.LookupEnv("TEST_DB")
 		if testDB == "" {
-			testDB = "bolt"
+			testDB = ""
 		}
 	})
 	return testDB

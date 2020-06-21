@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
@@ -76,7 +75,7 @@ type Ethereum struct {
 	blockchain      *core.BlockChain
 	protocolManager *ProtocolManager
 	lesServer       LesServer
-	dialCandiates   enode.Iterator
+	dialCandidates  enode.Iterator
 
 	// DB interfaces
 	chainDb ethdb.Database // Block chain database
@@ -194,12 +193,12 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	err = setStorageModeIfNotExist(chainDb, config.StorageMode)
+	err = ethdb.SetStorageModeIfNotExist(chainDb, config.StorageMode)
 	if err != nil {
 		return nil, err
 	}
 
-	sm, err := GetStorageModeFromDB(chainDb)
+	sm, err := ethdb.GetStorageModeFromDB(chainDb)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +296,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	}
 
-	eth.dialCandiates, err = eth.setupDiscovery(&ctx.Config.P2P)
+	eth.dialCandidates, err = eth.setupDiscovery(&ctx.Config.P2P)
 	if err != nil {
 		return nil, err
 	}
@@ -598,7 +597,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	for i, vsn := range ProtocolVersions {
 		protos[i] = s.protocolManager.makeProtocol(vsn)
 		protos[i].Attributes = []enr.Entry{s.currentEthEntry()}
-		protos[i].DialCandidates = s.dialCandiates
+		protos[i].DialCandidates = s.dialCandidates
 	}
 
 	if s.config.EnableDebugProtocol {
@@ -661,87 +660,4 @@ func (s *Ethereum) Stop() error {
 	s.chainDb.Close()
 	s.eventMux.Stop()
 	return nil
-}
-
-func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
-	var (
-		err error
-	)
-	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModePreImages, sm.Preimages)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModeReceipts, sm.Receipts)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModeTxIndex, sm.TxIndex)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func setModeOnEmpty(db ethdb.Database, key []byte, currentValue bool) error {
-	_, err := db.Get(dbutils.DatabaseInfoBucket, key)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return err
-	}
-	if err == ethdb.ErrKeyNotFound {
-		val := []byte{}
-		if currentValue {
-			val = []byte{1}
-		}
-		if err = db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func GetStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
-	var (
-		sm  StorageMode
-		v   []byte
-		err error
-	)
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.History = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModePreImages)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.Preimages = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.Receipts = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.TxIndex = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeThinHistory)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-
-	return sm, nil
 }

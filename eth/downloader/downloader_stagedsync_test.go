@@ -2,9 +2,9 @@ package downloader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"testing"
 
@@ -18,20 +18,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type stagedSyncTester struct {
-	downloader    *Downloader
-	db            ethdb.Database
-	peers         map[string]*stagedSyncTesterPeer
-	genesis       *types.Block
-	currentHeader *types.Header
-	lock          sync.RWMutex
+	downloader *Downloader
+	db         ethdb.Database
+	peers      map[string]*stagedSyncTesterPeer
+	genesis    *types.Block
+	lock       sync.RWMutex
 }
 
-func newStagedSyncTester(history bool) *stagedSyncTester {
+func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester := &stagedSyncTester{
 		peers:   make(map[string]*stagedSyncTesterPeer),
 		genesis: testGenesis,
@@ -41,9 +41,11 @@ func newStagedSyncTester(history bool) *stagedSyncTester {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.currentHeader = tester.genesis.Header()
-	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, history)
-	return tester
+	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	clear := func() {
+		tester.db.Close()
+	}
+	return tester, clear
 }
 
 // newPeer registers a new block download source into the downloader.
@@ -84,14 +86,13 @@ func (st *stagedSyncTester) CurrentFastBlock() *types.Block {
 
 // CurrentHeader is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) CurrentHeader() *types.Header {
-	st.lock.RLock()
-	defer st.lock.RUnlock()
-
-	return st.currentHeader
+	hash := rawdb.ReadHeadHeaderHash(st.db)
+	number := rawdb.ReadHeaderNumber(st.db, hash)
+	return rawdb.ReadHeader(st.db, hash, *number)
 }
 
-// ExecuteBlockEuphemerally is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) ExecuteBlockEuphemerally(_ *types.Block, _ state.StateReader, _ *state.DbStateWriter) error {
+// ExecuteBlockEphemerally is part of the implementation of BlockChain interface defined in downloader.go
+func (st *stagedSyncTester) ExecuteBlockEphemerally(_ *types.Block, _ state.StateReader, _ *state.DbStateWriter) error {
 	panic("")
 }
 
@@ -152,74 +153,6 @@ func (st *stagedSyncTester) InsertBodyChain(_ context.Context, blocks types.Bloc
 // InsertChain is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
 	panic("")
-}
-
-// InsertHeaderChainStaged is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertHeaderChainStaged(headers []*types.Header, checkFreq int) (int, bool, uint64, error) {
-	st.lock.Lock()
-	defer st.lock.Unlock()
-
-	if rawdb.ReadHeaderNumber(st.db, headers[0].ParentHash) == nil {
-		return 0, false, 0, errors.New("unknown parent")
-	}
-	for i := 1; i < len(headers); i++ {
-		if headers[i].ParentHash != headers[i-1].Hash() {
-			return i, false, 0, errors.New("unknown parent")
-		}
-	}
-	var newCanonical bool
-	var lowestCanonicalNumber uint64
-	// Do a full insert if pre-checks passed
-	for i, header := range headers {
-		if rawdb.ReadHeaderNumber(st.db, header.Hash()) != nil {
-			continue
-		}
-		if rawdb.ReadHeaderNumber(st.db, header.ParentHash) == nil {
-			return i, newCanonical, lowestCanonicalNumber, fmt.Errorf("unknown parent %x", header.ParentHash)
-		}
-		number := header.Number.Uint64()
-		ptd := rawdb.ReadTd(st.db, header.ParentHash, number-1)
-		externTd := ptd.Add(ptd, header.Difficulty)
-		localTd := rawdb.ReadTd(st.db, st.currentHeader.Hash(), st.currentHeader.Number.Uint64())
-		if externTd.Cmp(localTd) > 0 {
-			batch := st.db.NewBatch()
-			// Delete any canonical number assignments above the new head
-			for i := number + 1; ; i++ {
-				hash := rawdb.ReadCanonicalHash(st.db, i)
-				if hash == (common.Hash{}) {
-					break
-				}
-				rawdb.DeleteCanonicalHash(batch, i)
-			}
-			// Overwrite any stale canonical number assignments
-			var (
-				headHash   = header.ParentHash
-				headNumber = number - 1
-				headHeader = rawdb.ReadHeader(st.db, headHash, headNumber)
-			)
-			for rawdb.ReadCanonicalHash(st.db, headNumber) != headHash {
-				rawdb.WriteCanonicalHash(batch, headHash, headNumber)
-
-				headHash = headHeader.ParentHash
-				headNumber--
-				headHeader = rawdb.ReadHeader(st.db, headHash, headNumber)
-			}
-			if _, err := batch.Commit(); err != nil {
-				return i, newCanonical, lowestCanonicalNumber, fmt.Errorf("write header markers into disk: %v", err)
-			}
-			// Last step update all in-memory head header markers
-			st.currentHeader = types.CopyHeader(header)
-			if !newCanonical || number < lowestCanonicalNumber {
-				lowestCanonicalNumber = number
-				newCanonical = true
-			}
-		}
-		rawdb.WriteTd(st.db, header.Hash(), header.Number.Uint64(), externTd)
-		rawdb.WriteHeader(context.Background(), st.db, header)
-		rawdb.WriteCanonicalHash(st.db, header.Hash(), header.Number.Uint64())
-		st.currentHeader = header
-	}
-	return len(headers), newCanonical, lowestCanonicalNumber, nil
 }
 
 // InsertHeaderChain is part of the implementation of BlockChain interface defined in downloader.go
@@ -322,18 +255,56 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	panic("")
 }
 
+func TestStagedBase(t *testing.T) {
+	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
+	// Same as testChainForkLightA but much shorter
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	tester, clear := newStagedSyncTester()
+	defer clear()
+	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.sync("peer", nil); err != nil {
+		t.Fatal(err)
+	}
+	currentHeader := tester.CurrentHeader()
+	expectedHash := testChainBase.chain[len(testChainBase.chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(testChainBase.chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(testChainBase.chain)-1, currentHeader.Number.Uint64())
+	}
+	if currentHeader.Hash() != expectedHash {
+		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
+	}
+}
+
 func TestUnwind(t *testing.T) {
-	tester := newStagedSyncTester(false)
+	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	tester, clear := newStagedSyncTester()
+	defer clear()
 	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
+	fmt.Println("sync heavy")
 	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
+	}
+	// Need to call sync twice, because the first call is terminated by the unwinding
+	if err := tester.sync("forkpeer", nil); err != nil {
+		t.Fatal(err)
+	}
+	currentHeader := tester.CurrentHeader()
+	expectedHash := testChainForkHeavy.chain[len(testChainForkHeavy.chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(testChainForkHeavy.chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(testChainForkHeavy.chain)-1, currentHeader.Number.Uint64())
+	}
+	if currentHeader.Hash() != expectedHash {
+		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
 	}
 }

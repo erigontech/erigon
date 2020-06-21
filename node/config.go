@@ -83,7 +83,7 @@ type Config struct {
 	KeyStoreDir string `toml:",omitempty"`
 
 	// ExternalSigner specifies an external URI for a clef-type signer
-	ExternalSigner string `toml:"omitempty"`
+	ExternalSigner string `toml:",omitempty"`
 
 	// UseLightweightKDF lowers the memory and CPU requirements of the key store
 	// scrypt KDF at the expense of security.
@@ -191,6 +191,7 @@ type Config struct {
 	// Whether to use BadgerDB or BoltDB or LMDB.
 	BadgerDB bool
 	LMDB     bool
+	Bolt     bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener

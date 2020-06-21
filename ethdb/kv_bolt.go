@@ -3,12 +3,91 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"path"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
+
+var (
+	boltTxPool     = sync.Pool{New: func() interface{} { return &boltTx{} }}
+	boltCursorPool = sync.Pool{New: func() interface{} { return &boltCursor{} }}
+)
+
+var valueBytesMetrics []metrics.Gauge
+var keyBytesMetrics []metrics.Gauge
+var totalBytesPutMetrics []metrics.Gauge
+var totalBytesDeleteMetrics []metrics.Gauge
+var keyNMetrics []metrics.Gauge
+
+func init() {
+	if metrics.Enabled {
+		for i := range dbutils.Buckets {
+			b := strings.ToLower(string(dbutils.Buckets[i]))
+			b = strings.Replace(b, "-", "_", -1)
+			valueBytesMetrics = append(valueBytesMetrics, metrics.NewRegisteredGauge("db/bucket/value_bytes/"+b, nil))
+			keyBytesMetrics = append(keyBytesMetrics, metrics.NewRegisteredGauge("db/bucket/key_bytes/"+b, nil))
+			totalBytesPutMetrics = append(totalBytesPutMetrics, metrics.NewRegisteredGauge("db/bucket/bytes_put_total/"+b, nil))
+			totalBytesDeleteMetrics = append(totalBytesDeleteMetrics, metrics.NewRegisteredGauge("db/bucket/bytes_delete_total/"+b, nil))
+			keyNMetrics = append(keyNMetrics, metrics.NewRegisteredGauge("db/bucket/keys/"+b, nil))
+		}
+	}
+}
+
+func collectBoltMetrics(ctx context.Context, db *bolt.DB, ticker *time.Ticker) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		stats := db.Stats()
+		boltPagesFreeGauge.Update(int64(stats.FreePageN))
+		boltPagesPendingGauge.Update(int64(stats.PendingPageN))
+		boltPagesAllocGauge.Update(int64(stats.FreeAlloc))
+		boltFreelistInuseGauge.Update(int64(stats.FreelistInuse))
+
+		boltTxGauge.Update(int64(stats.TxN))
+		boltTxOpenGauge.Update(int64(stats.OpenTxN))
+		boltTxCursorGauge.Update(int64(stats.TxStats.CursorCount))
+
+		boltRebalanceGauge.Update(int64(stats.TxStats.Rebalance))
+		boltRebalanceTimer.Update(stats.TxStats.RebalanceTime)
+
+		boltSplitGauge.Update(int64(stats.TxStats.Split))
+		boltSpillGauge.Update(int64(stats.TxStats.Spill))
+		boltSpillTimer.Update(stats.TxStats.SpillTime)
+
+		boltWriteGauge.Update(int64(stats.TxStats.Write))
+		boltWriteTimer.Update(stats.TxStats.WriteTime)
+
+		if len(valueBytesMetrics) == 0 {
+			continue
+		}
+		writeStats := db.WriteStats()
+		for i := range dbutils.Buckets {
+			st, ok := writeStats[string(dbutils.Buckets[i])]
+			if !ok {
+				continue
+			}
+
+			valueBytesMetrics[i].Update(int64(st.ValueBytesN))
+			keyBytesMetrics[i].Update(int64(st.KeyBytesN))
+			totalBytesPutMetrics[i].Update(int64(st.TotalBytesPut))
+			totalBytesDeleteMetrics[i].Update(int64(st.TotalBytesDelete))
+			keyNMetrics[i].Update(int64(st.KeyN))
+		}
+	}
+}
 
 type boltOpts struct {
 	Bolt *bolt.Options
@@ -16,21 +95,24 @@ type boltOpts struct {
 }
 
 type BoltKV struct {
-	opts boltOpts
-	bolt *bolt.DB
-	log  log.Logger
+	opts        boltOpts
+	bolt        *bolt.DB
+	log         log.Logger
+	stopMetrics context.CancelFunc
+	wg          *sync.WaitGroup
 }
-type boltTx struct {
-	ctx context.Context
-	db  *BoltKV
 
-	bolt *bolt.Tx
+type boltTx struct {
+	ctx     context.Context
+	db      *BoltKV
+	bolt    *bolt.Tx
+	cursors []*boltCursor
 }
 
 type boltBucket struct {
-	tx *boltTx
-
+	tx      *boltTx
 	bolt    *bolt.Bucket
+	id      int
 	nameLen uint
 }
 
@@ -47,7 +129,7 @@ type boltCursor struct {
 }
 
 type noValuesBoltCursor struct {
-	boltCursor
+	*boltCursor
 }
 
 func (opts boltOpts) InMem() boltOpts {
@@ -65,9 +147,17 @@ func (opts boltOpts) Path(path string) boltOpts {
 	return opts
 }
 
-// WrapBoltDb provides a way for the code to gradually migrate
-// to the abstract interface
-func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
+func (opts boltOpts) Open() (KV, error) {
+	if !opts.Bolt.MemOnly {
+		if err := os.MkdirAll(path.Dir(opts.path), 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
+	}
+
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
@@ -81,23 +171,31 @@ func (opts boltOpts) WrapBoltDb(boltDB *bolt.DB) (db KV, err error) {
 			return nil, err
 		}
 	}
-	return &BoltKV{
+
+	db := &BoltKV{
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
-	}, nil
-}
-
-func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
-	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
-	if err != nil {
-		return nil, err
+		wg:   &sync.WaitGroup{},
 	}
-	return opts.WrapBoltDb(boltDB)
+
+	if metrics.Enabled {
+		ctx, cancel := context.WithCancel(context.Background())
+		db.stopMetrics = cancel
+		db.wg.Add(1)
+		go func() {
+			defer db.wg.Done()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			collectBoltMetrics(ctx, boltDB, ticker)
+		}()
+	}
+
+	return db, nil
 }
 
-func (opts boltOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
+func (opts boltOpts) MustOpen() KV {
+	db, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
@@ -113,6 +211,12 @@ func NewBolt() boltOpts {
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *BoltKV) Close() {
+	if db.stopMetrics != nil {
+		db.stopMetrics()
+	}
+
+	db.wg.Wait()
+
 	if db.bolt != nil {
 		if err := db.bolt.Close(); err != nil {
 			db.log.Warn("failed to close bolt DB", "err", err)
@@ -142,15 +246,55 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 	return res, nil
 }
 
+func (db *BoltKV) IdealBatchSize() int {
+	return 50 * 1024 * 1024 // 50 Mb
+}
+
+func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
+	err = db.bolt.View(func(tx *bolt.Tx) error {
+		v, _ := tx.Bucket(bucket).Get(key)
+		if v != nil {
+			val = make([]byte, len(v))
+			copy(val, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+func (db *BoltKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
+	var has bool
+	err := db.bolt.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			has = false
+		} else {
+			v, _ := b.Get(key)
+			has = v != nil
+		}
+		return nil
+	})
+	return has, err
+}
+
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	t := boltTxPool.Get().(*boltTx)
+	t.ctx = ctx
+	t.db = db
 	var err error
-	t := &boltTx{db: db, ctx: ctx}
 	t.bolt, err = db.bolt.Begin(writable)
 	return t, err
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &boltTx{db: db, ctx: ctx}
+	t := boltTxPool.Get().(*boltTx)
+	defer boltTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
+	defer t.closeCursors()
 	return db.bolt.View(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -158,7 +302,11 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &boltTx{db: db, ctx: ctx}
+	t := boltTxPool.Get().(*boltTx)
+	defer boltTxPool.Put(t)
+	t.ctx = ctx
+	t.db = db
+	defer t.closeCursors()
 	return db.bolt.Update(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -166,11 +314,22 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *boltTx) Commit(ctx context.Context) error {
+	defer tx.closeCursors()
+	// could not put tx back to pool, because tx can be used by app code after commit
 	return tx.bolt.Commit()
 }
 
 func (tx *boltTx) Rollback() error {
+	defer tx.closeCursors()
+	// could not put tx back to pool, because tx can be used by app code after rollback
 	return tx.bolt.Rollback()
+}
+
+func (tx *boltTx) closeCursors() {
+	for _, c := range tx.cursors {
+		boltCursorPool.Put(c)
+	}
+	tx.cursors = tx.cursors[:0]
 }
 
 func (tx *boltTx) Yield() {
@@ -178,7 +337,7 @@ func (tx *boltTx) Yield() {
 }
 
 func (tx *boltTx) Bucket(name []byte) Bucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name))}
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
 	b.bolt = tx.bolt.Bucket(name)
 	return b
 }
@@ -198,7 +357,24 @@ func (c *boltCursor) Prefetch(v uint) Cursor {
 }
 
 func (c *boltCursor) NoValues() NoValuesCursor {
-	return &noValuesBoltCursor{boltCursor: *c}
+	return &noValuesBoltCursor{boltCursor: c}
+}
+
+func (b boltBucket) Size() (uint64, error) {
+	st := b.bolt.Stats()
+	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
+}
+
+func (b boltBucket) Clear() error {
+	err := b.tx.bolt.DeleteBucket(dbutils.Buckets[b.id])
+	if err != nil {
+		return err
+	}
+	_, err = b.tx.bolt.CreateBucket(dbutils.Buckets[b.id], false)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b boltBucket) Get(key []byte) (val []byte, err error) {
@@ -232,25 +408,30 @@ func (b boltBucket) Delete(key []byte) error {
 }
 
 func (b boltBucket) Cursor() Cursor {
-	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
-}
-
-func (c *boltCursor) initCursor() {
-	if c.bolt != nil {
-		return
+	c := boltCursorPool.Get().(*boltCursor)
+	c.ctx = b.tx.ctx
+	c.bucket = b
+	c.prefix = nil
+	c.k = nil
+	c.v = nil
+	c.err = nil
+	c.bolt = b.bolt.Cursor()
+	// add to auto-close on end of transactions
+	if b.tx.cursors == nil {
+		b.tx.cursors = make([]*boltCursor, 0, 1)
 	}
-	c.bolt = c.bucket.bolt.Cursor()
+	b.tx.cursors = append(b.tx.cursors, c)
+	return c
 }
 
 func (c *boltCursor) First() ([]byte, []byte, error) {
 	if len(c.prefix) == 0 {
 		c.k, c.v = c.bolt.First()
-	} else {
-		c.k, c.v = c.bolt.Seek(c.prefix)
+		return c.k, c.v, nil
 	}
-
+	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+		return nil, nil, nil
 	}
 	return c.k, c.v, nil
 }
@@ -263,8 +444,10 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -277,8 +460,10 @@ func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.SeekTo(seek)
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -291,8 +476,10 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			c.k, c.v = nil, nil
+		}
 	}
 	return c.k, c.v, nil
 }
@@ -357,7 +544,7 @@ func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
 
 	c.k, c.v = c.bolt.Seek(c.prefix)
 	if !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+		return nil, 0, nil
 	}
 	return c.k, uint32(len(c.v)), nil
 }
@@ -370,8 +557,10 @@ func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	}
 
 	c.k, c.v = c.bolt.Seek(seek)
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		c.k, c.v = nil, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, uint32(len(c.v)), nil
 }
@@ -384,8 +573,10 @@ func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, 0, nil
+	if c.prefix != nil {
+		if !bytes.HasPrefix(c.k, c.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, uint32(len(c.v)), nil
 }

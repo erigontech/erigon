@@ -92,7 +92,7 @@ func newTester() *downloadTester {
 	if err != nil {
 		panic(err)
 	}
-	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, false)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 
@@ -243,10 +243,6 @@ func (dl *downloadTester) GetTd(hash common.Hash, number uint64) *big.Int {
 	return dl.ownChainTd[hash]
 }
 
-func (dl *downloadTester) InsertHeaderChainStaged([]*types.Header, int) (int, bool, uint64, error) {
-	return 0, false, 0, nil
-}
-
 // InsertHeaderChain injects a new batch of headers into the simulated chain.
 func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq int) (i int, err error) {
 	dl.lock.Lock()
@@ -254,24 +250,30 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 
 	// Do a quick check, as the blockchain.InsertHeaderChain doesn't insert anything in case of errors
 	if _, ok := dl.ownHeaders[headers[0].ParentHash]; !ok {
-		return 0, errors.New("unknown parent")
+		return 0, errors.New("error in InsertHeaderChain: unknown parent at first position")
 	}
+	var hashes []common.Hash
 	for i := 1; i < len(headers); i++ {
+		hash := headers[i-1].Hash()
 		if headers[i].ParentHash != headers[i-1].Hash() {
-			return i, errors.New("unknown parent")
+			return i, fmt.Errorf("non-contiguous import at position %d", i)
 		}
+		hashes = append(hashes, hash)
 	}
+	hashes = append(hashes, headers[len(headers)-1].Hash())
 	// Do a full insert if pre-checks passed
 	for i, header := range headers {
-		if _, ok := dl.ownHeaders[header.Hash()]; ok {
+		hash := hashes[i]
+		if _, ok := dl.ownHeaders[hash]; ok {
 			continue
 		}
 		if _, ok := dl.ownHeaders[header.ParentHash]; !ok {
-			return i, errors.New("unknown parent")
+			// This _should_ be impossible, due to precheck and induction
+			return i, fmt.Errorf("error in InsertHeaderChain: unknown parent at position %d", i)
 		}
-		dl.ownHashes = append(dl.ownHashes, header.Hash())
-		dl.ownHeaders[header.Hash()] = header
-		dl.ownChainTd[header.Hash()] = new(big.Int).Add(dl.ownChainTd[header.ParentHash], header.Difficulty)
+		dl.ownHashes = append(dl.ownHashes, hash)
+		dl.ownHeaders[hash] = header
+		dl.ownChainTd[hash] = new(big.Int).Add(dl.ownChainTd[header.ParentHash], header.Difficulty)
 	}
 	return len(headers), nil
 }
@@ -295,7 +297,7 @@ func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i
 
 	for i, block := range blocks {
 		if _, ok := dl.ownBlocks[block.ParentHash()]; !ok {
-			return i, errors.New("unknown parent")
+			return i, fmt.Errorf("error in InsertChain: unknown parent at position %d / %d", i, len(blocks))
 		}
 		if _, ok := dl.ownHeaders[block.Hash()]; !ok {
 			dl.ownHashes = append(dl.ownHashes, block.Hash())
@@ -323,7 +325,7 @@ func (dl *downloadTester) InsertReceiptChain(blocks types.Blocks, receipts []typ
 		}
 		if _, ok := dl.ancientBlocks[blocks[i].ParentHash()]; !ok {
 			if _, ok := dl.ownBlocks[blocks[i].ParentHash()]; !ok {
-				return i, errors.New("unknown parent")
+				return i, errors.New("error in InsertReceiptChain: unknown parent")
 			}
 		}
 		if blocks[i].NumberU64() <= ancientLimit {
@@ -513,8 +515,6 @@ func TestCanonicalSynchronisation64Light(t *testing.T) {
 }
 
 func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -541,7 +541,6 @@ func TestThrottling64Full(t *testing.T) { testThrottling(t, 64, FullSync) }
 //func TestThrottling64Fast(t *testing.T) { testThrottling(t, 64, FastSync) }
 
 func testThrottling(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -631,8 +630,6 @@ func TestForkedSync64Full(t *testing.T) { testForkedSync(t, 64, FullSync) }
 func TestForkedSync64Light(t *testing.T) { testForkedSync(t, 64, LightSync) }
 
 func testForkedSync(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -667,8 +664,6 @@ func TestHeavyForkedSync64Full(t *testing.T) { testHeavyForkedSync(t, 64, FullSy
 func TestHeavyForkedSync64Light(t *testing.T) { testHeavyForkedSync(t, 64, LightSync) }
 
 func testHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -704,8 +699,6 @@ func TestBoundedForkedSync64Full(t *testing.T) { testBoundedForkedSync(t, 64, Fu
 func TestBoundedForkedSync64Light(t *testing.T) { testBoundedForkedSync(t, 64, LightSync) }
 
 func testBoundedForkedSync(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -740,8 +733,6 @@ func TestBoundedHeavyForkedSync64Full(t *testing.T) { testBoundedHeavyForkedSync
 func TestBoundedHeavyForkedSync64Light(t *testing.T) { testBoundedHeavyForkedSync(t, 64, LightSync) }
 
 func testBoundedHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -767,8 +758,6 @@ func testBoundedHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 // Tests that an inactive downloader will not accept incoming block headers and
 // bodies.
 func TestInactiveDownloader62(t *testing.T) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -785,8 +774,6 @@ func TestInactiveDownloader62(t *testing.T) {
 // Tests that an inactive downloader will not accept incoming block headers,
 // bodies and receipts.
 func TestInactiveDownloader63(t *testing.T) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -814,8 +801,6 @@ func TestCancel64Full(t *testing.T) { testCancel(t, 64, FullSync) }
 func TestCancel64Light(t *testing.T) { testCancel(t, 64, LightSync) }
 
 func testCancel(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -849,8 +834,6 @@ func TestMultiSynchronisation64Full(t *testing.T) { testMultiSynchronisation(t, 
 func TestMultiSynchronisation64Light(t *testing.T) { testMultiSynchronisation(t, 64, LightSync) }
 
 func testMultiSynchronisation(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 
@@ -880,8 +863,6 @@ func TestMultiProtoSynchronisation64Full(t *testing.T) { testMultiProtoSync(t, 6
 func TestMultiProtoSynchronisation64Light(t *testing.T) { testMultiProtoSync(t, 64, LightSync) }
 
 func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -921,8 +902,6 @@ func TestEmptyShortCircuit64Full(t *testing.T) { testEmptyShortCircuit(t, 64, Fu
 func TestEmptyShortCircuit64Light(t *testing.T) { testEmptyShortCircuit(t, 64, LightSync) }
 
 func testEmptyShortCircuit(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 
@@ -976,8 +955,6 @@ func TestMissingHeaderAttack64Full(t *testing.T) { testMissingHeaderAttack(t, 64
 func TestMissingHeaderAttack64Light(t *testing.T) { testMissingHeaderAttack(t, 64, LightSync) }
 
 func testMissingHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1010,8 +987,6 @@ func TestShiftedHeaderAttack64Full(t *testing.T) { testShiftedHeaderAttack(t, 64
 //func TestShiftedHeaderAttack64Light(t *testing.T) { testShiftedHeaderAttack(t, 64, LightSync) }
 
 func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1044,8 +1019,6 @@ func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 func TestInvalidHeaderRollback64Light(t *testing.T) { testInvalidHeaderRollback(t, 64, LightSync) }
 
 func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1130,7 +1103,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
 	}
 }
 
-// Tests that a peer advertising an high TD doesn't get to stall the downloader
+// Tests that a peer advertising a high TD doesn't get to stall the downloader
 // afterwards by not sending any useful hashes.
 func TestHighTDStarvationAttack62(t *testing.T)     { testHighTDStarvationAttack(t, 62, FullSync) }
 func TestHighTDStarvationAttack63Full(t *testing.T) { testHighTDStarvationAttack(t, 63, FullSync) }
@@ -1142,8 +1115,6 @@ func TestHighTDStarvationAttack64Full(t *testing.T) { testHighTDStarvationAttack
 func TestHighTDStarvationAttack64Light(t *testing.T) { testHighTDStarvationAttack(t, 64, LightSync) }
 
 func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1161,8 +1132,6 @@ func TestBlockHeaderAttackerDropping63(t *testing.T) { testBlockHeaderAttackerDr
 func TestBlockHeaderAttackerDropping64(t *testing.T) { testBlockHeaderAttackerDropping(t, 64) }
 
 func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
-	t.Parallel()
-
 	// Define the disconnection requirement for individual hash fetch errors
 	tests := []struct {
 		result error
@@ -1222,8 +1191,6 @@ func TestSyncProgress64Full(t *testing.T) { testSyncProgress(t, 64, FullSync) }
 func TestSyncProgress64Light(t *testing.T) { testSyncProgress(t, 64, LightSync) }
 
 func testSyncProgress(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1308,8 +1275,6 @@ func TestForkedSyncProgress64Full(t *testing.T) { testForkedSyncProgress(t, 64, 
 func TestForkedSyncProgress64Light(t *testing.T) { testForkedSyncProgress(t, 64, LightSync) }
 
 func testForkedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1386,8 +1351,6 @@ func TestFailedSyncProgress64Full(t *testing.T) { testFailedSyncProgress(t, 64, 
 func TestFailedSyncProgress64Light(t *testing.T) { testFailedSyncProgress(t, 64, LightSync) }
 
 func testFailedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1462,8 +1425,6 @@ func TestFakedSyncProgress64Full(t *testing.T) { testFakedSyncProgress(t, 64, Fu
 func TestFakedSyncProgress64Light(t *testing.T) { testFakedSyncProgress(t, 64, LightSync) }
 
 func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1532,8 +1493,6 @@ func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 // This test reproduces an issue where unexpected deliveries would
 // block indefinitely if they arrived at the right time.
 func TestDeliverHeadersHang(t *testing.T) {
-	t.Parallel()
-
 	testCases := []struct {
 		protocol int
 		syncMode SyncMode
@@ -1547,7 +1506,6 @@ func TestDeliverHeadersHang(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("protocol %d mode %v", tc.protocol, tc.syncMode), func(t *testing.T) {
-			t.Parallel()
 			testDeliverHeadersHang(t, tc.protocol, tc.syncMode)
 		})
 	}
@@ -1711,8 +1669,6 @@ func TestCheckpointEnforcement64Fast(t *testing.T)  { testCheckpointEnforcement(
 func TestCheckpointEnforcement64Light(t *testing.T) { testCheckpointEnforcement(t, 64, LightSync) }
 
 func testCheckpointEnforcement(t *testing.T, protocol int, mode SyncMode) {
-	t.Parallel()
-
 	// Create a new tester with a particular hard coded checkpoint block
 	tester := newTester()
 	defer tester.terminate()

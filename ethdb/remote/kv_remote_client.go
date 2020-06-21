@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -193,6 +194,7 @@ type DB struct {
 	doDial            chan struct{}
 	doPing            <-chan time.Time
 	cancelConnections context.CancelFunc
+	wg                *sync.WaitGroup
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -275,7 +277,7 @@ func (closer notifyOnClose) Close() error {
 	return closer.internal.Close()
 }
 
-func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
+func Open(opts DbOpts) (*DB, error) {
 	if opts.DialFunc == nil {
 		opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
 			if opts.DialAddress == "" {
@@ -289,6 +291,7 @@ func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 		opts:           opts,
 		connectionPool: make(chan *conn, ClientMaxConnections),
 		doDial:         make(chan struct{}, ClientMaxConnections),
+		wg:             &sync.WaitGroup{},
 	}
 
 	for i := uint64(0); i < ClientMaxConnections; i++ {
@@ -296,15 +299,13 @@ func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 	}
 
 	ctx, cancelConnections := context.WithCancel(context.Background())
-	go func() {
-		<-parentCtx.Done()
-		cancelConnections()
-	}()
 	db.cancelConnections = cancelConnections
 
 	pingTicker := time.NewTicker(db.opts.PingEvery)
 	db.doPing = pingTicker.C
+	db.wg.Add(1)
 	go func() {
+		defer db.wg.Done()
 		defer pingTicker.Stop()
 
 		for {
@@ -544,22 +545,22 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	prefix         []byte
-	prefetchSize   uint
 	prefetchValues bool
+	initialized    bool
+	cursorHandle   uint64
+	prefetchSize   uint
+	cacheLastIdx   uint
+	cacheIdx       uint
+	prefix         []byte
 
 	ctx            context.Context
 	in             io.Reader
 	out            io.Writer
-	cursorHandle   uint64
-	cacheLastIdx   uint
-	cacheIdx       uint
 	cacheKeys      [][]byte
 	cacheValues    [][]byte
 	cacheValueSize []uint32
 
-	bucket      *Bucket
-	initialized bool
+	bucket *Bucket
 }
 
 func (c *Cursor) Prefix(v []byte) *Cursor {

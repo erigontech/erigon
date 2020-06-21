@@ -68,6 +68,7 @@ type FlatDbSubTrieLoader struct {
 
 	receiver        StreamReceiver
 	defaultReceiver *DefaultReceiver
+	hc              HashCollector
 }
 
 type DefaultReceiver struct {
@@ -106,6 +107,7 @@ func NewFlatDbSubTrieLoader() *FlatDbSubTrieLoader {
 // Reset prepares the loader for reuse
 func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, receiverDecider RetainDecider, hc HashCollector, dbPrefixes [][]byte, fixedbits []int, trace bool) error {
 	fstl.defaultReceiver.Reset(receiverDecider, hc, trace)
+	fstl.hc = hc
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
@@ -334,6 +336,12 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	}
 
 	if retain { // can't use ih as is, need go to children
+		// Collect deletions
+		if fstl.hc != nil {
+			if err = fstl.hc(fstl.minKeyAsNibbles.Bytes(), nil); err != nil {
+				return err
+			}
+		}
 		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
 			return err
 		} // go to children, not to sibling

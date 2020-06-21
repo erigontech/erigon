@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -13,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -25,7 +26,7 @@ var cryptoContexts []*secp256k1.Context
 func init() {
 	// To avoid bothering with creating/releasing the resources
 	// but still not leak the contexts
-	numOfGoroutines = 3 // We never get more than 3x improvement even if we use 8 goroutines
+	numOfGoroutines = 8
 	if numOfGoroutines > runtime.NumCPU() {
 		numOfGoroutines = runtime.NumCPU()
 	}
@@ -36,8 +37,21 @@ func init() {
 }
 
 func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
-	lastProcessedBlockNumber := s.BlockNumber
-	nextBlockNumber := lastProcessedBlockNumber + 1
+	if prof {
+		f, err := os.Create("cpu-senders.prof")
+		if err != nil {
+			log.Error("could not create CPU profile", "error", err)
+			return err
+		}
+		defer f.Close()
+		if err = pprof.StartCPUProfile(f); err != nil {
+			log.Error("could not start CPU profile", "error", err)
+			return err
+		}
+		defer pprof.StopCPUProfile()
+	}
+
+	nextBlockNumber := s.BlockNumber
 
 	mutation := stateDB.NewBatch()
 	defer func() {
@@ -76,23 +90,22 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 
 		written := 0
 		for i := 0; i < batchSize; i++ {
-			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
+			hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber+1)
 			if hash == emptyHash {
 				needExit = true
 				break
 			}
-			body := rawdb.ReadBody(mutation, hash, nextBlockNumber)
+			body := rawdb.ReadBody(mutation, hash, nextBlockNumber+1)
 			if body == nil {
 				needExit = true
 				break
 			}
+			nextBlockNumber++
 			blockNumber.SetUint64(nextBlockNumber)
 			s := types.MakeSigner(config, &blockNumber)
 
 			jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
 			written++
-
-			nextBlockNumber++
 		}
 
 		for i := 0; i < written; i++ {
@@ -160,21 +173,10 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 	}
 }
 
-func unwindSendersStage(stateDB ethdb.Database, unwindPoint uint64) error {
+func unwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
 	// Does not require any special processing
-	lastProcessedBlockNumber, err := stages.GetStageProgress(stateDB, stages.Senders)
-	if err != nil {
-		return fmt.Errorf("unwind Senders: get stage progress: %v", err)
-	}
-	if unwindPoint >= lastProcessedBlockNumber {
-		err = stages.SaveStageUnwind(stateDB, stages.Senders, 0)
-		if err != nil {
-			return fmt.Errorf("unwind Senders: reset: %v", err)
-		}
-		return nil
-	}
 	mutation := stateDB.NewBatch()
-	err = stages.SaveStageUnwind(mutation, stages.Senders, 0)
+	err := u.Done(mutation)
 	if err != nil {
 		return fmt.Errorf("unwind Senders: reset: %v", err)
 	}

@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	// testTxs is a set of transactions to use during testing that have meaninful hashes.
+	// testTxs is a set of transactions to use during testing that have meaningful hashes.
 	testTxs = []*types.Transaction{
 		types.NewTransaction(5577006791947779410, common.Address{0x0f}, new(uint256.Int), 0, new(uint256.Int), nil),
 		types.NewTransaction(15352856648520921629, common.Address{0xbb}, new(uint256.Int), 0, new(uint256.Int), nil),
@@ -450,7 +450,7 @@ func TestTransactionFetcherCleanupEmpty(t *testing.T) {
 	})
 }
 
-// Tests that non-returned transactions are either re-sheduled from a
+// Tests that non-returned transactions are either re-scheduled from a
 // different peer, or self if they are after the cutoff point.
 func TestTransactionFetcherMissingRescheduling(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{

@@ -653,25 +653,16 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 
 	if n.config.BadgerDB {
 		log.Info("Opening Database (Badger)")
-		return ethdb.NewBadgerDatabase(n.config.ResolvePath(name + "_badger"))
+		return ethdb.Open(n.config.ResolvePath(name + "_badger"))
 	}
 
-	if n.config.LMDB {
-		log.Info("Opening Database (LMDB)")
-		dir := n.config.ResolvePath(name + "_lmdb")
-		kv, err := ethdb.NewLMDB().Path(dir).Open(context.Background())
-		if err != nil {
-			return nil, err
-		}
-		return ethdb.NewObjectDatabase(kv), nil
+	if n.config.Bolt {
+		log.Info("Opening Database (Bolt)")
+		return ethdb.Open(n.config.ResolvePath(name + "_bolt"))
 	}
 
-	log.Info("Opening Database (Bolt)")
-	boltDb, err := ethdb.NewBoltDatabase(n.config.ResolvePath(name))
-	if err != nil {
-		return nil, err
-	}
-	return boltDb, nil
+	log.Info("Opening Database (LMDB)")
+	return ethdb.Open(n.config.ResolvePath(name))
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

@@ -17,8 +17,6 @@
 package ethdb
 
 import (
-	"context"
-
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -29,13 +27,13 @@ import (
 func NewMemDatabase() *ObjectDatabase {
 	switch debug.TestDB() {
 	case "bolt":
-		return NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
+		return NewObjectDatabase(NewBolt().InMem().MustOpen())
 	case "badger":
-		return NewObjectDatabase(NewBadger().InMem().MustOpen(context.Background()))
+		return NewObjectDatabase(NewBadger().InMem().MustOpen())
 	case "lmdb":
-		return NewObjectDatabase(NewLMDB().InMem().MustOpen(context.Background()))
+		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	default:
-		return NewObjectDatabase(NewBolt().InMem().MustOpen(context.Background()))
+		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	}
 }
 

@@ -103,6 +103,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
+		defer db.Close()
 		cfg.TrieDbSt = state.NewTrieDbState(common.Hash{}, db, blockNr)
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
@@ -135,6 +136,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
+		defer db.Close()
 		cfg.TrieDbSt = state.NewTrieDbState(common.Hash{}, db, blockNr)
 		cfg.State = state.New(cfg.TrieDbSt)
 	}

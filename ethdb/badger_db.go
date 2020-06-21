@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
@@ -29,12 +28,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-// https://github.com/dgraph-io/badger#frequently-asked-questions
-// https://groups.google.com/forum/#!topic/golang-nuts/jPb_h3TvlKE/discussion
-const minGoMaxProcs = 128
-
 // https://github.com/dgraph-io/badger#garbage-collection
-const gcPeriod = 35 * time.Minute
+const gcPeriod = 5 * time.Minute
 
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
@@ -50,11 +45,6 @@ type BadgerDatabase struct {
 func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	logger := log.New("database", dir)
 
-	oldMaxProcs := runtime.GOMAXPROCS(0)
-	if oldMaxProcs < minGoMaxProcs {
-		runtime.GOMAXPROCS(minGoMaxProcs)
-		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
-	}
 	options := badger.DefaultOptions(dir).WithMaxTableSize(128 << 20) // 128Mb, default 64Mb
 
 	db, err := badger.Open(options)
@@ -69,7 +59,7 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		i := 0
 		for range ticker.C {
 		nextFile:
-			err := db.RunValueLogGC(0.5)
+			err := db.RunValueLogGC(0.7)
 			if err == nil {
 				i++
 				goto nextFile
@@ -79,13 +69,6 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 				i = 0
 				continue
 			}
-			logger.Warn("Badger GC error", "err", err)
-		}
-	}()
-
-	go func() {
-		for range time.NewTicker(1 * time.Minute).C {
-			logger.Info("Badger Metrics", "BfCache", db.BfCacheMetrics().String(), "DataCache", db.DataCacheMetrics().String())
 		}
 	}()
 
@@ -113,7 +96,7 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 }
 
 func (db *BadgerDatabase) KV() KV {
-	return &badgerDB{badger: db.db}
+	return &badgerKV{badger: db.db}
 }
 
 // Close closes the database.
@@ -391,6 +374,15 @@ func (db *BadgerDatabase) IdealBatchSize() int {
 func (db *BadgerDatabase) DiskSize(_ context.Context) (common.StorageSize, error) {
 	lsm, vlog := db.db.Size()
 	return common.StorageSize(lsm + vlog), nil
+}
+
+func (db *BadgerDatabase) ClearBuckets(buckets ...[]byte) error {
+	for _, bucket := range buckets {
+		if err := db.db.DropPrefix(bucket); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (db *BadgerDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {

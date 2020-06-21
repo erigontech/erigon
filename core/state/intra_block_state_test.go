@@ -43,6 +43,7 @@ import (
 func TestUpdateLeaks(t *testing.T) {
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 
@@ -86,7 +87,9 @@ func TestUpdateLeaks(t *testing.T) {
 func TestIntermediateLeaks(t *testing.T) {
 	// Create two state databases, one transitioning to the final state, the other final from the beginning
 	transDb := ethdb.NewMemDatabase()
+	defer transDb.Close()
 	finalDb := ethdb.NewMemDatabase()
+	defer finalDb.Close()
 	transTds := NewTrieDbState(common.Hash{}, transDb, 0)
 	transState := New(transTds)
 	transTds.StartNewBuffer()
@@ -362,8 +365,9 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
-		db           = ethdb.NewMemDatabase()
 		ds           = NewDbState(db.KV(), 0)
 		state        = New(ds)
 		snapshotRevs = make([]int, len(test.snapshots))
