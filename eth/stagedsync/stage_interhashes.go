@@ -225,11 +225,11 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 	if skip {
 		return nil
 	}
-	var loadFunc etl.LoadFunc
+	var l OldestAppearedLoad
 	if storage {
-		loadFunc = r.storageLoad
+		l.innerLoadFunc = r.storageLoad
 	} else {
-		loadFunc = r.accountLoad
+		l.innerLoadFunc = r.accountLoad
 	}
 	if err := etl.Transform(
 		p.db,
@@ -240,7 +240,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 		// here we avoid getting the state from changesets,
 		// we just care about the accounts that did change,
 		// so we can directly read from the PlainTextBuffer
-		getFromPlainStateAndLoad(p.db, loadFunc),
+		getFromPlainStateAndLoad(p.db, l.LoadFunc),
 		etl.TransformArgs{
 			BufferType:      etl.SortableAppendBuffer,
 			ExtractStartKey: startkey,
