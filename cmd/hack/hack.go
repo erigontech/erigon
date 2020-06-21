@@ -2413,6 +2413,33 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	return nil
 }
 
+func findPreimage(chaindata string, hash common.Hash) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.PlainStateBucket)
+		c := b.Cursor()
+		k, _, e := c.First()
+		if e != nil {
+			return e
+		}
+		for k != nil {
+			if bytes.Equal(crypto.Keccak256(k), hash[:]) {
+				fmt.Print("preimage: %x\n", k)
+				break
+			}
+			k, _, e = c.Next()
+			if e != nil {
+				return e
+			}			
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2672,7 +2699,9 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	if *action == "preimage" {
-		preimage(*chaindata, common.HexToHash(*hash))
+		if err := findPreimage(*chaindata, common.HexToHash(*hash)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "addPreimage" {
 		addPreimage(*chaindata, common.HexToHash(*hash), common.FromHex(*preImage))
