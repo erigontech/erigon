@@ -31,7 +31,7 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
 	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32, codeSize int) error
 	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
@@ -139,7 +139,7 @@ func GenStructStep(
 				buildExtensions = true
 			case *GenStructStepAccountData:
 				if retain(curr[:maxLen]) {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, err
 					}
 				} else {

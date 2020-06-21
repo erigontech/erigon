@@ -164,6 +164,10 @@ func (s *Stateless) ReadAccountCodeSize(address common.Address, codeHash common.
 		return len(code), nil
 	}
 
+	if codeSize, ok := s.t.GetAccountCodeSize(addrHash[:]); ok {
+		return codeSize, nil
+	}
+
 	return 0, fmt.Errorf("could not find bytecode for hash %x", codeHash)
 }
 
