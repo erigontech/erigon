@@ -2413,21 +2413,21 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	return nil
 }
 
-func compareStates(chaindata string, chaindataCopy string) error {
+func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	copyDb := ethdb.MustOpen(chaindataCopy)
 	defer copyDb.Close()
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket([]byte(bucket))
 		c := b.Cursor()
 		k, v, e := c.First()
 		if e != nil {
 			return e
 		}
 		return copyDb.KV().View(context.Background(), func(copyTx ethdb.Tx) error {
-			copyB := copyTx.Bucket(dbutils.CurrentStateBucket)
+			copyB := copyTx.Bucket([]byte(bucket))
 			copyC := copyB.Cursor()
 			copyK, copyV, copyE := copyC.First()
 			if copyE != nil {
@@ -2796,7 +2796,7 @@ func main() {
 		}
 	}
 	if *action == "compare" {
-		if err := compareStates(*chaindata, *chaindata + "-copy"); err != nil {
+		if err := compareBucket(*chaindata, *chaindata + "-copy", *bucket); err != nil {
 			fmt.Printf("Error: %v\n", err)	
 		}
 	}
