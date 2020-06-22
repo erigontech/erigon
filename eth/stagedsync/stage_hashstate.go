@@ -37,9 +37,11 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 	}
 
 	log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
+	/*
 	if err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
 		return err
 	}
+	*/
 	if err := updateIntermediateHashes(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
 		return err
 	}
