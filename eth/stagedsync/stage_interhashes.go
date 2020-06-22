@@ -244,7 +244,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 		// so we can directly read from the PlainTextBuffer
 		getFromPlainStateAndLoad(p.db, l.LoadFunc),
 		etl.TransformArgs{
-			BufferType:      etl.SortableAppendBuffer,
+			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
 			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
