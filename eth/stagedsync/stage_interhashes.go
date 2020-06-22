@@ -81,6 +81,7 @@ type Receiver struct {
 	defaultReceiver *trie.DefaultReceiver
 	accountMap      map[string]*accounts.Account
 	storageMap      map[string][]byte
+	removingAccount []byte
 	unfurlList      []string
 	currentIdx      int
 }
@@ -116,7 +117,14 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
+			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
+				return nil
+			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+		}
+		r.currentIdx++
+		if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
+			return nil
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
@@ -131,9 +139,11 @@ func (r *Receiver) Receive(
 				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
+				r.removingAccount = nil
+			} else {
+				r.removingAccount = k
 			}
 		}
-		r.currentIdx++
 		if c == 0 {
 			return nil
 		}
