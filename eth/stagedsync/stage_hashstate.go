@@ -33,8 +33,8 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 	if s.BlockNumber == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally
-		s.Done()
-		return nil
+		//s.Done()
+		//return nil
 	}
 
 	/*
