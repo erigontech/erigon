@@ -118,13 +118,13 @@ func (r *Receiver) Receive(
 		}
 		if c > 0 {
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-				return nil
+				//return nil
 			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
 		if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-			return nil
+			//return nil
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
