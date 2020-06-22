@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	//"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -37,7 +37,6 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 		//return nil
 	}
 
-	/*
 	if core.UsePlainStateExecution {
 		log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
 		err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit)
@@ -45,7 +44,6 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 			return err
 		}
 	}
-	*/
 	if err := updateIntermediateHashes(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
 		return err
 	}
