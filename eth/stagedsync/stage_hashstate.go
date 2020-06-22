@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/core"
+	//"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -21,10 +21,13 @@ import (
 
 var cbor codec.CborHandle
 
-func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, limit uint64, quit chan struct{}) error {
 	syncHeadNumber, err := s.ExecutionAt(stateDB)
 	if err != nil {
 		return err
+	}
+	if limit > 0 && syncHeadNumber > limit {
+		syncHeadNumber = limit
 	}
 
 	if s.BlockNumber == syncHeadNumber {
@@ -34,6 +37,7 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 		return nil
 	}
 
+	/*
 	if core.UsePlainStateExecution {
 		log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
 		err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit)
@@ -41,6 +45,7 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 			return err
 		}
 	}
+	*/
 	if err := updateIntermediateHashes(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
 		return err
 	}

@@ -68,7 +68,7 @@ func PrepareStagedSync(
 			ID:          stages.HashState,
 			Description: "Hashing the key in the state",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
+				return SpawnHashStateStage(s, stateDB, datadir, 0 /* limit (meaning no limit) */, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindHashStateStage(u, s, stateDB, datadir, quitCh)
