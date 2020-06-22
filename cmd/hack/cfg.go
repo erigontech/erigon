@@ -9,6 +9,30 @@ import (
 	"math/big"
 )
 
+func testDF0() error {
+	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig,
+		vm.Config{
+			EVMInterpreter: "DFInterpreter",
+		}, nil)
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
+	//contract.Code = []byte{byte(vm.ADD), 0x1, 0x1, 0x0}
+
+	_, err := runDataflow(contract, []byte{}, false)
+	if err != nil {
+		return err
+	}
+
+	print("Done")
+	return nil
+}
+
+
+
+
+/////////////////////////////////////////////////////
+
 type dummyAccount struct{}
 
 func (dummyAccount) SubBalance(amount *big.Int)                          {}
