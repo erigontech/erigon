@@ -83,8 +83,7 @@ func promoteHashedState(s *StageState, db ethdb.Database, from, to uint64, datad
 	if from == 0 {
 		return promoteHashedStateCleanly(s, db, to, datadir, quit)
 	}
-	return nil
-	//return promoteHashedStateIncrementally(s, from, to, db, datadir, quit)
+	return promoteHashedStateIncrementally(s, from, to, db, datadir, quit)
 }
 
 func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, datadir string, quit chan struct{}) error {
