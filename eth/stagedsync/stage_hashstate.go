@@ -32,28 +32,25 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 	if s.BlockNumber == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally
-		//s.Done()
-		//return nil
+		s.Done()
+		return nil
 	}
 
 	log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
 	if err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
 		return err
 	}
-	if err := updateIntermediateHashes(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
-		return err
-	}
 	return s.DoneAndUpdate(stateDB, syncHeadNumber)
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
-	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
-		return err
-	}
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
 	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
+		return err
+	}
+	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err
 	}
 	if err := u.Done(db); err != nil {
@@ -142,7 +139,7 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 		}
 	}
 
-	return etl.Transform(
+	if err := etl.Transform(
 		db,
 		dbutils.PlainContractCodeBucket,
 		dbutils.ContractCodeBucket,
@@ -159,7 +156,13 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
 			},
 		},
-	)
+	); err != nil {
+		return err
+	}
+	if err := updateIntermediateHashes(s, db, s.BlockNumber, to, datadir, quit); err != nil {
+		return err
+	}
+	return nil
 }
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
@@ -523,6 +526,9 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 }
 
 func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
+	if err := updateIntermediateHashes(s, db, s.BlockNumber, to, datadir, quit); err != nil {
+		return err
+	}
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
 	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */, 0x00); err != nil {
