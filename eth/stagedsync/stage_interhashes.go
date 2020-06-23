@@ -365,6 +365,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	sort.Strings(r.unfurlList)
 	//fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
+		/*
 		fmt.Printf("%x", ks)
 		if a, ok := r.accountMap[ks]; ok && a == nil {
 			fmt.Printf(" DELETE\n")
@@ -373,6 +374,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		} else {
 			fmt.Printf("\n")
 		}
+		*/
 		unfurl.AddKey([]byte(ks))
 	}
 	//fmt.Printf("END OF UNFURL LIST========================\n")
