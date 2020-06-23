@@ -360,7 +360,14 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	sort.Strings(r.unfurlList)
 	//fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
-		//fmt.Printf("%x\n", ks)
+		fmt.Printf("%x", ks)
+		if a, ok := r.accountMap[ks]; ok && a == nil {
+			fmt.Printf(" DELETE\n")
+		} else if s, ok1 := r.storageMap[ks]; ok1 && len(s) == 0 {
+			fmt.Printf(" DELETE\n")
+		} else {
+			fmt.Printf("\n")
+		}
 		unfurl.AddKey([]byte(ks))
 	}
 	//fmt.Printf("END OF UNFURL LIST========================\n")
