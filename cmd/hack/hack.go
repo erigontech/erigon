@@ -2043,6 +2043,8 @@ func resetHistoryIndex(chaindata string) {
 	check(err)
 	err = stages.SaveStageProgress(db, stages.TxLookup, 0, nil)
 	check(err)
+	err = stages.SaveStageProgress(db, stages.Finish, 0, nil)
+	check(err)
 	fmt.Printf("Reset history index done\n")
 }
 
