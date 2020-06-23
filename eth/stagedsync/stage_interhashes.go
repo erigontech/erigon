@@ -117,14 +117,14 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-				//return nil
+			if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
+				return nil
 			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
 		if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-			//return nil
+			return nil
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
@@ -147,6 +147,11 @@ func (r *Receiver) Receive(
 		if c == 0 {
 			return nil
 		}
+	}
+	if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
+		return nil
+	} else {
+		r.removingAccount = nil
 	}
 	// We ran out of modifications, simply pass through
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
