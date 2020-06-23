@@ -35,6 +35,9 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 		s.Done()
 		return nil
 	}
+	if s.BlockNumber > syncHeadNumber {
+		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, syncHeadNumber)
+	}
 
 	log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
 	if err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {

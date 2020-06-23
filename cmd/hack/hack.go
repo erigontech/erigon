@@ -2035,12 +2035,13 @@ func resetHistoryIndex(chaindata string) {
 	check(db.ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
+		dbutils.TxLookupPrefix,
 	))
 	err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
+	err = stages.SaveStageProgress(db, stages.TxLookup, 0, nil)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
