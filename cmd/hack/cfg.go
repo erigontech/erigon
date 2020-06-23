@@ -5,30 +5,26 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"math/big"
 )
 
-func testDF0() error {
-	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig,
-		vm.Config{
-			EVMInterpreter: "DFInterpreter",
-		}, nil)
-
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
-	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
-	//contract.Code = []byte{byte(vm.ADD), 0x1, 0x1, 0x0}
-
-	_, err := runDataflow(contract, []byte{}, false)
-	if err != nil {
-		return err
-	}
-
-	print("Done")
+func testGenCfg() error {
+	cfg0Test0()
+	cfg0Test1()
 	return nil
 }
 
+func cfg0Test0() {
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
+	vm.Cfg0Harness(contract)
+}
 
+func cfg0Test1() {
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
+	vm.Cfg0Harness(contract)
+}
 
 
 /////////////////////////////////////////////////////
@@ -53,6 +49,7 @@ type dummyStatedb struct {
 
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
+/*
 func testGenCfg() error {
 	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig,
 		vm.Config{
@@ -63,11 +60,13 @@ func testGenCfg() error {
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	//contract.Code = []byte{byte(vm.ADD), 0x1, 0x1, 0x0}
 
-	_, err := env.Interpreter().Run(contract, []byte{}, false)
+	jt := newIstanbulInstructionSet()
+	vm.ToCfg0(contract)
+	//_, err := env.Interpreter().Run(contract, []byte{}, false)
 	if err != nil {
 		return err
 	}
 
 	print("Done")
 	return nil
-}
+}*/

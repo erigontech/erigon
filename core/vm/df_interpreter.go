@@ -1,29 +1,73 @@
 package vm
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"sort"
 )
 
 type Cfg struct {
+	pcList []uint64
 	nodes map[uint64]*Node
 }
 
+func (cfg *Cfg) Print() {
+	keys := make([]uint64, 0)
+	for k, _ := range cfg.nodes {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	for _,k := range keys {
+		n := cfg.nodes[k]
+		pcsuccs := make([]uint64, 0)
+		for _, s := range n.succs {
+			pcsuccs = append(pcsuccs, s.pc)
+		}
+		fmt.Printf("%-6d %-6v\n", k, pcsuccs)
+	}
+}
+
+type NodeSet map[uint64]*Node
+
 type Node struct {
 	pc uint64
-	succs []*Node
-	preds []*Node
+	succs NodeSet
+	preds NodeSet
+}
+
+func NewNode(pc uint64) *Node {
+	return &Node {pc, make(NodeSet), make(NodeSet)}
+}
+
+func NewCfg() *Cfg {
+	cfg := &Cfg{}
+	cfg.nodes = make(map[uint64]*Node)
+	return cfg
+}
+
+func Cfg0Harness(contract *Contract) {
+	jt := newIstanbulInstructionSet()
+	cfg, err := ToCfg0(contract, &jt)
+	if err != nil {
+		panic(err)
+	}
+
+	cfg.Print()
 }
 
 func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
-	cfg = &Cfg{}
+	cfg = NewCfg()
 
 	pc := uint64(0)
 	jumps := make([]*Node, 0)
 	var lastNode *Node = nil
 	for int(pc) < len(contract.Code) {
 		op := contract.GetOp(uint64(pc))
-		node := Node {pc, nil, nil}
-		cfg.nodes[pc] = &node
+		node := NewNode(pc)
+
+		cfg.nodes[pc] = node
+		cfg.pcList = append(cfg.pcList, pc)
 
 		opLength := uint64(1)
 		operation := &jt[op]
@@ -34,19 +78,30 @@ func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
 		if op.IsPush() {
 			opLength += GetPushBytes(op)
 		} else if op == JUMP {
-			jumps = append(jumps, &node)
+			jumps = append(jumps, node)
 		} else if op == JUMPI {
-			jumps = append(jumps, &node)
+			jumps = append(jumps, node)
 		} else if op == STOP || op == REVERT || op == RETURN || op == SELFDESTRUCT {
 
 		}
 
+		if lastNode != nil {
+			lastNode.succs[node.pc] = node
+		}
+
 		pc += opLength
+		lastNode = node
+	}
+
+	for _, jump := range jumps {
+		for _, node := range cfg.nodes {
+			jump.succs[node.pc] = node
+		}
 	}
 
 	for _, node := range cfg.nodes {
-		for _, jump := range jumps {
-			node.preds = append(node.preds, jump)
+		for _, succ := range node.succs {
+			succ.preds[node.pc] = node
 		}
 	}
 
@@ -151,7 +206,7 @@ func (in *DfInterpreter) Run(contract *Contract, input []byte, readOnly bool) er
 	}
 
 	states := make(map[uint64]*AbsState)
-	workList := []Node{cfg0.nodes[0]}
+	workList := []*Node{cfg0.nodes[0]}
 
 	for len(workList) > 0 {
 		instrNode := workList[0]
@@ -167,7 +222,7 @@ func (in *DfInterpreter) Run(contract *Contract, input []byte, readOnly bool) er
 		}
 
 		state0 := states[instrNode.pc]
-		state1 := Transfer(&instrNode, prevLub)
+		state1 := Transfer(instrNode, prevLub)
 		states[instrNode.pc] = state1
 		if state0.IsDiff(state1) {
 			for _, s := range instrNode.succs {
@@ -175,6 +230,8 @@ func (in *DfInterpreter) Run(contract *Contract, input []byte, readOnly bool) er
 			}
 		}
 	}
+
+	return nil
 }
 
 
