@@ -16,6 +16,7 @@ const (
 	SortableOldestAppearedBuffer
 
 	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
+	BufIOSize         = 1024 * 1024       // 1mb | bufio
 )
 
 type Buffer interface {
