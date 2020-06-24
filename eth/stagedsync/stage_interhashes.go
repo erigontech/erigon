@@ -82,6 +82,8 @@ type Receiver struct {
 	accountMap      map[string]*accounts.Account
 	storageMap      map[string][]byte
 	removingAccount []byte
+	currentAccount []byte
+	currentAccountWithInc []byte
 	unfurlList      []string
 	currentIdx      int
 }
@@ -120,10 +122,16 @@ func (r *Receiver) Receive(
 			if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
 				return nil
 			}
+			if r.currentAccount != nil && len(storageKey) > common.HashLength && bytes.HasPrefix(storageKey, r.currentAccount) && !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
+				return nil
+			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
-		if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
+		if r.removingAccount != nil && len(k) > common.HashLength && bytes.HasPrefix(k, r.removingAccount) {
+			return nil
+		}
+		if r.currentAccount != nil && len(k) > common.HashLength && bytes.HasPrefix(k, r.currentAccount) && !bytes.HasPrefix(k, r.currentAccountWithInc) {
 			return nil
 		}
 		if len(k) > common.HashLength {
@@ -140,8 +148,12 @@ func (r *Receiver) Receive(
 					return err
 				}
 				r.removingAccount = nil
+				r.currentAccount = k
+				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
 				r.removingAccount = k
+				r.currentAccount = nil
+				r.currentAccountWithInc = nil
 			}
 		}
 		if c == 0 {
@@ -152,6 +164,9 @@ func (r *Receiver) Receive(
 		return nil
 	} else {
 		r.removingAccount = nil
+	}
+	if r.currentAccount != nil && len(storageKey) > common.HashLength && bytes.HasPrefix(storageKey, r.currentAccount) && !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
+		return nil
 	}
 	// We ran out of modifications, simply pass through
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
