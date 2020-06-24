@@ -86,7 +86,6 @@ type Receiver struct {
 	currentAccountWithInc []byte
 	unfurlList      []string
 	currentIdx      int
-	unwinding       bool
 }
 
 func NewReceiver() *Receiver {
@@ -134,10 +133,8 @@ func (r *Receiver) Receive(
 				}
 			}
 			if itemType == trie.AccountStreamItem {
-				if !r.unwinding {
-					r.currentAccount = accountKey
-					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)					
-				}
+				r.currentAccount = accountKey
+				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
@@ -146,7 +143,7 @@ func (r *Receiver) Receive(
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
 				continue
 			}
-			if !r.unwinding && r.currentAccount == nil {
+			if r.currentAccount == nil {
 				continue
 			}
 			if r.currentAccount != nil {
@@ -171,14 +168,10 @@ func (r *Receiver) Receive(
 					return err
 				}
 				r.removingAccount = nil
-				if !r.unwinding {
-					r.currentAccount = k
-					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
-				}
+				r.currentAccount = k
+				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
-				if !r.unwinding {
-					r.removingAccount = k
-				}
+				r.removingAccount = k
 				r.currentAccount = nil
 				r.currentAccountWithInc = nil
 			}
@@ -203,10 +196,8 @@ func (r *Receiver) Receive(
 		}
 	}
 	if itemType == trie.AccountStreamItem {
-		if !r.unwinding {
-			r.currentAccount = accountKey
-			r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)					
-		}
+		r.currentAccount = accountKey
+		r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 	}
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
@@ -481,7 +472,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()
-	//r.unwinding = true
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
