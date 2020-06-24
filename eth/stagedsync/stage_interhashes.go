@@ -147,13 +147,13 @@ func (r *Receiver) Receive(
 				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
-				r.removingAccount = nil
-				r.currentAccount = k
-				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
+				//r.removingAccount = nil
+				//r.currentAccount = k
+				//r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
-				r.removingAccount = k
-				r.currentAccount = nil
-				r.currentAccountWithInc = nil
+				//r.removingAccount = k
+				//r.currentAccount = nil
+				//r.currentAccountWithInc = nil
 			}
 		}
 		if c == 0 {
@@ -176,35 +176,37 @@ func (r *Receiver) Result() trie.SubTries {
 	return r.defaultReceiver.Result()
 }
 
-func (r *Receiver) accountLoad(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNextFunc) error {
 	newK, err := transformPlainStateKey(k)
 	if err != nil {
 		return err
 	}
+	newKStr := string(newK)
 	if len(value) > 0 {
 		var a accounts.Account
 		if err = a.DecodeForStorage(value); err != nil {
 			return err
 		}
-		r.accountMap[string(newK)] = &a
+		r.accountMap[newKStr] = &a
 	} else {
-		r.accountMap[string(newK)] = nil
+		r.accountMap[newKStr] = nil
 	}
-	r.unfurlList = append(r.unfurlList, string(newK))
+	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
 }
 
-func (r *Receiver) storageLoad(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNextFunc) error {
 	newK, err := transformPlainStateKey(k)
 	if err != nil {
 		return err
 	}
+	newKStr := string(newK)
 	if len(value) > 0 {
-		r.storageMap[string(newK)] = common.CopyBytes(value)
+		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
-		r.storageMap[string(newK)] = nil
+		r.storageMap[newKStr] = nil
 	}
-	r.unfurlList = append(r.unfurlList, string(newK))
+	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
 }
 

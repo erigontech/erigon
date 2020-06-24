@@ -305,7 +305,7 @@ var promoterMapper = map[string]struct {
 func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
 	walkerAdapter := promoterMapper[string(changeSetBucket)].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, _ []byte) error {
 			return next(k, k, nil)
 		})
 	}
