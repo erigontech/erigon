@@ -86,6 +86,7 @@ type Receiver struct {
 	currentAccountWithInc []byte
 	unfurlList      []string
 	currentIdx      int
+	unwinding       bool
 }
 
 func NewReceiver() *Receiver {
@@ -147,11 +148,11 @@ func (r *Receiver) Receive(
 				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
 					return err
 				}
-				//r.removingAccount = nil
+				r.removingAccount = nil
 				//r.currentAccount = k
 				//r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
-				//r.removingAccount = k
+				r.removingAccount = k
 				//r.currentAccount = nil
 				//r.currentAccountWithInc = nil
 			}
