@@ -300,8 +300,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			}
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], ^fstl.accountValue.Incarnation)
-			// Now we know the correct incarnation of the account, an
-			//d we can skip all irrelevant storage records
+
+			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
 			if fstl.k, fstl.v, err = c.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
@@ -310,7 +310,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and SeekTo: %x\n", fstl.k)
 			}
-			if !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
+			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
 				if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
 					return err
 				}
@@ -398,7 +398,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		fmt.Printf("next: %x\n", next)
 	}
 
-	if !bytes.HasPrefix(fstl.k, next) {
+	if isBefore, _ := keyIsBefore(fstl.k, next); isBefore {
 		if fstl.k, fstl.v, err = c.SeekTo(next); err != nil {
 			return err
 		}
