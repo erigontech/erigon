@@ -2,8 +2,9 @@ package vm
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/holiman/uint256"
 	"sort"
+	"strconv"
 )
 
 type Cfg struct {
@@ -32,12 +33,14 @@ type NodeSet map[uint64]*Node
 
 type Node struct {
 	pc uint64
+	opCode OpCode
+	opValue *AbsConst
 	succs NodeSet
 	preds NodeSet
 }
 
-func NewNode(pc uint64) *Node {
-	return &Node {pc, make(NodeSet), make(NodeSet)}
+func NewNode(pc uint64, opCode OpCode) *Node {
+	return &Node {pc, opCode, nil, make(NodeSet), make(NodeSet)}
 }
 
 func NewCfg() *Cfg {
@@ -62,21 +65,38 @@ func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
 	pc := uint64(0)
 	jumps := make([]*Node, 0)
 	var lastNode *Node = nil
-	for int(pc) < len(contract.Code) {
-		op := contract.GetOp(uint64(pc))
-		node := NewNode(pc)
+	codeLen := len(contract.Code)
+	for int(pc) < codeLen {
+		op := contract.GetOp(pc)
+		node := NewNode(pc, op)
 
 		cfg.nodes[pc] = node
 		cfg.pcList = append(cfg.pcList, pc)
 
-		opLength := uint64(1)
+		opLength := 1
 		operation := &jt[op]
 		if !operation.valid {
 			return nil, &ErrInvalidOpCode{opcode: op}
 		}
 
 		if op.IsPush() {
-			opLength += GetPushBytes(op)
+			pushByteSize := GetPushBytes(op)
+			startMin := int(pc + 1)
+			if startMin >= codeLen {
+				startMin = codeLen
+			}
+			endMin := startMin + pushByteSize
+			if startMin+pushByteSize >= codeLen {
+				endMin = codeLen
+			}
+			integer := new(uint256.Int)
+			integer.SetBytes(contract.Code[startMin:endMin])
+			if integer.IsUint64() {
+				node.opValue = &AbsConst{Value, integer.Uint64()}
+			} else {
+				node.opValue = &AbsConst{Top, 0}
+			}
+			opLength += pushByteSize
 		} else if op == JUMP {
 			jumps = append(jumps, node)
 		} else if op == JUMPI {
@@ -89,7 +109,7 @@ func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
 			lastNode.succs[node.pc] = node
 		}
 
-		pc += opLength
+		pc += uint64(opLength)
 		lastNode = node
 	}
 
@@ -109,32 +129,44 @@ func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
 }
 
 //////////////////////////////////////////////////
-type AbsConstValueType string
+type AbsConstValueType int
 
 const (
-	Bot AbsConstValueType = "bot"
-	Top = "top"
-	Value = "value"
+	Bot AbsConstValueType = iota
+	Top
+	Value
 )
+
+func (d AbsConstValueType) String() string {
+	return [...]string{"Bot", "Top", "Value"}[d]
+}
 
 type AbsConst struct {
 	kind AbsConstValueType
 	value uint64
 }
 
-func (lhs *AbsConst) Lub(rhs AbsConst) AbsConst {
-	if lhs.kind == Value && rhs.kind == Value {
-		if lhs.value != rhs.value {
+func (c0 AbsConst) String() string {
+	if c0.kind == Bot || c0.kind == Top {
+		return c0.kind.String()
+	} else {
+		return strconv.FormatUint(c0.value, 10)
+	}
+}
+
+func (c0 *AbsConst) Lub(c1 AbsConst) AbsConst {
+	if c0.kind == Value && c1.kind == Value {
+		if c0.value != c1.value {
 			return AbsConst{Top, 0}
 		} else {
-			return AbsConst{Value,  lhs.value}
+			return AbsConst{Value,  c0.value}
 		}
-	} else if lhs.kind == Top || rhs.kind == Top {
+	} else if c0.kind == Top || c1.kind == Top {
 		return AbsConst{Top, 0}
-	} else if lhs.kind == Bot {
-		return AbsConst{Bot, rhs.value}
-	} else if rhs.kind == Bot {
-		return AbsConst{Bot, lhs.value}
+	} else if c0.kind == Bot {
+		return AbsConst{Bot, c1.value}
+	} else if c1.kind == Bot {
+		return AbsConst{Bot, c0.value}
 	} else {
 		panic("Missing condition")
 	}
@@ -145,6 +177,28 @@ type AbsState struct {
 	stack []AbsConst
 }
 
+func (state0 *AbsState) String() string {
+	var stackStr []string
+	for _, c := range state0.stack {
+		stackStr = append(stackStr, c.String())
+	}
+	return fmt.Sprintf("%v", stackStr)
+}
+
+func (state0 *AbsState) Copy() *AbsState {
+	state1 := &AbsState{}
+	state1.stack = append([]AbsConst(nil), state0.stack...)
+	return state1
+}
+
+func (state0 *AbsState) Push(value AbsConst) {
+	state0.stack = append([]AbsConst{value}, state0.stack...)
+}
+
+func (state0 *AbsState) Pop() {
+	state0.stack = state0.stack[1:]
+}
+
 func (state0 *AbsState) Canonicalize() {
 	st := state0.stack
 	for len(st) > 0 && st[len(st)-1].kind == Bot {
@@ -153,22 +207,22 @@ func (state0 *AbsState) Canonicalize() {
 	state0.stack = st
 }
 
-func (state0 *AbsState) Lub (rhs *AbsState) *AbsState {
+func (state0 *AbsState) Lub (state1 *AbsState) *AbsState {
 	res := &AbsState{}
 
-	if len(state0.stack) > len(rhs.stack) {
+	if len(state0.stack) > len(state1.stack) {
 		state0prev := state0
-		state0 = rhs
-		rhs = state0prev
+		state0 = state1
+		state1 = state0prev
 	}
 
 	for i := 0; i < len(state0.stack); i++ {
-		lub := state0.stack[i].Lub(rhs.stack[i])
+		lub := state0.stack[i].Lub(state1.stack[i])
 		res.stack = append(res.stack, lub)
 	}
 
-	for i := len(state0.stack); i < len(rhs.stack); i++ {
-		res.stack = append(res.stack, rhs.stack[i])
+	for i := len(state0.stack); i < len(state1.stack); i++ {
+		res.stack = append(res.stack, state1.stack[i])
 	}
 
 	res.Canonicalize()
@@ -176,7 +230,7 @@ func (state0 *AbsState) Lub (rhs *AbsState) *AbsState {
 	return res
 }
 
-func (state0 *AbsState) IsDiff(state1 *AbsState) bool {
+func (state0 *AbsState) Eq(state1 *AbsState) bool {
 	if len(state0.stack) != len(state1.stack) {
 		return false
 	}
@@ -191,21 +245,70 @@ func (state0 *AbsState) IsDiff(state1 *AbsState) bool {
 }
 
 func Transfer(instrNode *Node, state0 *AbsState) *AbsState {
-	res := &AbsState{}
+	state1 := state0.Copy()
 
-	return res
+	if instrNode.opCode.IsPush() {
+		state1.Push(*instrNode.opValue)
+	} else {
+		switch instrNode.opCode {
+		case JUMP:
+		case JUMPI:
+			state1.Pop()
+		}
+	}
+
+	return state1
 }
 
-func (in *DfInterpreter) Run(contract *Contract, input []byte, readOnly bool) error {
+func DataFlowHarness(contract *Contract) {
+	dataFlow, err := RunDataFlow(contract)
+	if err != nil {
+		panic(err)
+	}
 
+	dataFlow.Print()
+}
+
+type DataFlow struct {
+	cfg *Cfg
+	states map[uint64]*AbsState
+}
+
+func NewDataFlow(cfg *Cfg) *DataFlow {
+	states := make(map[uint64]*AbsState)
+	dataFlow := DataFlow{cfg, states}
+	return &dataFlow
+}
+
+func (df *DataFlow) Print() {
+	keys := make([]uint64, 0)
+	for k, _ := range df.states {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	for _, k := range keys {
+		state := df.states[k]
+		fmt.Printf("%-6d %-6v\n", k, state.String())
+	}
+}
+
+func RunDataFlow(contract *Contract) (*DataFlow, error) {
+	/*c := AbsConst{Top,0}
+	fmt.Printf("%+v\n", c)
+	s := AbsState{}
+	s.stack = append(s.stack, c)
+	fmt.Printf("%+v\n", s)
+	//if true { return &DataFlow{},nil }
+*/
 	jt := newIstanbulInstructionSet()
 
 	cfg0, err := ToCfg0(contract, &jt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	states := make(map[uint64]*AbsState)
+	df := NewDataFlow(cfg0)
 	workList := []*Node{cfg0.nodes[0]}
 
 	for len(workList) > 0 {
@@ -214,32 +317,36 @@ func (in *DfInterpreter) Run(contract *Contract, input []byte, readOnly bool) er
 
 		prevLub := &AbsState{}
 		for _, pred := range instrNode.preds {
-			predState, exists := states[pred.pc]
+			predState, exists := df.states[pred.pc]
 			if !exists {
 				predState = &AbsState{}
 			}
 			prevLub = prevLub.Lub(predState)
 		}
 
-		state0 := states[instrNode.pc]
+		state0, exists := df.states[instrNode.pc]
+		if !exists {
+			state0 = &AbsState{}
+		}
 		state1 := Transfer(instrNode, prevLub)
-		states[instrNode.pc] = state1
-		if state0.IsDiff(state1) {
+		fmt.Println("xfr")
+		fmt.Println(prevLub.String())
+		fmt.Println(state1.String())
+		df.states[instrNode.pc] = state1
+
+		if !state0.Eq(state1) {
 			for _, s := range instrNode.succs {
 				workList = append(workList, s)
 			}
 		}
 	}
 
-	return nil
+	return df, nil
 }
 
 
-
-
-
-func GetPushBytes(op OpCode) uint64 {
-	switch(op) {
+func GetPushBytes(op OpCode) int {
+	switch op {
 	case PUSH1:
 		return 1
 	case PUSH2:
@@ -310,15 +417,6 @@ func GetPushBytes(op OpCode) uint64 {
 }
 
 // DfInterpreter is for static analysis
-type DfInterpreter struct {
-	evm *EVM
-	cfg Config
+type DataFlowAnalysis struct {
 
-	jt *JumpTable // EVM instruction table
-
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
-
-	readOnly   bool   // Whether to throw on stateful modifications
-	returnData []byte // Last CALL's return data for subsequent reuse
 }
