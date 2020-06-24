@@ -152,7 +152,9 @@ func (r *Receiver) Receive(
 				//r.currentAccount = k
 				//r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
-				r.removingAccount = k
+				if !r.unwinding {
+					r.removingAccount = k
+				}
 				//r.currentAccount = nil
 				//r.currentAccountWithInc = nil
 			}
@@ -443,6 +445,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()
+	r.unwinding = true
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
