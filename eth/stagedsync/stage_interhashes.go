@@ -107,6 +107,7 @@ func (r *Receiver) Receive(
 	cutoff int,
 	witnessSize uint64,
 ) error {
+	storage := itemType == trie.StorageStreamItem || itemType == trie.SHashStreamItem
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
 		k := []byte(ks)
@@ -120,22 +121,40 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
+			if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
 				return nil
 			}
-			if r.currentAccount != nil && len(storageKey) > common.HashLength && bytes.HasPrefix(storageKey, r.currentAccount) && !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-				return nil
+			if r.currentAccount != nil && storage {
+				if bytes.HasPrefix(storageKey, r.currentAccount) {
+					if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
+						return nil
+					}
+				} else {
+					return nil
+				}
+			}
+			if itemType == trie.AccountStreamItem {
+				if !r.unwinding {
+					r.currentAccount = accountKey
+					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)					
+				}
 			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
-		if r.removingAccount != nil && len(k) > common.HashLength && bytes.HasPrefix(k, r.removingAccount) {
-			return nil
-		}
-		if r.currentAccount != nil && len(k) > common.HashLength && bytes.HasPrefix(k, r.currentAccount) && !bytes.HasPrefix(k, r.currentAccountWithInc) {
-			return nil
-		}
 		if len(k) > common.HashLength {
+			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
+				return nil
+			}
+			if r.currentAccount != nil {
+				if bytes.HasPrefix(k, r.currentAccount) {
+					if !bytes.HasPrefix(k, r.currentAccountWithInc) {
+						return nil
+					}
+				} else {
+					return nil
+				}
+			}
 			v := r.storageMap[ks]
 			if len(v) > 0 {
 				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
@@ -149,29 +168,41 @@ func (r *Receiver) Receive(
 					return err
 				}
 				r.removingAccount = nil
-				//r.currentAccount = k
-				//r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
+				if !r.unwinding {
+					r.currentAccount = k
+					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
+				}
 			} else {
 				if !r.unwinding {
 					r.removingAccount = k
 				}
-				//r.currentAccount = nil
-				//r.currentAccountWithInc = nil
+				r.currentAccount = nil
+				r.currentAccountWithInc = nil
 			}
 		}
 		if c == 0 {
 			return nil
 		}
 	}
-	if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
+	// We ran out of modifications, simply pass through
+	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
 		return nil
 	} else {
 		r.removingAccount = nil
 	}
-	if r.currentAccount != nil && len(storageKey) > common.HashLength && bytes.HasPrefix(storageKey, r.currentAccount) && !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-		return nil
+	if storage  {
+		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
+			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
+				return nil
+			} else {
+				r.currentAccount = nil
+			}
+		} else {
+			return nil
+		}
+	} else {
+		r.currentAccount = nil
 	}
-	// We ran out of modifications, simply pass through
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
 
