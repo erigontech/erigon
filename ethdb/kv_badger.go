@@ -451,6 +451,10 @@ func (c *badgerCursor) Put(key []byte, value []byte) error {
 	return c.bucket.Put(key, value)
 }
 
+func (c *badgerCursor) Append(key []byte, value []byte) error {
+	return c.Put(key, value)
+}
+
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
