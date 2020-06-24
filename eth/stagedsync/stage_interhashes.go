@@ -144,15 +144,18 @@ func (r *Receiver) Receive(
 		r.currentIdx++
 		if len(k) > common.HashLength {
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-				return nil
+				continue
+			}
+			if !r.unwinding && r.currentAccount == nil {
+				continue
 			}
 			if r.currentAccount != nil {
 				if bytes.HasPrefix(k, r.currentAccount) {
 					if !bytes.HasPrefix(k, r.currentAccountWithInc) {
-						return nil
+						continue
 					}
 				} else {
-					return nil
+					continue
 				}
 			}
 			v := r.storageMap[ks]
@@ -194,14 +197,16 @@ func (r *Receiver) Receive(
 		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
 			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
 				return nil
-			} else {
-				r.currentAccount = nil
 			}
 		} else {
 			return nil
 		}
-	} else {
-		r.currentAccount = nil
+	}
+	if itemType == trie.AccountStreamItem {
+		if !r.unwinding {
+			r.currentAccount = accountKey
+			r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)					
+		}
 	}
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
