@@ -248,7 +248,7 @@ func BenchmarkPut(b *testing.B) {
 	b.Run("lmdb", func(b *testing.B) {
 		var kv ethdb.KV = lmdbKV
 		db := ethdb.NewObjectDatabase(kv)
-		db.ClearBuckets(dbutils.CurrentStateBucket)
+		_ = db.ClearBuckets(dbutils.CurrentStateBucket)
 		batch := db.NewBatch()
 
 		N := 1_000_000
@@ -258,11 +258,11 @@ func BenchmarkPut(b *testing.B) {
 			j := rand.Uint64() % 1_000_000_000
 			binary.BigEndian.PutUint64(k, j)
 			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-			batch.Put(dbutils.CurrentStateBucket, k, v)
+			_ = batch.Put(dbutils.CurrentStateBucket, k, v)
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			batch.Commit()
+			_, _ = batch.Commit()
 		}
 	})
 }
