@@ -504,6 +504,10 @@ func (c *boltCursor) Put(key []byte, value []byte) error {
 	return c.bolt.Put(key, value)
 }
 
+func (c *boltCursor) Append(key []byte, value []byte) error {
+	return c.Put(key, value)
+}
+
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
