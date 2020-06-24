@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"os"
-	"sort"
 	"testing"
 	"time"
 
@@ -224,22 +223,22 @@ func BenchmarkPut(b *testing.B) {
 	clean := setupDatabases()
 	defer clean()
 
-	b.Run("bolt", func(b *testing.B) {
-		tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
-		for i := 0; i < keysAmount; i++ {
-			k := make([]byte, 8)
-			j := rand.Uint64() % 100_000_000
-			binary.BigEndian.PutUint64(k, j)
-			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-			tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
-		}
-		sort.Sort(tuples)
-		db := ethdb.NewWrapperBoltDatabase(boltOriginDb)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_, _ = db.MultiPut(tuples...)
-		}
-	})
+	//b.Run("bolt", func(b *testing.B) {
+	//	tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
+	//	for i := 0; i < keysAmount; i++ {
+	//		k := make([]byte, 8)
+	//		j := rand.Uint64() % 100_000_000
+	//		binary.BigEndian.PutUint64(k, j)
+	//		v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	//		tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
+	//	}
+	//	sort.Sort(tuples)
+	//	db := ethdb.NewWrapperBoltDatabase(boltOriginDb)
+	//	b.ResetTimer()
+	//	for i := 0; i < b.N; i++ {
+	//		_, _ = db.MultiPut(tuples...)
+	//	}
+	//})
 	//b.Run("badger", func(b *testing.B) {
 	//	db := ethdb.NewObjectDatabase(badgerDb)
 	//	for i := 0; i < b.N; i++ {
@@ -247,20 +246,23 @@ func BenchmarkPut(b *testing.B) {
 	//	}
 	//})
 	b.Run("lmdb", func(b *testing.B) {
-		tuples := make(ethdb.MultiPutTuples, 0, keysAmount*3)
-		for i := 0; i < keysAmount; i++ {
-			k := make([]byte, 8)
-			j := rand.Uint64() % 100_000_000
-			binary.BigEndian.PutUint64(k, j)
-			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-			tuples = append(tuples, dbutils.CurrentStateBucket, k, v)
-		}
-		sort.Sort(tuples)
 		var kv ethdb.KV = lmdbKV
 		db := ethdb.NewObjectDatabase(kv)
+		db.ClearBuckets(dbutils.CurrentStateBucket)
+		batch := db.NewBatch()
+
+		N := 1_000_000
+		rand.Seed(time.Now().Unix())
+		for i := 0; i < N; i++ {
+			k := make([]byte, 8)
+			j := rand.Uint64() % 1_000_000_000
+			binary.BigEndian.PutUint64(k, j)
+			v := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+			batch.Put(dbutils.CurrentStateBucket, k, v)
+		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = db.MultiPut(tuples...)
+			batch.Commit()
 		}
 	})
 }
