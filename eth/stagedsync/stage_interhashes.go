@@ -101,6 +101,7 @@ type Receiver struct {
 	currentAccountWithInc []byte
 	unfurlList            []string
 	currentIdx            int
+	unwinding             bool
 }
 
 func NewReceiver() *Receiver {
@@ -147,9 +148,11 @@ func (r *Receiver) Receive(
 					return nil
 				}
 			}
-			if itemType == trie.AccountStreamItem {
-				r.currentAccount = accountKey
-				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
+			if !r.unwinding {
+				if itemType == trie.AccountStreamItem {
+					r.currentAccount = accountKey
+					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
+				}
 			}
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
@@ -158,8 +161,10 @@ func (r *Receiver) Receive(
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
 				continue
 			}
-			if r.currentAccount == nil {
-				continue
+			if !r.unwinding {
+				if r.currentAccount == nil {
+					continue
+				}
 			}
 			if r.currentAccount != nil {
 				if bytes.HasPrefix(k, r.currentAccount) {
@@ -183,10 +188,14 @@ func (r *Receiver) Receive(
 					return err
 				}
 				r.removingAccount = nil
-				r.currentAccount = k
-				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
+				if !r.unwinding {
+					r.currentAccount = k
+					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
+				}
 			} else {
-				r.removingAccount = k
+				if !r.unwinding {
+					r.removingAccount = k
+				}
 				r.currentAccount = nil
 				r.currentAccountWithInc = nil
 			}
@@ -206,12 +215,16 @@ func (r *Receiver) Receive(
 				return nil
 			}
 		} else {
-			return nil
+			if !r.unwinding {
+				return nil
+			}
 		}
 	}
-	if itemType == trie.AccountStreamItem {
-		r.currentAccount = accountKey
-		r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
+	if !r.unwinding {
+		if itemType == trie.AccountStreamItem {
+			r.currentAccount = accountKey
+			r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
+		}
 	}
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
@@ -492,6 +505,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()
+	r.unwinding = true
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
