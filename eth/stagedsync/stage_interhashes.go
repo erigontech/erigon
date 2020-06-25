@@ -101,7 +101,6 @@ type Receiver struct {
 	currentAccountWithInc []byte
 	unfurlList            []string
 	currentIdx            int
-	unwinding             bool
 }
 
 func NewReceiver() *Receiver {
@@ -126,7 +125,6 @@ func (r *Receiver) Receive(
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
 		k := []byte(ks)
-		fmt.Printf("Receive ak=%x sk=%x anil=%t sv=%x, unfurl=%x\n", accountKey, storageKey, accountValue==nil, storageValue, k)
 		var c int
 		switch itemType {
 		case trie.StorageStreamItem, trie.SHashStreamItem:
@@ -138,49 +136,37 @@ func (r *Receiver) Receive(
 		}
 		if c > 0 {
 			if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
-				fmt.Printf("Skip received 1\n")
 				return nil
 			}
 			if r.currentAccount != nil && storage {
 				if bytes.HasPrefix(storageKey, r.currentAccount) {
 					if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-						fmt.Printf("Skip received 2\n")
 						return nil
 					}
 				} else {
-					fmt.Printf("Skip received 3\n")
 					return nil
 				}
 			}
-			if !r.unwinding {
-				if itemType == trie.AccountStreamItem {
-					r.currentAccount = accountKey
-					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
-				}
+			if itemType == trie.AccountStreamItem {
+				r.currentAccount = accountKey
+				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 			}
-			fmt.Printf("Accept received 1\n")
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
 		if len(k) > common.HashLength {
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-				fmt.Printf("Skip unfurl 1\n")
 				continue
 			}
-			if !r.unwinding {
-				if r.currentAccount == nil {
-					fmt.Printf("Skip unfurl 2\n")
-					continue
-				}
+			if r.currentAccount == nil {
+				continue
 			}
 			if r.currentAccount != nil {
 				if bytes.HasPrefix(k, r.currentAccount) {
 					if !bytes.HasPrefix(k, r.currentAccountWithInc) {
-						fmt.Printf("Skip unfurl 3\n")
 						continue
 					}
 				} else {
-					fmt.Printf("Skip unfurl 4\n")
 					continue
 				}
 			}
@@ -197,50 +183,36 @@ func (r *Receiver) Receive(
 					return err
 				}
 				r.removingAccount = nil
-				if !r.unwinding {
-					r.currentAccount = k
-					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
-				}
+				r.currentAccount = k
+				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
-				if !r.unwinding {
-					r.removingAccount = k
-				}
+				r.removingAccount = k
 				r.currentAccount = nil
 				r.currentAccountWithInc = nil
 			}
 		}
 		if c == 0 {
-			fmt.Printf("Skip both 1\n")
 			return nil
 		}
 	}
-	fmt.Printf("Receive ak=%x sk=%x anil=%t sv=%x\n", accountKey, storageKey, accountValue==nil, storageValue)
 	// We ran out of modifications, simply pass through
 	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
-		fmt.Printf("Skip both 2\n")
 		return nil
 	}
 	r.removingAccount = nil
 	if storage {
 		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
 			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-				fmt.Printf("Skip both 3\n")
 				return nil
 			}
 		} else {
-			if !r.unwinding {
-				fmt.Printf("Skip both 4\n")
-				return nil
-			}
+			return nil
 		}
 	}
-	if !r.unwinding {
-		if itemType == trie.AccountStreamItem {
-			r.currentAccount = accountKey
-			r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
-		}
+	if itemType == trie.AccountStreamItem {
+		r.currentAccount = accountKey
+		r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 	}
-	fmt.Printf("Accept received 2\n")
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
 
@@ -452,21 +424,9 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	}
 	unfurl := trie.NewRetainList(0)
 	sort.Strings(r.unfurlList)
-	fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
-		
-			fmt.Printf("%x", ks)
-			if a, ok := r.accountMap[ks]; ok && a == nil {
-				fmt.Printf(" DELETE\n")
-			} else if s, ok1 := r.storageMap[ks]; ok1 && len(s) == 0 {
-				fmt.Printf(" DELETE\n")
-			} else {
-				fmt.Printf("\n")
-			}
-		
 		unfurl.AddKey([]byte(ks))
 	}
-	fmt.Printf("END OF UNFURL LIST========================\n")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -520,7 +480,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()
-	//r.unwinding = true
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
@@ -543,19 +502,9 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	}
 	sort.Strings(r.unfurlList)
 	unfurl := trie.NewRetainList(0)
-	fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
-			fmt.Printf("%x", ks)
-			if a, ok := r.accountMap[ks]; ok && a == nil {
-				fmt.Printf(" DELETE\n")
-			} else if s, ok1 := r.storageMap[ks]; ok1 && len(s) == 0 {
-				fmt.Printf(" DELETE\n")
-			} else {
-				fmt.Printf("\n")
-			}
 		unfurl.AddKey([]byte(ks))
 	}
-	fmt.Printf("END OF UNFURL LIST========================\n")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
