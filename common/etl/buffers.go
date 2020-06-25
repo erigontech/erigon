@@ -16,7 +16,7 @@ const (
 	SortableOldestAppearedBuffer
 
 	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
-	BufIOSize         = 1024 * 1024       // 1mb | bufio
+	BufIOSize         = 64 * 4096         // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
 )
 
 type Buffer interface {
