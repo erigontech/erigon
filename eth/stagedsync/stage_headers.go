@@ -167,7 +167,8 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		// we always add header difficulty to TD, because next blocks might
 		// be inserted and we need the right value for them
 		td = td.Add(td, header.Difficulty)
-		if rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
+		if !newCanonical && rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
+			// We cannot ignore blocks if they cause reorg
 			ignored++
 			continue
 		}

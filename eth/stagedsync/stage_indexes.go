@@ -5,10 +5,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
+	endBlock, err := s.ExecutionAt(db)
+	if err != nil {
+		return fmt.Errorf("account history index: getting last executed block: %w", err)
+	}
+	if endBlock == s.BlockNumber {
+		s.Done()
+		return nil
+	}
 	var blockNum uint64
 	lastProcessedBlockNumber := s.BlockNumber
 	if lastProcessedBlockNumber > 0 {
@@ -17,10 +24,7 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
-	endBlock, err := s.ExecutionAt(db)
-	if err != nil {
-		log.Warn("Execution block error is empty")
-	}
+
 	if plainState {
 		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket)
 	} else {
@@ -34,6 +38,14 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 }
 
 func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
+	endBlock, err := s.ExecutionAt(db)
+	if err != nil {
+		return fmt.Errorf("storage history index: getting last executed block: %w", err)
+	}
+	if endBlock == s.BlockNumber {
+		s.Done()
+		return nil
+	}
 	var blockNum uint64
 	lastProcessedBlockNumber := s.BlockNumber
 	if lastProcessedBlockNumber > 0 {
@@ -41,10 +53,6 @@ func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	}
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
-	endBlock, err := s.ExecutionAt(db)
-	if err != nil {
-		log.Warn("Execution block error is empty")
-	}
 	if plainState {
 		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket)
 	} else {
