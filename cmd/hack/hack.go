@@ -2386,7 +2386,7 @@ func testUnwind6(chaindata string, rewind uint64) error {
 	ch := make(chan struct{})
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6progress - rewind}
 	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
-	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
@@ -2539,12 +2539,12 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	log.Info("Stage6", "progress", stage5progress)
+	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
 	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
 	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
