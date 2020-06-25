@@ -437,9 +437,9 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	}
 	unfurl := trie.NewRetainList(0)
 	sort.Strings(r.unfurlList)
-	//fmt.Printf("UNFURL LIST==============================\n")
+	fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
-		/*
+		
 			fmt.Printf("%x", ks)
 			if a, ok := r.accountMap[ks]; ok && a == nil {
 				fmt.Printf(" DELETE\n")
@@ -448,10 +448,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 			} else {
 				fmt.Printf("\n")
 			}
-		*/
+		
 		unfurl.AddKey([]byte(ks))
 	}
-	//fmt.Printf("END OF UNFURL LIST========================\n")
+	fmt.Printf("END OF UNFURL LIST========================\n")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -505,7 +505,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()
-	r.unwinding = true
+	//r.unwinding = true
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
