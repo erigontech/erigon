@@ -2300,29 +2300,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func testSeek(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		c := b.Cursor()
-		//kk := common.FromHex("0x434751")
-		kk := common.FromHex("0x434750c1bd61c93ad930ba5b31d2181636e06fcad87ea82ac78c3ad9515d099f")
-		c.Seek(kk)
-		/*
-			for k, _ := c.Seek(common.FromHex("4347500d81465512b2397af46c12792c44f2a89e3601af951cf9c7735385b0cb")); k != nil; k, _ = c.Next() {
-				if bytes.Compare(k, kk) > 0 {
-					fmt.Printf("Found nexgt key: %x\n", k)
-					break
-				}
-			}
-		*/
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-}
-
 func testStage4(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2588,6 +2565,27 @@ func printStages(chaindata string) error {
 	return nil
 }
 
+func fixStages(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var err error
+	var progress uint64
+	var list []uint64
+	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
+			return err
+		}
+		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+		list = append(list, progress)
+	}
+	for stage := stages.IntermediateHashes; stage < stages.TxLookup; stage++ {
+		if err = stages.SaveStageProgress(db, stage+1, list[int(stage)], nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func testStageLoop(chaindata string) error {
 	for block := uint64(10000000); block < uint64(11000000); block += uint64(100000) {
 		if err := testStage4(chaindata, block); err != nil {
@@ -2777,9 +2775,6 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "seek" {
-		testSeek(*chaindata)
-	}
 	if *action == "stage4" {
 		if err := testStage4(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -2837,6 +2832,11 @@ func main() {
 	}
 	if *action == "printStages" {
 		if err := printStages(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "fixStages" {
+		if err := fixStages(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
