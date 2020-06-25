@@ -528,9 +528,19 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	}
 	sort.Strings(r.unfurlList)
 	unfurl := trie.NewRetainList(0)
+	fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
+			fmt.Printf("%x", ks)
+			if a, ok := r.accountMap[ks]; ok && a == nil {
+				fmt.Printf(" DELETE\n")
+			} else if s, ok1 := r.storageMap[ks]; ok1 && len(s) == 0 {
+				fmt.Printf(" DELETE\n")
+			} else {
+				fmt.Printf("\n")
+			}
 		unfurl.AddKey([]byte(ks))
 	}
+	fmt.Printf("END OF UNFURL LIST========================\n")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
