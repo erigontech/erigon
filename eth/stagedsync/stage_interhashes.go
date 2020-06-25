@@ -214,6 +214,7 @@ func (r *Receiver) Receive(
 			return nil
 		}
 	}
+	fmt.Printf("Receive ak=%x sk=%x anil=%t sv=%x\n", accountKey, storageKey, accountValue==nil, storageValue)
 	// We ran out of modifications, simply pass through
 	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
 		fmt.Printf("Skip both 2\n")
