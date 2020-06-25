@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -47,12 +46,6 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
-	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
-	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
-	expectedRootHash := syncHeadHeader.Root
-	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
-		return err
-	}
 	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err
 	}
