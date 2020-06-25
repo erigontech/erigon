@@ -78,14 +78,14 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 }
 
 type Receiver struct {
-	defaultReceiver *trie.DefaultReceiver
-	accountMap      map[string]*accounts.Account
-	storageMap      map[string][]byte
-	removingAccount []byte
-	currentAccount []byte
+	defaultReceiver       *trie.DefaultReceiver
+	accountMap            map[string]*accounts.Account
+	storageMap            map[string][]byte
+	removingAccount       []byte
+	currentAccount        []byte
 	currentAccountWithInc []byte
-	unfurlList      []string
-	currentIdx      int
+	unfurlList            []string
+	currentIdx            int
 }
 
 func NewReceiver() *Receiver {
@@ -183,10 +183,9 @@ func (r *Receiver) Receive(
 	// We ran out of modifications, simply pass through
 	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
 		return nil
-	} else {
-		r.removingAccount = nil
 	}
-	if storage  {
+	r.removingAccount = nil
+	if storage {
 		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
 			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
 				return nil
@@ -413,14 +412,14 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	//fmt.Printf("UNFURL LIST==============================\n")
 	for _, ks := range r.unfurlList {
 		/*
-		fmt.Printf("%x", ks)
-		if a, ok := r.accountMap[ks]; ok && a == nil {
-			fmt.Printf(" DELETE\n")
-		} else if s, ok1 := r.storageMap[ks]; ok1 && len(s) == 0 {
-			fmt.Printf(" DELETE\n")
-		} else {
-			fmt.Printf("\n")
-		}
+			fmt.Printf("%x", ks)
+			if a, ok := r.accountMap[ks]; ok && a == nil {
+				fmt.Printf(" DELETE\n")
+			} else if s, ok1 := r.storageMap[ks]; ok1 && len(s) == 0 {
+				fmt.Printf(" DELETE\n")
+			} else {
+				fmt.Printf("\n")
+			}
 		*/
 		unfurl.AddKey([]byte(ks))
 	}

@@ -2434,7 +2434,7 @@ func findPreimage(chaindata string, hash common.Hash) error {
 			k, _, e = c.Next()
 			if e != nil {
 				return e
-			}			
+			}
 		}
 		return nil
 	}); err != nil {
@@ -2465,7 +2465,7 @@ func compareBucket(chaindata string, chaindataCopy string, bucket string) error 
 			}
 			for k != nil || copyK != nil {
 				count++
-				if count % 100000 == 0 {
+				if count%100000 == 0 {
 					fmt.Printf("Compared %d records\n", count)
 				}
 				if k == nil {
@@ -2828,8 +2828,8 @@ func main() {
 		}
 	}
 	if *action == "compare" {
-		if err := compareBucket(*chaindata, *chaindata + "-copy", *bucket); err != nil {
-			fmt.Printf("Error: %v\n", err)	
+		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {
+			fmt.Printf("Error: %v\n", err)
 		}
 	}
 }
