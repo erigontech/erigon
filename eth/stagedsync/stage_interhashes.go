@@ -126,6 +126,7 @@ func (r *Receiver) Receive(
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
 		k := []byte(ks)
+		fmt.Printf("Receive ak=%x sk=%x anil=%t sv=%x, unfurl=%x\n", accountKey, storageKey, accountValue==nil, storageValue, k)
 		var c int
 		switch itemType {
 		case trie.StorageStreamItem, trie.SHashStreamItem:
@@ -137,14 +138,17 @@ func (r *Receiver) Receive(
 		}
 		if c > 0 {
 			if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
+				fmt.Printf("Skip received 1\n")
 				return nil
 			}
 			if r.currentAccount != nil && storage {
 				if bytes.HasPrefix(storageKey, r.currentAccount) {
 					if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
+						fmt.Printf("Skip received 2\n")
 						return nil
 					}
 				} else {
+					fmt.Printf("Skip received 3\n")
 					return nil
 				}
 			}
@@ -154,24 +158,29 @@ func (r *Receiver) Receive(
 					r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 				}
 			}
+			fmt.Printf("Accept received 1\n")
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
 		if len(k) > common.HashLength {
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
+				fmt.Printf("Skip unfurl 1\n")
 				continue
 			}
 			if !r.unwinding {
 				if r.currentAccount == nil {
+					fmt.Printf("Skip unfurl 2\n")
 					continue
 				}
 			}
 			if r.currentAccount != nil {
 				if bytes.HasPrefix(k, r.currentAccount) {
 					if !bytes.HasPrefix(k, r.currentAccountWithInc) {
+						fmt.Printf("Skip unfurl 3\n")
 						continue
 					}
 				} else {
+					fmt.Printf("Skip unfurl 4\n")
 					continue
 				}
 			}
@@ -201,21 +210,25 @@ func (r *Receiver) Receive(
 			}
 		}
 		if c == 0 {
+			fmt.Printf("Skip both 1\n")
 			return nil
 		}
 	}
 	// We ran out of modifications, simply pass through
 	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
+		fmt.Printf("Skip both 2\n")
 		return nil
 	}
 	r.removingAccount = nil
 	if storage {
 		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
 			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
+				fmt.Printf("Skip both 3\n")
 				return nil
 			}
 		} else {
 			if !r.unwinding {
+				fmt.Printf("Skip both 4\n")
 				return nil
 			}
 		}
@@ -226,6 +239,7 @@ func (r *Receiver) Receive(
 			r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 		}
 	}
+	fmt.Printf("Accept received 2\n")
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
 
