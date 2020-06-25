@@ -2428,7 +2428,7 @@ func findPreimage(chaindata string, hash common.Hash) error {
 		}
 		for k != nil {
 			if bytes.Equal(crypto.Keccak256(k), hash[:]) {
-				fmt.Print("preimage: %x\n", k)
+				fmt.Printf("preimage: %x\n", k)
 				break
 			}
 			k, _, e = c.Next()
