@@ -33,7 +33,8 @@ const (
 	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders                              // "From" recovered from signatures, bodies re-written
 	Execution                            // Executing each block w/o buildinf a trie
-	HashState                            // Apply Keccak256 to all the keys in the state, generate intermediate hashes
+	IntermediateHashes                   // Generate intermediate hashes, calculate the state root hash
+	HashState                            // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex                  // Generating history index for accounts
 	StorageHistoryIndex                  // Generating history index for storage
 	TxLookup                             // Generating transactions lookup index

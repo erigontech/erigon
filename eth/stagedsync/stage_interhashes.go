@@ -19,8 +19,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir string, quit chan struct{}) error {
-	syncHeadNumber, _, err := stages.GetStageProgress(stateDB, stages.HashState)
+func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+	syncHeadNumber, _, err := stages.GetStageProgress(db, stages.HashState)
 	if err != nil {
 		return err
 	}
@@ -31,12 +31,19 @@ func SpawnIntermediateHashesStage(s *StageState, stateDB ethdb.Database, datadir
 		s.Done()
 		return nil
 	}
+	if s.BlockNumber == 0 {
+		// Special case - if this is the first cycle, we need to produce hashed state first
+		log.Info("Initial hashing plain state", "to", syncHeadNumber)
+		if err := promoteHashedStateCleanly(s, db, syncHeadNumber, datadir, quit); err != nil {
+			return err
+		}
+	}
 	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", syncHeadNumber)
 
-	if err := updateIntermediateHashes(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
+	if err := updateIntermediateHashes(s, db, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
 		return err
 	}
-	return s.DoneAndUpdate(stateDB, syncHeadNumber)
+	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
 func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {

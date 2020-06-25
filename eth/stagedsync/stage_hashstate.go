@@ -20,13 +20,10 @@ import (
 
 var cbor codec.CborHandle
 
-func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, limit uint64, quit chan struct{}) error {
-	syncHeadNumber, err := s.ExecutionAt(stateDB)
+func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+	syncHeadNumber, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
-	}
-	if limit > 0 && syncHeadNumber > limit {
-		syncHeadNumber = limit
 	}
 
 	if s.BlockNumber == syncHeadNumber {
@@ -39,11 +36,14 @@ func SpawnHashStateStage(s *StageState, stateDB ethdb.Database, datadir string, 
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, syncHeadNumber)
 	}
 
-	log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
-	if err := promoteHashedState(s, stateDB, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
-		return err
+	if s.BlockNumber > 0 { // Initial hashing of the state is performed at the previous stage
+		log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
+		if err := promoteHashedStateIncrementally(s, s.BlockNumber, syncHeadNumber, db, datadir, quit); err != nil {
+			return err
+		}
 	}
-	return s.DoneAndUpdate(stateDB, syncHeadNumber)
+
+	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
@@ -77,13 +77,6 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 		return err
 	}
 	return nil
-}
-
-func promoteHashedState(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
-	if from == 0 {
-		return promoteHashedStateCleanly(s, db, to, datadir, quit)
-	}
-	return promoteHashedStateIncrementally(s, from, to, db, datadir, quit)
 }
 
 func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, datadir string, quit chan struct{}) error {
@@ -142,7 +135,7 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 		}
 	}
 
-	if err := etl.Transform(
+	return etl.Transform(
 		db,
 		dbutils.PlainContractCodeBucket,
 		dbutils.ContractCodeBucket,
@@ -159,13 +152,7 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
 			},
 		},
-	); err != nil {
-		return err
-	}
-	if err := updateIntermediateHashes(s, db, s.BlockNumber, to, datadir, quit); err != nil {
-		return err
-	}
-	return nil
+	)
 }
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
@@ -214,9 +201,6 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	if addrHash == common.HexToHash("0xf3a0c3a055a5519efd6d5ef30a949711615c5fe20fd98924610de25918e57ee1") {
-		fmt.Printf("Address preimage of %x is %x, inc: %d\n", addrHash, address, incarnation)
-	}
 	compositeKey := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
 	return compositeKey, nil
 }
@@ -399,7 +383,6 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	skip := false
 
 	var loadStartKey []byte
-	/*
 	if len(s.StageData) != 0 {
 		// we have finished this stage but didn't start the next one
 		if len(s.StageData) == 1 && s.StageData[0] == index {
@@ -416,7 +399,6 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 			}
 		}
 	}
-	*/
 	if skip {
 		return nil
 	}
@@ -529,9 +511,6 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 }
 
 func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
-	if err := updateIntermediateHashes(s, db, s.BlockNumber, to, datadir, quit); err != nil {
-		return err
-	}
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
 	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */, 0x00); err != nil {
