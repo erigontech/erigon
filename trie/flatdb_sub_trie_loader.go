@@ -49,7 +49,7 @@ type FlatDbSubTrieLoader struct {
 	nextAccountKey     [32]byte
 	k, v               []byte
 	ihK, ihV           []byte
-	minKeyAsNibbles    bytes.Buffer
+	minKeyAsNibbles    []byte
 
 	itemPresent    bool
 	itemType       StreamItem
@@ -111,7 +111,7 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
-	fstl.minKeyAsNibbles.Reset()
+	fstl.minKeyAsNibbles = fstl.minKeyAsNibbles[:0]
 	fstl.trace = trace
 	fstl.rl = rl
 	fstl.dbPrefixes = dbPrefixes
@@ -158,7 +158,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	var minKey []byte
 	var err error
 	if !first {
-		isIH, minKey = keyIsBefore(fstl.ihK, fstl.k)
+		isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
 	}
 	fixedbytes := fstl.fixedbytes[fstl.rangeIdx]
 	cutoff := fstl.cutoffs[fstl.rangeIdx]
@@ -230,7 +230,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 					fstl.ihK = nil
 				}
 			}
-			isIH, minKey = keyIsBefore(fstl.ihK, fstl.k)
+			isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
 			if fixedbytes == 0 {
 				cmp = 0
 			}
@@ -320,25 +320,24 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	}
 
 	// ih part
-	fstl.minKeyAsNibbles.Reset()
-	keyToNibbles(minKey, &fstl.minKeyAsNibbles)
+	DecompressNibbles(minKey, &fstl.minKeyAsNibbles)
 
-	if fstl.minKeyAsNibbles.Len() < cutoff {
+	if len(fstl.minKeyAsNibbles) < cutoff {
 		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
 			return err
 		} // go to children, not to sibling
 		return nil
 	}
 
-	retain := fstl.rl.Retain(fstl.minKeyAsNibbles.Bytes())
+	retain := fstl.rl.Retain(fstl.minKeyAsNibbles)
 	if fstl.trace {
-		fmt.Printf("fstl.rl.Retain(%x)=%t\n", fstl.minKeyAsNibbles.Bytes(), retain)
+		fmt.Printf("fstl.rl.Retain(%x)=%t\n", fstl.minKeyAsNibbles, retain)
 	}
 
 	if retain { // can't use ih as is, need go to children
 		// Collect deletions
 		if fstl.hc != nil {
-			if err = fstl.hc(fstl.minKeyAsNibbles.Bytes(), nil); err != nil {
+			if err = fstl.hc(fstl.minKeyAsNibbles, nil); err != nil {
 				return err
 			}
 		}
@@ -416,23 +415,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	if fstl.trace {
 		fmt.Printf("k after next: %x\n", fstl.k)
 	}
-	if !bytes.HasPrefix(fstl.ihK, next) {
-		if fstl.ihK, fstl.ihV, err = ih.SeekTo(next); err != nil {
-			return err
-		}
-	}
-	if len(next) <= common.HashLength && len(fstl.ihK) > common.HashLength {
-		// Advance past the storage to the first account
-		if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-			if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
-				return err
-			}
-		} else {
-			fstl.ihK = nil
-		}
-	}
-	if fstl.trace {
-		fmt.Printf("ihK after next: %x\n", fstl.ihK)
+	if fstl.ihK, fstl.ihV, err = ih.SeekTo(next); err != nil {
+		return err
 	}
 	return nil
 }
@@ -834,6 +818,24 @@ func nextAccount(in, out []byte) bool {
 		out[i] = 0
 	}
 	return false
+}
+
+// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
+func keyIsBeforeOrEqual(k1, k2 []byte) (bool, []byte) {
+	if k1 == nil {
+		return false, k2
+	}
+
+	if k2 == nil {
+		return true, k1
+	}
+
+	switch bytes.Compare(k1, k2) {
+	case -1, 0:
+		return true, k1
+	default:
+		return false, k2
+	}
 }
 
 // keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
