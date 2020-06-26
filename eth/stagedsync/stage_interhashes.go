@@ -435,10 +435,8 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			//fmt.Printf("Collecting nil for %x\n", k)
 			return collector.Collect(k, nil)
 		}
-		//fmt.Printf("Collecting for %x: [%x]\n", k, hash)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
