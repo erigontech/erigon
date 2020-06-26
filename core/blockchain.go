@@ -791,15 +791,10 @@ func (bc *BlockChain) AvailableBlocks() []common.Hash {
 // caching it if found.
 func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 	// Short circuit if the block's already in the cache, retrieve otherwise
-	if block, ok := bc.blockCache.Get(hash); ok {
-		return block.(*types.Block)
-	}
 	block := rawdb.ReadBlock(bc.db, hash, number)
 	if block == nil {
 		return nil
 	}
-	// Cache the found block for next time and return
-	bc.blockCache.Add(block.Hash(), block)
 	return block
 }
 
