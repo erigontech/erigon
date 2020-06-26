@@ -2035,15 +2035,10 @@ func resetHistoryIndex(chaindata string) {
 	check(db.ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
-		dbutils.TxLookupPrefix,
 	))
 	err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.TxLookup, 0, nil)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.Finish, 0, nil)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2603,7 +2598,7 @@ func searchChangeSet(chaindata string, key []byte) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
 		c := st.Cursor()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -2611,7 +2606,7 @@ func searchChangeSet(chaindata string, key []byte) error {
 			}
 			timestamp, _ := dbutils.DecodeTimestamp(k)
 			//fmt.Printf("timestamp: %d\n", timestamp)
-			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
+			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
 				if bytes.Equal(kk, key) {
 					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
 				}
@@ -2624,6 +2619,53 @@ func searchChangeSet(chaindata string, key []byte) error {
 	}); err != nil {
 		return err
 	}
+	return nil
+}
+
+func buildHistory(chaindata string, reset bool) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.AccountsHistoryBucket,
+			dbutils.StorageHistoryBucket,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+	}
+	var err error
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	var stage7progress uint64
+	if stage7progress, _, err = stages.GetStageProgress(db, stages.AccountHistoryIndex); err != nil {
+		return err
+	}
+	var stage8progress uint64
+	if stage8progress, _, err = stages.GetStageProgress(db, stages.StorageHistoryIndex); err != nil {
+		return err
+	}
+	log.Info("Stage4", "progress", stage4progress)
+	log.Info("Stage7", "progress", stage7progress)
+	log.Info("Stage8", "progress", stage8progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
+	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
+	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
 	return nil
 }
 
@@ -2842,6 +2884,11 @@ func main() {
 	}
 	if *action == "compare" {
 		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "resetHistory" {
+		if err := buildHistory(*chaindata, true /* reset */); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

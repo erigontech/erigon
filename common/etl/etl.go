@@ -2,7 +2,6 @@ package etl
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -87,46 +85,9 @@ func Transform(
 	collector := NewCollector(datadir, buffer)
 
 	t := time.Now()
-	numOfChunks := 1 + len(args.Chunks)
-	if numOfChunks > 1 {
-		errg, _ := errgroup.WithContext(context.TODO())
-		f := func(startKey, endKey []byte, collector *Collector, i int) func() error {
-			return func() error {
-				if err := extractBucketIntoFiles(db, fromBucket, startKey, endKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
-					disposeProviders(collector.dataProviders)
-					return err
-				}
-				log.Info("Chunk finished successfully", "i", i, "dp", len(collector.dataProviders))
-				return nil
-			}
-		}
-		errg.Go(f(args.ExtractStartKey, args.Chunks[0], collector, 0))
-
-		localCollectors := make([]*Collector, len(args.Chunks))
-		for i := range args.Chunks {
-			i := i
-			localCollectors[i] = NewCollector(datadir, NewSortableBuffer(bufferSize))
-			extractStartKey := args.Chunks[i]
-			var endKey []byte
-			if i == len(args.Chunks)-1 {
-				endKey = args.ExtractEndKey
-			} else {
-				endKey = args.Chunks[i+1]
-			}
-			errg.Go(f(extractStartKey, endKey, localCollectors[i], i+1))
-		}
-		err := errg.Wait()
-		if err != nil {
-			return err
-		}
-		for i := range localCollectors {
-			collector.dataProviders = append(collector.dataProviders, localCollectors[i].dataProviders...)
-		}
-	} else {
-		if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
-			disposeProviders(collector.dataProviders)
-			return err
-		}
+	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+		disposeProviders(collector.dataProviders)
+		return err
 	}
 	log.Info("Extraction finished", "it took", time.Since(t))
 
