@@ -65,6 +65,16 @@ func PrepareStagedSync(
 			},
 		},
 		{
+			ID:          stages.IntermediateHashes,
+			Description: "Generating intermediate hashes and compiting state root",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return UnwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
+			},
+		},
+		{
 			ID:          stages.HashState,
 			Description: "Hashing the key in the state",
 			ExecFunc: func(s *StageState, u Unwinder) error {

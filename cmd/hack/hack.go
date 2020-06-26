@@ -2035,12 +2035,15 @@ func resetHistoryIndex(chaindata string) {
 	check(db.ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
+		dbutils.TxLookupPrefix,
 	))
 	err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
 	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
+	err = stages.SaveStageProgress(db, stages.TxLookup, 0, nil)
+	check(err)
+	err = stages.SaveStageProgress(db, stages.Finish, 0, nil)
 	check(err)
 	fmt.Printf("Reset history index done\n")
 }
@@ -2297,29 +2300,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func testSeek(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		c := b.Cursor()
-		//kk := common.FromHex("0x434751")
-		kk := common.FromHex("0x434750c1bd61c93ad930ba5b31d2181636e06fcad87ea82ac78c3ad9515d099f")
-		c.Seek(kk)
-		/*
-			for k, _ := c.Seek(common.FromHex("4347500d81465512b2397af46c12792c44f2a89e3601af951cf9c7735385b0cb")); k != nil; k, _ = c.Next() {
-				if bytes.Compare(k, kk) > 0 {
-					fmt.Printf("Found nexgt key: %x\n", k)
-					break
-				}
-			}
-		*/
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-}
-
 func testStage4(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2356,7 +2336,7 @@ func testUnwind4(chaindata string, rewind uint64) error {
 	return nil
 }
 
-func testStage5(chaindata string, reset bool) error {
+func testStage6(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if reset {
@@ -2373,19 +2353,19 @@ func testStage5(chaindata string, reset bool) error {
 		}
 	}
 	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
 	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	log.Info("Stage4", "progress", stage4progress)
+	var stage6progress uint64
+	if stage6progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+		return err
+	}
 	log.Info("Stage5", "progress", stage5progress)
+	log.Info("Stage6", "progress", stage6progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage5progress}
+	stageState := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
 	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
 		return err
 	}
@@ -2393,28 +2373,130 @@ func testStage5(chaindata string, reset bool) error {
 	return nil
 }
 
-func testUnwind5(chaindata string, rewind uint64) error {
+func testUnwind6(chaindata string, rewind uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	var err error
-	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+	var stage6progress uint64
+	if stage6progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
 		return err
 	}
-	log.Info("Stage5", "progress", stage5progress)
+	log.Info("Stage6", "progress", stage6progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage5progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage5progress}
-	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
+	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
+	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
 	return nil
 }
 
-/*
-func testStage6(chaindata string, reset bool) error {
+func findPreimage(chaindata string, hash common.Hash) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.PlainStateBucket)
+		c := b.Cursor()
+		k, _, e := c.First()
+		if e != nil {
+			return e
+		}
+		for k != nil {
+			if bytes.Equal(crypto.Keccak256(k), hash[:]) {
+				fmt.Printf("preimage: %x\n", k)
+				break
+			}
+			k, _, e = c.Next()
+			if e != nil {
+				return e
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	copyDb := ethdb.MustOpen(chaindataCopy)
+	defer copyDb.Close()
+	count := 0
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		c := b.Cursor()
+		k, v, e := c.First()
+		if e != nil {
+			return e
+		}
+		return copyDb.KV().View(context.Background(), func(copyTx ethdb.Tx) error {
+			copyB := copyTx.Bucket([]byte(bucket))
+			copyC := copyB.Cursor()
+			copyK, copyV, copyE := copyC.First()
+			if copyE != nil {
+				return copyE
+			}
+			for k != nil || copyK != nil {
+				count++
+				if count%100000 == 0 {
+					fmt.Printf("Compared %d records\n", count)
+				}
+				if k == nil {
+					fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
+					copyK, copyV, copyE = copyC.Next()
+					if copyE != nil {
+						return copyE
+					}
+				} else if copyK == nil {
+					fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
+					k, v, e = c.Next()
+					if e != nil {
+						return e
+					}
+				} else {
+					switch bytes.Compare(k, copyK) {
+					case -1:
+						fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
+						k, v, e = c.Next()
+						if e != nil {
+							return e
+						}
+					case 1:
+						fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
+						copyK, copyV, copyE = copyC.Next()
+						if copyE != nil {
+							return copyE
+						}
+					case 0:
+						if !bytes.Equal(v, copyV) {
+							fmt.Printf("Different values for %x. db: [%x], copyDb: [%x]\n", k, v, copyV)
+						}
+						k, v, e = c.Next()
+						if e != nil {
+							return e
+						}
+						copyK, copyV, copyE = copyC.Next()
+						if copyE != nil {
+							return copyE
+						}
+					default:
+						fmt.Printf("Unexpected result of bytes.Compare: %d\n", bytes.Compare(k, copyK))
+					}
+				}
+			}
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func testStage5(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if reset {
@@ -2429,19 +2511,19 @@ func testStage6(chaindata string, reset bool) error {
 		}
 	}
 	var err error
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
 	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	var stage6progress uint64
-	if stage6progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-		return err
-	}
+	log.Info("Stage4", "progress", stage4progress)
 	log.Info("Stage5", "progress", stage5progress)
-	log.Info("Stage6", "progress", stage6progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage6progress}
+	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
 	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
 		return err
 	}
@@ -2449,26 +2531,25 @@ func testStage6(chaindata string, reset bool) error {
 	return nil
 }
 
-func testUnwind6(chaindata string, rewind uint64) error {
+func testUnwind5(chaindata string, rewind uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	var err error
-	var stage6progress uint64
-	if stage6progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+	var stage5progress uint64
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	log.Info("Stage6", "progress", stage6progress)
+	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage6progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage6progress}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
+	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
+	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
 	return nil
 }
-*/
 
 func printStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
@@ -2480,6 +2561,27 @@ func printStages(chaindata string) error {
 			return err
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+	}
+	return nil
+}
+
+func fixStages(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var err error
+	var progress uint64
+	var list []uint64
+	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
+			return err
+		}
+		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+		list = append(list, progress)
+	}
+	for stage := stages.IntermediateHashes; stage < stages.TxLookup; stage++ {
+		if err = stages.SaveStageProgress(db, stage+1, list[int(stage)], nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -2596,7 +2698,9 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	if *action == "preimage" {
-		preimage(*chaindata, common.HexToHash(*hash))
+		if err := findPreimage(*chaindata, common.HexToHash(*hash)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "addPreimage" {
 		addPreimage(*chaindata, common.HexToHash(*hash), common.FromHex(*preImage))
@@ -2671,9 +2775,6 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "seek" {
-		testSeek(*chaindata)
-	}
 	if *action == "stage4" {
 		if err := testStage4(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -2699,6 +2800,21 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
+	if *action == "stage6" {
+		if err := testStage6(*chaindata, false /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "reset6" {
+		if err := testStage6(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "unwind6" {
+		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
 	if *action == "stageLoop" {
 		if err := testStageLoop(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -2716,6 +2832,16 @@ func main() {
 	}
 	if *action == "printStages" {
 		if err := printStages(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "fixStages" {
+		if err := fixStages(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "compare" {
+		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

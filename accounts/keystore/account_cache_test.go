@@ -52,7 +52,6 @@ var (
 )
 
 func TestWatchNewFile(t *testing.T) {
-	t.Parallel()
 
 	dir, ks := tmpKeyStore(t, false)
 	defer os.RemoveAll(dir)
@@ -92,7 +91,6 @@ func TestWatchNewFile(t *testing.T) {
 }
 
 func TestWatchNoDir(t *testing.T) {
-	t.Parallel()
 
 	// Create ks but not the directory that it watches.
 	rand.Seed(time.Now().UnixNano())
