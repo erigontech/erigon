@@ -65,7 +65,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 
 		dbstate := state.NewPlainDBState(historyDb.KV(), block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
-		csw := state.NewChangeSetWriter()
+		csw := state.NewChangeSetWriterPlain()
 		var blockWriter state.StateWriter
 		if nocheck {
 			blockWriter = noOpWriter
@@ -99,7 +99,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				return err
 			}
 			var expectedAccountChanges []byte
-			expectedAccountChanges, err = changeset.EncodeAccounts(accountChanges)
+			expectedAccountChanges, err = changeset.EncodeAccountsPlain(accountChanges)
 			if err != nil {
 				return err
 			}
@@ -121,7 +121,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 			expectedtorageSerialized := make([]byte, 0)
 			if expectedStorageChanges.Len() > 0 {
-				expectedtorageSerialized, err = changeset.EncodeStorage(expectedStorageChanges)
+				expectedtorageSerialized, err = changeset.EncodeStoragePlain(expectedStorageChanges)
 				if err != nil {
 					return err
 				}

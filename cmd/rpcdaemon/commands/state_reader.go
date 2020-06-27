@@ -73,7 +73,7 @@ func (r *StateReader) GetCodeReads() [][]byte {
 
 func (r *StateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	r.accountReads[address] = struct{}{}
-	enc, err := state.GetAsOf(r.db, true /* plain */, false /* storage */, address[:], r.blockNr)
+	enc, err := state.GetAsOf(r.db, true /* plain */, false /* storage */, address[:], r.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -92,7 +92,7 @@ func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uin
 	}
 	m[*key] = struct{}{}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	enc, err := state.GetAsOf(r.db, true /* plain */, true /* storage */, compositeKey, r.blockNr)
+	enc, err := state.GetAsOf(r.db, true /* plain */, true /* storage */, compositeKey, r.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}

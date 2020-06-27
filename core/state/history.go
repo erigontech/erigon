@@ -28,7 +28,7 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 		if !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
 		}
-		//fmt.Printf("Not found in history\n")
+		//fmt.Printf("Not found in history, key=%x, timestamp=%d\n", key, timestamp)
 		{
 			var bucket []byte
 			if plain {
