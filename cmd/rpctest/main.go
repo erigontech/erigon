@@ -1778,7 +1778,7 @@ func bench10() error {
 		res = reqGen.Geth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
 		if res.Err != nil {
 			print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
-			return fmt.Errorf("trace transaction (geth) %s: %v", tx.Hash, res.Err)			
+			return fmt.Errorf("trace transaction (geth) %s: %v", tx.Hash, res.Err)
 		}
 		if traceg.Error != nil {
 			return fmt.Errorf("tracing transaction (geth): %d %s", traceg.Error.Code, traceg.Error.Message)
@@ -1786,8 +1786,6 @@ func bench10() error {
 		if res.Err == nil && trace.Error == nil {
 			if !compareTraces(&trace, &traceg) {
 				return fmt.Errorf("different traces block %d, tx %s", bn, tx.Hash)
-			} else {
-				fmt.Printf("Same trace\n")
 			}
 		}
 		reqGen.reqID++
