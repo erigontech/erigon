@@ -25,7 +25,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
 
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket);  err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket); err != nil {
 		return err
 	}
 

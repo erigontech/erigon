@@ -58,7 +58,6 @@ type LoadCommitHandler func(ethdb.Putter, []byte, bool) error
 type TransformArgs struct {
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
-	Chunks          [][]byte
 	FixedBits       int
 	BufferType      int
 	BufferSize      int
