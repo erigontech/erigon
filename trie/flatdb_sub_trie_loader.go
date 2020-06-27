@@ -310,16 +310,18 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 			// But move .k forward - then `keyIsBeforeOrEqual` of new iteration will chose ihK.
 			// .v not expected been used.
 			if fstl.ihK != nil && fstl.accountValue.Incarnation == 0 && nextAccount(fstl.k, fstl.nextAccountKey[:]) {
+				// if account has no storage and next account matches IH, then IH will used on next iteration
 				canUseNextIH := bytes.HasPrefix(fstl.nextAccountKey[:], fstl.ihK)
 				if canUseNextIH {
-					fstl.k = append(fstl.k[:0], fstl.nextAccountKey[:]...)
+					fstl.k = common.CopyBytes(fstl.nextAccountKey[:])
 					return nil
 				}
 			}
 			if fstl.ihK != nil && fstl.accountValue.Incarnation > 0 {
-				canUseNextIH := bytes.Equal(fstl.accAddrHashWithInc[:], fstl.ihK)
+				// if IH is a storage root of current account, then IH will used on next iteration
+				canUseNextIH := bytes.HasPrefix(fstl.accAddrHashWithInc[:], fstl.ihK)
 				if canUseNextIH {
-					fstl.k = append(fstl.k[:0], fstl.accAddrHashWithInc[:]...)
+					fstl.k = common.CopyBytes(fstl.accAddrHashWithInc[:])
 					return nil
 				}
 			}
@@ -379,7 +381,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 	// .v not expected been used.
 	canUseNextIH := fstl.ihK != nil && bytes.Equal(next, fstl.ihK)
 	if canUseNextIH {
-		fstl.k = append(fstl.k[:0], fstl.ihK...)
+		// if IH is prefix of next sub-trie, then IH will used on next iteration
+		fstl.k = common.CopyBytes(fstl.ihK)
 		return nil
 	}
 

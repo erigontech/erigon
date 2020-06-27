@@ -498,6 +498,9 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
+	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
+	}
 	return nil
 }
 
