@@ -1499,10 +1499,8 @@ func resetState(chaindata string) {
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	))
-	_, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false)
-	check(err)
 	core.UsePlainStateExecution = true
-	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+	_, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
 	check(err)

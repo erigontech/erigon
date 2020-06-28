@@ -167,6 +167,19 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
+	//restore codehash
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		var codeHash []byte
+		if err := dbs.db.View(context.Background(), func(tx ethdb.Tx) error {
+			codeHash, _ = tx.Bucket(dbutils.PlainContractCodeBucket).Get(dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		if len(codeHash) > 0 {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		}
+	}
 	return &acc, nil
 }
 

@@ -102,30 +102,39 @@ func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
 	if a1.Nonce != a2.Nonce {
+		fmt.Printf("1\n")
 		return false
 	}
 	if !a1.Initialised {
 		if a2.Initialised {
+			fmt.Printf("2\n")
 			return false
 		}
 	} else if !a2.Initialised {
+		fmt.Printf("3\n")
 		return false
 	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
+		fmt.Printf("4\n")
 		return false
 	}
-	if a1.CodeHash == (common.Hash{}) {
-		if a2.CodeHash != (common.Hash{}) {
+	if a1.IsEmptyCodeHash() {
+		if !a2.IsEmptyCodeHash() {
+			fmt.Printf("5\n")
 			return false
 		}
-	} else if a2.CodeHash == (common.Hash{}) {
+	} else if a2.IsEmptyCodeHash() {
+		fmt.Printf("6\n")
 		return false
 	} else if a1.CodeHash != a2.CodeHash {
+		fmt.Printf("7\n")
 		return false
 	}
+	fmt.Printf("Codehashes: %x %x\n", a1.CodeHash, a1.CodeHash)
 	return true
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	fmt.Printf("UpdateAccountData %x, original=account=%t, storageChanged=%t\n", address, accountsEqual(original, account), w.storageChanged[address])
 	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
@@ -137,6 +146,7 @@ func (w *ChangeSetWriter) UpdateAccountCode(address common.Address, incarnation 
 }
 
 func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	fmt.Printf("DeleteAccount %x\n", address)
 	w.accountChanges[address] = originalAccountData(original, false)
 	return nil
 }

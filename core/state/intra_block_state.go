@@ -452,9 +452,9 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
 	sdb.Lock()
 
-	if sdb.trace {
+	//if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
-	}
+	//}
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
@@ -465,6 +465,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
+		fmt.Printf("stateObject.AddBalance %x, %d\n", addr, amount)
 		stateObject.AddBalance(amount)
 	}
 }
@@ -616,28 +617,34 @@ var nullValue = common.Big0
 // do not lock!!!
 // Retrieve a state object given my the address. Returns nil if not found.
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
+	fmt.Printf("IntraBlockState.getStateObject(%x)\n", addr)
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
+		fmt.Printf("getStateObject 1\n")
 		return obj
 	}
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
+		fmt.Printf("getStateObject 2\n")
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
+		fmt.Printf("getStateObject 3\n")
 		return nil
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
+		fmt.Printf("getStateObject 4\n")
 		return nil
 	}
 
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(obj)
+	fmt.Printf("getStateObject 5\n")
 	return obj
 }
 
