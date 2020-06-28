@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -90,10 +89,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				return SpawnAccountHistoryIndex(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindAccountHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
+				return UnwindAccountHistoryIndex(u, stateDB, quitCh)
 			},
 		},
 		{
@@ -102,10 +101,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				return SpawnStorageHistoryIndex(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindStorageHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
+				return UnwindStorageHistoryIndex(u, stateDB, quitCh)
 			},
 		},
 		{

@@ -29,6 +29,15 @@ func WrapHistoryIndex(b []byte) HistoryIndexBytes {
 
 type HistoryIndexBytes []byte
 
+func (hi HistoryIndexBytes) String() string {
+	var buffer bytes.Buffer
+	numbers, _, _ := hi.Decode()
+	for _, n := range numbers {
+		buffer.WriteString(fmt.Sprintf("%d ", n))
+	}
+	return buffer.String()
+}
+
 // decode is used for debugging and in tests
 func (hi HistoryIndexBytes) Decode() ([]uint64, []bool, error) {
 	if len(hi) < 8 {

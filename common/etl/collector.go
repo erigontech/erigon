@@ -3,13 +3,11 @@ package etl
 import (
 	"bytes"
 	"container/heap"
-	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"runtime"
 )
@@ -97,19 +95,6 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	}
 	batch := db.NewBatch()
 	state := &bucketState{batch, bucket, args.Quit}
-	batchCh := make(chan struct {
-		db         ethdb.DbWithPendingMutations
-		currentKey string
-	}, 2)
-	batchPool := make(chan ethdb.DbWithPendingMutations, 2)
-	getBatch := func() ethdb.DbWithPendingMutations {
-		select {
-		case bt := <-batchPool:
-			return bt
-		default:
-			return db.NewBatch()
-		}
-	}
 
 	loadNextFunc := func(k, v []byte) error {
 		// we ignore everything that is before this key
@@ -132,55 +117,8 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 					return err
 				}
 			}
-			batchCh <- struct {
-				db         ethdb.DbWithPendingMutations
-				currentKey string
-			}{db: batch, currentKey: makeCurrentKeyStr(k)}
-			batch = getBatch()
-		}
-		return nil
-	}
-
-	wg, _ := errgroup.WithContext(context.TODO())
-	stopWg := make(chan struct{})
-	wg.Go(func() error {
-		defer close(stopWg)
-		for h.Len() > 0 {
-			if err := common.Stopped(args.Quit); err != nil {
-				return err
-			}
-
-			element := (heap.Pop(h)).(HeapElem)
-			provider := providers[element.TimeIdx]
-			err := loadFunc(element.Key, element.Value, state, loadNextFunc)
-			if err != nil {
-				return err
-			}
-			if element.Key, element.Value, err = provider.Next(decoder); err == nil {
-				heap.Push(h, element)
-			} else if err != io.EOF {
-				return fmt.Errorf("error while reading next element from disk: %v", err)
-			}
-		}
-		if args.OnLoadCommit != nil {
-			if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
-				return err
-			}
-		}
-		batchCh <- struct {
-			db         ethdb.DbWithPendingMutations
-			currentKey string
-		}{db: batch, currentKey: makeCurrentKeyStr(nil)}
-
-		return nil
-	})
-	wg.Go(func() error {
-		commit := func(batchToCommit struct {
-			db         ethdb.DbWithPendingMutations
-			currentKey string
-		}) error {
-			batchSize := batchToCommit.db.BatchSize()
-			if _, err := batchToCommit.db.Commit(); err != nil {
+			batchSize := batch.BatchSize()
+			if _, err := batch.Commit(); err != nil {
 				return err
 			}
 			runtime.ReadMemStats(&m)
@@ -188,32 +126,48 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				"Committed batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
-				"current key", batchToCommit.currentKey,
+				"current key", makeCurrentKeyStr(k),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-			return nil
 		}
-		var err error
-		for {
-			select {
-			case batchToCommit := <-batchCh:
-				err = commit(batchToCommit)
-				if err != nil {
-					return err
-				}
-			case <-stopWg:
-				close(batchCh)
-				for batchToCommit := range batchCh {
-					err = commit(batchToCommit)
-					if err != nil {
-						return err
-					}
-				}
-				return nil
-			}
+		return nil
+	}
+	// Main loading loop
+	for h.Len() > 0 {
+		if err := common.Stopped(args.Quit); err != nil {
+			return err
 		}
-	})
 
-	return wg.Wait()
+		element := (heap.Pop(h)).(HeapElem)
+		provider := providers[element.TimeIdx]
+		err := loadFunc(element.Key, element.Value, state, loadNextFunc)
+		if err != nil {
+			return err
+		}
+		if element.Key, element.Value, err = provider.Next(decoder); err == nil {
+			heap.Push(h, element)
+		} else if err != io.EOF {
+			return fmt.Errorf("error while reading next element from disk: %v", err)
+		}
+	}
+	// Final commit
+	if args.OnLoadCommit != nil {
+		if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
+			return err
+		}
+	}
+	batchSize := batch.BatchSize()
+	if _, err := batch.Commit(); err != nil {
+		return err
+	}
+	runtime.ReadMemStats(&m)
+	log.Info(
+		"Committed batch",
+		"bucket", string(bucket),
+		"size", common.StorageSize(batchSize),
+		"current key", makeCurrentKeyStr(nil),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+
+	return nil
 }
 
 func makeCurrentKeyStr(k []byte) string {

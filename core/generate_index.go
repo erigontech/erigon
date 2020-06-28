@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -41,26 +40,6 @@ var CSMapper = map[string]struct {
 	New           func() *changeset.ChangeSet
 	Encode        func(*changeset.ChangeSet) ([]byte, error)
 }{
-	string(dbutils.AccountChangeSetBucket): {
-		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength,
-		Template: "acc-ind-",
-		New:      changeset.NewAccountChangeSet,
-		Encode:   changeset.EncodeAccounts,
-	},
-	string(dbutils.StorageChangeSetBucket): {
-		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength*2 + common.IncarnationLength,
-		Template: "st-ind-",
-		New:      changeset.NewStorageChangeSet,
-		Encode:   changeset.EncodeStorage,
-	},
 	string(dbutils.PlainAccountChangeSetBucket): {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(v []byte) changeset.Walker {
@@ -92,14 +71,6 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
-	var (
-		endBlockKey []byte
-		chunks      [][]byte
-	)
-	if endBlock != 0 {
-		endBlockKey = dbutils.EncodeTimestamp(endBlock)
-		chunks = calculateIndexChunks(startBlock, endBlock, runtime.NumCPU()/2+1)
-	}
 	t := time.Now()
 	err := etl.Transform(ig.db, changeSetBucket,
 		v.IndexBucket,
@@ -108,9 +79,8 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		loadFunc,
 		etl.TransformArgs{
 			ExtractStartKey: dbutils.EncodeTimestamp(startBlock),
-			ExtractEndKey:   endBlockKey,
+			ExtractEndKey:   dbutils.EncodeTimestamp(endBlock),
 			FixedBits:       0,
-			Chunks:          chunks,
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
@@ -290,17 +260,4 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 		}
 		return nil
 	}
-}
-
-func calculateIndexChunks(startBlock, endBlock uint64, numOfChunks int) [][]byte {
-	if endBlock < startBlock+1000000 || numOfChunks < 2 {
-		return nil
-	}
-
-	chunkSize := (endBlock - startBlock) / uint64(numOfChunks)
-	var chunks = make([][]byte, numOfChunks-1)
-	for i := uint64(1); i < uint64(numOfChunks); i++ {
-		chunks[i-1] = dbutils.EncodeTimestamp(i*chunkSize + 1)
-	}
-	return chunks
 }

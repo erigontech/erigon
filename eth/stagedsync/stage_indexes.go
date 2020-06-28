@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
+func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh chan struct{}) error {
 	endBlock, err := s.ExecutionAt(db)
 	if err != nil {
 		return fmt.Errorf("account history index: getting last executed block: %w", err)
@@ -25,19 +25,14 @@ func spawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
 
-	if plainState {
-		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket)
-	} else {
-		err = ig.GenerateIndex(blockNum, endBlock, dbutils.AccountChangeSetBucket)
-	}
-	if err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket); err != nil {
 		return err
 	}
 
 	return s.DoneAndUpdate(db, endBlock)
 }
 
-func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, plainState bool, quitCh chan struct{}) error {
+func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh chan struct{}) error {
 	endBlock, err := s.ExecutionAt(db)
 	if err != nil {
 		return fmt.Errorf("storage history index: getting last executed block: %w", err)
@@ -53,28 +48,17 @@ func spawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	}
 	ig := core.NewIndexGenerator(db, quitCh)
 	ig.TempDir = datadir
-	if plainState {
-		err = ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket)
-	} else {
-		err = ig.GenerateIndex(blockNum, endBlock, dbutils.StorageChangeSetBucket)
-	}
-	if err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return err
 	}
 
 	return s.DoneAndUpdate(db, endBlock)
 }
 
-func unwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
+func UnwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
 	ig := core.NewIndexGenerator(db, quitCh)
-	if plainState {
-		if err := ig.Truncate(u.UnwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
-			return err
-		}
-	} else {
-		if err := ig.Truncate(u.UnwindPoint, dbutils.AccountChangeSetBucket); err != nil {
-			return err
-		}
+	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
+		return err
 	}
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
@@ -82,16 +66,10 @@ func unwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, plainState boo
 	return nil
 }
 
-func unwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, plainState bool, quitCh chan struct{}) error {
+func UnwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
 	ig := core.NewIndexGenerator(db, quitCh)
-	if plainState {
-		if err := ig.Truncate(u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
-			return err
-		}
-	} else {
-		if err := ig.Truncate(u.UnwindPoint, dbutils.StorageChangeSetBucket); err != nil {
-			return err
-		}
+	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
+		return err
 	}
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind StorageHistorytIndex: %w", err)
