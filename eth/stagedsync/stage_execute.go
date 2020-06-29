@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -308,7 +309,7 @@ func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) erro
 		},
 		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
-		return err
+		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 	}
 
 	return rawdb.PlainWriteAccount(db, address, acc)
@@ -333,8 +334,8 @@ func cleanupContractCodeBucket(
 ) error {
 	var original accounts.Account
 	got, err := readAccountFunc(db, &original)
-	if err != nil {
-		return err
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return fmt.Errorf("cleanupContractCodeBucket: %w", err)
 	}
 	if got {
 		// clean up all the code incarnations original incarnation and the new one

@@ -39,10 +39,11 @@ type structInfoReceiver interface {
 	branchHash(set uint16) error
 	hash(hash []byte, dataLen uint64) error
 	topHash() []byte
+	topStateSize() uint64
 }
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
-type HashCollector func(keyHex []byte, hash []byte) error
+type HashCollector func(keyHex []byte, hash []byte, stateSize uint64) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -114,7 +115,7 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		if trace {
+		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}
 		// Add the digit immediately following the max common prefix and compute length of remainder length
@@ -197,7 +198,7 @@ func GenStructStep(
 				}
 			}
 			if h != nil {
-				if err := h(curr[:maxLen], e.topHash()); err != nil {
+				if err := h(curr[:maxLen], e.topHash(), e.topStateSize()); err != nil {
 					return nil, err
 				}
 			}

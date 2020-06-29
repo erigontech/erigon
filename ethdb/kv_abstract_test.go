@@ -205,6 +205,18 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 		assert.NoError(err)
 		assert.Nil(k)
 
+		k, _, err = c.First()
+		assert.NoError(err)
+		assert.Equal([]byte{0}, k)
+		k, _, err = c.SeekTo([]byte{0, 1})
+		assert.NoError(err)
+		assert.Equal([]byte{0, 1}, k)
+		k, _, err = c.SeekTo([]byte{2})
+		assert.NoError(err)
+		assert.Equal([]byte{2}, k)
+		k, _, err = c.SeekTo([]byte{99})
+		assert.NoError(err)
+		assert.Nil(k)
 		c2 := b.Cursor().NoValues()
 
 		k, _, err = c2.First()

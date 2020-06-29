@@ -254,7 +254,7 @@ func (an *accountNode) reference() []byte { return nil }
 func (n hashNode) witnessSize() uint64 { return n.iws }
 func (n valueNode) witnessSize() uint64 {
 	if CountWitnessSizeWithoutStructure {
-		return uint64(len(n))
+		return uint64(len(n)) + common.HashLength*2 + common.IncarnationLength
 	}
 	return uint64(len(n)) + 1
 }
@@ -270,7 +270,7 @@ func (n *duoNode) witnessSize() uint64   { return n.iws }
 func (n *shortNode) witnessSize() uint64 { return n.iws }
 func (an *accountNode) witnessSize() uint64 {
 	if CountWitnessSizeWithoutStructure {
-		res := uint64(an.EncodingLengthForStorage())
+		res := uint64(an.EncodingLengthForStorage()) + common.HashLength
 		if an.storage != nil {
 			res += an.storage.witnessSize()
 		}
