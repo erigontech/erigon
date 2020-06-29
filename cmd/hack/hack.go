@@ -1519,20 +1519,6 @@ func resetHashedState(chaindata string) {
 	fmt.Printf("Reset hashed state done\n")
 }
 
-func resetHistoryIndex(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	check(db.ClearBuckets(
-		dbutils.AccountsHistoryBucket,
-		dbutils.StorageHistoryBucket,
-	))
-	err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
-	check(err)
-	fmt.Printf("Reset history index done\n")
-}
-
 type Receiver struct {
 	defaultReceiver *trie.DefaultReceiver
 	accountMap      map[string]*accounts.Account
@@ -1843,7 +1829,7 @@ func testUnwind4(chaindata string, rewind uint64) error {
 	return nil
 }
 
-func testStage6(chaindata string, reset bool) error {
+func testStage5(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if reset {
@@ -1855,6 +1841,58 @@ func testStage6(chaindata string, reset bool) error {
 		); err != nil {
 			return err
 		}
+		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
+			return err
+		}
+	}
+	var err error
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	var stage5progress uint64
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+		return err
+	}
+	log.Info("Stage4", "progress", stage4progress)
+	log.Info("Stage5", "progress", stage5progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
+	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
+func testUnwind5(chaindata string, rewind uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var err error
+	var stage5progress uint64
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+		return err
+	}
+	log.Info("Stage5", "progress", stage5progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
+	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
+func testStage6(chaindata string, reset bool) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if reset {
 		if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
 			return err
 		}
@@ -1894,6 +1932,53 @@ func testUnwind6(chaindata string, rewind uint64) error {
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6progress - rewind}
 	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
 	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
+func testStage78(chaindata string, reset bool) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.AccountsHistoryBucket,
+			dbutils.StorageHistoryBucket,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+	}
+	var err error
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	var stage7progress uint64
+	if stage7progress, _, err = stages.GetStageProgress(db, stages.AccountHistoryIndex); err != nil {
+		return err
+	}
+	var stage8progress uint64
+	if stage8progress, _, err = stages.GetStageProgress(db, stages.StorageHistoryIndex); err != nil {
+		return err
+	}
+	log.Info("Stage4", "progress", stage4progress)
+	log.Info("Stage7", "progress", stage7progress)
+	log.Info("Stage8", "progress", stage8progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
+	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
+	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
@@ -2000,61 +2085,6 @@ func compareBucket(chaindata string, chaindataCopy string, bucket string) error 
 	}); err != nil {
 		return err
 	}
-	return nil
-}
-
-func testStage5(chaindata string, reset bool) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if reset {
-		if err := db.ClearBuckets(
-			dbutils.IntermediateTrieHashBucket,
-			dbutils.IntermediateWitnessSizeBucket,
-		); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
-			return err
-		}
-	}
-	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
-	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	log.Info("Stage4", "progress", stage4progress)
-	log.Info("Stage5", "progress", stage5progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
-	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
-	return nil
-}
-
-func testUnwind5(chaindata string, rewind uint64) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	log.Info("Stage5", "progress", stage5progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
-	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
 	return nil
 }
 
@@ -2308,9 +2338,6 @@ func main() {
 	if *action == "resetHashed" {
 		resetHashedState(*chaindata)
 	}
-	if *action == "resetHistoryIndex" {
-		resetHistoryIndex(*chaindata)
-	}
 	if *action == "getProof" {
 		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false); err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -2353,6 +2380,16 @@ func main() {
 	}
 	if *action == "unwind6" {
 		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage78" {
+		if err := testStage78(*chaindata, false /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "reset78" {
+		if err := testStage78(*chaindata, true /* reset */); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

@@ -65,7 +65,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 
 		dbstate := state.NewPlainDBState(historyDb.KV(), block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
-		csw := state.NewChangeSetWriterPlain()
+		csw := state.NewChangeSetWriterPlain(block.NumberU64()-1)
 		var blockWriter state.StateWriter
 		if nocheck {
 			blockWriter = noOpWriter
@@ -110,8 +110,19 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 
 			if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
+				if err = changeset.AccountChangeSetPlainBytes(dbAccountChanges).Walk(func(k, _ []byte) error {
+					fmt.Printf("0x%x\n", k)
+					return nil
+				}); err != nil {
+					return err
+				}
 				fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, hexutil.Encode(dbAccountChanges), hexutil.Encode(expectedAccountChanges))
-				csw.PrintChangedAccounts()
+				if err = changeset.AccountChangeSetPlainBytes(expectedAccountChanges).Walk(func(k, _ []byte) error {
+					fmt.Printf("0x%x\n", k)
+					return nil
+				}); err != nil {
+					return err
+				}
 				return nil
 			}
 
