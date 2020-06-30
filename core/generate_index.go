@@ -33,58 +33,9 @@ type IndexGenerator struct {
 	quitCh           chan struct{}
 }
 
-var CSMapper = map[string]struct {
-	IndexBucket   []byte
-	WalkerAdapter func(v []byte) changeset.Walker
-	KeySize       int
-	Template      string
-	New           func() *changeset.ChangeSet
-	Encode        func(*changeset.ChangeSet) ([]byte, error)
-}{
-	string(dbutils.AccountChangeSetBucket): {
-		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength,
-		Template: "acc-ind-",
-		New:      changeset.NewAccountChangeSet,
-		Encode:   changeset.EncodeAccounts,
-	},
-	string(dbutils.StorageChangeSetBucket): {
-		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength*2 + common.IncarnationLength,
-		Template: "st-ind-",
-		New:      changeset.NewStorageChangeSet,
-		Encode:   changeset.EncodeStorage,
-	},
-	string(dbutils.PlainAccountChangeSetBucket): {
-		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetPlainBytes(v)
-		},
-		KeySize:  common.AddressLength,
-		Template: "acc-ind-",
-		New:      changeset.NewAccountChangeSetPlain,
-		Encode:   changeset.EncodeAccountsPlain,
-	},
-	string(dbutils.PlainStorageChangeSetBucket): {
-		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetPlainBytes(v)
-		},
-		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
-		Template: "st-ind-",
-		New:      changeset.NewStorageChangeSetPlain,
-		Encode:   changeset.EncodeStoragePlain,
-	},
-}
 
 func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte) error {
-	v, ok := CSMapper[string(changeSetBucket)]
+	v, ok := changeset.Mapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
@@ -125,7 +76,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 }
 
 func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) error {
-	vv, ok := CSMapper[string(changeSetBucket)]
+	vv, ok := changeset.Mapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}

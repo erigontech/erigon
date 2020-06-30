@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"reflect"
 )
 
 type Walker interface {
 	Walk(func(k, v []byte) error) error
+	Find(k []byte) ([]byte, error)
 }
 
 func NewChangeSet() *ChangeSet {
@@ -91,8 +94,67 @@ func (s *ChangeSet) Equals(s2 *ChangeSet) bool {
 	return reflect.DeepEqual(s.Changes, s2.Changes)
 }
 
+func (s *ChangeSet) String() string {
+	str:=""
+	for _,v:=range s.Changes {
+		str+=fmt.Sprintf("%v %s : %s\n",len(v.Key), common.Bytes2Hex(v.Key), string(v.Value))
+	}
+	return str
+}
+
 // Encoded Method
 
 func Len(b []byte) int {
 	return int(binary.BigEndian.Uint32(b[0:4]))
+}
+
+
+var Mapper = map[string]struct {
+	IndexBucket   []byte
+	WalkerAdapter func(v []byte) Walker
+	KeySize       int
+	Template      string
+	New           func() *ChangeSet
+	Encode        func(*ChangeSet) ([]byte, error)
+}{
+	string(dbutils.AccountChangeSetBucket): {
+		IndexBucket: dbutils.AccountsHistoryBucket,
+		WalkerAdapter: func(v []byte) Walker {
+			return AccountChangeSetBytes(v)
+		},
+		KeySize:  common.HashLength,
+		Template: "acc-ind-",
+		New:      NewAccountChangeSet,
+		Encode:   EncodeAccounts,
+	},
+	string(dbutils.StorageChangeSetBucket): {
+		IndexBucket: dbutils.StorageHistoryBucket,
+		WalkerAdapter: func(v []byte) Walker {
+			return StorageChangeSetBytes(v)
+		},
+		KeySize:  common.HashLength*2 + common.IncarnationLength,
+		Template: "st-ind-",
+		New:      NewStorageChangeSet,
+		Encode:   EncodeStorage,
+	},
+	string(dbutils.PlainAccountChangeSetBucket): {
+		IndexBucket: dbutils.AccountsHistoryBucket,
+		WalkerAdapter: func(v []byte) Walker {
+			return AccountChangeSetPlainBytes(v)
+		},
+		KeySize:  common.AddressLength,
+		Template: "acc-ind-",
+		New:      NewAccountChangeSetPlain,
+		Encode:   EncodeAccountsPlain,
+	},
+	string(dbutils.PlainStorageChangeSetBucket): {
+		IndexBucket: dbutils.StorageHistoryBucket,
+		WalkerAdapter: func(v []byte) Walker {
+			return StorageChangeSetPlainBytes(v)
+		},
+		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
+		Template: "st-ind-",
+		New:      NewStorageChangeSetPlain,
+		Encode:   EncodeStoragePlain,
+	},
 }

@@ -128,7 +128,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err = ethdb.WalkAsOf(d.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
+	err = WalkAsOf(d.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -193,7 +193,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		}
 		if !excludeStorage {
 			storageMap := make(map[common.Hash][]byte)
-			err = ethdb.WalkAsOf(d.db,
+			err = WalkAsOf(d.db,
 				dbutils.CurrentStateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
