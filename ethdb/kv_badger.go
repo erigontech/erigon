@@ -230,10 +230,9 @@ func (tx *badgerTx) Commit(ctx context.Context) error {
 	return tx.badger.Commit()
 }
 
-func (tx *badgerTx) Rollback() error {
+func (tx *badgerTx) Rollback() {
 	tx.closeCursors()
 	tx.badger.Discard()
-	return nil
 }
 
 func (tx *badgerTx) closeCursors() {
