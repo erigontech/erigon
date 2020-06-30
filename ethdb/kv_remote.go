@@ -153,7 +153,7 @@ func (tx *remoteTx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")
 }
 
-func (tx *remoteTx) Rollback() error {
+func (tx *remoteTx) Rollback() {
 	panic("remote db is read-only")
 }
 

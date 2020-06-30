@@ -453,7 +453,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 			if err := collector.Collect(k, nil); err != nil {
 				return err
 			}
-			if !debug.IsTrackWitnessSizeEnabled() {
+			if debug.IsTrackWitnessSizeEnabled() {
 				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
 					return err
 				}
@@ -463,7 +463,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
 			return err
 		}
-		if !debug.IsTrackWitnessSizeEnabled() {
+		if debug.IsTrackWitnessSizeEnabled() {
 			lenBytes := make([]byte, 8)
 			binary.BigEndian.PutUint64(lenBytes, stateSize)
 			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
@@ -552,7 +552,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 			if err := collector.Collect(k, nil); err != nil {
 				return err
 			}
-			if !debug.IsTrackWitnessSizeEnabled() {
+			if debug.IsTrackWitnessSizeEnabled() {
 				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
 					return err
 				}
@@ -562,7 +562,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
 			return err
 		}
-		if !debug.IsTrackWitnessSizeEnabled() {
+		if debug.IsTrackWitnessSizeEnabled() {
 			lenBytes := make([]byte, 8)
 			binary.BigEndian.PutUint64(lenBytes, stateSize)
 			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
