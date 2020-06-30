@@ -684,9 +684,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	counters3 := []int{}
 	counters4 := []int{}
 	tx, _ := db.KV().Begin(context.Background(), false)
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	defer tx.Rollback()
 	for block <= toBlock {
 		tick, err2 := schedule.Tick(block)
 		if err2 != nil {

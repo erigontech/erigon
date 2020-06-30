@@ -48,9 +48,7 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 	// anything
 	defer func() {
 		if tx != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				logger.Error("could not roll back", "err", rollbackErr)
-			}
+			tx.Rollback()
 			tx = nil
 		}
 	}()
@@ -129,9 +127,7 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 			}
 
 			if tx != nil {
-				if err := tx.Rollback(); err != nil {
-					return fmt.Errorf("could not end transaction: %w", err)
-				}
+				tx.Rollback()
 				tx = nil
 			}
 

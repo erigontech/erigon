@@ -315,10 +315,12 @@ func (tx *boltTx) Commit(ctx context.Context) error {
 	return tx.bolt.Commit()
 }
 
-func (tx *boltTx) Rollback() error {
+func (tx *boltTx) Rollback() {
 	defer tx.closeCursors()
 	// could not put tx back to pool, because tx can be used by app code after rollback
-	return tx.bolt.Rollback()
+	if err := tx.bolt.Rollback(); err != nil {
+		tx.db.log.Warn("bolt rollback failed", "err", err)
+	}
 }
 
 func (tx *boltTx) closeCursors() {
