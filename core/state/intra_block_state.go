@@ -737,6 +737,10 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
+	trace := addr == common.HexToAddress("59eafcc345d78197ea9921467250b3b880b0006d")
+	if trace {
+		fmt.Printf("CreateAccount: %x\n", addr)
+	}
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -782,6 +786,9 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if contractCreation {
 		newObj.created = true
 		newObj.data.Incarnation = prevInc + 1
+		if trace {
+			fmt.Printf("newObj.data.Incarnation: %d\n", newObj.data.Incarnation)
+		}
 	}
 }
 
