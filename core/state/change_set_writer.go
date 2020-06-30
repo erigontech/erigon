@@ -104,67 +104,26 @@ func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
 	if a1.Nonce != a2.Nonce {
-		//fmt.Printf("1\n")
 		return false
 	}
 	if !a1.Initialised {
 		if a2.Initialised {
-			//fmt.Printf("2\n")
 			return false
 		}
 	} else if !a2.Initialised {
-		//fmt.Printf("3\n")
 		return false
 	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
-		//fmt.Printf("4\n")
 		return false
 	}
 	if a1.IsEmptyCodeHash() {
 		if !a2.IsEmptyCodeHash() {
-			//fmt.Printf("5\n")
 			return false
 		}
 	} else if a2.IsEmptyCodeHash() {
-		//fmt.Printf("6\n")
 		return false
 	} else if a1.CodeHash != a2.CodeHash {
-		//fmt.Printf("7\n")
 		return false
 	}
-	//fmt.Printf("Codehashes: %x %x\n", a1.CodeHash, a1.CodeHash)
-	return true
-}
-
-func accountsEqualTrace(a1, a2 *accounts.Account) bool {
-	if a1.Nonce != a2.Nonce {
-		fmt.Printf("1\n")
-		return false
-	}
-	if !a1.Initialised {
-		if a2.Initialised {
-			fmt.Printf("2\n")
-			return false
-		}
-	} else if !a2.Initialised {
-		fmt.Printf("3\n")
-		return false
-	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
-		fmt.Printf("4 %d %d\n", a1.Balance, a2.Balance)
-		return false
-	}
-	if a1.IsEmptyCodeHash() {
-		if !a2.IsEmptyCodeHash() {
-			fmt.Printf("5\n")
-			return false
-		}
-	} else if a2.IsEmptyCodeHash() {
-		fmt.Printf("6\n")
-		return false
-	} else if a1.CodeHash != a2.CodeHash {
-		fmt.Printf("7\n")
-		return false
-	}
-	fmt.Printf("Codehashes: %x %x\n", a1.CodeHash, a1.CodeHash)
 	return true
 }
 
