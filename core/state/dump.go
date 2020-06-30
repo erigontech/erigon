@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -69,28 +70,36 @@ type IteratorDump struct {
 	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
 }
 
-// Collector interface which the state trie calls during iteration
-type collector interface {
-	onRoot(common.Hash)
-	onAccount(common.Address, DumpAccount)
+// DumpCollector interface which the state trie calls during iteration
+type DumpCollector interface {
+	// OnRoot is called with the state root
+	OnRoot(common.Hash)
+	// OnAccount is called once for each account in the trie
+	OnAccount(common.Address, DumpAccount)
 }
 
-func (d *Dump) onRoot(root common.Hash) {
+// OnRoot implements DumpCollector interface
+func (d *Dump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
-func (d *Dump) onAccount(addr common.Address, account DumpAccount) {
+// OnAccount implements DumpCollector interface
+func (d *Dump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
-func (d *IteratorDump) onRoot(root common.Hash) {
+
+// OnRoot implements DumpCollector interface
+func (d *IteratorDump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
-func (d *IteratorDump) onAccount(addr common.Address, account DumpAccount) {
+// OnAccount implements DumpCollector interface
+func (d *IteratorDump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
-func (d iterativeDump) onAccount(addr common.Address, account DumpAccount) {
+// OnAccount implements DumpCollector interface
+func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 	dumpAccount := &DumpAccount{
 		Balance:   account.Balance,
 		Nonce:     account.Nonce,
@@ -108,7 +117,8 @@ func (d iterativeDump) onAccount(addr common.Address, account DumpAccount) {
 	d.Encode(dumpAccount)
 }
 
-func (d iterativeDump) onRoot(root common.Hash) {
+// OnRoot implements DumpCollector interface
+func (d iterativeDump) OnRoot(root common.Hash) {
 	//nolint:errcheck
 	d.Encoder.Encode(struct {
 		Root common.Hash `json:"root"`
@@ -123,14 +133,14 @@ func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
+func (d *Dumper) dump(c DumpCollector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var incarnationList []uint64
 	var addrHashList []common.Address
 
-	c.onRoot(emptyHash) // We do not calculate the root
+	c.OnRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
@@ -220,7 +230,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			}
 			fmt.Printf("Got walk storage for : %x\n", storagePrefix)
 		}
-		c.onAccount(addrHash, *account)
+		c.OnAccount(addrHash, *account)
 	}
 	return nextKey, nil
 }

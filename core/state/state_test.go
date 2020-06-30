@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
+var toAddr = common.BytesToAddress
 
 type StateSuite struct {
 	db    ethdb.Database
@@ -95,7 +96,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
     }
 }`
 	if got != want {
-		c.Errorf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
+		t.Errorf("DumpToCollector mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
 }
 
