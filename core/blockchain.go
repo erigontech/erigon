@@ -1505,7 +1505,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	// faster than direct delivery and requires much less mutex
 	// acquiring.
 	var (
-		stats     = insertStats{startTime: mclock.Now()}
+		stats     = InsertStats{StartTime: mclock.Now()}
 		lastCanon *types.Block
 	)
 	// Fire a single chain head event if we've progressed the chain
@@ -1834,10 +1834,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
 				"root", block.Root())
 		}
-		stats.processed++
-		stats.usedGas += usedGas
-		toCommit := stats.needToCommit(chain, bc.db, i)
-		stats.report(chain, i, bc.db, toCommit)
+		stats.Processed++
+		stats.UsedGas += usedGas
+		toCommit := stats.NeedToCommit(chain, bc.db, i)
+		stats.Report(chain, i, bc.db, toCommit)
 		if toCommit {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
@@ -1870,10 +1870,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 const statsReportLimit = 8 * time.Second
 const commitLimit = 60 * time.Second
 
-func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPendingMutations, index int) bool {
+func (st *InsertStats) NeedToCommit(chain []*types.Block, db ethdb.DbWithPendingMutations, index int) bool {
 	var (
 		now     = mclock.Now()
-		elapsed = time.Duration(now) - time.Duration(st.startTime)
+		elapsed = time.Duration(now) - time.Duration(st.StartTime)
 	)
 	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= db.IdealBatchSize() {
 		return true
@@ -1883,11 +1883,11 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations, toCommit bool) {
+func (st *InsertStats) Report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations, toCommit bool) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
-		elapsed = time.Duration(now) - time.Duration(st.startTime)
+		elapsed = time.Duration(now) - time.Duration(st.StartTime)
 	)
 	// If we're at the last block of the batch or report period reached, log
 	if index == len(chain)-1 || elapsed >= statsReportLimit || toCommit {
@@ -1898,8 +1898,8 @@ func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWit
 		}
 		end := chain[index]
 		context := []interface{}{
-			"blocks", st.processed, "txs", txs, "mgas", float64(st.usedGas) / 1000000,
-			"elapsed", common.PrettyDuration(elapsed), "mgasps", float64(st.usedGas) * 1000 / float64(elapsed),
+			"blocks", st.Processed, "txs", txs, "mgas", float64(st.UsedGas) / 1000000,
+			"elapsed", common.PrettyDuration(elapsed), "mgasps", float64(st.UsedGas) * 1000 / float64(elapsed),
 			"number", end.Number(), "hash", end.Hash(), "batch", common.StorageSize(batch.BatchSize()),
 		}
 		if timestamp := time.Unix(int64(end.Time()), 0); time.Since(timestamp) > time.Minute {
@@ -1912,7 +1912,7 @@ func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWit
 			context = append(context, []interface{}{"ignored", st.ignored}...)
 		}
 		log.Info("Imported new chain segment", context...)
-		*st = insertStats{startTime: now, lastIndex: index + 1}
+		*st = InsertStats{StartTime: now, lastIndex: index + 1}
 	}
 }
 

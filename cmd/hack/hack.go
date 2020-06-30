@@ -684,9 +684,7 @@ func mgrSchedule(chaindata string, block uint64) {
 	counters3 := []int{}
 	counters4 := []int{}
 	tx, _ := db.KV().Begin(context.Background(), false)
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	defer tx.Rollback()
 	for block <= toBlock {
 		tick, err2 := schedule.Tick(block)
 		if err2 != nil {
@@ -1620,7 +1618,7 @@ func regenerate(chaindata string) error {
 			if err := collector.Collect(k, nil); err != nil {
 				return err
 			}
-			if !debug.IsTrackWitnessSizeEnabled() {
+			if debug.IsTrackWitnessSizeEnabled() {
 				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
 					return err
 				}
@@ -1630,7 +1628,7 @@ func regenerate(chaindata string) error {
 		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
 			return err
 		}
-		if !debug.IsTrackWitnessSizeEnabled() {
+		if debug.IsTrackWitnessSizeEnabled() {
 			lenBytes := make([]byte, 8)
 			binary.BigEndian.PutUint64(lenBytes, stateSize)
 			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {

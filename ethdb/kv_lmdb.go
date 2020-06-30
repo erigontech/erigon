@@ -366,10 +366,9 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	return tx.tx.Commit()
 }
 
-func (tx *lmdbTx) Rollback() error {
+func (tx *lmdbTx) Rollback() {
 	tx.closeCursors()
 	tx.tx.Reset()
-	return nil
 }
 
 func (tx *lmdbTx) closeCursors() {
