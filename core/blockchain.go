@@ -1440,7 +1440,6 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 		bc.futureBlocks,
 		&bc.chainFeed,
 		bc.badBlocks,
-		false,
 	)
 
 	return n, err
@@ -2457,7 +2456,6 @@ func InsertBodies(
 	futureBlocks *lru.Cache,
 	chainSideFeed *event.Feed,
 	badBlocks *lru.Cache,
-	verifySeals bool,
 ) (int, error) {
 	// If the chain is terminating, don't even bother starting u
 	if atomic.LoadInt32(procInterrupt) == 1 {
@@ -2477,22 +2475,6 @@ func InsertBodies(
 	for i, block := range chain {
 		headers[i] = block.Header()
 		seals[i] = verifySeals
-	}
-
-	externTd := big.NewInt(0)
-	if len(chain) > 0 && chain[0].NumberU64() > 0 {
-		d := rawdb.ReadTd(db, chain[0].ParentHash(), chain[0].NumberU64()-1)
-		if d != nil {
-			externTd = externTd.Set(d)
-		}
-	}
-	currBlock := currentBlock.Load().(*types.Block)
-	localTd := rawdb.ReadTd(db, currBlock.Hash(), currBlock.NumberU64())
-
-	var verifyFrom int
-	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
-		header := chain[verifyFrom].Header()
-		externTd = externTd.Add(externTd, header.Difficulty)
 	}
 
 	var offset int
