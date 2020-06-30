@@ -106,7 +106,7 @@ type Downloader struct {
 	rttEstimate   uint64 // Round trip time to target for download requests
 	rttConfidence uint64 // Confidence in the estimated RTT (unit: millionths to allow atomic ops)
 
-	mode SyncMode       // Synchronisation mode defining the strategy used (per sync cycle)
+	mode uint32         // Synchronisation mode defining the strategy used (per sync cycle), use d.getMode() to get the SyncMode
 	mux  *event.TypeMux // Event multiplexer to announce sync operation events
 
 	checkpoint uint64   // Checkpoint block number to enforce head against (e.g. fast sync)
@@ -293,15 +293,16 @@ func (d *Downloader) Progress() ethereum.SyncProgress {
 	defer d.syncStatsLock.RUnlock()
 
 	current := uint64(0)
+	mode := d.getMode()
 	switch {
-	case d.blockchain != nil && d.mode == FullSync:
+	case d.blockchain != nil && mode == FullSync:
 		current = d.blockchain.CurrentBlock().NumberU64()
-	case d.blockchain != nil && d.mode == FastSync:
+	case d.blockchain != nil && mode == FastSync:
 		current = d.blockchain.CurrentFastBlock().NumberU64()
 	case d.lightchain != nil:
 		current = d.lightchain.CurrentHeader().Number.Uint64()
 	default:
-		log.Error("Unknown downloader chain/mode combo", "light", d.lightchain != nil, "full", d.blockchain != nil, "mode", d.mode)
+		log.Error("Unknown downloader chain/mode combo", "light", d.lightchain != nil, "full", d.blockchain != nil, "mode", mode)
 	}
 	return ethereum.SyncProgress{
 		StartingBlock: d.syncStatsChainOrigin,
@@ -448,8 +449,8 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
 
-	// Set the requested sync mode, unless it's forbidden
-	d.mode = mode
+	// Atomically set the requested sync mode
+	atomic.StoreUint32(&d.mode, uint32(mode))
 
 	// Retrieve the origin peer and initiate the downloading process
 	p := d.peers.Peer(id)
@@ -457,6 +458,10 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 		return errUnknownPeer
 	}
 	return d.syncWithPeer(p, hash, blockNumber, txPool, poolStart)
+}
+
+func (d *Downloader) getMode() SyncMode {
+	return SyncMode(atomic.LoadUint32(&d.mode))
 }
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
@@ -475,8 +480,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	if p.version < 62 {
 		return errTooOld
 	}
+	mode := d.getMode()
 
-	log.Debug("Synchronising with the network", "peer", p.id, "eth", p.version, "head", hash, "blockNumber", blockNumber, "mode", d.mode)
+	log.Debug("Synchronising with the network", "peer", p.id, "eth", p.version, "head", hash, "blockNumber", blockNumber, "td", td, "mode", mode)
 	defer func(start time.Time) {
 		log.Debug("Synchronisation terminated", "elapsed", common.PrettyDuration(time.Since(start)))
 	}(time.Now())
@@ -502,7 +508,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Ensure our origin point is below any fast sync pivot point
 	pivot := uint64(0)
-	if d.mode == FastSync {
+	if mode == FastSync {
 		if height <= uint64(fsMinFullBlocks) {
 			origin = 0
 		} else {
@@ -513,10 +519,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 	}
 	d.committed = 1
-	if d.mode == FastSync && pivot != 0 {
+	if mode == FastSync && pivot != 0 {
 		d.committed = 0
 	}
-	if d.mode == FastSync {
+	if mode == FastSync {
 		// Set the ancient data limitation.
 		// If we are running fast sync, all block data older than ancientLimit will be
 		// written to the ancient store. More recent data will be written to the active
@@ -555,7 +561,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 	}
 	// Initiate the sync using a concurrent header and content retrieval algorithm
-	d.queue.Prepare(origin+1, d.mode)
+	d.queue.Prepare(origin+1, mode)
 	if d.syncInitHook != nil {
 		d.syncInitHook(origin, height)
 	}
@@ -675,6 +681,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 
 	ttl := d.requestTTL()
 	timeout := time.After(ttl)
+	mode := d.getMode()
 	for {
 		select {
 		case <-d.cancelCh:
@@ -693,7 +700,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 				return 0, errBadPeer
 			}
 			head := headers[0]
-			if (d.mode == FastSync || d.mode == LightSync) && head.Number.Uint64() < d.checkpoint {
+			if (mode == FastSync || mode == LightSync) && head.Number.Uint64() < d.checkpoint {
 				p.log.Warn("Remote head below checkpoint", "number", head.Number, "hash", head.Hash())
 				return 0, errUnsyncedPeer
 			}
@@ -774,7 +781,8 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 		floor       = int64(-1)
 		localHeight uint64
 	)
-	switch d.mode {
+	mode := d.getMode()
+	switch mode {
 	case FullSync:
 		localHeight = d.blockchain.CurrentBlock().NumberU64()
 	case FastSync:
@@ -795,7 +803,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 	}
 	// If we're doing a light sync, ensure the floor doesn't go below the CHT, as
 	// all headers before that point will be missing.
-	if d.mode == LightSync {
+	if mode == LightSync {
 		// If we don't know the current CHT position, find it
 		if d.genesis == 0 {
 			header := d.lightchain.CurrentHeader()
@@ -861,7 +869,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 				n := headers[i].Number.Uint64()
 
 				var known bool
-				switch d.mode {
+				switch mode {
 				case FullSync:
 					known = d.blockchain.HasBlock(h, n)
 				case FastSync:
@@ -936,7 +944,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 				n := headers[0].Number.Uint64()
 
 				var known bool
-				switch d.mode {
+				switch mode {
 				case FullSync:
 					known = d.blockchain.HasBlock(h, n)
 				case FastSync:
@@ -1015,6 +1023,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 	ancestor := from
 	getHeaders(from)
 
+	mode := d.getMode()
 	for {
 		select {
 		case <-d.cancelCh:
@@ -1075,7 +1084,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 				if n := len(headers); n > 0 {
 					// Retrieve the current head we're at
 					var head uint64
-					if d.mode == LightSync {
+					if mode == LightSync {
 						head = d.lightchain.CurrentHeader().Number.Uint64()
 					} else if d.mode == StagedSync {
 						headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
@@ -1442,6 +1451,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
+	mode := d.getMode()
 	defer func() {
 		if len(rollback) > 0 {
 			// Flatten the headers and roll them back
@@ -1512,7 +1522,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				// This check cannot be executed "as is" for full imports, since blocks may still be
 				// queued for processing when the header download completes. However, as long as the
 				// peer gave us something useful, we're already happy/progressed (above check).
-				if d.mode == FastSync || d.mode == LightSync {
+				if mode == FastSync || mode == LightSync {
 					head := d.lightchain.CurrentHeader()
 					if blockNumber > head.Number.Uint64() {
 						return errStallingPeer
@@ -1585,7 +1595,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 				}
 				// Unless we're doing light chains, schedule the headers for associated content retrieval
-				if d.mode == FullSync || d.mode == FastSync {
+				if mode == FullSync || mode == FastSync {
 					// If we've reached the allowed number of pending headers, stall a bit
 					for d.queue.PendingBlocks() >= maxQueuedHeaders || d.queue.PendingReceipts() >= maxQueuedHeaders {
 						select {
