@@ -2468,14 +2468,6 @@ func InsertBodies(
 	var (
 		stats = InsertStats{StartTime: mclock.Now()}
 	)
-	// Start the parallel header verifier
-	headers := make([]*types.Header, len(chain))
-	seals := make([]bool, len(chain))
-
-	for i, block := range chain {
-		headers[i] = block.Header()
-		seals[i] = verifySeals
-	}
 
 	var offset int
 	var parent *types.Block
