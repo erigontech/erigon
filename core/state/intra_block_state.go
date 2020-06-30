@@ -22,9 +22,9 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"sort"
 	"sync"
-	"runtime/debug"
 
 	"github.com/holiman/uint256"
 	"github.com/petar/GoLLRB/llrb"
