@@ -158,12 +158,8 @@ var encbufPool = sync.Pool{
 
 func (w *encbuf) reset() {
 	w.lhsize = 0
-	if w.str != nil {
-		w.str = w.str[:0]
-	}
-	if w.lheads != nil {
-		w.lheads = w.lheads[:0]
-	}
+	w.str = w.str[:0]
+	w.lheads = w.lheads[:0]
 }
 
 // encbuf implements io.Writer so it can be passed it into EncodeRLP.
@@ -202,15 +198,16 @@ func (w *encbuf) encodeString(b []byte) {
 	}
 }
 
+// list adds a new list header to the header stack. It returns the index
+// of the header. The caller must call listEnd with this index after encoding
+// the content of the list.
 func (w *encbuf) list() int {
-	lh := listhead{offset: len(w.str), size: w.lhsize}
-	idx := len(w.lheads)
-	w.lheads = append(w.lheads, lh)
-	return idx
+	w.lheads = append(w.lheads, listhead{offset: len(w.str), size: w.lhsize})
+	return len(w.lheads) - 1
 }
 
-func (w *encbuf) listEnd(idx int) {
-	lh := &w.lheads[idx]
+func (w *encbuf) listEnd(index int) {
+	lh := &w.lheads[index]
 	lh.size = w.size() - lh.offset - lh.size
 	if lh.size < 56 {
 		w.lhsize++ // length encoded into kind tag
