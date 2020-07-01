@@ -20,11 +20,11 @@ type AbsStateSpec interface {
 type DataFlow struct {
 	spec AbsStateSpec
 	cfg *Cfg
-	states map[uint64]*AbsState
+	states map[uint64]AbsState
 }
 
 func NewDataFlow(cfg *Cfg, spec AbsStateSpec) *DataFlow {
-	states := make(map[uint64]*AbsState)
+	states := make(map[uint64]AbsState)
 	dataFlow := DataFlow{spec, cfg, states}
 	return &dataFlow
 }
@@ -55,22 +55,20 @@ func (df *DataFlow) Run() error {
 		for _, pred := range instrNode.preds {
 			predState, exists := df.states[pred.pc]
 			if !exists {
-				bot := df.spec.Bot()
-				predState = &bot
+				predState = df.spec.Bot()
 			}
-			prevLub = df.spec.Lub(prevLub, *predState)
+			prevLub = df.spec.Lub(prevLub, predState)
 		}
 
 		state0, exists := df.states[instrNode.pc]
 		if !exists {
-			bot := df.spec.Bot()
-			state0 = &bot
+			state0 = df.spec.Bot()
 		}
 		state1 := df.spec.Transfer(prevLub, instrNode)
 		fmt.Println("xfr")
 		fmt.Println(spec.String(prevLub))
 		fmt.Println(spec.String(state1))
-		df.states[instrNode.pc] = &state1
+		df.states[instrNode.pc] = state1
 
 		if !spec.Eq(state0, state1) {
 			for _, s := range instrNode.succs {

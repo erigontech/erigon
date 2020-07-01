@@ -22,7 +22,7 @@ func SimpleConstPropHarness(contract *Contract) {
 		panic("Cannot create cfg0")
 	}
 
-	spec := UnbSpec{}
+	spec := BndSpec{k:10}
 
 	df := NewDataFlow(cfg0, spec)
 
@@ -64,21 +64,34 @@ func (c0 AbsConst) String() string {
 func (c0 *AbsConst) Lub(c1 AbsConst) AbsConst {
 	if c0.kind == Value && c1.kind == Value {
 		if c0.value != c1.value {
-			return AbsConst{Top, 0}
+			return ConstTop()
 		} else {
-			return AbsConst{Value,  c0.value}
+			return ConstValue(c0.value)
 		}
+	} else if c0.kind == Bot && c1.kind == Bot {
+		return ConstBot()
+	} else if c0.kind == Value && c1.kind == Bot {
+		return ConstValue(c1.value)
+	} else if c0.kind == Bot && c1.kind == Value {
+		return ConstValue(c0.value)
 	} else if c0.kind == Top || c1.kind == Top {
-		return AbsConst{Top, 0}
-	} else if c0.kind == Bot {
-		return AbsConst{Bot, c1.value}
-	} else if c1.kind == Bot {
-		return AbsConst{Bot, c0.value}
+		return ConstTop()
 	} else {
 		panic("Missing condition")
 	}
 }
 
+func ConstTop() AbsConst {
+	return AbsConst{Top, 0}
+}
+
+func ConstBot() AbsConst {
+	return AbsConst{Bot, 0}
+}
+
+func ConstValue(value uint64) AbsConst {
+	return AbsConst{Value, value}
+}
 
 ///////////////
 //Unbounded stack
@@ -187,5 +200,104 @@ func (spec UnbSpec) Transfer(astate0 AbsState, instrNode *Node) AbsState {
 
 func (spec UnbSpec) String(astate0 AbsState) string {
 	state0 := astate0.(UnbState)
+	return state0.String()
+}
+
+///////////////
+//Bounded stack
+
+type BndState struct {
+	stack []AbsConst
+}
+
+func (state0 *BndState) String() string {
+	var stackStr []string
+	for _, c := range state0.stack {
+		stackStr = append(stackStr, c.String())
+	}
+	return fmt.Sprintf("%v", stackStr)
+}
+
+func (state0 *BndState) Copy() BndState {
+	state1 := BndState{}
+	state1.stack = append([]AbsConst(nil), state0.stack...)
+	return state1
+}
+
+func (state0 *BndState) Push(value AbsConst) {
+	state0.stack = append([]AbsConst{value}, state0.stack[0:len(state0.stack)-1]...)
+}
+
+func (state0 *BndState) Pop() {
+	state0.stack = append(state0.stack[1:], ConstTop())
+}
+
+func (state0 *BndState) Peek() AbsConst {
+	return state0.stack[0]
+}
+
+////////////////////////////////////////////////////
+type BndSpec struct {
+	k int
+}
+
+func (spec BndSpec) Bot() AbsState {
+	if spec.k <= 0 {
+		panic("k must be positive")
+	}
+
+	st := BndState{}
+	for i := 0; i < spec.k; i++ {
+		st.stack = append(st.stack, ConstBot())
+	}
+	return st
+}
+
+
+func (spec BndSpec) Lub (astate0 AbsState, astate1 AbsState) AbsState {
+	res := BndState{}
+	state0 := astate0.(BndState)
+	state1 := astate1.(BndState)
+
+	for i := 0; i < spec.k; i++ {
+		lub := state0.stack[i].Lub(state1.stack[i])
+		res.stack = append(res.stack, lub)
+	}
+
+	return res
+}
+
+func (spec BndSpec) Eq(astate0 AbsState, astate1 AbsState) bool {
+	state0 := astate0.(BndState)
+	state1 := astate1.(BndState)
+
+	for i := 0; i < spec.k; i++ {
+		if state0.stack[i] != state1.stack[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (spec BndSpec) Transfer(astate0 AbsState, instrNode *Node) AbsState {
+	state0 := astate0.(BndState)
+	state1 := state0.Copy()
+
+	if instrNode.opCode.IsPush() {
+		state1.Push(*instrNode.opValue)
+	} else {
+		switch instrNode.opCode {
+		case JUMP:
+		case JUMPI:
+			state1.Pop()
+		}
+	}
+
+	return state1
+}
+
+func (spec BndSpec) String(astate0 AbsState) string {
+	state0 := astate0.(BndState)
 	return state0.String()
 }

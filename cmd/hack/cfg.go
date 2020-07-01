@@ -30,13 +30,13 @@ func cfg0Test1() {
 func dfTest0() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, 0x0}
-	vm.DataFlowHarness(contract)
+	vm.SimpleConstPropHarness(contract)
 }
 
 func dfTest1() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
-	vm.DataFlowHarness(contract)
+	vm.SimpleConstPropHarness(contract)
 }
 
 
