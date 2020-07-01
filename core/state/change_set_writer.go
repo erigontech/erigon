@@ -128,11 +128,6 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	//trace := address == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	//trace := address == common.HexToAddress("0x0000000000000000000000000000000000000000")
-	//if trace {
-	//	fmt.Printf("[%d] UpdateAccountData %x, original=account=%t, storageChanged=%t\n", w.blockNumber, address, accountsEqualTrace(original, account), w.storageChanged[address])
-	//}
 	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
@@ -144,20 +139,11 @@ func (w *ChangeSetWriter) UpdateAccountCode(address common.Address, incarnation 
 }
 
 func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	//trace := address == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	//trace := address == common.HexToAddress("0x0000000000000000000000000000000000000000")
-	//if trace {
-	//	fmt.Printf("[%d] DeleteAccount %x\n", w.blockNumber, address)
-	//}
 	w.accountChanges[address] = originalAccountData(original, false)
 	return nil
 }
 
 func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	trace := address == common.HexToAddress("59eafcc345d78197ea9921467250b3b880b0006d")
-	if trace {
-		fmt.Printf("[%d] WriteAccountStorage %x %d %x\n", w.blockNumber, address, incarnation, *key)
-	}
 	if *original == *value {
 		return nil
 	}
@@ -165,9 +151,6 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 	compositeKey, err := w.storageKeyGen(address, incarnation, *key)
 	if err != nil {
 		return err
-	}
-	if trace {
-		fmt.Printf("compositeKey: %x\n", compositeKey)
 	}
 
 	w.storageChanges[string(compositeKey)] = original.Bytes()
@@ -177,10 +160,6 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 func (w *ChangeSetWriter) CreateContract(address common.Address) error {
-	trace := address == common.HexToAddress("59eafcc345d78197ea9921467250b3b880b0006d")
-	if trace {
-		fmt.Printf("[%d] CreateContract %x\n", w.blockNumber, address)
-	}
 	return nil
 }
 

@@ -465,7 +465,6 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
-		//fmt.Printf("stateObject.AddBalance %x, %d\n", addr, amount)
 		stateObject.AddBalance(amount)
 	}
 }
@@ -583,10 +582,6 @@ func (sdb *IntraBlockState) GetIncarnation(addr common.Address) uint64 {
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
-	//trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	//if trace {
-	//	fmt.Printf("Suicide\n")
-	//}
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -680,10 +675,6 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 // createObject creates a new state object. If there is an existing account with
 // the given address, it is overwritten.
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject, original *accounts.Account) (newobj *stateObject) {
-	//trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	//if trace {
-	//	fmt.Printf("[%x] createObject(%x)\n%s\n", sdb.bhash, addr, debug.Stack())
-	//}
 	account := new(accounts.Account)
 	if previous != nil {
 		account.Copy(&previous.data)

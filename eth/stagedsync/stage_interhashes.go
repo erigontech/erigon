@@ -135,12 +135,10 @@ func (r *Receiver) Receive(
 	cutoff int,
 	witnessSize uint64,
 ) error {
-	//fmt.Printf("Receive it=%v, ak=%x, sk=%x, (av==nil)=%t, sv=%x\n", itemType, accountKey, storageKey, accountValue==nil, storageValue)
 	storage := itemType == trie.StorageStreamItem || itemType == trie.SHashStreamItem
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
 		k := []byte(ks)
-		//fmt.Printf("unfurl k=%x\n", k)
 		var c int
 		switch itemType {
 		case trie.StorageStreamItem, trie.SHashStreamItem:
@@ -152,17 +150,14 @@ func (r *Receiver) Receive(
 		}
 		if c > 0 {
 			if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
-				//fmt.Printf("1\n")
 				return nil
 			}
 			if r.currentAccount != nil && storage {
 				if bytes.HasPrefix(storageKey, r.currentAccount) {
 					if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-						//fmt.Printf("2\n")
 						return nil
 					}
 				} else {
-					//fmt.Printf("3\n")
 					return nil
 				}
 			}
@@ -170,27 +165,22 @@ func (r *Receiver) Receive(
 				r.currentAccount = accountKey
 				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 			}
-			//fmt.Printf("4\n")
 			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 		}
 		r.currentIdx++
 		if len(k) > common.HashLength {
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
-				//fmt.Printf("5\n")
 				continue
 			}
 			if r.currentAccount == nil {
-				//fmt.Printf("6\n")
 				continue
 			}
 			if r.currentAccount != nil {
 				if bytes.HasPrefix(k, r.currentAccount) {
 					if !bytes.HasPrefix(k, r.currentAccountWithInc) {
-						//fmt.Printf("7\n")
 						continue
 					}
 				} else {
-					//fmt.Printf("8\n")
 					continue
 				}
 			}
@@ -216,24 +206,20 @@ func (r *Receiver) Receive(
 			}
 		}
 		if c == 0 {
-			//fmt.Printf("9\n")
 			return nil
 		}
 	}
 	// We ran out of modifications, simply pass through
 	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
-		//fmt.Printf("10\n")
 		return nil
 	}
 	r.removingAccount = nil
 	if storage {
 		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
 			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-				//fmt.Printf("11\n")
 				return nil
 			}
 		} else {
-			//fmt.Printf("12\n")
 			return nil
 		}
 	}
@@ -241,7 +227,6 @@ func (r *Receiver) Receive(
 		r.currentAccount = accountKey
 		r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 	}
-	//fmt.Printf("13\n")
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
 }
 
@@ -256,7 +241,6 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 	}
 	newKStr := string(newK)
 	if _, ok := r.accountMap[newKStr]; ok {
-		//fmt.Printf("Duplicate loading %x => %x\n", k, newK)
 		return nil
 	}
 	if len(value) > 0 {
