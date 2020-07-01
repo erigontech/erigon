@@ -1436,9 +1436,6 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 		bc.IsNoHistory,
 		&bc.currentBlock,
 		&bc.committedBlock,
-		bc.trieDbState,
-		bc.futureBlocks,
-		&bc.chainFeed,
 		bc.badBlocks,
 	)
 
@@ -2452,9 +2449,6 @@ func InsertBodies(
 	isNoHistory func(currentBlock *big.Int) bool,
 	currentBlock *atomic.Value,
 	committedBlock *atomic.Value,
-	trieDbState *state.TrieDbState,
-	futureBlocks *lru.Cache,
-	chainSideFeed *event.Feed,
 	badBlocks *lru.Cache,
 ) (int, error) {
 	// If the chain is terminating, don't even bother starting u
@@ -2556,19 +2550,11 @@ Callers: %v
 
 		rawdb.WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
 
-		if trieDbState != nil {
-			trieDbState.SetBlockNr(block.NumberU64())
-		}
 		ctx = config.WithEIPsFlags(ctx, block.Number())
 		ctx = params.WithNoHistory(ctx, noHistory, isNoHistory)
 
-		futureBlocks.Remove(block.Hash())
-
-		chainSideFeed.Send(ChainSideEvent{Block: block})
-
 		if err != nil {
 			db.Rollback()
-			trieDbState = nil
 			if committedBlock.Load() != nil {
 				currentBlock.Store(committedBlock.Load())
 			}
@@ -2590,7 +2576,6 @@ Callers: %v
 			if written, err = db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
 				db.Rollback()
-				trieDbState = nil
 				if committedBlock.Load() != nil {
 					currentBlock.Store(committedBlock.Load())
 				}
@@ -2598,9 +2583,6 @@ Callers: %v
 			}
 			committedBlock.Store(currentBlock.Load())
 			committedK = k
-			if trieDbState != nil {
-				trieDbState.EvictTries(false)
-			}
 			size, err := db.(ethdb.HasStats).DiskSize(context.Background())
 			if err != nil {
 				return k, err
