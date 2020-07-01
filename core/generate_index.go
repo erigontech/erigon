@@ -212,7 +212,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 				return err3
 			}
 			// Flush the old chunk
-			if err4 := next(indexKey, currentIndex); err4 != nil {
+			if err4 := next(k, indexKey, currentIndex); err4 != nil {
 				return err4
 			}
 			// Start a new chunk
@@ -220,7 +220,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		}
 		currentIndex = currentIndex.Append(blockNr, vzero)
 	}
-	err := next(currentChunkKey, currentIndex)
+	err := next(k, currentChunkKey, currentIndex)
 	if err != nil {
 		return err
 	}
@@ -230,34 +230,14 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 
 func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc { //nolint
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		bufferMap := make(map[string][][]byte)
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
-		err := bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
-			sKey := string(changesetKey)
-			list := bufferMap[sKey]
-			b := blockNum
+		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
 			v := make([]byte, 9)
-			binary.BigEndian.PutUint64(v, b)
+			binary.BigEndian.PutUint64(v, blockNum)
 			if len(changesetValue) == 0 {
 				v[8] = 1
 			}
-			list = append(list, v)
-
-			bufferMap[sKey] = list
-			return nil
+			return next(dbKey, changesetKey, v)
 		})
-		if err != nil {
-			return err
-		}
-
-		for k, v := range bufferMap {
-			for i := range v {
-				err = next(dbKey, []byte(k), v[i])
-				if err != nil {
-					return err
-				}
-			}
-		}
-		return nil
 	}
 }

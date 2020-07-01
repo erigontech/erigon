@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -65,7 +64,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 
 		dbstate := state.NewPlainDBState(historyDb.KV(), block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
-		csw := state.NewChangeSetWriterPlain()
+		csw := state.NewChangeSetWriterPlain(block.NumberU64() - 1)
 		var blockWriter state.StateWriter
 		if nocheck {
 			blockWriter = noOpWriter
@@ -110,8 +109,20 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 
 			if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
-				fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, hexutil.Encode(dbAccountChanges), hexutil.Encode(expectedAccountChanges))
-				csw.PrintChangedAccounts()
+				fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
+				if err = changeset.AccountChangeSetPlainBytes(dbAccountChanges).Walk(func(k, v []byte) error {
+					fmt.Printf("0x%x: %x\n", k, v)
+					return nil
+				}); err != nil {
+					return err
+				}
+				fmt.Printf("Expected: ==========================\n")
+				if err = changeset.AccountChangeSetPlainBytes(expectedAccountChanges).Walk(func(k, v []byte) error {
+					fmt.Printf("0x%x %x\n", k, v)
+					return nil
+				}); err != nil {
+					return err
+				}
 				return nil
 			}
 
@@ -133,7 +144,20 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 
 			if !bytes.Equal(dbStorageChanges, expectedtorageSerialized) {
-				fmt.Printf("Unexpected storage changes in block %d\n%s\nvs\n%s\n", blockNum, hexutil.Encode(dbStorageChanges), hexutil.Encode(expectedtorageSerialized))
+				fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
+				if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
+					fmt.Printf("0x%x: [%x]\n", k, v)
+					return nil
+				}); err != nil {
+					return err
+				}
+				fmt.Printf("Expected: ==========================\n")
+				if err = changeset.StorageChangeSetPlainBytes(expectedtorageSerialized).Walk(func(k, v []byte) error {
+					fmt.Printf("0x%x: [%x]\n", k, v)
+					return nil
+				}); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
