@@ -79,6 +79,8 @@ func MustParseUint64(s string) uint64 {
 	return v
 }
 
+// NOTE: The following methods need to be optimised using either bit checking or asm
+
 // SafeSub returns subtraction result and whether overflow occurred.
 func SafeSub(x, y uint64) (uint64, bool) {
 	diff, borrowOut := bits.Sub64(x, y, 0)
@@ -87,8 +89,8 @@ func SafeSub(x, y uint64) (uint64, bool) {
 
 // SafeAdd returns the result and whether overflow occurred.
 func SafeAdd(x, y uint64) (uint64, bool) {
-	sum, carryOut := bits.Add64(x, y, 0)
-	return sum, carryOut != 0
+	sum, carry := bits.Add64(x, y, 0)
+	return sum, carry != 0
 }
 
 // SafeMul returns multiplication result and whether overflow occurred.
