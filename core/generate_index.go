@@ -212,7 +212,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 				return err3
 			}
 			// Flush the old chunk
-			if err4 := next(indexKey, currentIndex); err4 != nil {
+			if err4 := next(k, indexKey, currentIndex); err4 != nil {
 				return err4
 			}
 			// Start a new chunk
@@ -220,7 +220,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		}
 		currentIndex = currentIndex.Append(blockNr, vzero)
 	}
-	err := next(currentChunkKey, currentIndex)
+	err := next(k, currentChunkKey, currentIndex)
 	if err != nil {
 		return err
 	}

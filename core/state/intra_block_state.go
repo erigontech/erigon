@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"runtime/debug"
 	"sort"
 	"sync"
 
@@ -584,10 +583,10 @@ func (sdb *IntraBlockState) GetIncarnation(addr common.Address) uint64 {
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
-	trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	if trace {
-		fmt.Printf("Suicide\n")
-	}
+	//trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
+	//if trace {
+	//	fmt.Printf("Suicide\n")
+	//}
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -622,47 +621,28 @@ var nullValue = common.Big0
 // do not lock!!!
 // Retrieve a state object given my the address. Returns nil if not found.
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
-	trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	if trace {
-		fmt.Printf("[%x] IntraBlockState.getStateObject(%x)\n%s\n", sdb.bhash, addr, debug.Stack())
-	}
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
-		if trace {
-			fmt.Printf("getStateObject 1, initialised=%t\n", obj.original.Initialised)
-		}
 		return obj
 	}
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
-		if trace {
-			fmt.Printf("getStateObject 2\n")
-		}
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
-		if trace {
-			fmt.Printf("getStateObject 3\n")
-		}
 		return nil
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
-		if trace {
-			fmt.Printf("getStateObject 4\n")
-		}
 		return nil
 	}
 
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(obj)
-	if trace {
-		fmt.Printf("getStateObject 5, initialised=%t\n", obj.original.Initialised)
-	}
 	return obj
 }
 
@@ -700,10 +680,10 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 // createObject creates a new state object. If there is an existing account with
 // the given address, it is overwritten.
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject, original *accounts.Account) (newobj *stateObject) {
-	trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
-	if trace {
-		fmt.Printf("[%x] createObject(%x)\n%s\n", sdb.bhash, addr, debug.Stack())
-	}
+	//trace := addr == common.HexToAddress("04b39c2a507ac2fc091eee0c4379b341d890c1dd")
+	//if trace {
+	//	fmt.Printf("[%x] createObject(%x)\n%s\n", sdb.bhash, addr, debug.Stack())
+	//}
 	account := new(accounts.Account)
 	if previous != nil {
 		account.Copy(&previous.data)
@@ -737,10 +717,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
-	trace := addr == common.HexToAddress("59eafcc345d78197ea9921467250b3b880b0006d")
-	if trace {
-		fmt.Printf("CreateAccount: %x\n", addr)
-	}
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -786,9 +762,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if contractCreation {
 		newObj.created = true
 		newObj.data.Incarnation = prevInc + 1
-		if trace {
-			fmt.Printf("newObj.data.Incarnation: %d\n", newObj.data.Incarnation)
-		}
 	}
 }
 
