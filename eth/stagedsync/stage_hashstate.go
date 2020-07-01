@@ -203,7 +203,7 @@ func keyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.Load
 	if err != nil {
 		return err
 	}
-	return next(newK, value)
+	return next(k, newK, value)
 }
 
 func codeKeyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
@@ -211,7 +211,7 @@ func codeKeyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.
 	if err != nil {
 		return err
 	}
-	return next(newK, value)
+	return next(k, newK, value)
 }
 
 type OldestAppearedLoad struct {

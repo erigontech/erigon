@@ -29,7 +29,7 @@ type PlainStateWriter struct {
 func NewPlainStateWriter(db ethdb.Database, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
 		db:          db,
-		csw:         NewChangeSetWriterPlain(),
+		csw:         NewChangeSetWriterPlain(blockNumber),
 		blockNumber: blockNumber,
 	}
 }

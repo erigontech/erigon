@@ -12,7 +12,7 @@ import (
 	"runtime"
 )
 
-type LoadNextFunc func(k []byte, v []byte) error
+type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k []byte, value []byte, state State, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
@@ -96,7 +96,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	batch := db.NewBatch()
 	state := &bucketState{batch, bucket, args.Quit}
 
-	loadNextFunc := func(k, v []byte) error {
+	loadNextFunc := func(originalK, k, v []byte) error {
 		// we ignore everything that is before this key
 		if bytes.Compare(k, args.LoadStartKey) < 0 {
 			return nil
@@ -126,7 +126,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				"Committed batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
-				"current key", makeCurrentKeyStr(k),
+				"current key", makeCurrentKeyStr(originalK),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		return nil

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"sort"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -114,6 +116,7 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	stored, ok := b.entries[string(k)]
 	if !ok {
 		b.size += len(k)
+		k = common.CopyBytes(k)
 	}
 	b.size += len(v)
 	stored = append(stored, v...)
