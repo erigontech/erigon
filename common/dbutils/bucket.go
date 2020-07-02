@@ -153,6 +153,9 @@ var (
 
 	// this bucket stored in separated database
 	InodesBucket = []byte("inodes")
+
+	// Transaction senders - stored separately from the block bodies
+	Senders = []byte("txSenders")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
