@@ -126,7 +126,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 		return err
 	}
 	if CountWitnessSizeWithoutStructure {
-		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes()))+common.HashLength*2+common.IncarnationLength)
+		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes())))
 	} else {
 		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes()))+1+uint64(len(key))/2) // + node opcode + len(key)/2
 	}
@@ -335,7 +335,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	}
 	dataLen := uint64(0)
 	if CountWitnessSizeWithoutStructure {
-		dataLen = uint64(hb.acc.EncodingLengthForStorage()) + common.HashLength
+		dataLen = uint64(hb.acc.EncodingLengthForStorage())
 	} else {
 		dataLen = 1 + uint64(hb.acc.EncodingLengthForStorage()) // + opcode + account data len
 		dataLen += 1 + uint64(len(key))/2                       // + opcode + len(key)/2
@@ -653,10 +653,6 @@ func (hb *HashBuilder) rootHash() common.Hash {
 
 func (hb *HashBuilder) topHash() []byte {
 	return hb.hashStack[len(hb.hashStack)-hashStackStride+1:]
-}
-
-func (hb *HashBuilder) topStateSize() uint64 {
-	return hb.dataLenStack[len(hb.dataLenStack)-1]
 }
 
 func (hb *HashBuilder) root() node {
