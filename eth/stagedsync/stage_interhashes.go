@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -59,25 +57,16 @@ func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64,
 
 func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			return stateSizeCollector.Collect(common.CopyBytes(k), nil)
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		lenBytes := make([]byte, 8)
-		binary.BigEndian.PutUint64(lenBytes, stateSize)
-		return stateSizeCollector.Collect(common.CopyBytes(k), lenBytes)
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
@@ -97,9 +86,6 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		return err
 	}
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	log.Info("Regeneration ended")
@@ -432,36 +418,16 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		unfurl.AddKey([]byte(ks))
 	}
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			if debug.IsTrackWitnessSizeEnabled() {
-				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
-					return err
-				}
-			}
-			return nil
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		if debug.IsTrackWitnessSizeEnabled() {
-			lenBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(lenBytes, stateSize)
-			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
-				return err
-			}
-		}
-
-		return nil
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
@@ -486,9 +452,6 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	)
 
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -531,35 +494,16 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		unfurl.AddKey([]byte(ks))
 	}
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			if debug.IsTrackWitnessSizeEnabled() {
-				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
-					return err
-				}
-			}
-			return nil
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		if debug.IsTrackWitnessSizeEnabled() {
-			lenBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(lenBytes, stateSize)
-			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
-				return err
-			}
-		}
-		return nil
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
@@ -583,9 +527,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		"gen IH", generationIHTook,
 	)
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	if err := u.Done(db); err != nil {
