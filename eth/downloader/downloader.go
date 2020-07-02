@@ -216,7 +216,7 @@ type BlockChain interface {
 	InsertChain(context.Context, types.Blocks) (int, error)
 
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(context.Context, types.Blocks) (int, error)
+	InsertBodyChain(context.Context, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -1643,11 +1643,17 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 		blocks[i] = types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
 	}
 	var index int
+	var stopped bool
 	var err error
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		index, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
+		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
+		if stopped {
+			index = 0
+		} else {
+			index = len(results)
+		}
 	}
 	if err != nil {
 		if index < len(results) {
