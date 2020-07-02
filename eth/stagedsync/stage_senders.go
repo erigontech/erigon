@@ -102,10 +102,8 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		toBlockNumber = 1_000_000
 	}
 
-	log.Info("!!!!!!!!!!!!!!!!!1", "toBlockNumber", toBlockNumber, "fromBlockNumber", fromBlockNumber, "n", toBlockNumber-fromBlockNumber)
 	canonical := make([]common.Hash, toBlockNumber-fromBlockNumber+1)
 	currentHeaderIdx := 0
-	log.Info("!!!!!!!!!!!!!!!!!2", "len", len(canonical))
 
 	err = stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
 		if err = common.Stopped(quitCh); err != nil {
@@ -186,11 +184,12 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
 
-	const tempFilePath = "stage3_froms.out"
+	var tempFilePath = "stage3_froms.out"
 	bufferFile, err := ioutil.TempFile(datadir, tempFilePath)
 	if err != nil {
 		return err
 	}
+	tempFilePath = bufferFile.Name()
 
 	buf := NewAddressBuffer(bufferFile, cfg.bufferSize, true)
 
