@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,8 +15,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -74,8 +73,6 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		return err
 	}
 
-
-
 	mutation := &mutationSafe{mutation: stateDB.NewBatch()}
 	defer func() {
 		if dbErr := mutation.Commit(); dbErr != nil {
@@ -111,7 +108,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	log.Info("!!!!!!!!!!!!!!!!!2", "len", len(canonical))
 
 	err = stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
+		if err = common.Stopped(quitCh); err != nil {
 			return false, err
 		}
 
@@ -137,7 +134,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 
 	jobs := make(chan *senderRecoveryJob, 1_000_000)
 	err = stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
+		if err = common.Stopped(quitCh); err != nil {
 			return false, err
 		}
 
@@ -215,8 +212,8 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	}
 
 	// recover Senders
-	err = recoverSendersFromDisk(cfg, s, stateDB, config, mutation, quitCh, firstBlockToProceed, tempFilePath)
-	if err != nil && err != io.EOF {
+	err = recoverSendersFromDisk(cfg, s, stateDB, mutation, quitCh, firstBlockToProceed, tempFilePath)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 
@@ -224,7 +221,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 	return nil
 }
 
-func recoverSendersFromDisk(cfg stage3Config, s *StageState, stateDB ethdb.Database, config *params.ChainConfig, mutation *mutationSafe, quitCh chan struct{}, lastProcessedBlockNumber uint64, filePath string) error {
+func recoverSendersFromDisk(cfg stage3Config, s *StageState, stateDB ethdb.Database, mutation *mutationSafe, quitCh chan struct{}, lastProcessedBlockNumber uint64, filePath string) error {
 	f, err := os.OpenFile(filePath, os.O_RDONLY, 0664)
 	if err != nil {
 		return err
@@ -245,7 +242,7 @@ type blockData struct {
 	number uint64
 }
 
-func getBlockBody(mutation *mutationSafe, nextBlockNumber uint64) *blockData {
+func getBlockBody(mutation rawdb.DatabaseReader, nextBlockNumber uint64) *blockData {
 	hash := rawdb.ReadCanonicalHash(mutation, nextBlockNumber)
 	if hash.IsEmpty() {
 		return nil
@@ -257,12 +254,6 @@ func getBlockBody(mutation *mutationSafe, nextBlockNumber uint64) *blockData {
 	}
 
 	return &blockData{body, hash, nextBlockNumber}
-}
-
-func getBlockTxs(mutation *mutationSafe, nextBlockNumber uint64, hash common.Hash) *senderRecoveryJob {
-	v := rawdb.ReadBodyRLP(mutation, hash, nextBlockNumber)
-
-	return &senderRecoveryJob{v, hash, nextBlockNumber}
 }
 
 type mutationSafe struct {
@@ -368,7 +359,7 @@ func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, o
 		}
 
 		if j.err != nil {
-			return errors.Wrap(j.err, "could not extract senders")
+			return fmt.Errorf("could not extract senders: %w", j.err)
 		}
 
 		buffer = append(buffer, j)
@@ -628,7 +619,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 			res.err = err
 		}
 
-		if res.err == common.ErrStopped {
+		if errors.Is(res.err, common.ErrStopped) {
 			return
 		}
 
@@ -645,7 +636,7 @@ func recoverFrom(cryptoContext *secp256k1.Context, blockTxs []*types.Transaction
 
 		from, err := signer.SenderWithContext(cryptoContext, tx)
 		if err != nil {
-			return nil, errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
+			return nil, fmt.Errorf("error recovering sender for tx=%x. Err: %w", tx.Hash(), err)
 		}
 		froms[i] = from
 	}

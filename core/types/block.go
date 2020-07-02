@@ -26,13 +26,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/pkg/errors"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -415,35 +413,6 @@ func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
 		block.uncles[i] = CopyHeader(uncles[i])
 	}
 	return block
-}
-
-func (b *Block) WithBodyRecovered(transactions []*Transaction, uncles []*Header, config *params.ChainConfig, cryptoContext *secp256k1.Context) *Block {
-	block := b.WithBody(transactions, uncles)
-	setFrom(block.header.Number, config, block.transactions, cryptoContext)
-	return block
-}
-
-func setFrom(blockNumber *big.Int, config *params.ChainConfig, blockBodyTxs []*Transaction, cryptoContext *secp256k1.Context) error {
-	s := MakeSigner(config, blockNumber)
-
-	if err := recoverFrom(cryptoContext, blockBodyTxs, s); err != nil {
-		return err
-	}
-	return nil
-}
-
-func recoverFrom(cryptoContext *secp256k1.Context, blockBodyTxs []*Transaction, signer Signer) error {
-	for _, tx := range blockBodyTxs {
-		from, err := signer.SenderWithContext(cryptoContext, tx)
-		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
-		}
-		tx.SetFrom(from)
-		if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
-			return errors.New("invalid chainId")
-		}
-	}
-	return nil
 }
 
 // Hash returns the keccak256 hash of b's header.
