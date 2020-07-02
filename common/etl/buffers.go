@@ -39,6 +39,7 @@ type sortableBufferEntry struct {
 var (
 	_ Buffer = &sortableBuffer{}
 	_ Buffer = &appendSortableBuffer{}
+    _ Buffer = oldestEntrySortableBuffer{}
 )
 
 func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
@@ -186,6 +187,10 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 
 	b.size += len(k)
 	b.size += len(v)
+	k = common.CopyBytes(k)
+	if v != nil {
+		v = common.CopyBytes(v)
+	}
 	b.entries[string(k)] = v
 }
 
@@ -194,7 +199,7 @@ func (b *oldestEntrySortableBuffer) Size() int {
 }
 
 func (b *oldestEntrySortableBuffer) Len() int {
-	return len(b.entries)
+	return len(b.sortedBuf)
 }
 func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
