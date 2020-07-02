@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -1591,35 +1590,16 @@ func regenerate(chaindata string) error {
 	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
 	log.Info("Regeneration started")
 	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
-		k := make([]byte, len(keyHex)/2)
+		var k []byte
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			if debug.IsTrackWitnessSizeEnabled() {
-				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
-					return err
-				}
-			}
-			return nil
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		if debug.IsTrackWitnessSizeEnabled() {
-			lenBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(lenBytes, stateSize)
-			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
-				return err
-			}
-		}
-		return nil
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
