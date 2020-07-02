@@ -241,6 +241,10 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 				fstl.itemPresent = true
 				fstl.itemType = CutoffStreamItem
 				fstl.streamCutoff = cutoff
+				fstl.accountKey = nil
+				fstl.storageKey = nil
+				fstl.storageValue = nil
+				fstl.hashValue = nil
 				if fstl.trace {
 					fmt.Printf("Inserting cutoff %d\n", cutoff)
 				}
@@ -280,6 +284,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 		fstl.itemPresent = true
 		if len(fstl.k) > common.HashLength {
 			fstl.itemType = StorageStreamItem
+			fstl.accountKey = nil
 			fstl.storageKey = append(fstl.storageKey[:0], fstl.k...)
 			fstl.hashValue = nil
 			fstl.storageValue = append(fstl.storageValue[:0], fstl.v...)
@@ -293,6 +298,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 			fstl.itemType = AccountStreamItem
 			fstl.accountKey = append(fstl.accountKey[:0], fstl.k...)
 			fstl.storageKey = nil
+			fstl.storageValue = nil
 			fstl.hashValue = nil
 			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
 				return fmt.Errorf("fail DecodeForStorage: %w", err)
@@ -352,6 +358,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 	fstl.itemPresent = true
 	if len(fstl.ihK) > common.HashLength {
 		fstl.itemType = SHashStreamItem
+		fstl.accountKey = nil
 		fstl.storageKey = append(fstl.storageKey[:0], fstl.ihK...)
 		fstl.hashValue = append(fstl.hashValue[:0], fstl.ihV...)
 		fstl.storageValue = nil
@@ -359,6 +366,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *SkipRetainCursor,
 		fstl.itemType = AHashStreamItem
 		fstl.accountKey = append(fstl.accountKey[:0], fstl.ihK...)
 		fstl.storageKey = nil
+		fstl.storageValue = nil
 		fstl.hashValue = append(fstl.hashValue[:0], fstl.ihV...)
 	}
 
