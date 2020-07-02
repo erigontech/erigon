@@ -204,6 +204,7 @@ var Buckets = [][]byte{
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
 	InodesBucket,
+	Senders,
 }
 
 var BucketsIndex = map[string]int{}
