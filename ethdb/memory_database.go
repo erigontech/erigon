@@ -33,7 +33,7 @@ func NewMemDatabase() *ObjectDatabase {
 	case "lmdb":
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	default:
-		return NewObjectDatabase(NewBolt().InMem().MustOpen())
+		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	}
 }
 

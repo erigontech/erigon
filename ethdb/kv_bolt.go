@@ -42,15 +42,13 @@ func init() {
 	}
 }
 
-func collectBoltMetrics(ctx context.Context, db *bolt.DB, refresh time.Duration) {
+func collectBoltMetrics(ctx context.Context, db *bolt.DB, ticker *time.Ticker) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 		}
-
-		time.Sleep(refresh)
 
 		stats := db.Stats()
 		boltPagesFreeGauge.Update(int64(stats.FreePageN))
@@ -101,6 +99,7 @@ type BoltKV struct {
 	bolt        *bolt.DB
 	log         log.Logger
 	stopMetrics context.CancelFunc
+	wg          *sync.WaitGroup
 }
 
 type boltTx struct {
@@ -123,10 +122,6 @@ type boltCursor struct {
 	prefix []byte
 
 	bolt *bolt.Cursor
-
-	k   []byte
-	v   []byte
-	err error
 }
 
 type noValuesBoltCursor struct {
@@ -177,12 +172,19 @@ func (opts boltOpts) Open() (KV, error) {
 		opts: opts,
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
+		wg:   &sync.WaitGroup{},
 	}
 
 	if metrics.Enabled {
 		ctx, cancel := context.WithCancel(context.Background())
 		db.stopMetrics = cancel
-		go collectBoltMetrics(ctx, boltDB, 3*time.Second)
+		db.wg.Add(1)
+		go func() {
+			defer db.wg.Done()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			collectBoltMetrics(ctx, boltDB, ticker)
+		}()
 	}
 
 	return db, nil
@@ -208,6 +210,8 @@ func (db *BoltKV) Close() {
 	if db.stopMetrics != nil {
 		db.stopMetrics()
 	}
+
+	db.wg.Wait()
 
 	if db.bolt != nil {
 		if err := db.bolt.Close(); err != nil {
@@ -311,10 +315,12 @@ func (tx *boltTx) Commit(ctx context.Context) error {
 	return tx.bolt.Commit()
 }
 
-func (tx *boltTx) Rollback() error {
+func (tx *boltTx) Rollback() {
 	defer tx.closeCursors()
 	// could not put tx back to pool, because tx can be used by app code after rollback
-	return tx.bolt.Rollback()
+	if err := tx.bolt.Rollback(); err != nil {
+		tx.db.log.Warn("bolt rollback failed", "err", err)
+	}
 }
 
 func (tx *boltTx) closeCursors() {
@@ -404,9 +410,6 @@ func (b boltBucket) Cursor() Cursor {
 	c.ctx = b.tx.ctx
 	c.bucket = b
 	c.prefix = nil
-	c.k = nil
-	c.v = nil
-	c.err = nil
 	c.bolt = b.bolt.Cursor()
 	// add to auto-close on end of transactions
 	if b.tx.cursors == nil {
@@ -416,64 +419,64 @@ func (b boltBucket) Cursor() Cursor {
 	return c
 }
 
-func (c *boltCursor) First() ([]byte, []byte, error) {
+func (c *boltCursor) First() (k, v []byte, err error) {
 	if len(c.prefix) == 0 {
-		c.k, c.v = c.bolt.First()
-		return c.k, c.v, nil
+		k, v = c.bolt.First()
+		return k, v, nil
 	}
-	c.k, c.v = c.bolt.Seek(c.prefix)
-	if !bytes.HasPrefix(c.k, c.prefix) {
+	k, v = c.bolt.Seek(c.prefix)
+	if !bytes.HasPrefix(k, c.prefix) {
 		return nil, nil, nil
 	}
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
-func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (c *boltCursor) Seek(seek []byte) (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
-	c.k, c.v = c.bolt.Seek(seek)
+	k, v = c.bolt.Seek(seek)
 	if c.prefix != nil {
-		if !bytes.HasPrefix(c.k, c.prefix) {
+		if !bytes.HasPrefix(k, c.prefix) {
 			return nil, nil, nil
 		}
 	}
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
-func (c *boltCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
+func (c *boltCursor) SeekTo(seek []byte) (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
-	c.k, c.v = c.bolt.SeekTo(seek)
+	k, v = c.bolt.SeekTo(seek)
 	if c.prefix != nil {
-		if !bytes.HasPrefix(c.k, c.prefix) {
+		if !bytes.HasPrefix(k, c.prefix) {
 			return nil, nil, nil
 		}
 	}
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
-func (c *boltCursor) Next() ([]byte, []byte, error) {
+func (c *boltCursor) Next() (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
 	default:
 	}
 
-	c.k, c.v = c.bolt.Next()
+	k, v = c.bolt.Next()
 	if c.prefix != nil {
-		if !bytes.HasPrefix(c.k, c.prefix) {
-			c.k, c.v = nil, nil
+		if !bytes.HasPrefix(k, c.prefix) {
+			k, v = nil, nil
 		}
 	}
-	return c.k, c.v, nil
+	return k, v, nil
 }
 
 func (c *boltCursor) Delete(key []byte) error {
@@ -494,6 +497,10 @@ func (c *boltCursor) Put(key []byte, value []byte) error {
 	}
 
 	return c.bolt.Put(key, value)
+}
+
+func (c *boltCursor) Append(key []byte, value []byte) error {
+	return c.Put(key, value)
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
@@ -528,47 +535,50 @@ func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, err
 	return nil
 }
 
-func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
+func (c *noValuesBoltCursor) First() (k []byte, vSize uint32, err error) {
+	var v []byte
 	if len(c.prefix) == 0 {
-		c.k, c.v = c.bolt.First()
-		return c.k, uint32(len(c.v)), nil
+		k, v = c.bolt.First()
+		return k, uint32(len(v)), nil
 	}
 
-	c.k, c.v = c.bolt.Seek(c.prefix)
-	if !bytes.HasPrefix(c.k, c.prefix) {
+	k, v = c.bolt.Seek(c.prefix)
+	if !bytes.HasPrefix(k, c.prefix) {
 		return nil, 0, nil
 	}
-	return c.k, uint32(len(c.v)), nil
+	return k, uint32(len(v)), nil
 }
 
-func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
+func (c *noValuesBoltCursor) Seek(seek []byte) (k []byte, vSize uint32, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, 0, c.ctx.Err() // on error key should be != nil
 	default:
 	}
 
-	c.k, c.v = c.bolt.Seek(seek)
+	var v []byte
+	k, v = c.bolt.Seek(seek)
 	if c.prefix != nil {
-		if !bytes.HasPrefix(c.k, c.prefix) {
+		if !bytes.HasPrefix(k, c.prefix) {
 			return nil, 0, nil
 		}
 	}
-	return c.k, uint32(len(c.v)), nil
+	return k, uint32(len(v)), nil
 }
 
-func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
+func (c *noValuesBoltCursor) Next() (k []byte, vSize uint32, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, 0, c.ctx.Err()
 	default:
 	}
 
-	c.k, c.v = c.bolt.Next()
+	var v []byte
+	k, v = c.bolt.Next()
 	if c.prefix != nil {
-		if !bytes.HasPrefix(c.k, c.prefix) {
+		if !bytes.HasPrefix(k, c.prefix) {
 			return nil, 0, nil
 		}
 	}
-	return c.k, uint32(len(c.v)), nil
+	return k, uint32(len(v)), nil
 }

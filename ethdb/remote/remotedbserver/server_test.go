@@ -549,7 +549,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 }
 
 func BenchmarkKVCursorFirst(b *testing.B) {
-	assert, require, db := assert.New(b), require.New(b), ethdb.NewMemDatabase()
+	_, require, db := assert.New(b), require.New(b), ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// ---------- Start of boilerplate code
@@ -579,7 +579,7 @@ func BenchmarkKVCursorFirst(b *testing.B) {
 			_ = v
 		}
 
-		assert.Nil(b, tx.Rollback())
+		tx.Rollback()
 	}
 
 }

@@ -406,7 +406,7 @@ func testLoadFromMapFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
 		return err
 	}
 	realValue := valueMap["value"]
-	return next(k, realValue)
+	return next(k, k, realValue)
 }
 
 func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
@@ -420,14 +420,15 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) e
 	}
 	realValue := valueMap["value"]
 
-	err = next(append(k, 0xAA), append(realValue, 0xAA))
+	err = next(k, append(k, 0xAA), append(realValue, 0xAA))
 	if err != nil {
 		return err
 	}
-	return next(append(k, 0xBB), append(realValue, 0xBB))
+	return next(k, append(k, 0xBB), append(realValue, 0xBB))
 }
 
 func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 []byte, startKey []byte) {
+	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.Walk(b1, startKey, len(startKey), func(k, v []byte) (bool, error) {
 		b1Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)

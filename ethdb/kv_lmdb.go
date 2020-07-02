@@ -19,7 +19,7 @@ import (
 
 var (
 	lmdbKvTxPool     = sync.Pool{New: func() interface{} { return &lmdbTx{} }}
-	lmdbKvCursorPool = sync.Pool{New: func() interface{} { return &lmdbCursor{} }}
+	lmdbKvCursorPool = sync.Pool{New: func() interface{} { return &LmdbCursor{} }}
 	lmdbKvBucketPool = sync.Pool{New: func() interface{} { return &lmdbBucket{} }}
 )
 
@@ -92,6 +92,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 		log:             logger,
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
+		wg:              &sync.WaitGroup{},
 	}
 
 	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
@@ -126,7 +127,9 @@ func (opts lmdbOpts) Open() (KV, error) {
 	if !opts.inMem {
 		ctx, ctxCancel := context.WithCancel(context.Background())
 		db.stopStaleReadsCheck = ctxCancel
+		db.wg.Add(1)
 		go func() {
+			defer db.wg.Done()
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			db.staleReadsCheckLoop(ctx, ticker)
@@ -152,6 +155,7 @@ type LmdbKV struct {
 	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
 	lmdbCursorPools     []sync.Pool       // pool of lmdb.Cursor objects
 	stopStaleReadsCheck context.CancelFunc
+	wg                  *sync.WaitGroup
 }
 
 func NewLMDB() lmdbOpts {
@@ -187,6 +191,7 @@ func (db *LmdbKV) Close() {
 		db.stopStaleReadsCheck()
 	}
 	db.lmdbTxPool.Close()
+	db.wg.Wait()
 
 	if db.env != nil {
 		if err := db.env.Close(); err != nil {
@@ -292,7 +297,7 @@ type lmdbTx struct {
 	tx      *lmdb.Txn
 	ctx     context.Context
 	db      *LmdbKV
-	cursors []*lmdbCursor
+	cursors []*LmdbCursor
 	buckets []*lmdbBucket
 }
 
@@ -302,7 +307,7 @@ type lmdbBucket struct {
 	dbi lmdb.DBI
 }
 
-type lmdbCursor struct {
+type LmdbCursor struct {
 	ctx    context.Context
 	bucket *lmdbBucket
 	prefix []byte
@@ -361,10 +366,9 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	return tx.tx.Commit()
 }
 
-func (tx *lmdbTx) Rollback() error {
+func (tx *lmdbTx) Rollback() {
 	tx.closeCursors()
 	tx.tx.Reset()
-	return nil
 }
 
 func (tx *lmdbTx) closeCursors() {
@@ -385,23 +389,23 @@ func (tx *lmdbTx) closeCursors() {
 	tx.buckets = tx.buckets[:0]
 }
 
-func (c *lmdbCursor) Prefix(v []byte) Cursor {
+func (c *LmdbCursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
 }
 
-func (c *lmdbCursor) MatchBits(n uint) Cursor {
+func (c *LmdbCursor) MatchBits(n uint) Cursor {
 	panic("not implemented yet")
 }
 
-func (c *lmdbCursor) Prefetch(v uint) Cursor {
+func (c *LmdbCursor) Prefetch(v uint) Cursor {
 	//c.cursorOpts.PrefetchSize = int(v)
 	return c
 }
 
-func (c *lmdbCursor) NoValues() NoValuesCursor {
+func (c *LmdbCursor) NoValues() NoValuesCursor {
 	//c.cursorOpts.PrefetchValues = false
-	return &lmdbNoValuesCursor{lmdbCursor: c}
+	return &lmdbNoValuesCursor{LmdbCursor: c}
 }
 
 func (b lmdbBucket) Get(key []byte) (val []byte, err error) {
@@ -420,6 +424,10 @@ func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
 	default:
+	}
+
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[b.id])
 	}
 
 	err := b.tx.tx.Put(b.dbi, key, value, 0)
@@ -460,20 +468,20 @@ func (b *lmdbBucket) Clear() error {
 
 func (b *lmdbBucket) Cursor() Cursor {
 	tx := b.tx
-	c := lmdbKvCursorPool.Get().(*lmdbCursor)
+	c := lmdbKvCursorPool.Get().(*LmdbCursor)
 	c.ctx = tx.ctx
 	c.bucket = b
 	c.prefix = nil
 	c.cursor = nil
 	// add to auto-close on end of transactions
 	if tx.cursors == nil {
-		tx.cursors = make([]*lmdbCursor, 0, 1)
+		tx.cursors = make([]*LmdbCursor, 0, 1)
 	}
 	tx.cursors = append(tx.cursors, c)
 	return c
 }
 
-func (c *lmdbCursor) initCursor() error {
+func (c *LmdbCursor) initCursor() error {
 	if c.cursor != nil {
 		return nil
 	}
@@ -500,7 +508,7 @@ func (c *lmdbCursor) initCursor() error {
 	return nil
 }
 
-func (c *lmdbCursor) First() ([]byte, []byte, error) {
+func (c *LmdbCursor) First() ([]byte, []byte, error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, nil, err
@@ -510,14 +518,14 @@ func (c *lmdbCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
-func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
+func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, nil, err
 		}
 	}
 
-	if seek == nil {
+	if len(seek) == 0 {
 		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
 		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
@@ -535,11 +543,11 @@ func (c *lmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (c *lmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
+func (c *LmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	return c.Seek(seek)
 }
 
-func (c *lmdbCursor) Next() (k, v []byte, err error) {
+func (c *LmdbCursor) Next() (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
 		return []byte{}, nil, c.ctx.Err()
@@ -560,7 +568,7 @@ func (c *lmdbCursor) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (c *lmdbCursor) Delete(key []byte) error {
+func (c *LmdbCursor) Delete(key []byte) error {
 	select {
 	case <-c.ctx.Done():
 		return c.ctx.Err()
@@ -584,13 +592,16 @@ func (c *lmdbCursor) Delete(key []byte) error {
 	return c.cursor.Del(0)
 }
 
-func (c *lmdbCursor) Put(key []byte, value []byte) error {
+func (c *LmdbCursor) Put(key []byte, value []byte) error {
 	select {
 	case <-c.ctx.Done():
 		return c.ctx.Err()
 	default:
 	}
 
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
+	}
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return err
@@ -600,7 +611,24 @@ func (c *lmdbCursor) Put(key []byte, value []byte) error {
 	return c.cursor.Put(key, value, 0)
 }
 
-func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
+// Append - speedy feature of lmdb which is not part of KV interface.
+// Cast your cursor to *LmdbCursor to use this method.
+// Danger: if provided data will not sorted (or bucket have old records which mess with new in sorting manner) - db will corrupt.
+func (c *LmdbCursor) Append(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
+	}
+
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	return c.cursor.Put(key, value, lmdb.Append)
+}
+
+func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -617,7 +645,7 @@ func (c *lmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 }
 
 type lmdbNoValuesCursor struct {
-	*lmdbCursor
+	*LmdbCursor
 }
 
 func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
@@ -637,51 +665,33 @@ func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, err
 }
 
 func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {
-	if c.cursor == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, 0, err
-		}
-	}
-
-	var val []byte
-	if len(c.prefix) == 0 {
-		k, val, err = c.cursor.Get(nil, nil, lmdb.First)
-	} else {
-		k, val, err = c.cursor.Get(c.prefix, nil, lmdb.SetKey)
-	}
-	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return []byte{}, uint32(len(val)), nil
-		}
-		return []byte{}, 0, err
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, val = nil, nil
-	}
-	return k, uint32(len(val)), err
+	return c.Seek(c.prefix)
 }
 
-func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, v uint32, err error) {
+func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, vSize uint32, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return []byte{}, 0, err
 		}
 	}
 
-	var val []byte
-	k, val, err = c.cursor.Get(seek, nil, lmdb.SetKey)
+	var v []byte
+	if len(seek) == 0 {
+		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
+	} else {
+		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
+	}
 	if err != nil {
 		if lmdb.IsNotFound(err) {
-			return []byte{}, uint32(len(val)), nil
+			return []byte{}, uint32(len(v)), nil
 		}
 		return []byte{}, 0, err
 	}
 	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, val = nil, nil
+		k, v = nil, nil
 	}
 
-	return k, uint32(len(val)), err
+	return k, uint32(len(v)), err
 }
 
 func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {

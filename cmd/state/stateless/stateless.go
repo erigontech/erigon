@@ -51,7 +51,8 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-	for _, tx := range block.Transactions() {
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)

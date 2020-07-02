@@ -20,7 +20,7 @@ var (
 
 func init() {
 	rootCmd.Flags().StringVar(&remoteDbAddress, "remote-db-addr", "", "address of remote DB listener of a turbo-geth node")
-	rootCmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the boltdb database")
+	rootCmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the database")
 	rootCmd.Flags().StringVar(&listenAddress, "rpcaddr", "localhost:8080", "REST server listening interface")
 }
 

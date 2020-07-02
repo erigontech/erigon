@@ -64,8 +64,10 @@ func Open(path string) (*ObjectDatabase, error) {
 		kv, err = NewLMDB().Path(path).Open()
 	case testDB == "badger" || strings.HasSuffix(path, "_badger"):
 		kv, err = NewBadger().Path(path).Open()
-	default:
+	case testDB == "bolt" || strings.HasSuffix(path, "_bolt"):
 		kv, err = NewBolt().Path(path).Open()
+	default:
+		kv, err = NewLMDB().Path(path).Open()
 	}
 	if err != nil {
 		return nil, err
@@ -81,8 +83,8 @@ func (db *ObjectDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
+// MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	//var savedTx Tx
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
 			bucketEnd := bucketStart
@@ -90,31 +92,49 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			}
 			b := tx.Bucket(tuples[bucketStart])
 			c := b.Cursor()
+
+			// move cursor to a first element in batch
+			// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
+			// can apply optimisations for this case
+			firstKey, _, err := c.Seek(tuples[bucketStart+1])
+			if err != nil {
+				return err
+			}
+			isEndOfBucket := firstKey == nil
+
 			l := (bucketEnd - bucketStart) / 3
 			for i := 0; i < l; i++ {
 				k := tuples[bucketStart+3*i+1]
 				v := tuples[bucketStart+3*i+2]
-				if v == nil {
-					if err := c.Delete(k); err != nil {
-						return err
+				if isEndOfBucket {
+					if v == nil {
+						// nothing to delete after end of bucket
+					} else {
+						if err := c.Append(k, v); err != nil {
+							return err
+						}
 					}
 				} else {
-					if err := c.Put(k, v); err != nil {
-						return err
+					if v == nil {
+						if err := c.Delete(k); err != nil {
+							return err
+						}
+					} else {
+						if err := c.Put(k, v); err != nil {
+							return err
+						}
 					}
 				}
 			}
 
 			bucketStart = bucketEnd
 		}
-		//savedTx = tx
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
 	return 0, nil
-	//return uint64(savedTx.Stats().Write), nil
 }
 
 func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {

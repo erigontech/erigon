@@ -52,6 +52,7 @@ type ChangeSetWriter struct {
 	accountFactory changesetFactory
 	accountKeyGen  accountKeyGen
 	storageKeyGen  storageKeyGen
+	blockNumber    uint64
 }
 
 func NewChangeSetWriter() *ChangeSetWriter {
@@ -65,7 +66,7 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		storageKeyGen:  hashedStorageKeyGen,
 	}
 }
-func NewChangeSetWriterPlain() *ChangeSetWriter {
+func NewChangeSetWriterPlain(blockNumber uint64) *ChangeSetWriter {
 	return &ChangeSetWriter{
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
@@ -74,6 +75,7 @@ func NewChangeSetWriterPlain() *ChangeSetWriter {
 		accountFactory: changeset.NewAccountChangeSetPlain,
 		accountKeyGen:  plainAccountKeyGen,
 		storageKeyGen:  plainStorageKeyGen,
+		blockNumber:    blockNumber,
 	}
 }
 
@@ -113,11 +115,11 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
 		return false
 	}
-	if a1.CodeHash == (common.Hash{}) {
-		if a2.CodeHash != (common.Hash{}) {
+	if a1.IsEmptyCodeHash() {
+		if !a2.IsEmptyCodeHash() {
 			return false
 		}
-	} else if a2.CodeHash == (common.Hash{}) {
+	} else if a2.IsEmptyCodeHash() {
 		return false
 	} else if a1.CodeHash != a2.CodeHash {
 		return false

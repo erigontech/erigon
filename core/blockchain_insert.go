@@ -23,12 +23,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
-// insertStats tracks and reports on block insertion.
-type insertStats struct {
-	queued, processed, ignored int
-	usedGas                    uint64
-	lastIndex                  int
-	startTime                  mclock.AbsTime
+// InsertStats tracks and reports on block insertion.
+type InsertStats struct {
+	queued, lastIndex, ignored int
+	UsedGas                    uint64
+	Processed                  int
+	StartTime                  mclock.AbsTime
 }
 
 // statsReportLimit is the time limit during import and export after which we
@@ -38,7 +38,7 @@ type insertStats struct {
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
 /*
-func (st *insertStats) report(chain []*types.Block, index int, cache common.StorageSize) {
+func (st *InsertStats) report(chain []*types.Block, index int, cache common.StorageSize) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
@@ -73,7 +73,7 @@ func (st *insertStats) report(chain []*types.Block, index int, cache common.Stor
 		log.Info("Imported new chain segment", context...)
 
 		// Bump the stats reported to the next section
-		*st = insertStats{startTime: now, lastIndex: index + 1}
+		*st = InsertStats{startTime: now, lastIndex: index + 1}
 	}
 }
 */

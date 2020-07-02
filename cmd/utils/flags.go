@@ -452,8 +452,8 @@ var (
 	}
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
-		Usage: "Which database software to use? Currently supported values: badger & bolt",
-		Value: "bolt",
+		Usage: "Which database software to use? Currently supported values: badger & bolt & lmdb",
+		Value: "lmdb",
 	}
 	RemoteDbListenAddress = cli.StringFlag{
 		Name:  "remote-db-listen-addr",
@@ -1283,6 +1283,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.BadgerDB = strings.EqualFold(databaseFlag, "badger") //case insensitive
 	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb")       //case insensitive
+	cfg.Bolt = strings.EqualFold(databaseFlag, "bolt")       //case insensitive
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {

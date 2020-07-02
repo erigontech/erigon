@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
-	"io"
-	"runtime"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
+	"io"
+	"runtime"
 )
 
-type LoadNextFunc func(k []byte, v []byte) error
+type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k []byte, value []byte, state State, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
@@ -97,7 +96,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	batch := db.NewBatch()
 	state := &bucketState{batch, bucket, args.Quit}
 
-	loadNextFunc := func(k, v []byte) error {
+	loadNextFunc := func(originalK, k, v []byte) error {
 		// we ignore everything that is before this key
 		if bytes.Compare(k, args.LoadStartKey) < 0 {
 			return nil
@@ -118,26 +117,21 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 					return err
 				}
 			}
+			batchSize := batch.BatchSize()
 			if _, err := batch.Commit(); err != nil {
 				return err
-			}
-			var currentKeyStr string
-			if len(k) < 4 {
-				currentKeyStr = fmt.Sprintf("%x", k)
-			} else {
-				currentKeyStr = fmt.Sprintf("%x...", k[:4])
 			}
 			runtime.ReadMemStats(&m)
 			log.Info(
 				"Committed batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
-				"current key", currentKeyStr,
+				"current key", makeCurrentKeyStr(originalK),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 		}
 		return nil
 	}
-
+	// Main loading loop
 	for h.Len() > 0 {
 		if err := common.Stopped(args.Quit); err != nil {
 			return err
@@ -155,11 +149,35 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			return fmt.Errorf("error while reading next element from disk: %v", err)
 		}
 	}
+	// Final commit
 	if args.OnLoadCommit != nil {
 		if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
 			return err
 		}
 	}
-	_, err := batch.Commit()
-	return err
+	batchSize := batch.BatchSize()
+	if _, err := batch.Commit(); err != nil {
+		return err
+	}
+	runtime.ReadMemStats(&m)
+	log.Info(
+		"Committed batch",
+		"bucket", string(bucket),
+		"size", common.StorageSize(batchSize),
+		"current key", makeCurrentKeyStr(nil),
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+
+	return nil
+}
+
+func makeCurrentKeyStr(k []byte) string {
+	var currentKeyStr string
+	if k == nil {
+		currentKeyStr = "final"
+	} else if len(k) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", k)
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+	}
+	return currentKeyStr
 }

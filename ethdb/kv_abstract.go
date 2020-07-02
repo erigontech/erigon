@@ -24,7 +24,7 @@ type Tx interface {
 	Bucket(name []byte) Bucket
 
 	Commit(ctx context.Context) error
-	Rollback() error
+	Rollback()
 }
 
 type Bucket interface {
@@ -51,6 +51,7 @@ type Cursor interface {
 
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
+	Append(key []byte, value []byte) error // Danger: if provided data will not sorted (or bucket have old records which mess with new in sorting manner) - db will corrupt. Method also doesn't tolerate duplicates.
 }
 
 type NoValuesCursor interface {

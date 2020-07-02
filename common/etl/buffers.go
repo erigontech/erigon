@@ -18,6 +18,7 @@ const (
 	SortableOldestAppearedBuffer
 
 	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
+	BufIOSize         = 64 * 4096         // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
 )
 
 type Buffer interface {
@@ -115,6 +116,7 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	stored, ok := b.entries[string(k)]
 	if !ok {
 		b.size += len(k)
+		k = common.CopyBytes(k)
 	}
 	b.size += len(v)
 	stored = append(stored, v...)
@@ -184,7 +186,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 
 	b.size += len(k)
 	b.size += len(v)
-	b.entries[string(k)] = common.CopyBytes(v)
+	b.entries[string(k)] = v
 }
 
 func (b *oldestEntrySortableBuffer) Size() int {
@@ -195,8 +197,8 @@ func (b *oldestEntrySortableBuffer) Len() int {
 	return len(b.entries)
 }
 func (b *oldestEntrySortableBuffer) Sort() {
-	for i := range b.entries {
-		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
+	for k, v := range b.entries {
+		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
 	sort.Sort(b)
 }

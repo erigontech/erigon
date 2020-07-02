@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"math/big"
-	"runtime"
 )
 
 func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan struct{}) error {
@@ -25,22 +24,20 @@ func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan
 	if lastProcessedBlockNumber > 0 {
 		blockNum = lastProcessedBlockNumber + 1
 	}
-	var chunks [][]byte
 	syncHeadNumber, err := s.ExecutionAt(db)
-	if err == nil {
-		chunks = calculateTxLookupChunks(lastProcessedBlockNumber, syncHeadNumber, runtime.NumCPU()/2+1)
+	if err != nil {
+		return err
 	}
 
 	startKey = dbutils.HeaderHashKey(blockNum)
-	err = TxLookupTransform(db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, dataDir, chunks)
-	if err != nil {
+	if err = TxLookupTransform(db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, dataDir); err != nil {
 		return err
 	}
 
 	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
-func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan struct{}, datadir string, chunks [][]byte) error {
+func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan struct{}, datadir string) error {
 	return etl.Transform(db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, datadir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		if !dbutils.CheckCanonicalKey(k) {
 			return nil
@@ -63,7 +60,6 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 		Quit:            quitCh,
 		ExtractStartKey: startKey,
 		ExtractEndKey:   endKey,
-		Chunks:          chunks,
 	})
 }
 
@@ -104,17 +100,4 @@ func unwindTxLookup(u *UnwindState, db ethdb.Database, quitCh chan struct{}) err
 		return fmt.Errorf("unwind TxLookup: %w", err)
 	}
 	return nil
-}
-
-func calculateTxLookupChunks(startBlock, endBlock uint64, numOfChunks int) [][]byte {
-	if endBlock < startBlock+1000000 || numOfChunks < 2 {
-		return nil
-	}
-
-	chunkSize := (endBlock - startBlock) / uint64(numOfChunks)
-	var chunks = make([][]byte, numOfChunks-1)
-	for i := uint64(1); i < uint64(numOfChunks); i++ {
-		chunks[i-1] = dbutils.HeaderHashKey(i * chunkSize)
-	}
-	return chunks
 }

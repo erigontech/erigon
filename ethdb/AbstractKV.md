@@ -24,7 +24,7 @@ type Tx interface {
 	Bucket(name []byte) Bucket
 
 	Commit(ctx context.Context) error
-	Rollback() error
+	Rollback() // doesn't return err to be defer friendly
 }
 
 type Bucket interface {

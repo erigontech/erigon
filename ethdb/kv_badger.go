@@ -61,12 +61,15 @@ func (opts badgerOpts) Open() (KV, error) {
 		opts:   opts,
 		badger: badgerDB,
 		log:    logger,
+		wg:     &sync.WaitGroup{},
 	}
 
 	if !opts.Badger.InMemory {
 		ctx, ctxCancel := context.WithCancel(context.Background())
 		db.stopGC = ctxCancel
+		db.wg.Add(1)
 		go func() {
+			defer db.wg.Done()
 			gcTicker := time.NewTicker(gcPeriod)
 			defer gcTicker.Stop()
 			db.vlogGCLoop(ctx, gcTicker)
@@ -89,6 +92,7 @@ type badgerKV struct {
 	badger *badger.DB
 	log    log.Logger
 	stopGC context.CancelFunc
+	wg     *sync.WaitGroup
 }
 
 func NewBadger() badgerOpts {
@@ -131,6 +135,7 @@ func (db *badgerKV) Close() {
 	if db.stopGC != nil {
 		db.stopGC()
 	}
+	db.wg.Wait()
 	if db.badger != nil {
 		if err := db.badger.Close(); err != nil {
 			db.log.Warn("failed to close badger DB", "err", err)
@@ -225,10 +230,9 @@ func (tx *badgerTx) Commit(ctx context.Context) error {
 	return tx.badger.Commit()
 }
 
-func (tx *badgerTx) Rollback() error {
+func (tx *badgerTx) Rollback() {
 	tx.closeCursors()
 	tx.badger.Discard()
-	return nil
 }
 
 func (tx *badgerTx) closeCursors() {
@@ -444,6 +448,10 @@ func (c *badgerCursor) Put(key []byte, value []byte) error {
 	}
 
 	return c.bucket.Put(key, value)
+}
+
+func (c *badgerCursor) Append(key []byte, value []byte) error {
+	return c.Put(key, value)
 }
 
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {

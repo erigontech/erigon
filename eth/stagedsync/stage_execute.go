@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -169,10 +170,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				return err
 			}
 			start := time.Now()
+			sz := batch.BatchSize()
 			if _, err = batch.Commit(); err != nil {
 				return err
 			}
-			log.Info("Batch committed", "in", time.Since(start), "size", common.StorageSize(batch.BatchSize()))
+			log.Info("Batch committed", "in", time.Since(start), "size", common.StorageSize(sz))
 		}
 
 		if prof {
@@ -202,7 +204,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 
@@ -307,7 +309,7 @@ func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) erro
 		},
 		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
-		return err
+		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 	}
 
 	return rawdb.PlainWriteAccount(db, address, acc)
@@ -332,8 +334,8 @@ func cleanupContractCodeBucket(
 ) error {
 	var original accounts.Account
 	got, err := readAccountFunc(db, &original)
-	if err != nil {
-		return err
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return fmt.Errorf("cleanupContractCodeBucket: %w", err)
 	}
 	if got {
 		// clean up all the code incarnations original incarnation and the new one
