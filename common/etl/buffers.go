@@ -39,7 +39,7 @@ type sortableBufferEntry struct {
 var (
 	_ Buffer = &sortableBuffer{}
 	_ Buffer = &appendSortableBuffer{}
-    _ Buffer = oldestEntrySortableBuffer{}
+    _ Buffer = &oldestEntrySortableBuffer{}
 )
 
 func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
