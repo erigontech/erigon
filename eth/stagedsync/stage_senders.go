@@ -13,7 +13,6 @@ import (
 	"runtime/trace"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -23,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -74,7 +74,7 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		return err
 	}
 
-	lastProcessedBlockNumber := s.BlockNumber
+
 
 	mutation := &mutationSafe{mutation: stateDB.NewBatch()}
 	defer func() {
@@ -83,147 +83,139 @@ func spawnRecoverSendersStage(cfg stage3Config, s *StageState, stateDB ethdb.Dat
 		}
 	}()
 
-	firstBlockToProceed := lastProcessedBlockNumber + 1
+	fromBlockNumber := s.BlockNumber
+	firstBlockToProceed := fromBlockNumber + 1
 
-	onlySecondStage := false
-	var filePath string
-	if !onlySecondStage {
-		// collect canonical hashes
-		t1 := time.Now()
+	// collect canonical hashes
+	t1 := time.Now()
 
-		// fixme: it'd be great to have lastBlockNum and optimize next make()
-		canonical := make([]common.Hash, 13_000_000)
-		currentHeaderNumber := new(uint64)
-		*currentHeaderNumber = 0
-
-		errCh := make(chan error, 2)
-		readWg := sync.WaitGroup{}
-		readWg.Add(2)
-		go func() {
-			defer readWg.Done()
-			err := stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
-				if err := common.Stopped(quitCh); err != nil {
-					return false, err
-				}
-
-				// Skip non relevant records
-				if !dbutils.CheckCanonicalKey(k) {
-					return true, nil
-				}
-
-				n := atomic.AddUint64(currentHeaderNumber, 1)
-				canonical[n-1] = common.BytesToHash(v)
-
-				if n%100000 == 0 {
-					log.Info("done some hashes", "n", n)
-				}
-
-				return true, nil
-			})
-
-			log.Info("collect hashes done", "duration", time.Since(t1))
-			if err != nil {
-				errCh <- err
-			}
-		}()
-
-		jobs := make(chan *senderRecoveryJob, 1_000_000)
-		go func() {
-			defer readWg.Done()
-			err := stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
-				if err := common.Stopped(quitCh); err != nil {
-					return false, err
-				}
-
-				blockNumber := binary.BigEndian.Uint64(k[:8])
-				for blockNumber >= atomic.LoadUint64(currentHeaderNumber) {
-					//fixme
-					log.Info("walk body wait", "number", blockNumber, "headerNumber", atomic.LoadUint64(currentHeaderNumber))
-					time.Sleep(time.Second)
-				}
-
-				blockHash := common.BytesToHash(k[8:])
-				if canonical[blockNumber-1] != blockHash {
-					// non-canonical case
-					return true, nil
-				}
-
-				data := make([]byte, len(v))
-				copy(data, v)
-
-				if cfg.prof || cfg.startTrace {
-					if blockNumber == uint64(cfg.toProcess) {
-						// Flush the profiler
-						pprof.StopCPUProfile()
-						common.SafeClose(quitCh)
-						return false, nil
-					}
-				}
-
-				if blockNumber%10000 == 0 {
-					log.Info("done some bodies", "n", blockNumber)
-				}
-
-				jobs <- &senderRecoveryJob{data, blockHash, blockNumber}
-
-				return true, nil
-			})
-
-			if err != nil {
-				errCh <- err
-			}
-		}()
-
-		out := make(chan TxsFroms, cfg.batchSize)
-		wg := &sync.WaitGroup{}
-		wg.Add(cfg.numOfGoroutines)
-		for i := 0; i < cfg.numOfGoroutines; i++ {
-			go func() {
-				runtime.LockOSThread()
-				defer func() {
-					wg.Done()
-					runtime.UnlockOSThread()
-				}()
-
-				// each goroutine gets it's own crypto context to make sure they are really parallel
-				recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)
-			}()
-		}
-		log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
-
-		filePath = fmt.Sprintf("froms_%d_%d_%d.out", cfg.now.Day(), cfg.now.Hour(), cfg.now.Minute())
-		bufferFile, err := ioutil.TempFile(datadir, filePath)
-		if err != nil {
-			return err
-		}
-
-		buf := NewAddressBuffer(bufferFile, cfg.bufferSize, true)
-
-		go func() {
-			err = writeOnDiskBatch(cfg, buf, firstBlockToProceed, out, quitCh, jobs)
-			if err != nil {
-				errCh <- err
-			}
-			log.Info("Storing into a file - DONE")
-		}()
-
-		// fixme simplify
-		readWg.Wait()
-		close(jobs)
-		log.Info("reading bodies is finished")
-
-		wg.Wait()
-		close(out)
-		close(errCh)
-
-		err = <-errCh
-		buf.Close()
-		if err != nil {
-			return err
-		}
+	// calculate how many blocks to proceed
+	toUnwindBlockNumber, _, err := stages.GetStageUnwind(stateDB, stages.Bodies)
+	if err != nil {
+		return err
+	}
+	toBlockNumber, _, err := stages.GetStageProgress(stateDB, stages.Bodies)
+	if err != nil {
+		return err
+	}
+	if toUnwindBlockNumber != 0 && toBlockNumber != toUnwindBlockNumber {
+		toBlockNumber = toUnwindBlockNumber
+	}
+	if toBlockNumber == 0 {
+		toBlockNumber = 1_000_000
 	}
 
-	err := recoverSendersFromDisk(cfg, s, stateDB, config, mutation, quitCh, firstBlockToProceed, filePath)
+	log.Info("!!!!!!!!!!!!!!!!!1", "toBlockNumber", toBlockNumber, "fromBlockNumber", fromBlockNumber, "n", toBlockNumber-fromBlockNumber)
+	canonical := make([]common.Hash, toBlockNumber-fromBlockNumber+1)
+	currentHeaderIdx := 0
+	log.Info("!!!!!!!!!!!!!!!!!2", "len", len(canonical))
+
+	err = stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(quitCh); err != nil {
+			return false, err
+		}
+
+		// Skip non relevant records
+		if !dbutils.CheckCanonicalKey(k) {
+			return true, nil
+		}
+
+		canonical[currentHeaderIdx] = common.BytesToHash(v)
+		currentHeaderIdx++
+
+		if currentHeaderIdx%100000 == 0 {
+			log.Info("stage 3.1: Getting blocks hashes", "currentHeader", uint64(currentHeaderIdx)+firstBlockToProceed)
+		}
+
+		return true, nil
+	})
+
+	log.Info("stage 3.1: collect hashes done", "duration", time.Since(t1))
+	if err != nil {
+		return err
+	}
+
+	jobs := make(chan *senderRecoveryJob, 1_000_000)
+	err = stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(firstBlockToProceed), 0, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(quitCh); err != nil {
+			return false, err
+		}
+
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		if canonical[blockNumber-firstBlockToProceed] != blockHash {
+			// non-canonical case
+			return true, nil
+		}
+
+		data := make([]byte, len(v))
+		copy(data, v)
+
+		if cfg.prof || cfg.startTrace {
+			if blockNumber == uint64(cfg.toProcess) {
+				// Flush the profiler
+				pprof.StopCPUProfile()
+				common.SafeClose(quitCh)
+				return false, nil
+			}
+		}
+
+		if blockNumber%10000 == 0 {
+			log.Info("stage 3.2: Getting blocks bodies", "blockNumber", blockNumber)
+		}
+
+		jobs <- &senderRecoveryJob{data, blockHash, blockNumber}
+
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	out := make(chan TxsFroms, cfg.batchSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(cfg.numOfGoroutines)
+	for i := 0; i < cfg.numOfGoroutines; i++ {
+		go func() {
+			runtime.LockOSThread()
+			defer func() {
+				wg.Done()
+				runtime.UnlockOSThread()
+			}()
+
+			// each goroutine gets it's own crypto context to make sure they are really parallel
+			recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)
+		}()
+	}
+	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.numOfGoroutines)
+
+	const tempFilePath = "stage3_froms.out"
+	bufferFile, err := ioutil.TempFile(datadir, tempFilePath)
+	if err != nil {
+		return err
+	}
+
+	buf := NewAddressBuffer(bufferFile, cfg.bufferSize, true)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- writeOnDiskBatch(cfg, buf, firstBlockToProceed, out, quitCh, jobs)
+		log.Info("Storing into a file - DONE")
+	}()
+
+	close(jobs)
+	log.Info("reading bodies is finished")
+
+	wg.Wait()
+	close(out)
+	buf.Close()
+
+	if err = <-errCh; err != nil {
+		return err
+	}
+
+	// recover Senders
+	err = recoverSendersFromDisk(cfg, s, stateDB, config, mutation, quitCh, firstBlockToProceed, tempFilePath)
 	if err != nil && err != io.EOF {
 		return err
 	}
@@ -371,7 +363,7 @@ func writeOnDiskBatch(cfg stage3Config, buf *AddressBuffer, firstBlock uint64, o
 
 		if j.blockNumber%uint64(cfg.batchSize) == 0 {
 			runtime.ReadMemStats(m)
-			log.Info("Dumped on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", buf.Len(), "toWriteCap", buf.Cap(),
+			log.Info("stage 3.3: Dumped txs senders on a disk:", "blockNumber", j.blockNumber, "out", len(out), "in", len(in), "written", total, "txs", totalFroms, "bufLen", len(buffer), "bufCap", cap(buffer), "toWriteLen", buf.Len(), "toWriteCap", buf.Cap(),
 				"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 
