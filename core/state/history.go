@@ -224,7 +224,6 @@ func WalkAsOf(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, time
 
 func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return fmt.Errorf("storageBucket not found")
@@ -294,9 +293,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 				part1End=common.AddressLength
 				part2Start=common.AddressLength+common.IncarnationLength
 				part3Start=common.AddressLength+common.IncarnationLength+common.HashLength
-
 			}
-
 
 			decorator:=NewChangesetSearchDecorator(historyCursor, csB, startkey,fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
 			err:=decorator.buildChangeset(0, 7)
@@ -311,7 +308,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		}
 
 		hAddrHash, hKeyHash, _, hV, err2 := historyCursor.Seek()
-		if err2 != nil {
+		if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 			return err2
 		}
 
@@ -319,13 +316,13 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		var err error
 		for goOn {
 			cmp,br:=walkAsOfCmp(addrHash, hAddrHash)
-			fmt.Println("addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
+			fmt.Println("core/state/history.go:319 addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
 			if br {
 				break
 			}
 			if cmp==0 {
 				cmp,br=walkAsOfCmp(keyHash, hKeyHash)
-				fmt.Println("key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
+				fmt.Println("core/state/history.go:325 key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
 			}
 			if br {
 				break
@@ -357,7 +354,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 				if cmp >= 0 {
 					hAddrHash, hKeyHash, _, hV, err2 = historyCursor.Next()
 					if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-							return err2
+						return err2
 					}
 				}
 			}
@@ -540,6 +537,8 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte)([]byte
 		}
 		return nil, true,  nil
 	}
+	dec,_,_:=index.Decode()
+	fmt.Println("core/state/history.go:543", "not in history", timestamp,common.Bytes2Hex(hK), dec)
 	return nil, false, nil
 }
 
@@ -599,6 +598,7 @@ type changesetSearchDecorator struct {
 
 	kd1, kd2,kd3,dv []byte
 	kc1, kc2,kc3,cv []byte
+	cerr error
 
 }
 func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error) {
@@ -632,16 +632,24 @@ func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error)
 			return nil, nil,nil, nil, err2
 		}
 	}
-	hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
-	copy(hK[:len(hAddrHash)], hAddrHash)
-	copy(hK[len(hAddrHash):], hKeyHash)
-	data, found, err:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
-	if err!=nil {
-		return nil,nil, nil,nil, err
-	}
-	if found {
+	if len(hKeyHash)>0 {
+		hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
+		copy(hK[:len(hAddrHash)], hAddrHash)
+		copy(hK[len(hAddrHash):], hKeyHash)
+		data, found, innerErr:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
+		if innerErr!=nil {
+			return nil,nil, nil,nil, innerErr
+		}
 		csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+		if !found {
+			csd.cerr= ErrNotInHistory
+		} else {
+			csd.cerr=nil
+		}
+	} else {
+		csd.kc1, csd.kc2,csd.kc3,csd.cv, csd.cerr = nil, nil, nil, nil,nil
 	}
+
 
 	cmp, br:=walkAsOfCmp(csd.kd1, csd.kc1)
 	if br {
@@ -655,6 +663,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error)
 	}
 
 	var key1,key2, key3, val []byte
+	var err error
 	if cmp < 0 {
 		key1 = csd.kd1
 		key2 = csd.kd2
@@ -665,6 +674,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error)
 		key2 = csd.kc2
 		key3 = csd.kc3
 		val = csd.cv
+		err = csd.cerr
 
 	}
 	//shift changesets cursor~
@@ -700,19 +710,27 @@ func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error)
 				return nil,nil, nil,nil, err2
 			}
 		}
-		hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
-		copy(hK[:len(hAddrHash)], hAddrHash)
-		copy(hK[len(hAddrHash):], hKeyHash)
-		data, found, err:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
-		if err!=nil {
-			return nil,nil, nil,nil, err
-		}
-		if found {
+		if len(hAddrHash)>0 && len(hKeyHash)>0 {
+			hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
+			copy(hK[:len(hAddrHash)], hAddrHash)
+			copy(hK[len(hAddrHash):], hKeyHash)
+			data, found, err:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
+			if err!=nil {
+				return nil,nil, nil,nil, err
+			}
 			csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+			if !found {
+				csd.cerr = ErrNotInHistory
+			} else {
+				csd.cerr=nil
+			}
+		} else {
+			csd.kc1, csd.kc2,csd.kc3,csd.cv, csd.cerr = nil, nil, nil, nil,nil
 		}
+
 	}
 
-	return key1, key2, key3, val, nil
+	return key1, key2, key3, val, err
 }
 func (csd *changesetSearchDecorator) Next() ([]byte,[]byte,[]byte,[]byte, error) {
 	cmp, br:=walkAsOfCmp(csd.kd1, csd.kc1)
@@ -727,6 +745,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte,[]byte,[]byte,[]byte, error)
 	}
 
 	var key1,key2, key3, val []byte
+	var err error
 	if cmp < 0 {
 		key1 = csd.kd1
 		key2 = csd.kd2
@@ -737,6 +756,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte,[]byte,[]byte,[]byte, error)
 		key2 = csd.kc2
 		key3 = csd.kc3
 		val = csd.cv
+		err = csd.cerr
 
 	}
 	//shift changesets cursor
@@ -781,15 +801,18 @@ func (csd *changesetSearchDecorator) Next() ([]byte,[]byte,[]byte,[]byte, error)
 			if err!=nil {
 				return nil,nil, nil,nil, err
 			}
-			if found {
-				csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+			csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+			if !found {
+				csd.cerr= ErrNotInHistory
+			} else {
+				csd.cerr=nil
 			}
 		} else {
 			csd.kc1, csd.kc2,csd.kc3,csd.cv = nil, nil, nil, nil
 		}
 	}
 
-	return key1, key2, key3, val, nil
+	return key1, key2, key3, val, err
 }
 
 var ErrNotInHistory = errors.New("not in history")
