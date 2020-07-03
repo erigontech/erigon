@@ -1143,56 +1143,6 @@ func relayoutKeys() {
 	fmt.Printf("Total: %d\n", accountChangeSetCount+storageChangeSetCount)
 }
 
-func upgradeBlocks() {
-	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	defer ethDb.Close()
-	start := []byte{}
-	var keys [][]byte
-	if err := ethDb.Walk([]byte("b"), start, 0, func(k, v []byte) (bool, error) {
-		if len(keys)%1000 == 0 {
-			fmt.Printf("Collected keys: %d\n", len(keys))
-		}
-		keys = append(keys, common.CopyBytes(k))
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	for i, key := range keys {
-		v, err := ethDb.Get([]byte("b"), key)
-		if err != nil {
-			panic(err)
-		}
-		smallBody := new(types.SmallBody) // To be changed to SmallBody
-		if err := rlp.Decode(bytes.NewReader(v), smallBody); err != nil {
-			panic(err)
-		}
-		body := new(types.Body)
-		blockNum := binary.BigEndian.Uint64(key[:8])
-		signer := types.MakeSigner(params.MainnetChainConfig, big.NewInt(int64(blockNum)))
-		body.Senders = make([]common.Address, len(smallBody.Transactions))
-		for j, tx := range smallBody.Transactions {
-			addr, err := signer.Sender(tx)
-			if err != nil {
-				panic(err)
-			}
-			body.Senders[j] = addr
-		}
-		body.Transactions = smallBody.Transactions
-		body.Uncles = smallBody.Uncles
-		newV, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			panic(err)
-		}
-		ethDb.Put([]byte("b"), key, newV)
-		if i%1000 == 0 {
-			fmt.Printf("Upgraded keys: %d\n", i)
-		}
-	}
-
-	check(ethDb.ClearBuckets(dbutils.BlockReceiptsPrefix))
-}
-
 func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
 	check(err)

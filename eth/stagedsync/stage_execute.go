@@ -121,6 +121,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		if block == nil {
 			break
 		}
+		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
+		block.Body().SendersToTxs(senders)
 		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
 		type cacheSetter interface {

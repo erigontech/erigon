@@ -143,8 +143,6 @@ func ReadBody(tx ethdb.Tx, hash common.Hash, number uint64) (*types.Body, error)
 	if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
 		return nil, fmt.Errorf("invalid block body RLP: %s, %w", hash, err)
 	}
-	// Post-processing
-	body.SendersToTxs()
 	return body, nil
 }
 

@@ -104,7 +104,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 			blockNumber.SetUint64(nextBlockNumber)
 			s := types.MakeSigner(config, &blockNumber)
 
-			jobs <- &senderRecoveryJob{s, body, hash, nextBlockNumber, nil}
+			jobs <- &senderRecoveryJob{s, body, nil, hash, nextBlockNumber, nil}
 			written++
 		}
 
@@ -113,7 +113,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 			if j.err != nil {
 				return errors.Wrap(j.err, "could not extract senders")
 			}
-			rawdb.WriteBody(context.Background(), mutation, j.hash, j.nextBlockNumber, j.blockBody)
+			rawdb.WriteSenders(context.Background(), mutation, j.hash, j.nextBlockNumber, j.senders)
 		}
 
 		if err := s.Update(mutation, nextBlockNumber); err != nil {
@@ -136,6 +136,7 @@ func spawnRecoverSendersStage(s *StageState, stateDB ethdb.Database, config *par
 type senderRecoveryJob struct {
 	signer          types.Signer
 	blockBody       *types.Body
+	senders         []common.Address
 	hash            common.Hash
 	nextBlockNumber uint64
 	err             error
@@ -148,17 +149,18 @@ func recoverSenders(cryptoContext *secp256k1.Context, in chan *senderRecoveryJob
 		if job == nil {
 			return
 		}
-		for _, tx := range job.blockBody.Transactions {
+		job.senders = make([]common.Address, len(job.blockBody.Transactions))
+		for i, tx := range job.blockBody.Transactions {
 			from, err := job.signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
 				job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
 				break
 			}
-			tx.SetFrom(from)
 			if tx.Protected() && tx.ChainID().Cmp(job.signer.ChainID()) != 0 {
 				job.err = errors.New("invalid chainId")
 				break
 			}
+			job.senders[i] = from
 		}
 
 		// prevent sending to close channel
