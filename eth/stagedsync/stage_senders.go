@@ -184,11 +184,11 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 }
 
 type senderRecoveryJob struct {
-	bodyRlp         rlp.RawValue
-	blockHash       common.Hash
-	blockNumber     uint64
-	froms           []common.Address
-	err             error
+	bodyRlp     rlp.RawValue
+	blockHash   common.Hash
+	blockNumber uint64
+	froms       []common.Address
+	err         error
 }
 
 func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit chan struct{}) {

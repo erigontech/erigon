@@ -1723,7 +1723,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 
 func resetStage3(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
-	defer db.Close()	
+	defer db.Close()
 	if err := db.ClearBuckets(
 		dbutils.Senders,
 	); err != nil {
