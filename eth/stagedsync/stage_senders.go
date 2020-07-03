@@ -70,7 +70,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 	if err := common.Stopped(quitCh); err != nil {
 		return err
 	}
-	nextBlockNumber := s.BlockNumber
 	toBlockNumber, _, err := stages.GetStageProgress(stateDB, stages.Bodies)
 	if err != nil {
 		return err
@@ -92,6 +91,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 		currentHeaderIdx++
 		return true, nil
 	})
+	log.Info("Sync (Senders): Reading canonical hashes complete", "hashes", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
 	go func() {
@@ -166,12 +166,12 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 			return err
 		}
 		rawdb.WriteSenders(context.Background(), mutation, j.blockHash, j.blockNumber, j.froms)
-		if err := s.Update(mutation, nextBlockNumber); err != nil {
-			return err
-		}
-		log.Info("Recovered for blocks:", "blockNumber", nextBlockNumber)
 
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
+			if err := s.Update(mutation, j.blockNumber); err != nil {
+				return err
+			}
+			log.Info("Recovered for blocks:", "blockNumber", j.blockNumber)
 			if _, err := mutation.Commit(); err != nil {
 				return err
 			}
