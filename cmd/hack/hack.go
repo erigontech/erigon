@@ -1724,6 +1724,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 func resetStage3(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	/*
 	if err := db.ClearBuckets(
 		dbutils.Senders,
 	); err != nil {
@@ -1732,12 +1733,14 @@ func resetStage3(chaindata string) error {
 	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
 		return err
 	}
+	*/
 	var err error
 	var stage2progress uint64
 	if stage2progress, _, err = stages.GetStageProgress(db, stages.Bodies); err != nil {
 		return err
 	}
 	log.Info("Stage2", "progress", stage2progress)
+	/*
 	ch := make(chan struct{})
 	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: 0}
 	const batchSize = 10000
@@ -1755,6 +1758,10 @@ func resetStage3(chaindata string) error {
 		Now:             time.Now(),
 	}
 	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
+		return err
+	}
+	*/
+	if err := stages.SaveStageProgress(db, stages.HashState, stage2progress, nil); err != nil {
 		return err
 	}
 	return nil

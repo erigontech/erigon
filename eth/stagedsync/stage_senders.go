@@ -171,8 +171,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		return err
 	}
 
-	s.Done()
-	return nil
+	return s.DoneAndUpdate(db, toBlockNumber)
 }
 
 type senderRecoveryJob struct {
