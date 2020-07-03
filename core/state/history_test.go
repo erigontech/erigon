@@ -1156,6 +1156,7 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	for i:=uint8(0); i<numOfAccounts; i++ {
 		addrs[i] = common.Address{i+1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
+		fmt.Println("core/state/history_test.go:1159", i+1, common.Bytes2Hex(addrHash.Bytes()))
 		addrHashes[i] = addrHash
 	}
 
@@ -1196,6 +1197,7 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
+
 
 
 
@@ -1249,55 +1251,161 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	sort.Sort(block2Expected)
 	sort.Sort(block2)
 	if !reflect.DeepEqual(block2, block2Expected) {
-		t.Log("expected:")
+		fmt.Println("expected:")
 		fmt.Println(block2Expected.String())
-		t.Log("obtained:", )
+		fmt.Println("obtained:", )
 		fmt.Println(block2.String())
 		t.Fatal("block 2 result is incorrect")
 	}
 
 
-	//block4 := &changeset.ChangeSet{
-	//	Changes: make([]changeset.Change, 0),
-	//}
-	//
-	//block6 := &changeset.ChangeSet{
-	//	Changes: make([]changeset.Change, 0),
-	//}
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
 
-	//err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-	//	err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-	//	if err != nil {
-	//		t.Fatal(err)
-	//	}
-	//	return true, nil
-	//})
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//
-	//err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-	//	err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-	//	if err != nil {
-	//		t.Fatal(err)
-	//	}
-	//
-	//	return true, nil
-	//})
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//
-	//sort.Sort(block4Expected)
-	//if !reflect.DeepEqual(block4, block4Expected) {
-	//	spew.Dump("expected", block4Expected)
-	//	spew.Dump("current", block4)
-	//	t.Fatal("block 4 result is incorrect")
-	//}
-	//sort.Sort(block6Expected)
-	//if !reflect.DeepEqual(block6, block6Expected) {
-	//	spew.Dump("expected", block6Expected)
-	//	spew.Dump("current", block6)
-	//	t.Fatal("block 6 result is incorrect")
-	//}
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	fmt.Println("expected:")
+	fmt.Println(block4Expected.String())
+
+	/*
+		before 3:
+		addr1(f22b):""
+		addr2(1f0e):""
+		addr3(3e05):""
+		addr4(d12e):""
+		block 3
+		addr1(f22b):"block3"
+		addr2(1f0e):""
+		addr3(3e05):"state"
+		addr4(d12e):"block3"
+		block 5
+		addr1(f22b):"state"
+		addr2(1f0e):"state"
+		addr3(3e05):"state"
+		addr4(d12e):""
+	*/
+
+	/*
+	obtained:
+	block 4
+	addr1(f22b):"block3"
+	addr2(1f0e):""
+	addr3(3e05):""
+	addr4(d12e):"block3"
+
+
+	*/
+
+	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Sort(block4Expected)
+	if !reflect.DeepEqual(block4, block4Expected) {
+		fmt.Println("expected:")
+		fmt.Println(block4Expected.String())
+		fmt.Println("obtained:", )
+		fmt.Println(block4.String())
+		t.Fatal("block 4 result is incorrect")
+	}
+
+
+	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Sort(block6Expected)
+	if !reflect.DeepEqual(block6, block6Expected) {
+		fmt.Println("expected:")
+		fmt.Println(block6Expected.String())
+		fmt.Println("obtained:", )
+		fmt.Println(block6.String())
+		t.Fatal("block 6 result is incorrect")
+	}
 }
+//
+//func TestChangesetSearchDecorator_Next(t *testing.T) {
+//	db:=ethdb.NewMemDatabase()
+//	acc1:=common.Address{1}
+//	acc2:=common.Address{2}
+//	key:=common.Hash{1}
+//	type nextRes struct {
+//		k1,k2,k3,v []byte
+//	}
+//	addrHash1,err:=common.HashData(acc1.Bytes())
+//	if err!=nil {
+//		t.Fatal(err)
+//	}
+//	addrHash2,err:=common.HashData(acc2.Bytes())
+//	if err!=nil {
+//		t.Fatal(err)
+//	}
+//	keyHash,err:=common.HashData(key.Bytes())
+//	if err!=nil {
+//		t.Fatal(err)
+//	}
+//	//cs:=e
+//	//changeset.EncodeStorage()
+//	res:=[]nextRes{}
+//	var startKey = make([]byte,72)
+//	db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+//		hB := tx.Bucket(dbutils.StorageHistoryBucket)
+//		csBucket:= dbutils.StorageChangeSetBucket
+//		csB := tx.Bucket(csBucket)
+//		part1End:=common.HashLength
+//		part2Start:=common.HashLength+common.IncarnationLength
+//		part3Start:=common.HashLength+common.IncarnationLength+common.HashLength
+//		startkeyNoInc:=dbutils.CompositeKeyWithoutIncarnation(startKey)
+//		//for historic data
+//		var historyCursor historyCursor = ethdb.NewSplitCursor(
+//			hB,
+//			startkeyNoInc,
+//			0,
+//			part1End,   /* part1end */
+//			part2Start,   /* part2start */
+//			part3Start, /* part3start */
+//		)
+//
+//		part1End=common.HashLength
+//		part2Start=common.HashLength+common.IncarnationLength
+//		part3Start=common.HashLength+common.IncarnationLength+common.HashLength
+//
+//		decorator:=NewChangesetSearchDecorator(historyCursor, csB, startKey, 0, part1End, part2Start, part3Start, 2, changeset.Mapper[string(dbutils.StorageChangeSetBucket)].WalkerAdapter)
+//		err:=decorator.buildChangeset(4, 7)
+//		if err!=nil {
+//			return err
+//		}
+//
+//		k1,k2,k3,v,err:=decorator.Next()
+//		for ;k1!=nil; {
+//			res = append(res, nextRes{
+//				k1, k2,k3, v,
+//			})
+//			k1,k2,k3,v,err=decorator.Next()
+//		}
+//		if err!=nil {
+//			t.Fatal(err)
+//		}
+//
+//
+//		return nil
+//	})
+//	fmt.Println(res)
+//}

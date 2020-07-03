@@ -290,9 +290,16 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 			part1End:=common.HashLength
 			part2Start:=common.HashLength+common.IncarnationLength
 			part3Start:=common.HashLength+common.IncarnationLength+common.HashLength
+			if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+				part1End=common.AddressLength
+				part2Start=common.AddressLength+common.IncarnationLength
+				part3Start=common.AddressLength+common.IncarnationLength+common.HashLength
 
-			decorator:=NewChangesetSearchDecorator(historyCursor, startkey,fixetBitsForHistory, part1End, part2Start, part3Start)
-			err:=decorator.buildChangeset(csB, 0, 7, timestamp, changeset.Mapper[string(csBucket)].WalkerAdapter)
+			}
+
+
+			decorator:=NewChangesetSearchDecorator(historyCursor, csB, startkey,fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+			err:=decorator.buildChangeset(0, 7)
 			if err!=nil {
 				return err
 			}
@@ -303,22 +310,23 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 			return err1
 		}
 
-		hAddrHash, hKeyHash, tsEnc, hV, err2 := historyCursor.Seek()
+		hAddrHash, hKeyHash, _, hV, err2 := historyCursor.Seek()
 		if err2 != nil {
 			return err2
 		}
 
-		//find firsh chunk after timestamp
-		for hKeyHash != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
-			hAddrHash, hKeyHash, tsEnc, hV, err2 = historyCursor.Next()
-			if err2 != nil {
-				return err2
-			}
-		}
 		goOn := true
 		var err error
 		for goOn {
-			cmp,br:=walkAsOfCmp(keyHash, hKeyHash)
+			cmp,br:=walkAsOfCmp(addrHash, hAddrHash)
+			fmt.Println("addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
+			if br {
+				break
+			}
+			if cmp==0 {
+				cmp,br=walkAsOfCmp(keyHash, hKeyHash)
+				fmt.Println("key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
+			}
 			if br {
 				break
 			}
@@ -327,21 +335,17 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 			if cmp < 0 {
 				goOn, err = walker(addrHash, keyHash, v)
 			} else {
-				hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
-				copy(hK[:len(hAddrHash)], hAddrHash)
-				copy(hK[len(hAddrHash):], hKeyHash)
-				data, found, err:=findInHistory(hK, hV,timestamp,csB.Get, returnCorrectWalker(bucket, hBucket))
-				if err!=nil{
-					return err
+				if err2!=nil && !errors.Is(err2, ErrNotInHistory) {
+					return err2
 				}
-
-				if found && len(data) > 0 { // Skip accounts did not exist
-					goOn, err = walker(hAddrHash, hKeyHash, data)
-				}
-				if !found && cmp == 0 {
+				if len(hV) > 0 && err2==nil { // Skip accounts did not exist
+					goOn, err = walker(hAddrHash, hKeyHash, hV)
+				} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
 					goOn, err = walker(addrHash, keyHash, v)
 				}
-
+			}
+			if err!=nil {
+				return err
 			}
 			if goOn {
 				if cmp <= 0 {
@@ -351,13 +355,9 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 					}
 				}
 				if cmp >= 0 {
-					hKeyHash0 := hKeyHash
-					hAddrHash0:=hAddrHash
-					for bytes.Equal(hAddrHash0, hAddrHash) && hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
-						hAddrHash, hKeyHash, tsEnc, hV, err2 = historyCursor.Next()
-						if err2 != nil {
+					hAddrHash, hKeyHash, _, hV, err2 = historyCursor.Next()
+					if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 							return err2
-						}
 					}
 				}
 			}
@@ -563,7 +563,7 @@ type historyCursor interface {
 	Next() (key1, key2, key3, val []byte, err error)
 }
 
-func NewChangesetSearchDecorator(historyCursor historyCursor, startKey []byte,matchBits, part1End, part2Start, part3Start int) *changesetSearchDecorator {
+func NewChangesetSearchDecorator(historyCursor historyCursor,bucket ethdb.Bucket, startKey []byte,matchBits, part1End, part2Start, part3Start int, timestamp uint64, walkerAdapter func(v []byte) changeset.Walker) *changesetSearchDecorator {
 	matchBytes, mask := ethdb.Bytesmask(matchBits)
 	return &changesetSearchDecorator{
 		startKey: startKey,
@@ -572,6 +572,9 @@ func NewChangesetSearchDecorator(historyCursor historyCursor, startKey []byte,ma
 		part2Start: part2Start,
 		part3Start: part3Start,
 
+		bucket: bucket,
+		timestamp: timestamp,
+		walkerAdapter: walkerAdapter,
 		matchBytes: matchBytes,
 		byteMask: mask,
 	}
@@ -586,35 +589,210 @@ type changesetSearchDecorator struct {
 	matchBytes int
 	byteMask byte
 
+	bucket ethdb.Bucket
+	timestamp uint64
+	walkerAdapter func(v []byte) changeset.Walker
+
 	pos    int
 	values []changeset.Change
+
+
+	kd1, kd2,kd3,dv []byte
+	kc1, kc2,kc3,cv []byte
+
 }
-func (csd *changesetSearchDecorator) Seek() (key1, key2, key3, val []byte, err error) {
+func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error) {
 	pos:=sort.Search(len(csd.values), func(i int) bool {
 		return bytes.Compare(csd.startKey,csd.values[i].Key) < 0
 	})
+
 	if pos<len(csd.values) {
 		csd.pos=pos
 		if !csd.matchKey(csd.values[csd.pos].Key) {
-			return nil, nil, nil, nil, nil
+			csd.kd1 = nil
+			csd.kd2 = nil
+			csd.kd3 = nil
+			csd.dv  = nil
+		} else {
+			csd.kd1 = csd.values[csd.pos].Key[:csd.part1End]
+			csd.kd2 = csd.values[csd.pos].Key[csd.part2Start:csd.part3Start]
+			csd.kd3 = csd.values[csd.pos].Key[csd.part3Start:]
+			csd.dv  = csd.values[csd.pos].Value
 		}
-		return csd.values[csd.pos].Key[:csd.part1End], csd.values[csd.pos].Key[csd.part2Start:csd.part3Start], csd.values[csd.pos].Key[csd.part3Start:], csd.values[csd.pos].Value, nil
 	}
-	return csd.historyCursor.Seek()
+
+	hAddrHash, hKeyHash, tsEnc, hV, err2 := csd.historyCursor.Seek()
+	if err2 != nil {
+		return nil, nil,nil, nil, err2
+	}
+	//find firsh chunk after timestamp
+	for hKeyHash != nil && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
+		hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
+		if err2 != nil {
+			return nil, nil,nil, nil, err2
+		}
+	}
+	hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
+	copy(hK[:len(hAddrHash)], hAddrHash)
+	copy(hK[len(hAddrHash):], hKeyHash)
+	data, found, err:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
+	if err!=nil {
+		return nil,nil, nil,nil, err
+	}
+	if found {
+		csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+	}
+
+	cmp, br:=walkAsOfCmp(csd.kd1, csd.kc1)
+	if br {
+		return nil, nil, nil,nil,nil
+	}
+	if cmp == 0 {
+		cmp, br = walkAsOfCmp(csd.kd2, csd.kc2)
+	}
+	if br {
+		return nil, nil, nil,nil,nil
+	}
+
+	var key1,key2, key3, val []byte
+	if cmp < 0 {
+		key1 = csd.kd1
+		key2 = csd.kd2
+		key3 = csd.kd3
+		val = csd.dv
+	} else {
+		key1 = csd.kc1
+		key2 = csd.kc2
+		key3 = csd.kc3
+		val = csd.cv
+
+	}
+	//shift changesets cursor~
+	if cmp <= 0 {
+		csd.pos++
+		if csd.pos<len(csd.values) {
+			if !csd.matchKey(csd.values[csd.pos].Key) {
+				csd.kd1 = nil
+				csd.kd2 = nil
+				csd.kd3 = nil
+				csd.dv  = nil
+			} else {
+				csd.kd1 = csd.values[csd.pos].Key[:csd.part1End]
+				csd.kd2 = csd.values[csd.pos].Key[csd.part2Start:csd.part3Start]
+				csd.kd3 = csd.values[csd.pos].Key[csd.part3Start:]
+				csd.dv  = csd.values[csd.pos].Value
+			}
+		} else {
+			csd.kd1 = nil
+			csd.kd2 = nil
+			csd.kd3 = nil
+			csd.dv  = nil
+		}
+	}
+
+	//shift history cursor
+	if cmp >= 0 {
+		hKeyHash0 := hKeyHash
+		hAddrHash0:=hAddrHash
+		for bytes.Equal(hAddrHash0, hAddrHash) && hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
+			hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
+			if err2 != nil {
+				return nil,nil, nil,nil, err2
+			}
+		}
+		hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
+		copy(hK[:len(hAddrHash)], hAddrHash)
+		copy(hK[len(hAddrHash):], hKeyHash)
+		data, found, err:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
+		if err!=nil {
+			return nil,nil, nil,nil, err
+		}
+		if found {
+			csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+		}
+	}
+
+	return key1, key2, key3, val, nil
 }
-func (csd *changesetSearchDecorator) Next() (key1, key2, key3, val []byte, err error) {
-	if len(csd.values)>0 && csd.pos < len(csd.values) {
-		if !csd.matchKey(csd.values[csd.pos].Key) {
-			return nil, nil, nil, nil, nil
-		}
-		defer func() {
-			csd.pos++
-		}()
-		return csd.values[csd.pos].Key[:csd.part1End], csd.values[csd.pos].Key[csd.part2Start:csd.part3Start], csd.values[csd.pos].Key[csd.part3Start:], csd.values[csd.pos].Value, nil
+func (csd *changesetSearchDecorator) Next() ([]byte,[]byte,[]byte,[]byte, error) {
+	cmp, br:=walkAsOfCmp(csd.kd1, csd.kc1)
+	if br {
+		return nil, nil, nil,nil,nil
 	}
-	return csd.historyCursor.Next()
+	if cmp == 0 {
+		cmp, br=walkAsOfCmp(csd.kd2, csd.kc2)
+	}
+	if br {
+		return nil, nil, nil,nil,nil
+	}
+
+	var key1,key2, key3, val []byte
+	if cmp < 0 {
+		key1 = csd.kd1
+		key2 = csd.kd2
+		key3 = csd.kd3
+		val = csd.dv
+	} else {
+		key1 = csd.kc1
+		key2 = csd.kc2
+		key3 = csd.kc3
+		val = csd.cv
+
+	}
+	//shift changesets cursor
+	if cmp <= 0 {
+		csd.pos++
+		if csd.pos<len(csd.values) {
+			if !csd.matchKey(csd.values[csd.pos].Key) {
+				csd.kd1 = nil
+				csd.kd2 = nil
+				csd.kd3 = nil
+				csd.dv  = nil
+			} else {
+				csd.kd1 = csd.values[csd.pos].Key[:csd.part1End]
+				csd.kd2 = csd.values[csd.pos].Key[csd.part2Start:csd.part3Start]
+				csd.kd3 = csd.values[csd.pos].Key[csd.part3Start:]
+				csd.dv  = csd.values[csd.pos].Value
+			}
+		} else {
+			csd.kd1 = nil
+			csd.kd2 = nil
+			csd.kd3 = nil
+			csd.dv  = nil
+		}
+	}
+
+	//shift history cursor
+	if cmp >= 0 {
+		hKeyHash0 := csd.kc2
+		hAddrHash0:=csd.kc1
+		hAddrHash, hKeyHash, tsEnc, hV, err2 := csd.historyCursor.Next()
+		for bytes.Equal(hAddrHash0, hAddrHash) && hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
+			hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
+			if err2 != nil {
+				return nil,nil, nil,nil, err2
+			}
+		}
+		if len(hAddrHash)>0&&len(hKeyHash)>0 {
+			hK:=make([]byte, len(hAddrHash)+len(hKeyHash))
+			copy(hK[:len(hAddrHash)], hAddrHash)
+			copy(hK[len(hAddrHash):], hKeyHash)
+			data, found, err:=findInHistory(hK,hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
+			if err!=nil {
+				return nil,nil, nil,nil, err
+			}
+			if found {
+				csd.kc1, csd.kc2,csd.kc3,csd.cv = hAddrHash, hKeyHash, tsEnc, data
+			}
+		} else {
+			csd.kc1, csd.kc2,csd.kc3,csd.cv = nil, nil, nil, nil
+		}
+	}
+
+	return key1, key2, key3, val, nil
 }
 
+var ErrNotInHistory = errors.New("not in history")
 func (csd *changesetSearchDecorator) matchKey(k []byte) bool {
 	if k == nil {
 		return false
@@ -631,13 +809,13 @@ func (csd *changesetSearchDecorator) matchKey(k []byte) bool {
 	return (k[csd.matchBytes-1] & csd.byteMask) == (csd.startKey[csd.matchBytes-1] & csd.byteMask)
 }
 
-func (csd *changesetSearchDecorator) buildChangeset(bucket ethdb.Bucket, from, to, timestamp uint64, walkerAdapter func(v []byte)changeset.Walker) error {
+func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	fmt.Println("buildChangeset")
 	cs:=make([]struct{
 		Walker changeset.Walker
 		BlockNum uint64
 	},0, to-from)
-	c:=bucket.Cursor()
+	c:=csd.bucket.Cursor()
 	_,_,err:=c.Seek(dbutils.EncodeTimestamp(from))
 	if err!=nil {
 		return err
@@ -650,7 +828,7 @@ func (csd *changesetSearchDecorator) buildChangeset(bucket ethdb.Bucket, from, t
 		cs=append(cs, struct {
 			Walker   changeset.Walker
 			BlockNum uint64
-		}{Walker: walkerAdapter(common.CopyBytes(v)), BlockNum: blockNum})
+		}{Walker: csd.walkerAdapter(common.CopyBytes(v)), BlockNum: blockNum})
 
 		return true, nil
 	})
@@ -658,11 +836,15 @@ func (csd *changesetSearchDecorator) buildChangeset(bucket ethdb.Bucket, from, t
 		return err
 	}
 
+	sort.Slice(cs, func(i, j int) bool {
+		return cs[i].BlockNum<cs[j].BlockNum
+	})
 	mp:=make(map[string][]byte)
 	for i:=len(cs)-1; i>=0; i-- {
-		replace:=cs[i].BlockNum>=timestamp
+		replace:=cs[i].BlockNum>=csd.timestamp
 		err = cs[i].Walker.Walk(func(k, v []byte) error {
 			if replace {
+				fmt.Println(cs[i].BlockNum, "replace ", common.Bytes2Hex(k), string(v))
 				mp[string(k)]=v
 			}
 			return nil
@@ -685,8 +867,5 @@ func (csd *changesetSearchDecorator) buildChangeset(bucket ethdb.Bucket, from, t
 		return cmp <= 0
 	})
 	csd.values =res
-	for _,v:=range res {
-		fmt.Println("core/state/history.go:623", common.Bytes2Hex(v.Key), string(v.Value))
-	}
 	return nil
 }
