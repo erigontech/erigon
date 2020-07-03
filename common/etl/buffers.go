@@ -199,7 +199,7 @@ func (b *oldestEntrySortableBuffer) Size() int {
 }
 
 func (b *oldestEntrySortableBuffer) Len() int {
-	return len(b.sortedBuf)
+	return len(b.entries)
 }
 func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
