@@ -119,7 +119,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 				}
 			}
 
-			jobs <- &senderRecoveryJob{bodyRlp: common.CopyBytes(v), blockNumber: blockNumber, index: int(blockNumber-s.BlockNumber-1)}
+			jobs <- &senderRecoveryJob{bodyRlp: common.CopyBytes(v), blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}
 
 			return true, nil
 		})
