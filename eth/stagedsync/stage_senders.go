@@ -119,7 +119,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 				}
 			}
 
-			jobs <- &senderRecoveryJob{bodyRlp: common.CopyBytes(v), blockHash: blockHash, blockNumber: blockNumber}
+			jobs <- &senderRecoveryJob{bodyRlp: common.CopyBytes(v), blockNumber: blockNumber, index: int(blockNumber-s.BlockNumber-1)}
 
 			return true, nil
 		})
@@ -157,11 +157,17 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
-		if err := collector.Collect(dbutils.BlockBodyKey(j.blockNumber, j.blockHash), j.senders); err != nil {
+		k := make([]byte, 4)
+		binary.BigEndian.PutUint32(k, uint32(j.index))
+		if err := collector.Collect(k, j.senders); err != nil {
 			return err
 		}
 	}
-	if err := collector.Load(db, dbutils.Senders, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+	loadFunc := func(k []byte, value []byte, _ etl.State, next etl.LoadNextFunc) error {
+		index := int(binary.BigEndian.Uint32(k))
+		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
+	}
+	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
 
@@ -171,8 +177,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 type senderRecoveryJob struct {
 	bodyRlp     rlp.RawValue
-	blockHash   common.Hash
 	blockNumber uint64
+	index       int
 	senders     []byte
 	err         error
 }
