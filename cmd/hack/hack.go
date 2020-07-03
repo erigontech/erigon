@@ -2310,6 +2310,11 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
+	if *action == "reset3" {
+		if err := resetStage3(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
 	if *action == "stage4" {
 		if err := testStage4(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
