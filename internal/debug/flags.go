@@ -20,21 +20,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/pprof"
+	_ "net/http/pprof"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
-	"time"
 
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum/go-ethereum/metrics/exp"
 	"github.com/fjl/memsize/memsizeui"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/metrics/exp"
 	colorable "github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
+	"gopkg.in/urfave/cli.v1"
 )
 
 var Memsize memsizeui.Handler
@@ -143,97 +139,6 @@ func init() {
 	glogger = log.NewGlogHandler(ostream)
 }
 
-func SetupCobra(cmd *cobra.Command) error {
-	flags := cmd.Flags()
-	dbg, err := flags.GetBool(debugFlag.Name)
-	if err != nil {
-		return err
-	}
-	lvl, err := flags.GetInt(verbosityFlag.Name)
-	if err != nil {
-		return err
-	}
-
-	vmodule, err := flags.GetString(vmoduleFlag.Name)
-	if err != nil {
-		return err
-	}
-	backtrace, err := flags.GetString(backtraceAtFlag.Name)
-	if err != nil {
-		return err
-	}
-
-	// logging
-	log.PrintOrigins(dbg)
-	glogger.Verbosity(log.Lvl(lvl))
-	err = glogger.Vmodule(vmodule)
-	if err != nil {
-		return err
-	}
-	if backtrace != "" {
-		err = glogger.BacktraceAt(backtrace)
-		if err != nil {
-			return err
-		}
-	}
-	log.Root().SetHandler(glogger)
-
-	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
-	if err != nil {
-		return err
-	}
-	blockprofilerate, err := flags.GetInt(blockprofilerateFlag.Name)
-	if err != nil {
-		return err
-	}
-	traceFile, err := flags.GetString(traceFlag.Name)
-	if err != nil {
-		return err
-	}
-	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
-	if err != nil {
-		return err
-	}
-
-	// profiling, tracing
-	runtime.MemProfileRate = memprofilerate
-	Handler.SetBlockProfileRate(blockprofilerate)
-	if traceFile != "" {
-		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
-			return err2
-		}
-	}
-	if cpuFile != "" {
-		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
-			return err2
-		}
-	}
-
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
-		Exit()
-	}()
-	pprof, err := flags.GetBool(pprofFlag.Name)
-	if err != nil {
-		return err
-	}
-	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
-	if err != nil {
-		return err
-	}
-	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
-	if err != nil {
-		return err
-	}
-
-	// metrics and pprof server
-	StartPProf(pprof, metrics.Enabled, fmt.Sprintf("%s:%d", pprofAddr, pprofPort))
-
-	return nil
-}
-
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
@@ -276,54 +181,40 @@ func Setup(ctx *cli.Context) error {
 	}
 
 	// pprof server
-	listenHost := ctx.GlobalString(pprofAddrFlag.Name)
-	if ctx.GlobalIsSet(legacyPprofAddrFlag.Name) && !ctx.GlobalIsSet(pprofAddrFlag.Name) {
-		listenHost = ctx.GlobalString(legacyPprofAddrFlag.Name)
-		log.Warn("The flag --pprofaddr is deprecated and will be removed in the future, please use --pprof.addr")
-	}
+	if ctx.GlobalBool(pprofFlag.Name) {
+		listenHost := ctx.GlobalString(pprofAddrFlag.Name)
+		if ctx.GlobalIsSet(legacyPprofAddrFlag.Name) && !ctx.GlobalIsSet(pprofAddrFlag.Name) {
+			listenHost = ctx.GlobalString(legacyPprofAddrFlag.Name)
+			log.Warn("The flag --pprofaddr is deprecated and will be removed in the future, please use --pprof.addr")
+		}
 
-	port := ctx.GlobalInt(pprofPortFlag.Name)
-	if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
-		port = ctx.GlobalInt(legacyPprofPortFlag.Name)
-		log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
-		Exit()
-	}
+		port := ctx.GlobalInt(pprofPortFlag.Name)
+		if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
+			port = ctx.GlobalInt(legacyPprofPortFlag.Name)
+			log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
+		}
 
-	address := fmt.Sprintf("%s:%d", listenHost, port)
-	StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
+		address := fmt.Sprintf("%s:%d", listenHost, port)
+		// This context value ("metrics.addr") represents the utils.MetricsHTTPFlag.Name.
+		// It cannot be imported because it will cause a cyclical dependency.
+		StartPProf(address, !ctx.GlobalIsSet("metrics.addr"))
+	}
 	return nil
 }
 
-func StartPProf(enablePprof bool, enableMetrics bool, address string) {
-	mux := http.NewServeMux()
-	if enablePprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "?seconds=20")
-		heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
-		log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
+func StartPProf(address string, withMetrics bool) {
+	// Hook go-metrics into expvar on any /debug/metrics request, load all vars
+	// from the registry into expvar, and execute regular expvar handler.
+	if withMetrics {
+		exp.Exp(metrics.DefaultRegistry)
 	}
-
-	if enableMetrics {
-		// Hook go-metrics into expvar on any /debug/metrics request, load all vars
-		// from the registry into expvar, and execute regular expvar handler.
-		exp.Exp(metrics.DefaultRegistry, mux)
-		mux.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
-		// Start system runtime metrics collection
-		go metrics.CollectProcessMetrics(3 * time.Second)
-		log.Info("Starting metrics server", "addr", address)
-	}
-
-	if enableMetrics || enablePprof {
-		go func() {
-			if err := http.ListenAndServe(address, mux); err != nil {
-				log.Error("Failure in running metrics server", "err", err)
-			}
-		}()
-	}
+	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
+	log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+	go func() {
+		if err := http.ListenAndServe(address, nil); err != nil {
+			log.Error("Failure in running pprof server", "err", err)
+		}
+	}()
 }
 
 // Exit stops all running profiles, flushing their output to the
