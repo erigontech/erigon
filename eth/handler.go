@@ -681,14 +681,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				return errResp(ErrDecode, "msg %v: %v", msg, err)
 			}
 			// Retrieve the requested block body, stopping if enough was found
-			if body := pm.blockchain.GetBody(hash); body != nil {
-				smallBody := &blockBody{Transactions: body.Transactions, Uncles: body.Uncles}
-				if data, err := rlp.EncodeToBytes(smallBody); err == nil {
-					bodies = append(bodies, data)
-					bytes += len(data)
-				} else {
-					return err
-				}
+			if data := pm.blockchain.GetBodyRLP(hash); len(data) != 0 {
+				bodies = append(bodies, data)
+				bytes += len(data)
 			}
 		}
 		return p.SendBlockBodiesRLP(bodies)

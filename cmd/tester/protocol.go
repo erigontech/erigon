@@ -373,9 +373,7 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 				newSentBlocks++
 			}
 			body := block.Body()
-			// Need to transform because our blocks also contain list of tx senders
-			smallBody := types.SmallBody{Transactions: body.Transactions, Uncles: body.Uncles}
-			data, err := rlp.EncodeToBytes(smallBody)
+			data, err := rlp.EncodeToBytes(body)
 			if err != nil {
 				return newSentBlocks, fmt.Errorf("failed to encode body: %w", err)
 			}
