@@ -1721,6 +1721,45 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
+func resetStage3(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.ClearBuckets(
+		dbutils.Senders,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+		return err
+	}
+	var err error
+	var stage2progress uint64
+	if stage2progress, _, err = stages.GetStageProgress(db, stages.Bodies); err != nil {
+		return err
+	}
+	log.Info("Stage2", "progress", stage2progress)
+	ch := make(chan struct{})
+	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: 0}
+	const batchSize = 10000
+	const blockSize = 4096
+	n := runtime.NumCPU()
+
+	cfg := stagedsync.Stage3Config{
+		BatchSize:       batchSize,
+		BlockSize:       blockSize,
+		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
+		StartTrace:      false,
+		Prof:            false,
+		NumOfGoroutines: n,
+		ReadChLen:       4,
+		Now:             time.Now(),
+	}
+	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
+		return err
+	}
+	return nil
+}
+
 func testStage4(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2268,6 +2307,11 @@ func main() {
 	}
 	if *action == "getProof" {
 		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "reset3" {
+		if err := resetStage3(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
