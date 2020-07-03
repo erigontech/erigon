@@ -157,7 +157,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
-		collector.Collect(dbutils.BlockBodyKey(j.blockNumber, j.blockHash), j.senders)
+		if err := collector.Collect(dbutils.BlockBodyKey(j.blockNumber, j.blockHash), j.senders); err != nil {
+			return err
+		}
 	}
 	if err := collector.Load(db, dbutils.Senders, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
