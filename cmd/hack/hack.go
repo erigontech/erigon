@@ -1761,7 +1761,10 @@ func resetStage3(chaindata string) error {
 		return err
 	}
 	*/
-	if err := stages.SaveStageProgress(db, stages.HashState, stage2progress, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.Senders, stage2progress, nil); err != nil {
 		return err
 	}
 	return nil
