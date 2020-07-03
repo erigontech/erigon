@@ -287,7 +287,7 @@ func ReadBody(db DatabaseReader, hash common.Hash, number uint64) *types.Body {
 func ReadSenders(db DatabaseReader, hash common.Hash, number uint64) []common.Address {
 	data, _ := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
 	senders := make([]common.Address, len(data)/common.AddressLength)
-	for i := 0; i < len(senders); i ++ {
+	for i := 0; i < len(senders); i++ {
 		copy(senders[i][:], data[i*common.AddressLength:])
 	}
 	return senders
@@ -311,7 +311,7 @@ func WriteSenders(ctx context.Context, db DatabaseWriter, hash common.Hash, numb
 	if common.IsCanceled(ctx) {
 		return
 	}
-	data := make([]byte, common.AddressLength * len(senders))
+	data := make([]byte, common.AddressLength*len(senders))
 	for i, sender := range senders {
 		copy(data[i*common.AddressLength:], sender[:])
 	}
