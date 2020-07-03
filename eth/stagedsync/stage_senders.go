@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -17,7 +16,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -39,7 +38,7 @@ type Stage3Config struct {
 	Now             time.Time
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Database, config *params.ChainConfig, quitCh chan struct{}) error {
+func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
 	if cfg.StartTrace {
 		filePath := fmt.Sprintf("trace_%d_%d_%d.out", cfg.Now.Day(), cfg.Now.Hour(), cfg.Now.Minute())
 		f1, err := os.Create(filePath)
@@ -70,14 +69,14 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 	if err := common.Stopped(quitCh); err != nil {
 		return err
 	}
-	toBlockNumber, _, err := stages.GetStageProgress(stateDB, stages.Bodies)
+	toBlockNumber, _, err := stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return err
 	}
 	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
 	currentHeaderIdx := 0
 
-	err = stateDB.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	err = db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 		if err = common.Stopped(quitCh); err != nil {
 			return false, err
 		}
@@ -96,7 +95,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
 	go func() {
 		defer close(jobs)
-		err = stateDB.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+		err = db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 			if err = common.Stopped(quitCh); err != nil {
 				return false, err
 			}
@@ -150,14 +149,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 		close(out)
 	}()
 
-	mutation := stateDB.NewBatch()
-	defer func() {
-		_, dbErr := mutation.Commit()
-		if dbErr != nil {
-			log.Error("Sync (Senders): failed to write db commit", "err", dbErr)
-		}
-	}()
-
+	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	for j := range out {
 		if j.err != nil {
 			return err
@@ -165,18 +157,10 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, stateDB ethdb.Dat
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
-		rawdb.WriteSenders(context.Background(), mutation, j.blockHash, j.blockNumber, j.froms)
-
-		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if err := s.Update(mutation, j.blockNumber); err != nil {
-				return err
-			}
-			log.Info("Recovered for blocks:", "blockNumber", j.blockNumber)
-			if _, err := mutation.Commit(); err != nil {
-				return err
-			}
-			mutation = stateDB.NewBatch()
-		}
+		collector.Collect(dbutils.BlockBodyKey(j.blockNumber, j.blockHash), j.senders)
+	}
+	if err := collector.Load(db, dbutils.Senders, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+		return err
 	}
 
 	s.Done()
@@ -187,7 +171,7 @@ type senderRecoveryJob struct {
 	bodyRlp     rlp.RawValue
 	blockHash   common.Hash
 	blockNumber uint64
-	froms       []common.Address
+	senders     []byte
 	err         error
 }
 
@@ -203,7 +187,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 			return
 		}
 		signer := types.MakeSigner(config, big.NewInt(int64(job.blockNumber)))
-		job.froms = make([]common.Address, len(body.Transactions))
+		job.senders = make([]byte, len(body.Transactions)*common.AddressLength)
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
@@ -214,7 +198,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 				job.err = errors.New("invalid chainId")
 				break
 			}
-			job.froms[i] = from
+			copy(job.senders[i*common.AddressLength:], from[:])
 		}
 
 		// prevent sending to close channel

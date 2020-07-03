@@ -1754,7 +1754,7 @@ func resetStage3(chaindata string) error {
 		ReadChLen:       4,
 		Now:             time.Now(),
 	}
-	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, ch); err != nil {
+	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
 		return err
 	}
 	return nil
