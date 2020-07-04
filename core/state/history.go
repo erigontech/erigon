@@ -401,7 +401,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			maxKeyLen=common.AddressLength
 		}
 
-		historyCursor := ethdb.NewSplitCursor(
+		var historyCursor historyCursor = ethdb.NewSplitCursor(
 			hB,
 			startkey,
 			fixedbits,
@@ -409,6 +409,15 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			part2Start,   /* part2start */
 			part3Start, /* part3start */
 		)
+		if true {
+			decorator:=NewChangesetSearchDecorator(historyCursor, csB, startkey,fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+			err:=decorator.buildChangeset(0, 7)
+			if err!=nil {
+				return err
+			}
+			historyCursor = decorator
+		}
+
 		k, v, err1 := mainCursor.Seek(startkey)
 		if err1 != nil {
 			return err1

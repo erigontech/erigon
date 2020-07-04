@@ -1507,3 +1507,181 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	addr3(3e05):"state"
 	addr4(d12e):""
 */
+
+
+func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+	ctx := context.Background()
+	emptyValAcc := accounts.NewAccount()
+	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
+	emptyValAcc.EncodeForStorage(emptyVal)
+
+	block3ValAcc:= emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce=3
+	block3ValAcc.Initialised=true
+	block3Val:=make([]byte,block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc.EncodeForStorage(block3Val)
+
+	stateValAcc:= emptyValAcc.SelfCopy()
+	stateValAcc.Nonce=5
+	stateValAcc.Initialised=true
+	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
+	stateValAcc.EncodeForStorage(stateVal)
+
+	numOfAccounts:=uint8(4)
+	addrs:=make([]common.Address, numOfAccounts)
+	addrHashes:=make([]common.Hash, numOfAccounts)
+	for i:=uint8(0); i<numOfAccounts; i++ {
+		addrs[i] = common.Address{i+1}
+		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHashes[i] = addrHash
+	}
+
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block2Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	tds.SetBlockNr(3)
+	blockWriter := tds.DbStateWriter()
+
+	if err := blockWriter.UpdateAccountData(ctx, addrs[0], &emptyValAcc, block3ValAcc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.UpdateAccountData(ctx, addrs[2], &emptyValAcc, block3ValAcc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.UpdateAccountData(ctx, addrs[3], &emptyValAcc, block3ValAcc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+
+	tds.SetBlockNr(5)
+	blockWriter = tds.DbStateWriter()
+
+	if err := blockWriter.UpdateAccountData(ctx, addrs[0], block3ValAcc, stateValAcc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.UpdateAccountData(ctx, addrs[1], &emptyValAcc, stateValAcc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.DeleteAccount(ctx, addrs[3], block3ValAcc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+ 
+	var startKey [32]byte
+	err := WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Sort(block2Expected)
+	sort.Sort(block2)
+	if !reflect.DeepEqual(block2, block2Expected) {
+		fmt.Println("expected:")
+		fmt.Println(block2Expected.String())
+		fmt.Println("obtained:")
+		fmt.Println(block2.String())
+		t.Fatal("block 2 result is incorrect")
+	}
+
+
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block4Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
+			{
+				addrHashes[0].Bytes(),
+				block3Val,
+			},
+			{
+				addrHashes[2].Bytes(),
+				block3Val,
+			},
+			{
+				addrHashes[3].Bytes(),
+				block3Val,
+			},
+		},
+	}
+
+	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Sort(block4Expected)
+	sort.Sort(block4)
+	if !reflect.DeepEqual(block4, block4Expected) {
+		fmt.Println("expected:")
+		fmt.Println(block4Expected.String())
+		fmt.Println("obtained:", )
+		fmt.Println(block4.String())
+		t.Fatal("block 4 result is incorrect")
+	}
+
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block6Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
+			{
+				addrHashes[0].Bytes(),
+				stateVal,
+			},
+			{
+				addrHashes[1].Bytes(),
+				stateVal,
+			},
+			{
+				addrHashes[2].Bytes(),
+				block3Val,
+			},
+		},
+	}
+
+	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Sort(block6Expected)
+	sort.Sort(block6)
+	if !reflect.DeepEqual(block6, block6Expected) {
+		fmt.Println("expected:")
+		fmt.Println(block6Expected.String())
+		fmt.Println("obtained:")
+		fmt.Println(block6.String())
+		t.Fatal("block 6 result is incorrect")
+	}
+}
