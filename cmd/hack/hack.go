@@ -1979,6 +1979,253 @@ func findPreimage(chaindata string, hash common.Hash) error {
 	return nil
 }
 
+/*
+CurrentStateBucket layout which utilises DupSort feature of LMDB (store multiple values inside 1 key).
+LMDB stores multiple values of 1 key in B+ tree (as keys which have no values).
+It allows do Seek by values and other features of LMDB.
+You can think about it as Sub-Database which doesn't store any values.
+-------------------------------------------------------------
+       key              |            value
+-------------------------------------------------------------
+[acc_hash]              | [acc_value]
+[acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
+                        | [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+                        | [storage3_hash]+[storage3_value]
+                        | ...
+[acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
+                        | ...
+[acc2_hash]             | [acc2_value]
+                        ...
+
+
+On 5M block CurrentState bucket using 5.9Gb. This layout using 2.3Gb. See dupSortState()
+
+Another feature of this layout is:
+- DupSort stores values in B+ tree
+- To delete key with multiple values - LMDB does add pages (of sub-tree) to the free list
+- Same logic used when `drop bucket`
+- LMDB doesn't deletes much. Deletion of 17GB (1 key with 1 billions values 8 bytes each) took 2sec on SSD. See deleteLargeDupSortKey()
+- It means performance of deletion contracts with huge storage is predictable
+- Means we can drop incarnations concept
+
+
+As further evolution of this idea:
+- Can add CodeHash as 2-nd value of [acc_hash] key (just use 1st byte to store type of value)
+- And drop ContractCodeBucket
+*/
+func dupSortState(chaindata string) {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	dbFile := "statedb_dupsort"
+	dbFile2 := "statedb_no_dupsort"
+
+	err := os.MkdirAll(dbFile, 0744)
+	check(err)
+	env, err := lmdb.NewEnv()
+	check(err)
+	err = env.SetMaxDBs(100)
+	check(err)
+	err = env.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags uint = lmdb.NoReadahead
+	err = env.Open(dbFile, flags, 0664)
+	check(err)
+	defer env.Close()
+
+	err = os.MkdirAll(dbFile2, 0744)
+	check(err)
+	env2, err := lmdb.NewEnv()
+	check(err)
+	err = env2.SetMaxDBs(100)
+	check(err)
+	err = env2.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags2 uint = lmdb.NoReadahead
+	err = env2.Open(dbFile2, flags2, 0664)
+	check(err)
+	defer env.Close()
+
+	var newStateBucket lmdb.DBI
+	err = env.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
+		check(createErr)
+		return nil
+	})
+	check(err)
+
+	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		sz, _ := b.Size()
+		fmt.Printf("Current State bucket size: %s\n", common.StorageSize(sz))
+
+		txn, _ := env.BeginTxn(nil, 0)
+		err = txn.Drop(newStateBucket, false)
+		check(err)
+
+		txn2, _ := env2.BeginTxn(nil, 0)
+		err = txn2.Drop(newStateBucket, false)
+		check(err)
+
+		c := b.Cursor()
+		i := 0
+		for k, v, err1 := c.First(); k != nil; k, v, err = c.Next() {
+			check(err1)
+			i++
+			if i%1_000_000 == 0 {
+				err = txn.Commit()
+				check(err)
+				txn, _ = env.BeginTxn(nil, 0)
+				err = txn2.Commit()
+				check(err)
+				txn2, _ = env2.BeginTxn(nil, 0)
+				fmt.Printf("%x\n", k[:2])
+			}
+
+			if len(k) == common.HashLength {
+				err = txn.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.AppendDup)
+				check(err)
+				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
+				check(err)
+			} else {
+				prefix := k[:common.HashLength+common.IncarnationLength]
+				suffix := k[common.HashLength+common.IncarnationLength:]
+				err = txn.Put(newStateBucket, common.CopyBytes(prefix), append(suffix, v...), lmdb.AppendDup)
+				check(err)
+				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
+				check(err)
+			}
+		}
+		err = txn.Commit()
+		check(err)
+		err = txn2.Commit()
+		check(err)
+
+		return nil
+	})
+	check(err)
+
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		i := 0
+		for k, v, err := cur.Get(nil, nil, lmdb.First); !lmdb.IsNotFound(err); k, v, err = cur.Get(nil, nil, lmdb.Next) {
+			check(err)
+			i++
+			if i == 100 { // print first 100
+				return nil
+			}
+			if len(k) == 32 {
+				fmt.Printf("Acc: %x, %x\n", k, v)
+				continue
+			}
+
+			// try to seek on incarnation=2 and check that no incarnation=1 are visible
+			for _, v, err := cur.Get(nil, nil, lmdb.FirstDup); !lmdb.IsNotFound(err); _, v, err = cur.Get(nil, nil, lmdb.NextDup) {
+				fmt.Printf("Storage: %x, %x\n", k, v)
+			}
+		}
+		return nil
+	})
+	check(err)
+}
+
+func deleteLargeDupSortKey() {
+	dbFile := "statedb_dupsort_delete"
+	err := os.MkdirAll(dbFile, 0744)
+	check(err)
+	env, err := lmdb.NewEnv()
+	check(err)
+	err = env.SetMaxDBs(100)
+	check(err)
+	err = env.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags uint = lmdb.NoReadahead
+	err = env.Open(dbFile, flags, 0664)
+	check(err)
+	defer env.Close()
+
+	var newStateBucket lmdb.DBI
+	err = env.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
+		check(createErr)
+		return nil
+	})
+	check(err)
+
+	k := common.FromHex("000034c2eb874b6125c8a84e69fe77640d468ccef4c02a2d20c284446dbb1460")
+
+	txn, _ := env.BeginTxn(nil, 0)
+	err = txn.Drop(newStateBucket, false)
+	check(err)
+
+	for i := uint64(0); i < 1_000_000_000; i++ {
+		if i%10_000_000 == 0 {
+			err = txn.Commit()
+			check(err)
+			txn, err = env.BeginTxn(nil, 0)
+			check(err)
+			fmt.Printf("%dM\n", i/1_000_000)
+		}
+
+		v := make([]byte, 8)
+		binary.BigEndian.PutUint64(v, i)
+		err = txn.Put(newStateBucket, k, v, lmdb.AppendDup)
+		check(err)
+	}
+	err = txn.Commit()
+	check(err)
+
+	//print new bucket size
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
+	// delete single DupSort key
+	t := time.Now()
+	err = env.Update(func(txn *lmdb.Txn) (err error) {
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		k, _, err = cur.Get(k, nil, lmdb.SetRange)
+		check(err)
+		err = cur.Del(lmdb.NoDupData)
+		check(err)
+		return nil
+	})
+	check(err)
+	fmt.Printf("Deletion took: %s\n", time.Since(t))
+
+	// check that no keys are left in the bucket
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		for k, v, err := cur.Get(nil, nil, lmdb.First); !lmdb.IsNotFound(err); k, v, err = cur.Get(nil, nil, lmdb.Next) {
+			check(err)
+			fmt.Printf("Still see some key: %x, %x\n", k, v)
+			panic(1)
+		}
+		return nil
+	})
+	check(err)
+}
+
 func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2389,6 +2636,12 @@ func main() {
 		if err := fixStages(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
+	}
+	if *action == "deleteLargeDupSortKey" {
+		deleteLargeDupSortKey()
+	}
+	if *action == "dupSortState" {
+		dupSortState(*chaindata)
 	}
 	if *action == "compare" {
 		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {
