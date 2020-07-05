@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"io"
+	"runtime"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
-	"io"
-	"runtime"
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
@@ -122,7 +123,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				return err
 			}
 			runtime.ReadMemStats(&m)
-			log.Info(
+			log.Debug(
 				"Committed batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),
@@ -160,7 +161,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 		return err
 	}
 	runtime.ReadMemStats(&m)
-	log.Info(
+	log.Debug(
 		"Committed batch",
 		"bucket", string(bucket),
 		"size", common.StorageSize(batchSize),

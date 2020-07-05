@@ -19,7 +19,10 @@ var cmdSyncBySmallSteps = &cobra.Command{
 	Short: "Staged sync in mode '1 step back 2 steps forward' with integrity checks after each step",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
-		return syncBySmallSteps(ctx, chaindata)
+		if err := syncBySmallSteps(ctx, chaindata); err != nil {
+			log.Error("Error", "err", err)
+		}
+		return nil
 	},
 }
 
@@ -50,15 +53,14 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		rewind := blocksPerStep
 
-		if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-			return err
-		}
-		if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-			return err
-		}
+		stage4progress, stage5progress = progress(db)
 		log.Info("Stages", "Exec", stage4progress, "IH", stage5progress)
+
+		if stage4progress <= blocksPerStep+1 {
+			rewind = 0
+		}
 		core.UsePlainStateExecution = true
-		if stage4progress == 0 {
+		if stage4progress <= blocksPerStep+1 {
 			rewind = 0
 		}
 
@@ -77,19 +79,41 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
+		stage4progress, stage5progress = progress(db)
+		log.Info("Stages", "Exec", stage4progress, "IH", stage5progress)
 		// Stage 5: 1 step back, 2 forward
-		{
-			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
+		if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+			return err
+		}
+
+		if stage5progress > blocksPerStep+1 {
+			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage4progress - rewind}
 			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
 			if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ctx.Done()); err != nil {
 				return err
 			}
 		}
+
 		{
-			stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
+			stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage4progress}
 			if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ctx.Done()); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func progress(db ethdb.Getter) (uint64, uint64) {
+	var stage4progress, stage5progress uint64
+	var err error
+	stage4progress, _, err = stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		panic(err)
+	}
+	stage4progress, _, err = stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		panic(err)
+	}
+
+	return stage4progress, stage5progress
 }
