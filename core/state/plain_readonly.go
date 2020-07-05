@@ -187,7 +187,8 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	trace := address == common.HexToAddress("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab")
+	//trace := address == common.HexToAddress("0x09400ec683f70174e1217d6dcdbf42448e8de5d6")
+	trace := false
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	enc, err := GetAsOf(dbs.db, true /* plain */, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {

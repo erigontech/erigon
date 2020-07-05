@@ -16,7 +16,8 @@ import (
 )
 
 func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	trace := bytes.HasPrefix(key, common.FromHex("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab"))
+	//trace := bytes.HasPrefix(key, common.FromHex("0x09400ec683f70174e1217d6dcdbf42448e8de5d6"))
+	trace := false
 	if trace {
 		fmt.Printf("GetAsOf plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
 	}
@@ -58,7 +59,8 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 }
 
 func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	trace := bytes.HasPrefix(key, common.FromHex("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab"))
+	//trace := bytes.HasPrefix(key, common.FromHex("0x09400ec683f70174e1217d6dcdbf42448e8de5d6"))
+	trace := false
 	if trace {
 		fmt.Printf("FindByHistory plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
 	}
