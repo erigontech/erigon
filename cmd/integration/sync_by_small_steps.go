@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -56,33 +55,39 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		rewind := blocksPerStep
 
-		execProgress, ihProgress = progress(db)
-		fmt.Printf("2: %d, %d\n", execProgress, ihProgress)
-
-		if execProgress > blocksPerStep+1 {
-			// Stage 4: 1 step back
-			{
-				u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execProgress - rewind}
-				s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
-				if err = stagedsync.UnwindExecutionStage(u, s, db); err != nil {
-					return err
-				}
+		// Stage 4: 1 step back
+		{
+			execProgress, ihProgress = progress(db)
+			if execProgress < blocksPerStep+1 {
+				goto Unwind4End
 			}
 
-			// Stage 5: 1 step back
-			{
-				u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: execProgress - rewind}
-				s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
-				if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ctx.Done()); err != nil {
-					return err
-				}
+			u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execProgress - rewind}
+			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
+			if err = stagedsync.UnwindExecutionStage(u, s, db); err != nil {
+				return err
 			}
 		}
+	Unwind4End:
 
-		execProgress, ihProgress = progress(db)
-		fmt.Printf("2: %d, %d\n", execProgress, ihProgress)
+		// Stage 5: 1 step back
+		{
+			execProgress, ihProgress = progress(db)
+			if execProgress < blocksPerStep+1 {
+				goto Unwind5End
+			}
+
+			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: execProgress}
+			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
+			if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ctx.Done()); err != nil {
+				return err
+			}
+		}
+	Unwind5End:
+
 		// Stage 4: 2 forward
 		{
+			execProgress, ihProgress = progress(db)
 			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
 			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, execProgress+2*blocksPerStep, ctx.Done(), nil, false); err != nil {
 				return err
@@ -91,6 +96,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// Stage 5: 2 forward
 		{
+			execProgress, ihProgress = progress(db)
 			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
 			if err = stagedsync.SpawnIntermediateHashesStage(s, db, "", ctx.Done()); err != nil {
 				return err
@@ -106,7 +112,7 @@ func progress(db ethdb.Getter) (uint64, uint64) {
 	if err != nil {
 		panic(err)
 	}
-	stage5progress, _, err = stages.GetStageProgress(db, stages.Execution)
+	stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes)
 	if err != nil {
 		panic(err)
 	}

@@ -105,7 +105,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1)
+	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1, "to", limit)
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
