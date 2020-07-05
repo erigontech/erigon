@@ -96,8 +96,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// Stage 5: 2 forward
 		{
-			execProgress, ihProgress = progress(db)
-			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
+			s := &stagedsync.StageState{Stage: stages.IntermediateHashes}
 			if err = stagedsync.SpawnIntermediateHashesStage(s, db, "", ctx.Done()); err != nil {
 				return err
 			}

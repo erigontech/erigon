@@ -1656,7 +1656,7 @@ func testStage5(chaindata string, reset bool) error {
 	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage4progress}
+	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
 	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
 		return err
 	}
@@ -1672,14 +1672,10 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
 	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage4progress - rewind}
+	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
 	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
 	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
 		return err
