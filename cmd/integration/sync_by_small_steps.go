@@ -70,21 +70,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	Unwind4End:
 
-		// Stage 5: 1 step back
-		{
-			execProgress, ihProgress = progress(db)
-			if execProgress < blocksPerStep+1 {
-				goto Unwind5End
-			}
-
-			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: execProgress}
-			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
-			if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ctx.Done()); err != nil {
-				return err
-			}
-		}
-	Unwind5End:
-
 		// Stage 4: 2 forward
 		{
 			execProgress, ihProgress = progress(db)
@@ -94,9 +79,25 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
+		// Stage 5: 1 step back
+		{
+			execProgress, ihProgress = progress(db)
+			if ihProgress < blocksPerStep+1 {
+				goto Unwind5End
+			}
+
+			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: execProgress - rewind}
+			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
+			if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ctx.Done()); err != nil {
+				return err
+			}
+		}
+	Unwind5End:
+
 		// Stage 5: 2 forward
 		{
-			s := &stagedsync.StageState{Stage: stages.IntermediateHashes}
+			execProgress, ihProgress = progress(db)
+			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
 			if err = stagedsync.SpawnIntermediateHashesStage(s, db, "", ctx.Done()); err != nil {
 				return err
 			}
