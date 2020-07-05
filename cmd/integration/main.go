@@ -13,10 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	chaindata string
-)
-
 var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for turbo-geth",
@@ -32,7 +28,6 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricsEnabledFlag, utils.MetricsEnabledExpensiveFlag))
-	rootCmd.PersistentFlags().StringVar(&chaindata, "chaindata", "", "path to db")
 }
 
 func main() {
