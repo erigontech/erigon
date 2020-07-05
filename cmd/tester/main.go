@@ -75,11 +75,6 @@ func init() {
 			Name:   "genesis",
 			Usage:  "Produce genesis.json file for geth",
 		},
-		{
-			Action: utils.MigrateFlags(mgrCmd),
-			Name:   "mgr",
-			Usage:  "MGR (aka Marry-Go-Round) protocol to swarm-full-sync",
-		},
 	}
 
 }
@@ -185,26 +180,6 @@ func genesisCmd(cliCtx *cli.Context) error {
 	return nil
 }
 
-func mgrCmd(cliCtx *cli.Context) error {
-	ctx := rootContext()
-	nodeToConnect, err := getTargetAddr(cliCtx)
-	if err != nil {
-		return err
-	}
-
-	tp := NewTesterProtocol()
-	server := makeP2PServer(ctx, tp, []string{eth.MGRName})
-
-	// Add protocol
-	if err := server.Start(); err != nil {
-		panic(fmt.Sprintf("Could not start server: %v", err))
-	}
-	server.AddPeer(nodeToConnect)
-
-	<-ctx.Done()
-	return nil
-}
-
 func makeP2PServer(ctx context.Context, tp *TesterProtocol, protocols []string) *p2p.Server {
 	serverKey, err := crypto.GenerateKey()
 	if err != nil {
@@ -232,14 +207,6 @@ func makeP2PServer(ctx context.Context, tp *TesterProtocol, protocols []string) 
 			Length:  eth.DebugLengths[eth.DebugVersions[0]],
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				return tp.debugProtocolRun(ctx, peer, rw)
-			},
-		},
-		eth.MGRName: {
-			Name:    eth.MGRName,
-			Version: eth.MGRVersions[0],
-			Length:  eth.MGRLengths[eth.MGRVersions[0]],
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-				return tp.mgrProtocolRun(ctx, peer, rw)
 			},
 		},
 	}

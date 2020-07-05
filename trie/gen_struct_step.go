@@ -37,7 +37,7 @@ type structInfoReceiver interface {
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(hash []byte, dataLen uint64) error
+	hash(hash []byte) error
 	topHash() []byte
 }
 
@@ -71,8 +71,7 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash        common.Hash
-	WitnessSize uint64
+	Hash common.Hash
 }
 
 func (GenStructStepHashData) GenStructStepData() {}
@@ -134,7 +133,7 @@ func GenStructStep(
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash[:], v.WitnessSize); err != nil {
+				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
 				buildExtensions = true

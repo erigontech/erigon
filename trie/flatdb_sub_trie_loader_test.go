@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -258,11 +256,6 @@ func TestApiDetails(t *testing.T) {
 	putIH := func(k string, v string) {
 		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
-	putIDataLen := func(k string, v uint64) {
-		lenBytes := make([]byte, 8)
-		binary.BigEndian.PutUint64(lenBytes, v)
-		require.NoError(db.Put(dbutils.IntermediateWitnessSizeBucket, common.Hex2Bytes(k), lenBytes))
-	}
 
 	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached SubTrieLoaders
 	// Test works with keys like: {base}{i}{j}{zeroes}
@@ -307,8 +300,6 @@ func TestApiDetails(t *testing.T) {
 	*/
 	putIH("00", "7e099756ba801779e6ac78da0c8f0272a2033e92314f02fbf7ec5158ab57017b")
 	putIH("ff", "73e9eaef7cbb0b824f964669ee2ebff9ed7a4cd2c672b521e44f9b33cab8aa55")
-	putIDataLen("00", 254)
-	putIDataLen("ff", 256)
 
 	// this IntermediateHash key must not be used, because such key is in ResolveRequest
 	// putIH("01", "0000000000000000000000000000000000000000000000000000000000000000")
@@ -410,42 +401,6 @@ func TestApiDetails(t *testing.T) {
 		//	tr.Update(hexf("021%0125x", 0), nil)
 		//	tr.Update(hexf("051%0125x", 0), nil)
 		//})
-	}
-
-	if debug.IsTrackWitnessSizeEnabled() {
-		loader := NewSubTrieLoader(0)
-		rs := NewRetainList(0)
-		for _, base := range []string{"0", "f"} {
-			for _, i := range []int{0, 1, 2, 15} {
-				for _, j := range []int{0, 1, 2, 15} {
-					contract := hexf("0"+base+"0%x0%x%0122x", i, j, 0)
-					rs.AddHex(append(contract, hexf("%0128x", 0)...))
-				}
-			}
-		}
-		dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
-		subTries, err := loader.LoadSubTries(db, 0, rs, nil /* HashCollector */, dbPrefixes, fixedbits, false)
-		require.NoError(err)
-
-		err = tr.HookSubTries(subTries, hooks) // hook up to the root
-		assert.NoError(err)
-
-		assert.Equal(uint64(2050), tr.root.witnessSize())
-		assert.Equal(uint64(1024), tr.root.(*fullNode).Children[0].witnessSize())
-		assert.Equal(uint64(254), tr.root.(*fullNode).Children[0].(*fullNode).Children[0].witnessSize())
-		assert.Equal(uint64(256), tr.root.(*fullNode).Children[15].(*fullNode).Children[15].witnessSize())
-
-		witness, err := tr.ExtractWitness(false, rs)
-		if err != nil {
-			panic(err)
-		}
-
-		var buf bytes.Buffer
-		_, err = witness.WriteTo(&buf)
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("WitnessSize. Real: %d, Estimate: %d\n", buf.Len(), tr.root.witnessSize())
 	}
 }
 

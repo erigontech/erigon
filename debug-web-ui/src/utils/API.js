@@ -54,16 +54,6 @@ export default class API {
     });
   }
 
-  lookupIntermediateDataLen(prefix) {
-    return axios({
-      url: this.endpoint('/api/v1/intermediate-data-len/'),
-      method: 'get',
-      params: {
-        prefix: prefix,
-      },
-    });
-  }
-
   dbSize(prefix) {
     return axios({
       url: this.endpoint('/api/v1/db/size'),

@@ -98,7 +98,7 @@ func (b *WitnessBuilder) makeHashNode(n node, force bool, hashNodeFunc HashNodeF
 		if _, err := hashNodeFunc(n, force, hash[:]); err != nil {
 			return hashNode{}, err
 		}
-		return hashNode{hash: hash[:], iws: n.witnessSize()}, nil
+		return hashNode{hash: hash[:]}, nil
 	}
 }
 
@@ -154,7 +154,7 @@ func (b *WitnessBuilder) processAccountCode(n *accountNode, retainDec RetainDeci
 	}
 
 	if n.code == nil || (retainDec != nil && !retainDec.IsCodeTouched(n.CodeHash)) {
-		return b.addHashOp(hashNode{hash: n.CodeHash[:], iws: uint64(n.codeSize)})
+		return b.addHashOp(hashNode{hash: n.CodeHash[:]})
 	}
 
 	return b.addCodeOp(n.code)
