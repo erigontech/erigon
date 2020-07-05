@@ -597,7 +597,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				t.evictNodeFromHashMap(n)
 				n.Val = nn
 				n.ref.len = 0
-				n.recalculateWitnessSize()
 			}
 			newNode = n
 		} else {
@@ -624,7 +623,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				branch.child2 = c1
 			}
 			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
-			branch.recalculateWitnessSize()
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -634,7 +632,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
 				n.ref.len = 0
-				n.recalculateWitnessSize()
 				newNode = n
 			}
 			t.observers.BranchNodeCreated(key[:pos+matchlen])
@@ -652,7 +649,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				t.evictNodeFromHashMap(n)
 				n.child1 = nn
 				n.ref.len = 0
-				n.recalculateWitnessSize()
 			}
 			newNode = n
 		case i2:
@@ -661,7 +657,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				t.evictNodeFromHashMap(n)
 				n.child2 = nn
 				n.ref.len = 0
-				n.recalculateWitnessSize()
 			}
 			newNode = n
 		default:
@@ -676,7 +671,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
 			newnode.Children[key[pos]] = child
-			newnode.recalculateWitnessSize()
 			updated = true
 			// current node leaves the generation but newnode joins it
 			newNode = newnode
@@ -695,14 +689,12 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			}
 			updated = true
 			n.ref.len = 0
-			n.recalculateWitnessSize()
 		} else {
 			updated, nn = t.insertRecursive(child, key, pos+1, value)
 			if updated {
 				t.evictNodeFromHashMap(n)
 				n.Children[key[pos]] = nn
 				n.ref.len = 0
-				n.recalculateWitnessSize()
 			}
 		}
 		newNode = n
@@ -1084,7 +1076,6 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 					duo.child2 = n.Children[pos2]
 				}
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
-				duo.iws = duo.child1.witnessSize() + duo.child2.witnessSize()
 				newNode = duo
 			} else if count > 2 {
 				t.observers.BranchNodeTouched(key[:keyStart])
@@ -1254,7 +1245,7 @@ func (t *Trie) EvictNode(hex []byte) {
 		return
 	}
 	copy(hn[:], nd.reference())
-	hnode := hashNode{hash: hn[:], iws: nd.witnessSize()}
+	hnode := hashNode{hash: hn[:]}
 	t.observers.WillUnloadNode(hex, hn)
 
 	t.notifyUnloadRecursive(hex, incarnation, nd)
@@ -1297,7 +1288,7 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
 		}
 		t.notifyUnloadRecursive(hex, n.Incarnation, n.storage)
 	case *fullNode:
-		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
+		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation)
 		for i := range n.Children {
 			if n.Children[i] == nil {
 				continue
@@ -1308,7 +1299,7 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd node) {
 			t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
 		}
 	case *duoNode:
-		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation, n.witnessSize())
+		t.observers.WillUnloadBranchNode(hex, common.BytesToHash(n.reference()), incarnation)
 		i1, i2 := n.childrenIdx()
 		if n.child1 != nil {
 			t.notifyUnloadRecursive(append(hex, i1), incarnation, n.child1)
@@ -1389,114 +1380,4 @@ func (t *Trie) evictSubtreeFromHashMap(n node) {
 // HashMapSize returns the number of entries in trie's hash map.
 func (t *Trie) HashMapSize() int {
 	return len(t.hashMap)
-}
-
-func (t *Trie) CumulativeWitnessSize(key []byte) uint64 {
-	hex := keybytesToHex(key)
-	if t.binary {
-		hex = keyHexToBin(hex)
-	}
-	if len(key) != 32 || len(key) != 64 {
-		hex = hex[:len(hex)-1]
-	}
-	n, _, ok, _ := t.getNode(hex, false)
-	if !ok {
-		return 0
-	}
-	return n.witnessSize()
-}
-
-// PrefixByCumulativeWitnessSizeDeprecated returns minimal prefix with accumulated size >= than given one.
-// Returns (nil, true) if size > root.witnessSize()
-// Returns (nil, false) if faced nil node in trie
-func (t *Trie) PrefixByCumulativeWitnessSize(size uint64) (prefix []byte, incarnation uint64, accumulator uint64, found bool) {
-	return prefixGreaterThanWitnessSize(t.root, size)
-}
-
-// prefixGreaterThanWitnessSize - returns lexicographically minimal prefix of maximal length with accumulated witness size >= than given threshold.
-// accumulator - increase it when go to siblings, don't touch it when go to child. Doesn't includes last node - means accumulator <= size.
-func prefixGreaterThanWitnessSize(nd node, size uint64) (prefix []byte, incarnation uint64, accumulator uint64, found bool) {
-	if nd.witnessSize() < size {
-		return prefix, incarnation, accumulator, true
-	}
-
-Loop:
-	for {
-		switch n := nd.(type) {
-		case nil:
-			found = false
-			break Loop
-		case *shortNode:
-			prefix = append(prefix, n.Key...)
-			if prefix[len(prefix)-1] == 0x10 { // remove terminator
-				prefix = prefix[:len(prefix)-1]
-			}
-			nd = n.Val
-			//fmt.Printf("short node: %d\n", accumulator)
-		case *duoNode:
-			var acc2 uint64
-			i1, i2 := n.childrenIdx()
-			if accumulator+n.child1.witnessSize() >= size {
-				prefix = append(prefix, i1)
-				nd = n.child1
-				//fmt.Printf("duo overflow1: %d+%d=%d <= %d, %x\n", accumulator, n.child1.witnessSize(), accumulator+n.child1.witnessSize(), size, prefix)
-				continue
-			}
-			acc2 += n.child1.witnessSize()
-
-			if accumulator+acc2+n.child2.witnessSize() >= size {
-				prefix = append(prefix, i2)
-				nd = n.child2
-				//fmt.Printf("duo overflow2: %d+%d+%d=%d <= %d, %x\n", accumulator, acc2, n.child2.witnessSize(), accumulator+acc2+n.child2.witnessSize(), size, prefix)
-				accumulator += acc2
-				continue
-			}
-
-			//fmt.Printf("duo: %d, %x\n", accumulator, prefix)
-			break Loop
-		case *fullNode:
-			var acc2 uint64
-			//fmt.Printf("full children %d\n", n.Children)
-			for i := range n.Children {
-				if n.Children[i] == nil {
-					//fmt.Printf("full nill child %d\n", i)
-					continue
-				}
-				//fmt.Printf("full child %d\n", i)
-				if accumulator+acc2+n.Children[i].witnessSize() >= size {
-					prefix = append(prefix, uint8(i))
-					nd = n.Children[i]
-					//fmt.Printf("full overflow(%d): %d+%d+%d=%d <= %d, %x\n", i, accumulator, acc2, n.Children[i].witnessSize(), accumulator+acc2+n.Children[i].witnessSize(), size, prefix)
-					accumulator += acc2
-					//fmt.Printf("full overflow(%d)++\n", accumulator)
-					continue Loop
-				}
-				//fmt.Printf("full no overflow (%d): %d\n", i, n.Children[i].witnessSize())
-				acc2 += n.Children[i].witnessSize()
-			}
-
-			//fmt.Printf("full: %d+%d=%d<=%d, %x\n", accumulator, acc2, accumulator+acc2, size, prefix)
-			break Loop
-		case *accountNode:
-			//fmt.Printf("accountNode: %d, %x\n", accumulator, prefix)
-			if n.storage == nil {
-				found = true
-				break Loop
-			}
-			nd = n.storage
-			incarnation = n.Incarnation
-		case valueNode:
-			//fmt.Printf("valueNode: %d %d %x\n", accumulator, accumulator+n.witnessSize(), prefix)
-			found = true
-			break Loop
-		case hashNode:
-			//fmt.Printf("hashNode: %x %d %d\n", prefix, accumulator, n.witnessSize())
-			found = false
-			break Loop
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
-		}
-	}
-
-	return prefix, incarnation, accumulator, found
 }

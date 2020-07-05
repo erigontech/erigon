@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"os/signal"
@@ -22,7 +21,6 @@ import (
 	"time"
 
 	"github.com/AskAlexSharov/lmdb-go/lmdb"
-	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -36,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -633,149 +630,6 @@ func trieChart() {
 	check(err)
 	err = ioutil.WriteFile("chart5.png", buffer.Bytes(), 0644)
 	check(err)
-}
-
-func mgrSchedule(chaindata string, block uint64) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
-	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	check(err)
-	defer db.Close()
-	tds, err := bc.GetTrieDbState()
-	check(err)
-	//t3 := time.Now()
-	//rl := trie.NewRetainList(3)
-	//rl.AddHex([]byte{})
-	//loader := trie.NewFlatDbSubTrieLoader()
-	//tr := tds.Trie()
-	//err = loader.Reset(db, rl, rl, [][]byte{nil}, []int{0}, false)
-	//check(err)
-	//subTries, err := loader.LoadSubTries()
-	//check(err)
-	//fmt.Println("LoadSubTries: ", time.Since(t3))
-	//t4 := time.Now()
-	//err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
-	//check(err)
-	//fmt.Println("HookSubTries: ", time.Since(t4))
-	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
-	//check(err)
-
-	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 46814683)
-	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 47126779)
-	//fmt.Printf("R: %x %x\n", r1, r2)
-
-	t5 := time.Now()
-	//var buf bytes.Buffer
-	var witnessSizeAccumulator uint64
-	var witnessCount int64
-	var witnessEstimatedSizeAccumulator uint64
-	schedule := mgr.NewSchedule(tds)
-	var toBlock = block + mgr.BlocksPerCycle
-	var (
-		max float64
-		min float64 = 1_000_000_000_000_000
-		avg float64
-	)
-
-	counters := []int{}
-	counters2 := []int{}
-	counters3 := []int{}
-	counters4 := []int{}
-	tx, _ := db.KV().Begin(context.Background(), false)
-	defer tx.Rollback()
-	for block <= toBlock {
-		tick, err2 := schedule.Tick(block)
-		if err2 != nil {
-			panic(err2)
-		}
-		counter := 0
-		counter2 := 0
-		counter3 := 0
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		for k, v, err3 := c.SeekTo(tick.From); k != nil; k, v, err3 = c.Next() {
-			if err3 != nil {
-				panic(err3)
-			}
-			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
-				break
-			}
-			counter += len(k) + len(v)
-			counter2 += len(v)
-			counter3++
-		}
-		check(err)
-
-		counters = append(counters, counter)
-		counters2 = append(counters2, counter2)
-		counters3 = append(counters3, counter3)
-
-		//retain := trie.NewRetainRange(common.CopyBytes(tick.From), common.CopyBytes(tick.To))
-		//dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
-		//err = loader.Reset(db, retain, retain, dbPrefixes, fixedbits, false)
-		//check(err)
-		//subTries, err2 := loader.LoadSubTries()
-		//check(err2)
-		//err = tr.HookSubTries(subTries, hooks) // hook up to the root
-		//check(err)
-		//witness, err2 := tr.ExtractWitness(false, retain)
-		//if err2 != nil {
-		//	panic(err2)
-		//}
-		//buf.Reset()
-		//_, err = witness.WriteTo(&buf)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//counters4 = append(counters4, buf.Len())
-
-		min = math.Min(min, float64(counter))
-		max = math.Max(max, float64(counter))
-		if avg == 0 {
-			avg = float64(counter)
-		} else {
-			avg = (avg + float64(counter)) / 2
-		}
-
-		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
-		block = tick.ToBlock + 1
-	}
-
-	fmt.Println("MGR Time of All Ticks: ", time.Since(t5))
-	fmt.Println("Min: ", min, "Max: ", max, "Avg: ", avg)
-
-	accs := map[int]int{}
-	for _, counter := range counters {
-		accs[counter/100_000]++
-	}
-	fmt.Printf("Counter Aggs: %v\n", accs)
-
-	accs2 := map[int]int{}
-	for _, counter := range counters2 {
-		accs2[counter/100_000]++
-	}
-	fmt.Printf("Counter Aggs2: %v\n", accs2)
-
-	accs3 := map[int]int{}
-	for _, counter := range counters3 {
-		accs3[counter/1_000]++
-	}
-	fmt.Printf("Counter Aggs3: %v\n", accs3)
-
-	accs4 := map[int]int{}
-	for _, counter := range counters4 {
-		accs4[counter/1_000]++
-	}
-	fmt.Printf("Counter Aggs4: %v\n", accs4)
-
-	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
-	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
-	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
-
-	//defer func(t time.Time) { fmt.Println("hack.go:746", time.Since(t)) }(time.Now())
-	//tr.EvictNode([]byte{})
-	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-	//check(err)
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
@@ -1482,7 +1336,6 @@ func (r *Receiver) Receive(
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessSize uint64,
 ) error {
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
@@ -1497,19 +1350,19 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
 			if len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0); err != nil {
 					return err
 				}
 			}
@@ -1520,7 +1373,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -1533,7 +1386,6 @@ func regenerate(chaindata string) error {
 	defer db.Close()
 	check(db.ClearBuckets(
 		dbutils.IntermediateTrieHashBucket,
-		dbutils.IntermediateWitnessSizeBucket,
 	))
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -1804,7 +1656,6 @@ func testStage5(chaindata string, reset bool) error {
 			dbutils.CurrentStateBucket,
 			dbutils.ContractCodeBucket,
 			dbutils.IntermediateTrieHashBucket,
-			dbutils.IntermediateWitnessSizeBucket,
 		); err != nil {
 			return err
 		}
@@ -2542,9 +2393,6 @@ func main() {
 	}
 	if *action == "slice" {
 		dbSlice(*chaindata, []byte(*bucket), common.FromHex(*hash))
-	}
-	if *action == "mgrSchedule" {
-		mgrSchedule(*chaindata, uint64(*block))
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)
