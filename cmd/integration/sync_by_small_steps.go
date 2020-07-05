@@ -56,11 +56,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		rewind := blocksPerStep
 
 		execProgress, ihProgress = progress(db)
-		log.Info("Stages", "Exec", execProgress, "IH", ihProgress)
 
-		if execProgress <= blocksPerStep+1 {
-			rewind = 0
-		}
 		if execProgress <= blocksPerStep+1 {
 			rewind = 0
 		}
@@ -75,7 +71,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 
 		execProgress, ihProgress = progress(db)
-		log.Info("Stages", "Exec", execProgress, "IH", ihProgress)
 		{
 			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
 			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, execProgress+2*blocksPerStep, ctx.Done(), nil, false); err != nil {
