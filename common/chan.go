@@ -4,7 +4,7 @@ import "errors"
 
 var ErrStopped = errors.New("stopped")
 
-func Stopped(ch chan struct{}) error {
+func Stopped(ch <-chan struct{}) error {
 	if ch == nil {
 		return nil
 	}
