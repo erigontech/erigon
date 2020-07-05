@@ -315,13 +315,13 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		goOn := true
 		var err error
 		for goOn {
-			cmp,br:=walkAsOfCmp(addrHash, hAddrHash)
+			cmp,br:= keyCmp(addrHash, hAddrHash)
 			fmt.Println("core/state/history.go:319 addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
 			if br {
 				break
 			}
 			if cmp==0 {
-				cmp,br=walkAsOfCmp(keyHash, hKeyHash)
+				cmp,br= keyCmp(keyHash, hKeyHash)
 				fmt.Println("core/state/history.go:325 key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
 			}
 			if br {
@@ -387,17 +387,16 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 		if csB == nil {
 			return fmt.Errorf("accountChangeBucket not found")
 		}
-		//for state
+
 		mainCursor := b.Cursor()
-		//for historic data
 		part1End:=common.HashLength
 		part2Start:=common.HashLength
-		part3Start:=common.HashLength+8
+		part3Start:=common.HashLength
 		maxKeyLen:=common.HashLength
 		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
 			part1End=common.AddressLength
 			part2Start=common.AddressLength
-			part3Start=common.AddressLength+8
+			part3Start=common.AddressLength
 			maxKeyLen=common.AddressLength
 		}
 
@@ -409,6 +408,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			part2Start,   /* part2start */
 			part3Start, /* part3start */
 		)
+
 		if true {
 			decorator:=NewChangesetSearchDecorator(historyCursor, csB, startkey,fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
 			err:=decorator.buildChangeset(0, 7)
@@ -428,16 +428,11 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 				return err1
 			}
 		}
-		hK, tsEnc, _, hV, err1 := historyCursor.Seek()
-		if err1 != nil {
-			return err1
+		hK, _, _, hV, err2 := historyCursor.Seek()
+		if err2 != nil {
+			return err2
 		}
-		for hK != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
-			hK, tsEnc, _, hV, err1 = historyCursor.Next()
-			if err1 != nil {
-				return err1
-			}
-		}
+
 		goOn := true
 		var err error
 		for goOn {
@@ -449,39 +444,31 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 				k = nil
 			}
 			var cmp int
-			if k == nil {
-				if hK == nil {
-					break
-				} else {
-					cmp = 1
-				}
-			} else if hK == nil {
-				cmp = -1
-			} else {
-				cmp = bytes.Compare(k, hK)
+			cmp,br:= keyCmp(k, hK)
+			if br {
+				break
 			}
+
 			if cmp < 0 {
 				goOn, err = walker(k, v)
 			} else {
-				data, found, err:=findInHistory(hK, hV,timestamp,csB.Get, returnCorrectWalker(bucket, hBucket))
-				if err!=nil{
-					return err
+				if err2!=nil && !errors.Is(err2, ErrNotInHistory) {
+					return err2
 				}
-
-				if found && len(data) > 0 { // Skip accounts did not exist
-					goOn, err = walker(hK, data)
-				}
-				if !found && cmp == 0 {
+				if len(hV) > 0 && err2==nil { // Skip accounts did not exist
+					goOn, err = walker(hK, hV)
+				} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
 					goOn, err = walker(k, v)
 				}
 			}
+
 			if goOn {
 				if cmp <= 0 {
 					k, v, err1 = mainCursor.Next()
 					if err1 != nil {
 						return err1
 					}
-					for k != nil && len(k) > common.HashLength {
+					for k != nil && len(k) > maxKeyLen {
 						k, v, err1 = mainCursor.Next()
 						if err1 != nil {
 							return err1
@@ -489,12 +476,9 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 					}
 				}
 				if cmp >= 0 {
-					hK0 := hK
-					for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
-						hK, tsEnc, _, hV, err1 = historyCursor.Next()
-						if err1 != nil {
-							return err1
-						}
+					hK, _, _, hV, err1 = historyCursor.Next()
+					if err1 != nil {
+						return err1
 					}
 				}
 			}
@@ -505,16 +489,16 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 }
 
 
-func walkAsOfCmp(keyHash, hKeyHash []byte) (int,bool) {
+func keyCmp(key1, key2 []byte) (int,bool) {
 	switch {
-	case keyHash==nil&&hKeyHash == nil:
+	case key1 ==nil&& key2 == nil:
 		return 0, true
-	case keyHash == nil && hKeyHash != nil:
+	case key1 == nil && key2 != nil:
 		return 1,false
-	case keyHash != nil && hKeyHash == nil:
+	case key1 != nil && key2 == nil:
 		return -1,false
 	default:
-		return bytes.Compare(keyHash, hKeyHash), false
+		return bytes.Compare(key1, key2), false
 	}
 }
 
@@ -547,7 +531,7 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte)([]byte
 		return nil, true,  nil
 	}
 	dec,_,_:=index.Decode()
-	fmt.Println("core/state/history.go:543", "not in history", timestamp,common.Bytes2Hex(hK), dec)
+	fmt.Println("core/state/history.go:548", "not in history", timestamp,common.Bytes2Hex(hK), dec)
 	return nil, false, nil
 }
 
@@ -660,12 +644,12 @@ func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error)
 	}
 
 
-	cmp, br:=walkAsOfCmp(csd.kd1, csd.kc1)
+	cmp, br:= keyCmp(csd.kd1, csd.kc1)
 	if br {
 		return nil, nil, nil,nil,nil
 	}
 	if cmp == 0 {
-		cmp, br = walkAsOfCmp(csd.kd2, csd.kc2)
+		cmp, br = keyCmp(csd.kd2, csd.kc2)
 	}
 	if br {
 		return nil, nil, nil,nil,nil
@@ -742,12 +726,12 @@ func (csd *changesetSearchDecorator) Seek() ([]byte,[]byte,[]byte,[]byte, error)
 	return key1, key2, key3, val, err
 }
 func (csd *changesetSearchDecorator) Next() ([]byte,[]byte,[]byte,[]byte, error) {
-	cmp, br:=walkAsOfCmp(csd.kd1, csd.kc1)
+	cmp, br:= keyCmp(csd.kd1, csd.kc1)
 	if br {
 		return nil, nil, nil,nil,nil
 	}
 	if cmp == 0 {
-		cmp, br=walkAsOfCmp(csd.kd2, csd.kc2)
+		cmp, br= keyCmp(csd.kd2, csd.kc2)
 	}
 	if br {
 		return nil, nil, nil,nil,nil
