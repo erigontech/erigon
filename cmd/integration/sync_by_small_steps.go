@@ -70,15 +70,13 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
-		execProgress, ihProgress = progress(db)
 		{
-			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
-			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, execProgress+2*blocksPerStep, ctx.Done(), nil, false); err != nil {
+			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress - rewind}
+			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, execProgress+blocksPerStep, ctx.Done(), nil, false); err != nil {
 				return err
 			}
 		}
 
-		execProgress, ihProgress = progress(db)
 		// Stage 5: 1 step back, 2 forward
 		if ihProgress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 			return err
@@ -92,10 +90,9 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
-		execProgress, ihProgress = progress(db)
 		{
-			stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
-			if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ctx.Done()); err != nil {
+			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: execProgress - rewind}
+			if err = stagedsync.SpawnIntermediateHashesStage(s, db, "", ctx.Done()); err != nil {
 				return err
 			}
 		}
