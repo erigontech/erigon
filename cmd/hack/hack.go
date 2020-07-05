@@ -1791,11 +1791,11 @@ func testStage78(chaindata string, reset bool) error {
 	log.Info("Stage8", "progress", stage8progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: 9200000}
+	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
 	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
 		return err
 	}
-	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: 9200000}
+	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
 	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
 		return err
 	}
