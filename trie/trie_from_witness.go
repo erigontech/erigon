@@ -39,7 +39,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 			if trace {
 				fmt.Printf("HASH ")
 			}
-			if err := hb.hash(op.Hash[:], 0); err != nil {
+			if err := hb.hash(op.Hash[:]); err != nil {
 				return nil, err
 			}
 		case *OperatorCode:

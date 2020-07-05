@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	syncHeadNumber, _, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
-func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
+func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit <-chan struct{}) error {
 	hash := rawdb.ReadCanonicalHash(db, to)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
@@ -55,7 +55,7 @@ func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64,
 	return incrementIntermediateHashes(s, db, from, to, datadir, expectedRootHash, quit)
 }
 
-func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -118,7 +118,6 @@ func (r *Receiver) Receive(
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessSize uint64,
 ) error {
 	storage := itemType == trie.StorageStreamItem || itemType == trie.SHashStreamItem
 	for r.currentIdx < len(r.unfurlList) {
@@ -148,7 +147,7 @@ func (r *Receiver) Receive(
 			if itemType == trie.AccountStreamItem {
 				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 			}
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 		}
 		r.currentIdx++
 		if len(k) > common.HashLength {
@@ -163,14 +162,14 @@ func (r *Receiver) Receive(
 			}
 			v := r.storageMap[ks]
 			if len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0); err != nil {
 					return err
 				}
 				r.removingAccount = nil
@@ -200,7 +199,7 @@ func (r *Receiver) Receive(
 	if itemType == trie.AccountStreamItem {
 		r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 	}
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -254,7 +253,7 @@ type HashPromoter struct {
 	quitCh           chan struct{}
 }
 
-func NewHashPromoter(db ethdb.Database, quitCh chan struct{}) *HashPromoter {
+func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 	return &HashPromoter{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -393,7 +392,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	return nil
 }
 
-func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()

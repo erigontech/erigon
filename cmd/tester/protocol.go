@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type statusData struct {
@@ -53,62 +52,6 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 	result := (tp.blockMarkers[blockNumber/64] & bitMask) != 0
 	tp.blockMarkers[blockNumber/64] |= bitMask
 	return result
-}
-
-// nextSubtree does []byte++. Returns false if overflow.
-func nextSubtree(in []byte) ([]byte, bool) {
-	r := make([]byte, len(in))
-	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
-			r[i]++
-			return r, true
-		}
-
-		r[i] = 0
-	}
-	return nil, false
-}
-
-func (tp *TesterProtocol) mgrProtocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-	amountOfPrefixes := 100
-	prefixes := make([][]byte, 0, amountOfPrefixes)
-	from := []byte{1, 1, 1, 1, 1, 1}
-	for next, ok := nextSubtree(from); ok && amountOfPrefixes > 0; next, ok = nextSubtree(from) {
-		amountOfPrefixes--
-		prefixes = append(prefixes, next)
-	}
-
-	if err := p2p.Send(rw, eth.MGRStatus, prefixes); err != nil {
-		panic(err)
-	}
-	fmt.Printf("Sent MGRStatus\n")
-
-	i := 0
-	j := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		msg, err := rw.ReadMsg()
-		if err != nil {
-			return err
-		}
-		switch msg.Code {
-		case eth.MGRWitness:
-			res, err := trie.NewWitnessFromReader(msg.Payload, false)
-			if err != nil {
-				panic(err)
-			}
-
-			i++
-			j += len(res.Operators)
-			fmt.Printf("Messages: %d, Operators: %d\n", i, j)
-		}
-	}
 }
 
 func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
