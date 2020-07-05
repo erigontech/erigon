@@ -24,7 +24,6 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	if err != nil {
 		return err
 	}
-	fmt.Printf("2: %d, %d\n", s.BlockNumber, syncHeadNumber)
 
 	if s.BlockNumber == syncHeadNumber {
 		// we already did hash check for this block
