@@ -45,10 +45,10 @@ var (
 
 func init() {
 
-	// Initialize the CLI app and start Geth
+	// Initialize the CLI app and start TurboGeth
 	app.Action = tester
 	app.HideVersion = true // we have a command to print the version
-	app.Copyright = "Copyright 2018 The go-ethereum Authors"
+	app.Copyright = "Copyright 2020 The turbo-geth Authors"
 	app.Commands = []cli.Command{}
 	sort.Sort(cli.CommandsByName(app.Commands))
 
