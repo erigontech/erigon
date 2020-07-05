@@ -78,10 +78,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 
 		// Stage 5: 1 step back, 2 forward
-		if ihProgress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-			return err
-		}
-
 		if ihProgress > blocksPerStep+1 {
 			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: execProgress - rewind}
 			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
