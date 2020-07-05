@@ -288,8 +288,7 @@ func (spec BndSpec) Transfer(astate0 AbsState, instrNode *Node) AbsState {
 		state1.Push(*instrNode.opValue)
 	} else {
 		switch instrNode.opCode {
-		case JUMP:
-		case JUMPI:
+		case JUMP, JUMPI:
 			state1.Pop()
 		}
 	}
