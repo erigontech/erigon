@@ -234,7 +234,6 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		return nil, err
 	}
 
-	//fmt.Printf("%x: %d\n", tx.Hash(), result.UsedGas)
 	*usedGas += result.UsedGas
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx

@@ -377,11 +377,6 @@ func doSearch(
 	keyBytesToFind []byte,
 	incarnation uint64,
 ) ([]byte, error) {
-	//trace := bytes.Equal(addrBytesToFind, common.FromHex("0x09400ec683f70174e1217d6dcdbf42448e8de5d6"))
-	trace := false
-	if trace {
-		fmt.Printf("doSearch %x %d %x in [%x]\n", addrBytesToFind, incarnation, keyBytesToFind, b)
-	}
 	if len(b) == 0 {
 		return nil, ErrNotFound
 	}
@@ -418,9 +413,6 @@ func doSearch(
 			id := int(binary.BigEndian.Uint32(b[incarnationsStart+12*i:]))
 			return id >= addrID
 		})
-		if trace {
-			fmt.Printf("Found addrID=%d incIndex: %d out of %d\n", addrID, incIndex, numOfNotDefaultIncarnations)
-		}
 		var foundIncarnation uint64 = DefaultIncarnation
 		if incIndex < numOfNotDefaultIncarnations && int(binary.BigEndian.Uint32(b[incarnationsStart+12*incIndex:])) == addrID {
 			foundIncarnation = ^binary.BigEndian.Uint64(b[incarnationsStart+12*incIndex+4:])

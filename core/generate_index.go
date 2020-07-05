@@ -183,7 +183,6 @@ func (ig *IndexGenerator) DropIndex(bucket []byte) error {
 }
 
 func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
-	trace := bytes.HasPrefix(k, common.FromHex("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab"))
 	if len(value)%9 != 0 {
 		log.Error("Value must be a multiple of 9", "ln", len(value), "k", common.Bytes2Hex(k))
 		return errors.New("incorrect value")
@@ -196,9 +195,6 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 	indexBytes, err1 := state.Get(currentChunkKey)
 	if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
 		return fmt.Errorf("find chunk failed: %w", err1)
-	}
-	if trace {
-		fmt.Printf("Loading %x: %x (%d), replacing %x\n", k, value, binary.BigEndian.Uint64(value), indexBytes)
 	}
 	currentIndex := dbutils.WrapHistoryIndex(indexBytes)
 
@@ -237,10 +233,6 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
 		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
-			trace := bytes.HasPrefix(changesetKey, common.FromHex("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab"))
-			if trace {
-				fmt.Printf("Extracting %x for block %d\n", changesetKey, blockNum)
-			}
 			key := common.CopyBytes(changesetKey)
 			if len(key) >= 28 {
 				binary.BigEndian.PutUint64(key[common.AddressLength:], ^binary.BigEndian.Uint64(key[common.AddressLength:]))

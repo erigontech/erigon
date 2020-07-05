@@ -16,11 +16,6 @@ import (
 )
 
 func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	//trace := bytes.HasPrefix(key, common.FromHex("0x09400ec683f70174e1217d6dcdbf42448e8de5d6"))
-	trace := false
-	if trace {
-		fmt.Printf("GetAsOf plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
-	}
 	var dat []byte
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		v, err := FindByHistory(tx, plain, storage, key, timestamp)
@@ -31,9 +26,6 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 		}
 		if !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
-		}
-		if trace {
-			fmt.Printf("Not found in history, key=%x, timestamp=%d\n", key, timestamp)
 		}
 		{
 			var bucket []byte
@@ -46,10 +38,6 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 			if v == nil {
 				return ethdb.ErrKeyNotFound
 			}
-			if trace {
-				fmt.Printf("Returning %x\n", v)
-			}
-
 			dat = make([]byte, len(v))
 			copy(dat, v)
 			return nil
@@ -59,11 +47,6 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 }
 
 func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	//trace := bytes.HasPrefix(key, common.FromHex("0x09400ec683f70174e1217d6dcdbf42448e8de5d6"))
-	trace := false
-	if trace {
-		fmt.Printf("FindByHistory plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
-	}
 	var hBucket []byte
 	if storage {
 		hBucket = dbutils.StorageHistoryBucket
@@ -104,15 +87,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 	changeSetBlock, set, ok := index.Search(timestamp)
 	var data []byte
 	if ok {
-		if trace {
-			fmt.Printf("Found changeSetBlock: %d in [%s]\n", changeSetBlock, index)
-		}
 		// set == true if this change was from empty record (non-existent account) to non-empty
 		// In such case, we do not need to examine changeSet and return empty data
 		if set && !storage {
-			if trace {
-				fmt.Printf("Empty flag set\n")
-			}
 			return []byte{}, nil
 		}
 		csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)

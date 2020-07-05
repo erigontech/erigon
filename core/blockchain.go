@@ -23,12 +23,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
-	"encoding/json"
 
 	lru "github.com/hashicorp/golang-lru"
 
@@ -2407,37 +2405,11 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		writeTrace := false
-		if !vmConfig.Debug && common.HexToHash("a4bc1998d15d57e30ba42d43aa524efa1cabcc132f250c0aabe312f879c2c36d") == tx.Hash() {
-			// This code is useful when debugging a certain transaction. If uncommented, together with the code
-			// at the end of this function, after the execution of transaction with given hash, the file
-			// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
-			// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
-			vmConfig.Debug = true
-			writeTrace = true
-		}
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, dests)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
-		if writeTrace {
-			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
-			if err1 != nil {
-				panic(err1)
-			}
-			encoder := json.NewEncoder(w)
-			logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-			if err2 := encoder.Encode(logs); err2 != nil {
-				panic(err2)
-			}
-			if err2 := w.Close(); err2 != nil {
-				panic(err2)
-			}
-			vmConfig.Debug = false
-			vmConfig.Tracer = nil
-		}
 	}
 
 	if chainConfig.IsByzantium(header.Number) {
