@@ -19,7 +19,7 @@ import (
 
 var cbor codec.CborHandle
 
-func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	syncHeadNumber, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -503,7 +503,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	)
 }
 
-func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
+func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
 	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */, 0x00); err != nil {

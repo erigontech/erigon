@@ -201,7 +201,7 @@ type senderRecoveryJob struct {
 	err         error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit chan struct{}) {
+func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	for job := range in {
 		if job == nil {
 			return
