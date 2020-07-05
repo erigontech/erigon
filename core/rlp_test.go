@@ -101,10 +101,6 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 		t.Fatal("expected two elems, got zero")
 	}
 	txdata := it.Value()
-	// Check that senders exist (turbo-geth specific)
-	if !it.Next() {
-		t.Fatal("expected three elems, got one")
-	}
 	// Check that uncles exist
 	if !it.Next() {
 		t.Fatal("expected three elems, got two")

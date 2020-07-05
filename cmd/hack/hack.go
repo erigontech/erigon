@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"os/signal"
@@ -22,12 +21,10 @@ import (
 	"time"
 
 	"github.com/AskAlexSharov/lmdb-go/lmdb"
-	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -37,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -636,149 +632,6 @@ func trieChart() {
 	check(err)
 }
 
-func mgrSchedule(chaindata string, block uint64) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
-	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	check(err)
-	defer db.Close()
-	tds, err := bc.GetTrieDbState()
-	check(err)
-	//t3 := time.Now()
-	//rl := trie.NewRetainList(3)
-	//rl.AddHex([]byte{})
-	//loader := trie.NewFlatDbSubTrieLoader()
-	//tr := tds.Trie()
-	//err = loader.Reset(db, rl, rl, [][]byte{nil}, []int{0}, false)
-	//check(err)
-	//subTries, err := loader.LoadSubTries()
-	//check(err)
-	//fmt.Println("LoadSubTries: ", time.Since(t3))
-	//t4 := time.Now()
-	//err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
-	//check(err)
-	//fmt.Println("HookSubTries: ", time.Since(t4))
-	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
-	//check(err)
-
-	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 46814683)
-	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 47126779)
-	//fmt.Printf("R: %x %x\n", r1, r2)
-
-	t5 := time.Now()
-	//var buf bytes.Buffer
-	var witnessSizeAccumulator uint64
-	var witnessCount int64
-	var witnessEstimatedSizeAccumulator uint64
-	schedule := mgr.NewSchedule(tds)
-	var toBlock = block + mgr.BlocksPerCycle
-	var (
-		max float64
-		min float64 = 1_000_000_000_000_000
-		avg float64
-	)
-
-	counters := []int{}
-	counters2 := []int{}
-	counters3 := []int{}
-	counters4 := []int{}
-	tx, _ := db.KV().Begin(context.Background(), false)
-	defer tx.Rollback()
-	for block <= toBlock {
-		tick, err2 := schedule.Tick(block)
-		if err2 != nil {
-			panic(err2)
-		}
-		counter := 0
-		counter2 := 0
-		counter3 := 0
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		for k, v, err3 := c.SeekTo(tick.From); k != nil; k, v, err3 = c.Next() {
-			if err3 != nil {
-				panic(err3)
-			}
-			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
-				break
-			}
-			counter += len(k) + len(v)
-			counter2 += len(v)
-			counter3++
-		}
-		check(err)
-
-		counters = append(counters, counter)
-		counters2 = append(counters2, counter2)
-		counters3 = append(counters3, counter3)
-
-		//retain := trie.NewRetainRange(common.CopyBytes(tick.From), common.CopyBytes(tick.To))
-		//dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
-		//err = loader.Reset(db, retain, retain, dbPrefixes, fixedbits, false)
-		//check(err)
-		//subTries, err2 := loader.LoadSubTries()
-		//check(err2)
-		//err = tr.HookSubTries(subTries, hooks) // hook up to the root
-		//check(err)
-		//witness, err2 := tr.ExtractWitness(false, retain)
-		//if err2 != nil {
-		//	panic(err2)
-		//}
-		//buf.Reset()
-		//_, err = witness.WriteTo(&buf)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//counters4 = append(counters4, buf.Len())
-
-		min = math.Min(min, float64(counter))
-		max = math.Max(max, float64(counter))
-		if avg == 0 {
-			avg = float64(counter)
-		} else {
-			avg = (avg + float64(counter)) / 2
-		}
-
-		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
-		block = tick.ToBlock + 1
-	}
-
-	fmt.Println("MGR Time of All Ticks: ", time.Since(t5))
-	fmt.Println("Min: ", min, "Max: ", max, "Avg: ", avg)
-
-	accs := map[int]int{}
-	for _, counter := range counters {
-		accs[counter/100_000]++
-	}
-	fmt.Printf("Counter Aggs: %v\n", accs)
-
-	accs2 := map[int]int{}
-	for _, counter := range counters2 {
-		accs2[counter/100_000]++
-	}
-	fmt.Printf("Counter Aggs2: %v\n", accs2)
-
-	accs3 := map[int]int{}
-	for _, counter := range counters3 {
-		accs3[counter/1_000]++
-	}
-	fmt.Printf("Counter Aggs3: %v\n", accs3)
-
-	accs4 := map[int]int{}
-	for _, counter := range counters4 {
-		accs4[counter/1_000]++
-	}
-	fmt.Printf("Counter Aggs4: %v\n", accs4)
-
-	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
-	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
-	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
-
-	//defer func(t time.Time) { fmt.Println("hack.go:746", time.Since(t)) }(time.Now())
-	//tr.EvictNode([]byte{})
-	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-	//check(err)
-}
-
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
 	blockDb := ethdb.MustOpen(chaindata)
@@ -1144,56 +997,6 @@ func relayoutKeys() {
 	fmt.Printf("Total: %d\n", accountChangeSetCount+storageChangeSetCount)
 }
 
-func upgradeBlocks() {
-	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	defer ethDb.Close()
-	start := []byte{}
-	var keys [][]byte
-	if err := ethDb.Walk([]byte("b"), start, 0, func(k, v []byte) (bool, error) {
-		if len(keys)%1000 == 0 {
-			fmt.Printf("Collected keys: %d\n", len(keys))
-		}
-		keys = append(keys, common.CopyBytes(k))
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	for i, key := range keys {
-		v, err := ethDb.Get([]byte("b"), key)
-		if err != nil {
-			panic(err)
-		}
-		smallBody := new(types.SmallBody) // To be changed to SmallBody
-		if err := rlp.Decode(bytes.NewReader(v), smallBody); err != nil {
-			panic(err)
-		}
-		body := new(types.Body)
-		blockNum := binary.BigEndian.Uint64(key[:8])
-		signer := types.MakeSigner(params.MainnetChainConfig, big.NewInt(int64(blockNum)))
-		body.Senders = make([]common.Address, len(smallBody.Transactions))
-		for j, tx := range smallBody.Transactions {
-			addr, err := signer.Sender(tx)
-			if err != nil {
-				panic(err)
-			}
-			body.Senders[j] = addr
-		}
-		body.Transactions = smallBody.Transactions
-		body.Uncles = smallBody.Uncles
-		newV, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			panic(err)
-		}
-		ethDb.Put([]byte("b"), key, newV)
-		if i%1000 == 0 {
-			fmt.Printf("Upgraded keys: %d\n", i)
-		}
-	}
-
-	check(ethDb.ClearBuckets(dbutils.BlockReceiptsPrefix))
-}
-
 func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
 	check(err)
@@ -1533,7 +1336,6 @@ func (r *Receiver) Receive(
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessSize uint64,
 ) error {
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
@@ -1548,19 +1350,19 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
 			if len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0); err != nil {
 					return err
 				}
 			}
@@ -1571,7 +1373,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -1584,42 +1386,22 @@ func regenerate(chaindata string) error {
 	defer db.Close()
 	check(db.ClearBuckets(
 		dbutils.IntermediateTrieHashBucket,
-		dbutils.IntermediateWitnessSizeBucket,
 	))
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
 	log.Info("Regeneration started")
 	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
-		k := make([]byte, len(keyHex)/2)
+		var k []byte
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			if debug.IsTrackWitnessSizeEnabled() {
-				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
-					return err
-				}
-			}
-			return nil
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		if debug.IsTrackWitnessSizeEnabled() {
-			lenBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(lenBytes, stateSize)
-			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
-				return err
-			}
-		}
-		return nil
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
@@ -1791,6 +1573,45 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
+func resetStage3(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.ClearBuckets(
+		dbutils.Senders,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+		return err
+	}
+	var err error
+	var stage2progress uint64
+	if stage2progress, _, err = stages.GetStageProgress(db, stages.Bodies); err != nil {
+		return err
+	}
+	log.Info("Stage2", "progress", stage2progress)
+	ch := make(chan struct{})
+	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: 0}
+	const batchSize = 10000
+	const blockSize = 4096
+	n := runtime.NumCPU()
+
+	cfg := stagedsync.Stage3Config{
+		BatchSize:       batchSize,
+		BlockSize:       blockSize,
+		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
+		StartTrace:      false,
+		Prof:            false,
+		NumOfGoroutines: n,
+		ReadChLen:       4,
+		Now:             time.Now(),
+	}
+	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
+		return err
+	}
+	return nil
+}
+
 func testStage4(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -1835,7 +1656,6 @@ func testStage5(chaindata string, reset bool) error {
 			dbutils.CurrentStateBucket,
 			dbutils.ContractCodeBucket,
 			dbutils.IntermediateTrieHashBucket,
-			dbutils.IntermediateWitnessSizeBucket,
 		); err != nil {
 			return err
 		}
@@ -2008,6 +1828,253 @@ func findPreimage(chaindata string, hash common.Hash) error {
 		return err
 	}
 	return nil
+}
+
+/*
+CurrentStateBucket layout which utilises DupSort feature of LMDB (store multiple values inside 1 key).
+LMDB stores multiple values of 1 key in B+ tree (as keys which have no values).
+It allows do Seek by values and other features of LMDB.
+You can think about it as Sub-Database which doesn't store any values.
+-------------------------------------------------------------
+       key              |            value
+-------------------------------------------------------------
+[acc_hash]              | [acc_value]
+[acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
+                        | [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+                        | [storage3_hash]+[storage3_value]
+                        | ...
+[acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
+                        | ...
+[acc2_hash]             | [acc2_value]
+                        ...
+
+
+On 5M block CurrentState bucket using 5.9Gb. This layout using 2.3Gb. See dupSortState()
+
+Another feature of this layout is:
+- DupSort stores values in B+ tree
+- To delete key with multiple values - LMDB does add pages (of sub-tree) to the free list
+- Same logic used when `drop bucket`
+- LMDB doesn't deletes much. Deletion of 17GB (1 key with 1 billions values 8 bytes each) took 2sec on SSD. See deleteLargeDupSortKey()
+- It means performance of deletion contracts with huge storage is predictable
+- Means we can drop incarnations concept
+
+
+As further evolution of this idea:
+- Can add CodeHash as 2-nd value of [acc_hash] key (just use 1st byte to store type of value)
+- And drop ContractCodeBucket
+*/
+func dupSortState(chaindata string) {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	dbFile := "statedb_dupsort"
+	dbFile2 := "statedb_no_dupsort"
+
+	err := os.MkdirAll(dbFile, 0744)
+	check(err)
+	env, err := lmdb.NewEnv()
+	check(err)
+	err = env.SetMaxDBs(100)
+	check(err)
+	err = env.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags uint = lmdb.NoReadahead
+	err = env.Open(dbFile, flags, 0664)
+	check(err)
+	defer env.Close()
+
+	err = os.MkdirAll(dbFile2, 0744)
+	check(err)
+	env2, err := lmdb.NewEnv()
+	check(err)
+	err = env2.SetMaxDBs(100)
+	check(err)
+	err = env2.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags2 uint = lmdb.NoReadahead
+	err = env2.Open(dbFile2, flags2, 0664)
+	check(err)
+	defer env.Close()
+
+	var newStateBucket lmdb.DBI
+	err = env.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
+		check(createErr)
+		return nil
+	})
+	check(err)
+
+	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		sz, _ := b.Size()
+		fmt.Printf("Current State bucket size: %s\n", common.StorageSize(sz))
+
+		txn, _ := env.BeginTxn(nil, 0)
+		err = txn.Drop(newStateBucket, false)
+		check(err)
+
+		txn2, _ := env2.BeginTxn(nil, 0)
+		err = txn2.Drop(newStateBucket, false)
+		check(err)
+
+		c := b.Cursor()
+		i := 0
+		for k, v, err1 := c.First(); k != nil; k, v, err = c.Next() {
+			check(err1)
+			i++
+			if i%1_000_000 == 0 {
+				err = txn.Commit()
+				check(err)
+				txn, _ = env.BeginTxn(nil, 0)
+				err = txn2.Commit()
+				check(err)
+				txn2, _ = env2.BeginTxn(nil, 0)
+				fmt.Printf("%x\n", k[:2])
+			}
+
+			if len(k) == common.HashLength {
+				err = txn.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.AppendDup)
+				check(err)
+				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
+				check(err)
+			} else {
+				prefix := k[:common.HashLength+common.IncarnationLength]
+				suffix := k[common.HashLength+common.IncarnationLength:]
+				err = txn.Put(newStateBucket, common.CopyBytes(prefix), append(suffix, v...), lmdb.AppendDup)
+				check(err)
+				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
+				check(err)
+			}
+		}
+		err = txn.Commit()
+		check(err)
+		err = txn2.Commit()
+		check(err)
+
+		return nil
+	})
+	check(err)
+
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		i := 0
+		for k, v, err := cur.Get(nil, nil, lmdb.First); !lmdb.IsNotFound(err); k, v, err = cur.Get(nil, nil, lmdb.Next) {
+			check(err)
+			i++
+			if i == 100 { // print first 100
+				return nil
+			}
+			if len(k) == 32 {
+				fmt.Printf("Acc: %x, %x\n", k, v)
+				continue
+			}
+
+			// try to seek on incarnation=2 and check that no incarnation=1 are visible
+			for _, v, err := cur.Get(nil, nil, lmdb.FirstDup); !lmdb.IsNotFound(err); _, v, err = cur.Get(nil, nil, lmdb.NextDup) {
+				fmt.Printf("Storage: %x, %x\n", k, v)
+			}
+		}
+		return nil
+	})
+	check(err)
+}
+
+func deleteLargeDupSortKey() {
+	dbFile := "statedb_dupsort_delete"
+	err := os.MkdirAll(dbFile, 0744)
+	check(err)
+	env, err := lmdb.NewEnv()
+	check(err)
+	err = env.SetMaxDBs(100)
+	check(err)
+	err = env.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags uint = lmdb.NoReadahead
+	err = env.Open(dbFile, flags, 0664)
+	check(err)
+	defer env.Close()
+
+	var newStateBucket lmdb.DBI
+	err = env.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
+		check(createErr)
+		return nil
+	})
+	check(err)
+
+	k := common.FromHex("000034c2eb874b6125c8a84e69fe77640d468ccef4c02a2d20c284446dbb1460")
+
+	txn, _ := env.BeginTxn(nil, 0)
+	err = txn.Drop(newStateBucket, false)
+	check(err)
+
+	for i := uint64(0); i < 1_000_000_000; i++ {
+		if i%10_000_000 == 0 {
+			err = txn.Commit()
+			check(err)
+			txn, err = env.BeginTxn(nil, 0)
+			check(err)
+			fmt.Printf("%dM\n", i/1_000_000)
+		}
+
+		v := make([]byte, 8)
+		binary.BigEndian.PutUint64(v, i)
+		err = txn.Put(newStateBucket, k, v, lmdb.AppendDup)
+		check(err)
+	}
+	err = txn.Commit()
+	check(err)
+
+	//print new bucket size
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
+	// delete single DupSort key
+	t := time.Now()
+	err = env.Update(func(txn *lmdb.Txn) (err error) {
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		k, _, err = cur.Get(k, nil, lmdb.SetRange)
+		check(err)
+		err = cur.Del(lmdb.NoDupData)
+		check(err)
+		return nil
+	})
+	check(err)
+	fmt.Printf("Deletion took: %s\n", time.Since(t))
+
+	// check that no keys are left in the bucket
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		for k, v, err := cur.Get(nil, nil, lmdb.First); !lmdb.IsNotFound(err); k, v, err = cur.Get(nil, nil, lmdb.Next) {
+			check(err)
+			fmt.Printf("Still see some key: %x, %x\n", k, v)
+			panic(1)
+		}
+		return nil
+	})
+	check(err)
 }
 
 func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
@@ -2327,9 +2394,6 @@ func main() {
 	if *action == "slice" {
 		dbSlice(*chaindata, []byte(*bucket), common.FromHex(*hash))
 	}
-	if *action == "mgrSchedule" {
-		mgrSchedule(*chaindata, uint64(*block))
-	}
 	if *action == "resetState" {
 		resetState(*chaindata)
 	}
@@ -2338,6 +2402,11 @@ func main() {
 	}
 	if *action == "getProof" {
 		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "reset3" {
+		if err := resetStage3(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
@@ -2420,6 +2489,12 @@ func main() {
 		if err := fixStages(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
+	}
+	if *action == "deleteLargeDupSortKey" {
+		deleteLargeDupSortKey()
+	}
+	if *action == "dupSortState" {
+		dupSortState(*chaindata)
 	}
 	if *action == "compare" {
 		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {

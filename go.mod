@@ -22,7 +22,6 @@ require (
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200219165308-d1232e640a87
-	github.com/dustin/go-humanize v1.0.0
 	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
 	github.com/ethereum/evmc/v7 v7.3.0
 	github.com/fatih/color v1.7.0

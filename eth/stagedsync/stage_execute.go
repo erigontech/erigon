@@ -77,7 +77,7 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool) error {
 	nextBlockNumber := s.BlockNumber
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
@@ -121,6 +121,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		if block == nil {
 			break
 		}
+		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
+		block.Body().SendersToTxs(senders)
 		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
 		type cacheSetter interface {

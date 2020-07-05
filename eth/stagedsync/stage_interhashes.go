@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -21,7 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	syncHeadNumber, _, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
 		return err
@@ -47,7 +45,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
-func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit chan struct{}) error {
+func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit <-chan struct{}) error {
 	hash := rawdb.ReadCanonicalHash(db, to)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
@@ -57,27 +55,18 @@ func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64,
 	return incrementIntermediateHashes(s, db, from, to, datadir, expectedRootHash, quit)
 }
 
-func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			return stateSizeCollector.Collect(common.CopyBytes(k), nil)
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		lenBytes := make([]byte, 8)
-		binary.BigEndian.PutUint64(lenBytes, stateSize)
-		return stateSizeCollector.Collect(common.CopyBytes(k), lenBytes)
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
@@ -99,9 +88,6 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
 	log.Info("Regeneration ended")
 	return nil
 }
@@ -111,7 +97,6 @@ type Receiver struct {
 	accountMap            map[string]*accounts.Account
 	storageMap            map[string][]byte
 	removingAccount       []byte
-	currentAccount        []byte
 	currentAccountWithInc []byte
 	unfurlList            []string
 	currentIdx            int
@@ -133,7 +118,6 @@ func (r *Receiver) Receive(
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessSize uint64,
 ) error {
 	storage := itemType == trie.StorageStreamItem || itemType == trie.SHashStreamItem
 	for r.currentIdx < len(r.unfurlList) {
@@ -149,59 +133,49 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
-				return nil
-			}
-			if r.currentAccount != nil && storage {
-				if bytes.HasPrefix(storageKey, r.currentAccount) {
-					if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-						return nil
-					}
-				} else {
+			if storage {
+				if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
+					return nil
+				}
+				if r.currentAccountWithInc == nil {
+					return nil
+				}
+				if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
 					return nil
 				}
 			}
 			if itemType == trie.AccountStreamItem {
-				r.currentAccount = accountKey
 				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 			}
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 		}
 		r.currentIdx++
 		if len(k) > common.HashLength {
 			if r.removingAccount != nil && bytes.HasPrefix(k, r.removingAccount) {
 				continue
 			}
-			if r.currentAccount == nil {
+			if r.currentAccountWithInc == nil {
 				continue
 			}
-			if r.currentAccount != nil {
-				if bytes.HasPrefix(k, r.currentAccount) {
-					if !bytes.HasPrefix(k, r.currentAccountWithInc) {
-						continue
-					}
-				} else {
-					continue
-				}
+			if !bytes.HasPrefix(k, r.currentAccountWithInc) {
+				continue
 			}
 			v := r.storageMap[ks]
 			if len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0); err != nil {
 					return err
 				}
 				r.removingAccount = nil
-				r.currentAccount = k
 				r.currentAccountWithInc = dbutils.GenerateStoragePrefix(k, v.Incarnation)
 			} else {
 				r.removingAccount = k
-				r.currentAccount = nil
 				r.currentAccountWithInc = nil
 			}
 		}
@@ -210,24 +184,22 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	if r.removingAccount != nil && storage && bytes.HasPrefix(storageKey, r.removingAccount) {
-		return nil
-	}
-	r.removingAccount = nil
 	if storage {
-		if r.currentAccount != nil && bytes.HasPrefix(storageKey, r.currentAccount) {
-			if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
-				return nil
-			}
-		} else {
+		if r.removingAccount != nil && bytes.HasPrefix(storageKey, r.removingAccount) {
+			return nil
+		}
+		if r.currentAccountWithInc == nil {
+			return nil
+		}
+		if !bytes.HasPrefix(storageKey, r.currentAccountWithInc) {
 			return nil
 		}
 	}
+	r.removingAccount = nil
 	if itemType == trie.AccountStreamItem {
-		r.currentAccount = accountKey
 		r.currentAccountWithInc = dbutils.GenerateStoragePrefix(accountKey, accountValue.Incarnation)
 	}
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -262,6 +234,10 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
+	if _, ok := r.storageMap[newKStr]; ok {
+		//fmt.Printf("Duplicate: %x\n", newKStr)
+		return nil
+	}
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
@@ -278,7 +254,7 @@ type HashPromoter struct {
 	quitCh           chan struct{}
 }
 
-func NewHashPromoter(db ethdb.Database, quitCh chan struct{}) *HashPromoter {
+func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 	return &HashPromoter{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -417,7 +393,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	return nil
 }
 
-func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver()
@@ -445,36 +421,16 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		unfurl.AddKey([]byte(ks))
 	}
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			if debug.IsTrackWitnessSizeEnabled() {
-				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
-					return err
-				}
-			}
-			return nil
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		if debug.IsTrackWitnessSizeEnabled() {
-			lenBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(lenBytes, stateSize)
-			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
-				return err
-			}
-		}
-
-		return nil
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
@@ -499,9 +455,6 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	)
 
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -544,35 +497,16 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		unfurl.AddKey([]byte(ks))
 	}
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	stateSizeCollector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte, stateSize uint64) error {
+	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
 			return nil
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
 		if hash == nil {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			if debug.IsTrackWitnessSizeEnabled() {
-				if err := stateSizeCollector.Collect(common.CopyBytes(k), nil); err != nil {
-					return err
-				}
-			}
-			return nil
+			return collector.Collect(k, nil)
 		}
-		if err := collector.Collect(k, common.CopyBytes(hash)); err != nil {
-			return err
-		}
-		if debug.IsTrackWitnessSizeEnabled() {
-			lenBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(lenBytes, stateSize)
-			if err := stateSizeCollector.Collect(common.CopyBytes(k), lenBytes); err != nil {
-				return err
-			}
-		}
-		return nil
+		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
@@ -596,9 +530,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		"gen IH", generationIHTook,
 	)
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	if err := stateSizeCollector.Load(db, dbutils.IntermediateWitnessSizeBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	if err := u.Done(db); err != nil {

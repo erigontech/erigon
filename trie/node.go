@@ -36,7 +36,6 @@ type node interface {
 
 	// if not empty, returns node's RLP or hash thereof
 	reference() []byte
-	witnessSize() uint64
 }
 
 type (
@@ -44,7 +43,6 @@ type (
 	fullNode struct {
 		ref      nodeRef
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
-		iws      uint64   // IntermediateWitnessSize - amount of bytes used in DB by all storage/code under this prefix + few bytes for Trie structure encoding. equal to sum of children's iws
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	duoNode struct {
@@ -52,18 +50,15 @@ type (
 		mask   uint32 // Bitmask. The set bits indicate the child is not nil
 		child1 node
 		child2 node
-		iws    uint64
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
 		ref nodeRef
 		Key []byte // HEX encoding
 		Val node
-		iws uint64
 	}
 	hashNode struct {
 		hash []byte
-		iws  uint64
 	}
 	valueNode []byte
 
@@ -86,10 +81,6 @@ func NewShortNode(key []byte, value node) *shortNode {
 	s := &shortNode{
 		Key: key,
 		Val: value,
-		iws: 1 + uint64(1)/2 + value.witnessSize(), //opcode + len(key)/2 + childrenWitnessSize
-	}
-	if CountWitnessSizeWithoutStructure {
-		s.iws = value.witnessSize()
 	}
 
 	return s
@@ -242,96 +233,6 @@ func (n *fullNode) reference() []byte     { return n.ref.data[0:n.ref.len] }
 func (n *duoNode) reference() []byte      { return n.ref.data[0:n.ref.len] }
 func (n *shortNode) reference() []byte    { return n.ref.data[0:n.ref.len] }
 func (an *accountNode) reference() []byte { return nil }
-
-// WitnessSize calculation logic:
-// hashNode: represents full underlying witness
-// valueNode: opcode + len(storage)
-// codeNode: opcode + len(code)
-// fullNode: opcode + mask + childrenWitnessSize
-// duoNode: opcode + mask + childrenWitnessSize
-// shortNode: opcode + len(key)/2 + childrenWitnessSize
-// accountNode: opcode + account data len + storageWitnessSize - could not include codeSize because it's not available yet
-func (n hashNode) witnessSize() uint64 { return n.iws }
-func (n valueNode) witnessSize() uint64 {
-	if CountWitnessSizeWithoutStructure {
-		return uint64(len(n)) + common.HashLength*2 + common.IncarnationLength
-	}
-	return uint64(len(n)) + 1
-}
-func (n codeNode) witnessSize() uint64 {
-	if CountWitnessSizeWithoutStructure {
-		//return uint64(len(n))
-		return 0
-	}
-	return uint64(len(n)) + 1
-}
-func (n *fullNode) witnessSize() uint64  { return n.iws }
-func (n *duoNode) witnessSize() uint64   { return n.iws }
-func (n *shortNode) witnessSize() uint64 { return n.iws }
-func (an *accountNode) witnessSize() uint64 {
-	if CountWitnessSizeWithoutStructure {
-		res := uint64(an.EncodingLengthForStorage()) + common.HashLength
-		if an.storage != nil {
-			res += an.storage.witnessSize()
-		}
-		return res
-	}
-
-	res := 1 + uint64(an.EncodingLengthForStorage())
-	if an.storage != nil {
-		res += an.storage.witnessSize()
-	}
-	//if an.code != nil {
-	//	res += an.code.witnessSize()
-	//}
-	return res
-}
-
-func (n *fullNode) recalculateWitnessSize() {
-	if CountWitnessSizeWithoutStructure {
-		n.iws = 0
-		for j := range n.Children {
-			if n.Children[j] != nil {
-				n.iws += n.Children[j].witnessSize()
-			}
-		}
-		return
-	}
-	n.iws = 1 + 1 // opcode + mask + childrenWitnessSize
-	for j := range n.Children {
-		if n.Children[j] != nil {
-			n.iws += n.Children[j].witnessSize()
-		}
-	}
-}
-func (n *duoNode) recalculateWitnessSize() {
-	if CountWitnessSizeWithoutStructure {
-		n.iws = 0
-		if n.child1 != nil {
-			n.iws += n.child1.witnessSize()
-		}
-		if n.child2 != nil {
-			n.iws += n.child2.witnessSize()
-		}
-		return
-	}
-
-	n.iws = 1 + 1 // opcode + mask + childrenWitnessSize
-	if n.child1 != nil {
-		n.iws += n.child1.witnessSize()
-	}
-	if n.child2 != nil {
-		n.iws += n.child2.witnessSize()
-	}
-}
-func (n *shortNode) recalculateWitnessSize() {
-	if CountWitnessSizeWithoutStructure {
-		n.iws = n.Val.witnessSize()
-		return
-	}
-
-	n.iws = 1 + 1 + uint64(len(n.Key))/2 + n.Val.witnessSize() // opcode + len(key)/2 + childrenWitnessSize
-}
 
 // Pretty printing.
 func (n fullNode) String() string     { return n.fstring("") }

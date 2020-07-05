@@ -1392,10 +1392,10 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 
 // InsertBodyChain attempts to insert the given batch of block into the
 // canonical chain, without executing those blocks
-func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (int, error) {
+func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (bool, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
-		return 0, nil
+		return true, nil
 	}
 	// Remove already known canon-blocks
 	var (
@@ -1410,14 +1410,14 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 			log.Error("Non contiguous block insert", "number", block.Number(), "hash", block.Hash(),
 				"parent", block.ParentHash(), "prevnumber", prev.Number(), "prevhash", prev.Hash())
 
-			return 0, fmt.Errorf("non contiguous insert: item %d is #%d [%x…], item %d is #%d [%x…] (parent [%x…])", i-1, prev.NumberU64(),
+			return true, fmt.Errorf("non contiguous insert: item %d is #%d [%x…], item %d is #%d [%x…] (parent [%x…])", i-1, prev.NumberU64(),
 				prev.Hash().Bytes()[:4], i, block.NumberU64(), block.Hash().Bytes()[:4], block.ParentHash().Bytes()[:4])
 		}
 	}
 	// Only insert if the difficulty of the inserted chain is bigger than existing chain
 	// Pre-checks passed, start the full block imports
 	if err := bc.addJob(); err != nil {
-		return 0, err
+		return true, err
 	}
 	ctx = bc.WithContext(ctx, chain[0].Number())
 	bc.chainmu.Lock()
@@ -1426,7 +1426,7 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 		bc.doneJob()
 	}()
 
-	n, err := InsertBodies(
+	return InsertBodies(
 		ctx,
 		&bc.procInterrupt,
 		chain,
@@ -1436,13 +1436,8 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 		bc.IsNoHistory,
 		&bc.currentBlock,
 		&bc.committedBlock,
-		bc.trieDbState,
-		bc.futureBlocks,
-		&bc.chainFeed,
 		bc.badBlocks,
 	)
-
-	return n, err
 }
 
 // InsertChain attempts to insert the given batch of blocks in to the canonical
@@ -2452,22 +2447,14 @@ func InsertBodies(
 	isNoHistory func(currentBlock *big.Int) bool,
 	currentBlock *atomic.Value,
 	committedBlock *atomic.Value,
-	trieDbState *state.TrieDbState,
-	futureBlocks *lru.Cache,
-	chainSideFeed *event.Feed,
 	badBlocks *lru.Cache,
-) (int, error) {
+) (bool, error) {
 	// If the chain is terminating, don't even bother starting u
 	if atomic.LoadInt32(procInterrupt) == 1 {
-		return 0, nil
+		return true, nil
 	}
 
-	// A queued approach to delivering events. This is generally
-	// faster than direct delivery and requires much less mutex
-	// acquiring.
-	var (
-		stats = InsertStats{StartTime: mclock.Now()}
-	)
+	stats := InsertStats{StartTime: mclock.Now()}
 
 	var offset int
 	var parent *types.Block
@@ -2478,7 +2465,7 @@ func InsertBodies(
 	parent = rawdb.ReadBlock(db, parentHash, parentNumber)
 	if parent == nil {
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
-		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
+		return true, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
 
 	canonicalHash := rawdb.ReadCanonicalHash(db, parentNumber)
@@ -2490,7 +2477,7 @@ func InsertBodies(
 		parent = rawdb.ReadBlock(db, parentHash, parentNumber)
 		if parent == nil {
 			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
-			return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
+			return true, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
 		canonicalHash = rawdb.ReadCanonicalHash(db, parentNumber)
 	}
@@ -2504,20 +2491,13 @@ func InsertBodies(
 		chain = append(preBlocks, chain...)
 	}
 
-	var k int
-	var committedK int
 	// Iterate over the blocks and insert when the verifier permits
-	for i, block := range chain {
+	for _, block := range chain {
 		start := time.Now()
-		if i >= offset {
-			k = i - offset
-		} else {
-			k = 0
-		}
 
 		// If the chain is terminating, stop processing blocks
 		if atomic.LoadInt32(procInterrupt) == 1 {
-			break
+			return true, nil
 		}
 
 		// If the header is a banned one, straight out abort
@@ -2533,80 +2513,49 @@ Error: %v
 Callers: %v
 ##############################
 `, block.Number(), block.Hash(), ErrBlacklistedHash, debug.Callers(20)))
-			return k, ErrBlacklistedHash
+			return true, ErrBlacklistedHash
 		}
-
-		// Wait for the block's verification to complete
-		var err error
-
-		var usedGas uint64
-		// proctime := time.Since(start)
 
 		// Calculate the total difficulty of the block
 		ptd := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1)
 
 		if ptd == nil {
-			return 0, consensus.ErrUnknownAncestor
+			return true, consensus.ErrUnknownAncestor
 		}
 
 		// Irrelevant of the canonical status, write the block itself to the database
 		if common.IsCanceled(ctx) {
-			return 0, ctx.Err()
+			return true, ctx.Err()
 		}
 
 		rawdb.WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
 
-		if trieDbState != nil {
-			trieDbState.SetBlockNr(block.NumberU64())
-		}
 		ctx = config.WithEIPsFlags(ctx, block.Number())
 		ctx = params.WithNoHistory(ctx, noHistory, isNoHistory)
-
-		futureBlocks.Remove(block.Hash())
-
-		chainSideFeed.Send(ChainSideEvent{Block: block})
-
-		if err != nil {
-			db.Rollback()
-			trieDbState = nil
-			if committedBlock.Load() != nil {
-				currentBlock.Store(committedBlock.Load())
-			}
-			return k, err
-		}
 
 		log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(),
 			"uncles", len(block.Uncles()), "txs", len(block.Transactions()), "gas", block.GasUsed(),
 			"elapsed", common.PrettyDuration(time.Since(start)),
 			"root", block.Root())
-		// bc.gcproc += proctime
-
-		stats.Processed++
-		stats.UsedGas += usedGas
-		toCommit := stats.NeedToCommit(chain, db, i)
-		stats.Report(chain, i, db, toCommit)
-		if toCommit {
-			var written uint64
-			if written, err = db.Commit(); err != nil {
-				log.Error("Could not commit chainDb", "error", err)
-				db.Rollback()
-				trieDbState = nil
-				if committedBlock.Load() != nil {
-					currentBlock.Store(committedBlock.Load())
-				}
-				return k, err
-			}
-			committedBlock.Store(currentBlock.Load())
-			committedK = k
-			if trieDbState != nil {
-				trieDbState.EvictTries(false)
-			}
-			size, err := db.(ethdb.HasStats).DiskSize(context.Background())
-			if err != nil {
-				return k, err
-			}
-			log.Info("Database", "size", size, "written", written)
-		}
 	}
-	return committedK + 1, nil
+	stats.Processed = len(chain)
+	stats.Report(chain, len(chain)-1, db, true)
+	var written uint64
+	var err error
+	if written, err = db.Commit(); err != nil {
+		log.Error("Could not commit chainDb", "error", err)
+		db.Rollback()
+		if committedBlock.Load() != nil {
+			currentBlock.Store(committedBlock.Load())
+		}
+		return true, err
+	}
+	committedBlock.Store(currentBlock.Load())
+	size, err := db.(ethdb.HasStats).DiskSize(context.Background())
+	if err != nil {
+		return true, err
+	}
+	log.Info("Database", "size", size, "written", written)
+
+	return false, nil
 }

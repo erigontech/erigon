@@ -37,13 +37,12 @@ type structInfoReceiver interface {
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(hash []byte, dataLen uint64) error
+	hash(hash []byte) error
 	topHash() []byte
-	topStateSize() uint64
 }
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
-type HashCollector func(keyHex []byte, hash []byte, stateSize uint64) error
+type HashCollector func(keyHex []byte, hash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -72,8 +71,7 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash        common.Hash
-	WitnessSize uint64
+	Hash common.Hash
 }
 
 func (GenStructStepHashData) GenStructStepData() {}
@@ -135,7 +133,7 @@ func GenStructStep(
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash[:], v.WitnessSize); err != nil {
+				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
 				buildExtensions = true
@@ -198,7 +196,7 @@ func GenStructStep(
 				}
 			}
 			if h != nil {
-				if err := h(curr[:maxLen], e.topHash(), e.topStateSize()); err != nil {
+				if err := h(curr[:maxLen], e.topHash()); err != nil {
 					return nil, err
 				}
 			}
