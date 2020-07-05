@@ -2102,20 +2102,50 @@ func testStageLoop(chaindata string) error {
 	return nil
 }
 
-func searchChangeSet(chaindata string, key []byte) error {
+func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block)
 		c := st.Cursor()
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			timestamp, _ := dbutils.DecodeTimestamp(k)
 			//fmt.Printf("timestamp: %d\n", timestamp)
 			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
+				if bytes.Equal(kk, key) {
+					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
+				}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
+	fmt.Printf("Searching storage changesets\n")
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
 				if bytes.Equal(kk, key) {
 					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
 				}
@@ -2376,7 +2406,12 @@ func main() {
 		}
 	}
 	if *action == "searchChangeSet" {
-		if err := searchChangeSet(*chaindata, common.FromHex(*hash)); err != nil {
+		if err := searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "searchStorageChangeSet" {
+		if err := searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

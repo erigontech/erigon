@@ -109,7 +109,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 
 		currentKey = common.CopyBytes(k)
 		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
-			keys[string(kk)] = struct{}{}
+			keys[string(common.CopyBytes(kk))] = struct{}{}
 			return nil
 		})
 		if err != nil {
@@ -130,8 +130,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 	var startKey = make([]byte, keySize+8)
 
 	for key := range keys {
-		key := common.CopyBytes([]byte(key))
-		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation(key))
+		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation([]byte(key)))
 
 		binary.BigEndian.PutUint64(startKey[keySize:], timestampTo)
 		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*keySize, func(k, v []byte) (bool, error) {
@@ -237,7 +236,7 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 			if len(changesetValue) == 0 {
 				v[8] = 1
 			}
-			return next(dbKey, changesetKey, v)
+			return next(dbKey, common.CopyBytes(changesetKey), v)
 		})
 	}
 }

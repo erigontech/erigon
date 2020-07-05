@@ -214,7 +214,7 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 	}
 	newKStr := string(newK)
 	if _, ok := r.accountMap[newKStr]; ok {
-		return nil
+		//return nil
 	}
 	if len(value) > 0 {
 		var a accounts.Account
@@ -236,8 +236,7 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 	}
 	newKStr := string(newK)
 	if _, ok := r.storageMap[newKStr]; ok {
-		//fmt.Printf("Duplicate: %x\n", newKStr)
-		return nil
+		//return nil
 	}
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)

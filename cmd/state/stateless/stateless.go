@@ -63,6 +63,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
 		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
+	fmt.Printf("Total used gas: %d\n", *usedGas)
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {

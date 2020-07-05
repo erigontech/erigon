@@ -16,7 +16,10 @@ import (
 )
 
 func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	//fmt.Printf("GetAsOf plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
+	trace := bytes.HasPrefix(key, common.FromHex("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab"))
+	if trace {
+		fmt.Printf("GetAsOf plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
+	}
 	var dat []byte
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		v, err := FindByHistory(tx, plain, storage, key, timestamp)
@@ -28,7 +31,9 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 		if !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
 		}
-		//fmt.Printf("Not found in history, key=%x, timestamp=%d\n", key, timestamp)
+		if trace {
+			fmt.Printf("Not found in history, key=%x, timestamp=%d\n", key, timestamp)
+		}
 		{
 			var bucket []byte
 			if plain {
@@ -40,6 +45,9 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 			if v == nil {
 				return ethdb.ErrKeyNotFound
 			}
+			if trace {
+				fmt.Printf("Returning %x\n", v)
+			}
 
 			dat = make([]byte, len(v))
 			copy(dat, v)
@@ -50,7 +58,10 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 }
 
 func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	//fmt.Printf("FindByHistory plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
+	trace := bytes.HasPrefix(key, common.FromHex("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab"))
+	if trace {
+		fmt.Printf("FindByHistory plain=%t, storage=%t, key=%x, timestamp=%d\n", plain, storage, key, timestamp)
+	}
 	var hBucket []byte
 	if storage {
 		hBucket = dbutils.StorageHistoryBucket
@@ -91,11 +102,15 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 	changeSetBlock, set, ok := index.Search(timestamp)
 	var data []byte
 	if ok {
-		//fmt.Printf("Found changeSetBlock: %d in [%s]\n", changeSetBlock, index)
+		if trace {
+			fmt.Printf("Found changeSetBlock: %d in [%s]\n", changeSetBlock, index)
+		}
 		// set == true if this change was from empty record (non-existent account) to non-empty
 		// In such case, we do not need to examine changeSet and return empty data
-		if set {
-			//fmt.Printf("Empty flag set\n")
+		if set && !storage {
+			if trace {
+				fmt.Printf("Empty flag set\n")
+			}
 			return []byte{}, nil
 		}
 		csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
@@ -109,10 +124,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 
 		if plain {
 			if storage {
-				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
+				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).Find(key)
 			} else {
 				data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
-				//fmt.Printf("Found data: %x\n", data)
 			}
 		} else if storage {
 			data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
@@ -120,10 +134,10 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			data, err = changeset.AccountChangeSetBytes(changeSetData).Find(key)
 		}
 		if err != nil {
-			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			if !errors.Is(err, changeset.ErrNotFound) {
 				return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
 			}
-			return nil, err
+			return nil, ethdb.ErrKeyNotFound
 		}
 	} else if plain {
 		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
@@ -165,7 +179,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			err = nil
 			for k, v, err1 := c.Seek(startKey); k != nil && err1 == nil; k, v, err1 = c.Next() {
 				if storage {
-					data, err = changeset.StorageChangeSetPlainBytes(v).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
+					data, err = changeset.StorageChangeSetPlainBytes(v).Find(key)
 				} else {
 					data, err = changeset.AccountChangeSetPlainBytes(v).Find(key)
 				}

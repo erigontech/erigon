@@ -20,7 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"math/big"
+	//"runtime/debug"
 
 	"github.com/holiman/uint256"
 	"github.com/petar/GoLLRB/llrb"
@@ -184,10 +187,17 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	trace := address == common.HexToAddress("0x6ffedc1562918c07ae49b0ba210e6d80c7d61eab")
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	enc, err := GetAsOf(dbs.db, true /* plain */, true /* storage */, compositeKey, dbs.blockNr+1)
-	if err != nil || enc == nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, err
+	}
+	if enc == nil {
 		return nil, nil
+	}
+	if trace {
+		fmt.Printf("ReadAccountStorage: %x %d %x: %x\n", address, incarnation, *key, enc)
 	}
 	return enc, nil
 }
@@ -208,6 +218,7 @@ func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, codeHash co
 }
 
 func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	//fmt.Printf("ReadAccountIncarnation %x\n%s\n", address, debug.Stack())
 	// We do not need to know the accurate incarnation value when DbState is used, because correct incarnation
 	// is stored in the account record
 	return 0, nil
