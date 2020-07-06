@@ -86,7 +86,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return true, nil
 		}
 
-		if currentHeaderIdx >= toBlockNumber { // if header stage is ehead of body stage
+		if currentHeaderIdx >= toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
 			return false, nil
 		}
 

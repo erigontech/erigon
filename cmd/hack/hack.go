@@ -62,39 +62,6 @@ var bucket = flag.String("bucket", "", "bucket in the database")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 var preImage = flag.String("preimage", "0x00", "preimage")
 
-func bucketList(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, dbutils.CurrentStateBucket) {
-				n := make([]byte, len(name))
-				copy(n, name)
-				bucketList = append(bucketList, n)
-			}
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
-// prefixLen returns the length of the common prefix of a and b.
-func prefixLen(a, b []byte) int {
-	var i, length = 0, len(a)
-	if len(b) < length {
-		length = len(b)
-	}
-	for ; i < length; i++ {
-		if a[i] != b[i] {
-			break
-		}
-	}
-	return i
-}
-
 func check(e error) {
 	if e != nil {
 		panic(e)
