@@ -62,39 +62,6 @@ var bucket = flag.String("bucket", "", "bucket in the database")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 var preImage = flag.String("preimage", "0x00", "preimage")
 
-func bucketList(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, dbutils.CurrentStateBucket) {
-				n := make([]byte, len(name))
-				copy(n, name)
-				bucketList = append(bucketList, n)
-			}
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
-// prefixLen returns the length of the common prefix of a and b.
-func prefixLen(a, b []byte) int {
-	var i, length = 0, len(a)
-	if len(b) < length {
-		length = len(b)
-	}
-	for ; i < length; i++ {
-		if a[i] != b[i] {
-			break
-		}
-	}
-	return i
-}
-
 func check(e error) {
 	if e != nil {
 		panic(e)
@@ -1573,16 +1540,18 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func resetStage3(chaindata string) error {
+func testStage3(chaindata string, reset bool, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := db.ClearBuckets(
-		dbutils.Senders,
-	); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
-		return err
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.Senders,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+			return err
+		}
 	}
 	var err error
 	var stage2progress uint64
@@ -1590,8 +1559,13 @@ func resetStage3(chaindata string) error {
 		return err
 	}
 	log.Info("Stage2", "progress", stage2progress)
+	var stage3progress uint64
+	if stage3progress, _, err = stages.GetStageProgress(db, stages.Senders); err != nil {
+		return err
+	}
+	log.Info("Stage3", "progress", stage3progress)
 	ch := make(chan struct{})
-	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: 0}
+	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: stage3progress}
 	const batchSize = 10000
 	const blockSize = 4096
 	n := runtime.NumCPU()
@@ -1606,7 +1580,7 @@ func resetStage3(chaindata string) error {
 		ReadChLen:       4,
 		Now:             time.Now(),
 	}
-	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
+	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, block, "", ch); err != nil {
 		return err
 	}
 	return nil
@@ -2436,7 +2410,12 @@ func main() {
 		}
 	}
 	if *action == "reset3" {
-		if err := resetStage3(*chaindata); err != nil {
+		if err := testStage3(*chaindata, true, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage3" {
+		if err := testStage3(*chaindata, false, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
