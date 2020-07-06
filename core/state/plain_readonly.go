@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -186,7 +187,10 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	enc, err := GetAsOf(dbs.db, true /* plain */, true /* storage */, compositeKey, dbs.blockNr+1)
-	if err != nil || enc == nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, err
+	}
+	if enc == nil {
 		return nil, nil
 	}
 	return enc, nil
