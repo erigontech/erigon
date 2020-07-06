@@ -3,8 +3,9 @@ package main
 import "github.com/spf13/cobra"
 
 var (
-	chaindata     string
-	blocksPerStep uint64
+	chaindata string
+	block     uint64
+	stride    uint64
 )
 
 func must(err error) {
@@ -19,6 +20,10 @@ func withChaindata(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chaindata"))
 }
 
-func withBlocksPerStep(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&blocksPerStep, "blocks_per_step", 2, "how much blocks unwind/exec on each iteration")
+func withBlockNumber(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&block, "block", 0, "stop test at this block")
+}
+
+func withStride(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&stride, "stride", 2, "how much blocks unwind/exec on each iteration")
 }

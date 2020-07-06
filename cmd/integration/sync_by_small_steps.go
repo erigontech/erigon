@@ -29,7 +29,8 @@ var cmdSyncBySmallSteps = &cobra.Command{
 
 func init() {
 	withChaindata(cmdSyncBySmallSteps)
-	withBlocksPerStep(cmdSyncBySmallSteps)
+	withStride(cmdSyncBySmallSteps)
+	withBlockNumber(cmdSyncBySmallSteps)
 
 	rootCmd.AddCommand(cmdSyncBySmallSteps)
 }
@@ -46,18 +47,24 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	ch := make(chan struct{})
 	defer close(ch)
 
-	stopAt := progress(db, stages.Senders).BlockNumber
-	for progress(db, stages.Execution).BlockNumber+2*blocksPerStep < stopAt {
+	senderStageProgress := progress(db, stages.Senders).BlockNumber
+
+	var stopAt = senderStageProgress
+	if block > 0 && block < senderStageProgress {
+		stopAt = block
+	}
+
+	for progress(db, stages.Execution).BlockNumber+2*stride < stopAt {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
 
-		// All stages forward to `execStage + 2*blocksPerStep` block
+		// All stages forward to `execStage + 2*stride` block
 		{
 			stage := progress(db, stages.Execution)
-			execToBlock := stage.BlockNumber + 2*blocksPerStep
+			execToBlock := stage.BlockNumber + 2*stride
 			if err = stagedsync.SpawnExecuteBlocksStage(stage, db, blockchain, execToBlock, ch, nil, false); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
@@ -88,9 +95,9 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
-		// Unwind all stages to `execStage - blocksPerStep` block
+		// Unwind all stages to `execStage - stride` block
 		execStage := progress(db, stages.Execution)
-		to := execStage.BlockNumber - blocksPerStep
+		to := execStage.BlockNumber - stride
 		{
 			u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: to}
 			if err = stagedsync.UnwindStorageHistoryIndex(u, db, ch); err != nil {
