@@ -36,9 +36,17 @@ func (df *DataFlow) Print() {
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 
+	df.cfg.Print()
+
+	fmt.Printf("%-6s %-12s %-6s\n", "PC", "INSTR", "STATE")
 	for _, k := range keys {
 		state := df.states[k]
-		fmt.Printf("%-6d %-6v\n", k, df.spec.String(state))
+		node := df.cfg.nodes[k]
+		valueStr := opCodeToString[node.opCode]
+		if node.opValue != nil {
+			valueStr += " " + node.opValue.String()
+		}
+		fmt.Printf("%-6d %-12s %-6v\n", k, valueStr, df.spec.String(state))
 	}
 }
 
@@ -65,9 +73,6 @@ func (df *DataFlow) Run() error {
 			state0 = df.spec.Bot()
 		}
 		state1 := df.spec.Transfer(prevLub, instrNode)
-		fmt.Println("xfr")
-		fmt.Println(spec.String(prevLub))
-		fmt.Println(spec.String(state1))
 		df.states[instrNode.pc] = state1
 
 		if !spec.Eq(state0, state1) {

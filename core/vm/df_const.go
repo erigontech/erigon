@@ -71,9 +71,9 @@ func (c0 *AbsConst) Lub(c1 AbsConst) AbsConst {
 	} else if c0.kind == Bot && c1.kind == Bot {
 		return ConstBot()
 	} else if c0.kind == Value && c1.kind == Bot {
-		return ConstValue(c1.value)
-	} else if c0.kind == Bot && c1.kind == Value {
 		return ConstValue(c0.value)
+	} else if c0.kind == Bot && c1.kind == Value {
+		return ConstValue(c1.value)
 	} else if c0.kind == Top || c1.kind == Top {
 		return ConstTop()
 	} else {
