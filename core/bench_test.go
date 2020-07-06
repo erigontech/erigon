@@ -176,7 +176,10 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	ctx := chainman.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	defer chainman.Stop()
-	chain, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen)
+	chain, _, err := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen)
+	if err != nil {
+		b.Fatalf("generate chain: %w", err)
+	}
 
 	// Time the insertion of the new chain.
 	// State and blocks are stored in the same DB.

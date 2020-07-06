@@ -67,7 +67,7 @@ func ExampleGenerateChain() {
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.HomesteadSigner{}
-	chain, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db.NewBatch(), 5, func(i int, gen *BlockGen) {
+	chain, _, err := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db.NewBatch(), 5, func(i int, gen *BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
@@ -94,6 +94,9 @@ func ExampleGenerateChain() {
 			gen.AddUncle(b3)
 		}
 	})
+	if err != nil {
+		fmt.Printf("generate chain: %w\n", err)
+	}
 
 	// Import the chain. This runs all block validation rules.
 	if i, err := blockchain.InsertChain(context.Background(), chain); err != nil {
