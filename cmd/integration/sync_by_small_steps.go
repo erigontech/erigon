@@ -47,7 +47,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			ch := make(chan struct{})
 			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
 			blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, stage4progress+2, ch, nil, false); err != nil {
+			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, stage4progress+3, ch, nil, false); err != nil {
 				return err
 			}
 			close(ch)
