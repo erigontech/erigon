@@ -1266,14 +1266,11 @@ func resetState(chaindata string) {
 		dbutils.PlainContractCodeBucket,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
-		dbutils.IntermediateTrieHashBucket,
 	))
 	core.UsePlainStateExecution = true
 	_, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil)
 	check(err)
 	fmt.Printf("Reset state done\n")
 }

@@ -2,12 +2,13 @@ package stagedsync
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh chan struct{}) error {
+func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
 	endBlock, err := s.ExecutionAt(db)
 	if err != nil {
 		return fmt.Errorf("account history index: getting last executed block: %w", err)
@@ -32,7 +33,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	return s.DoneAndUpdate(db, endBlock)
 }
 
-func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh chan struct{}) error {
+func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
 	endBlock, err := s.ExecutionAt(db)
 	if err != nil {
 		return fmt.Errorf("storage history index: getting last executed block: %w", err)
@@ -55,7 +56,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	return s.DoneAndUpdate(db, endBlock)
 }
 
-func UnwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
+func UnwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, quitCh <-chan struct{}) error {
 	ig := core.NewIndexGenerator(db, quitCh)
 	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
 		return err
@@ -66,7 +67,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, db ethdb.Database, quitCh chan st
 	return nil
 }
 
-func UnwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
+func UnwindStorageHistoryIndex(u *UnwindState, db ethdb.Database, quitCh <-chan struct{}) error {
 	ig := core.NewIndexGenerator(db, quitCh)
 	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return err

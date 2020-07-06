@@ -239,7 +239,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 	}
 }
 
-func unwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
+func UnwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
 	// Does not require any special processing
 	mutation := stateDB.NewBatch()
 	err := u.Done(mutation)

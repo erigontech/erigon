@@ -16,6 +16,7 @@ func must(err error) {
 func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chaindata, "chaindata", "chaindata", "path to the db")
 	must(cmd.MarkFlagFilename("chaindata", ""))
+	must(cmd.MarkFlagRequired("chaindata"))
 }
 
 func withBlocksPerStep(cmd *cobra.Command) {
