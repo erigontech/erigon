@@ -43,11 +43,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		return err
 	}
 	defer blockchain.Stop()
-	ch := ctx.Done()
+	ch := make(chan struct{})
+	defer close(ch)
 
 	stopAt := progress(db, stages.Senders).BlockNumber
 	for progress(db, stages.Execution).BlockNumber+2*blocksPerStep < stopAt {
-
 		select {
 		case <-ctx.Done():
 			return nil
