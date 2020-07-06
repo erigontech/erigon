@@ -85,7 +85,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		return err
 	}
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return fmt.Errorf("gen ih stage: fail load data to bucket: %d\n", err)
+		return fmt.Errorf("gen ih stage: fail load data to bucket: %d", err)
 	}
 	log.Info("Regeneration ended")
 	return nil

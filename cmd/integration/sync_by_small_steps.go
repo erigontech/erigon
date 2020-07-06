@@ -56,21 +56,21 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			stage := progress(db, stages.Execution)
 			execToBlock := stage.BlockNumber + 2*blocksPerStep
 			if err = stagedsync.SpawnExecuteBlocksStage(stage, db, blockchain, execToBlock, ch, nil, false); err != nil {
-				return fmt.Errorf("SpawnExecuteBlocksStage: %w", err)
+				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 		}
 
 		{
 			stage := progress(db, stages.IntermediateHashes)
 			if err = stagedsync.SpawnIntermediateHashesStage(stage, db, "", ch); err != nil {
-				return fmt.Errorf("SpawnIntermediateHashesStage: %w", err)
+				return fmt.Errorf("spawnIntermediateHashesStage: %w", err)
 			}
 		}
 
 		{
 			stage := progress(db, stages.HashState)
 			if err = stagedsync.SpawnHashStateStage(stage, db, "", ch); err != nil {
-				return fmt.Errorf("SpawnHashStateStage: %w", err)
+				return fmt.Errorf("spawnHashStateStage: %w", err)
 			}
 		}
 
@@ -78,10 +78,10 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			stage7 := progress(db, stages.AccountHistoryIndex)
 			stage8 := progress(db, stages.StorageHistoryIndex)
 			if err = stagedsync.SpawnAccountHistoryIndex(stage7, db, "", ch); err != nil {
-				return fmt.Errorf("SpawnAccountHistoryIndex: %w", err)
+				return fmt.Errorf("spawnAccountHistoryIndex: %w", err)
 			}
 			if err = stagedsync.SpawnStorageHistoryIndex(stage8, db, "", ch); err != nil {
-				return fmt.Errorf("SpawnStorageHistoryIndex: %w", err)
+				return fmt.Errorf("spawnStorageHistoryIndex: %w", err)
 			}
 		}
 
@@ -91,12 +91,12 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		{
 			u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: to}
 			if err = stagedsync.UnwindStorageHistoryIndex(u, db, ch); err != nil {
-				return fmt.Errorf("UnwindStorageHistoryIndex: %w", err)
+				return fmt.Errorf("unwindStorageHistoryIndex: %w", err)
 			}
 
 			u = &stagedsync.UnwindState{Stage: stages.AccountHistoryIndex, UnwindPoint: to}
 			if err = stagedsync.UnwindAccountHistoryIndex(u, db, ch); err != nil {
-				return fmt.Errorf("UnwindAccountHistoryIndex: %w", err)
+				return fmt.Errorf("unwindAccountHistoryIndex: %w", err)
 			}
 		}
 
@@ -104,7 +104,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
 			stage := progress(db, stages.HashState)
 			if err = stagedsync.UnwindHashStateStage(u, stage, db, "", ch); err != nil {
-				return fmt.Errorf("UnwindHashStateStage: %w", err)
+				return fmt.Errorf("unwindHashStateStage: %w", err)
 			}
 		}
 
@@ -112,7 +112,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
 			stage := progress(db, stages.IntermediateHashes)
 			if err = stagedsync.UnwindIntermediateHashesStage(u, stage, db, "", ch); err != nil {
-				return fmt.Errorf("UnwindIntermediateHashesStage: %w", err)
+				return fmt.Errorf("unwindIntermediateHashesStage: %w", err)
 			}
 		}
 
@@ -120,7 +120,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			stage := progress(db, stages.Execution)
 			u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: to}
 			if err = stagedsync.UnwindExecutionStage(u, stage, db); err != nil {
-				return fmt.Errorf("UnwindExecutionStage: %w", err)
+				return fmt.Errorf("unwindExecutionStage: %w", err)
 			}
 		}
 	}
