@@ -1540,7 +1540,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func testStage3(chaindata string, reset bool) error {
+func testStage3(chaindata string, reset bool, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if reset {
@@ -1580,7 +1580,7 @@ func testStage3(chaindata string, reset bool) error {
 		ReadChLen:       4,
 		Now:             time.Now(),
 	}
-	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
+	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, block, "", ch); err != nil {
 		return err
 	}
 	return nil
@@ -2410,12 +2410,12 @@ func main() {
 		}
 	}
 	if *action == "reset3" {
-		if err := testStage3(*chaindata, true); err != nil {
+		if err := testStage3(*chaindata, true, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "stage3" {
-		if err := testStage3(*chaindata, false); err != nil {
+		if err := testStage3(*chaindata, false, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

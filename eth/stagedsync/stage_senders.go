@@ -38,7 +38,11 @@ type Stage3Config struct {
 	Now             time.Time
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
+func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh chan struct{}) error {
+	if toBlock > 0 && toBlock <= s.BlockNumber {
+		return nil
+	}
+
 	if cfg.StartTrace {
 		filePath := fmt.Sprintf("trace_%d_%d_%d.out", cfg.Now.Day(), cfg.Now.Hour(), cfg.Now.Minute())
 		f1, err := os.Create(filePath)
@@ -69,10 +73,17 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := common.Stopped(quitCh); err != nil {
 		return err
 	}
-	toBlockNumber, _, err := stages.GetStageProgress(db, stages.Bodies)
+	bodiesStageProgress, _, err := stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return err
 	}
+
+	var toBlockNumber = bodiesStageProgress
+	if toBlock > 0 && toBlock < bodiesStageProgress {
+		toBlockNumber = toBlock
+	}
+	log.Info("Senders recovery", "from", s.BlockNumber, "to", toBlockNumber)
+
 	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
