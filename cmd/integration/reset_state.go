@@ -14,7 +14,7 @@ import (
 
 var cmdResetState = &cobra.Command{
 	Use:   "reset",
-	Short: "Reset sync stages and buckets. All, but headers and blocks.",
+	Short: "Reset sync stages and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		if err := resetState(ctx, chaindata); err != nil {
@@ -39,9 +39,6 @@ func resetState(_ context.Context, chaindata string) error {
 	}
 
 	core.UsePlainStateExecution = true
-	if err := resetSenders(db); err != nil {
-		return err
-	}
 	if err := resetExec(db); err != nil {
 		return err
 	}
@@ -59,18 +56,6 @@ func resetState(_ context.Context, chaindata string) error {
 
 	fmt.Printf("After reset: \n")
 	if err := printStages(db); err != nil {
-		return err
-	}
-	return nil
-}
-
-func resetSenders(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
-		dbutils.Senders,
-	); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
 		return err
 	}
 	return nil
