@@ -314,8 +314,8 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 			newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 			var codeHash []byte
 			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
-			if err != nil {
-				return err
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, newK)
 			}
 			return next(k, newK, codeHash)
 		})
