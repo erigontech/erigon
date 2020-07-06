@@ -189,7 +189,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
-	fmt.Printf("2: %d\n", toBlockNumber)
 	return s.DoneAndUpdate(db, toBlockNumber)
 }
 
