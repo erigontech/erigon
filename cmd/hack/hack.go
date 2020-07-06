@@ -1573,16 +1573,18 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func resetStage3(chaindata string) error {
+func testStage3(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := db.ClearBuckets(
-		dbutils.Senders,
-	); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
-		return err
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.Senders,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+			return err
+		}
 	}
 	var err error
 	var stage2progress uint64
@@ -1590,8 +1592,13 @@ func resetStage3(chaindata string) error {
 		return err
 	}
 	log.Info("Stage2", "progress", stage2progress)
+	var stage3progress uint64
+	if stage3progress, _, err = stages.GetStageProgress(db, stages.Senders); err != nil {
+		return err
+	}
+	log.Info("Stage3", "progress", stage3progress)
 	ch := make(chan struct{})
-	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: 0}
+	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: stage3progress}
 	const batchSize = 10000
 	const blockSize = 4096
 	n := runtime.NumCPU()
@@ -2436,7 +2443,12 @@ func main() {
 		}
 	}
 	if *action == "reset3" {
-		if err := resetStage3(*chaindata); err != nil {
+		if err := testStage3(*chaindata, true); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage3" {
+		if err := testStage3(*chaindata, false); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
