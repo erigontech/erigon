@@ -109,7 +109,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 
 		currentKey = common.CopyBytes(k)
 		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
-			keys[string(kk)] = struct{}{}
+			keys[string(common.CopyBytes(kk))] = struct{}{}
 			return nil
 		})
 		if err != nil {
@@ -130,8 +130,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 	var startKey = make([]byte, keySize+8)
 
 	for key := range keys {
-		key := common.CopyBytes([]byte(key))
-		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation(key))
+		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation([]byte(key)))
 
 		binary.BigEndian.PutUint64(startKey[keySize:], timestampTo)
 		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*keySize, func(k, v []byte) (bool, error) {
@@ -188,13 +187,15 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		log.Error("Value must be a multiple of 9", "ln", len(value), "k", common.Bytes2Hex(k))
 		return errors.New("incorrect value")
 	}
-
+	k = common.CopyBytes(k)
+	if len(k) >= 28 {
+		binary.BigEndian.PutUint64(k[common.AddressLength:], ^binary.BigEndian.Uint64(k[common.AddressLength:]))
+	}
 	currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 	indexBytes, err1 := state.Get(currentChunkKey)
 	if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
 		return fmt.Errorf("find chunk failed: %w", err1)
 	}
-
 	currentIndex := dbutils.WrapHistoryIndex(indexBytes)
 
 	for i := 0; i < len(value); i += 9 {
@@ -232,12 +233,16 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
 		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
+			key := common.CopyBytes(changesetKey)
+			if len(key) >= 28 {
+				binary.BigEndian.PutUint64(key[common.AddressLength:], ^binary.BigEndian.Uint64(key[common.AddressLength:]))
+			}
 			v := make([]byte, 9)
 			binary.BigEndian.PutUint64(v, blockNum)
 			if len(changesetValue) == 0 {
 				v[8] = 1
 			}
-			return next(dbKey, changesetKey, v)
+			return next(dbKey, key, v)
 		})
 	}
 }

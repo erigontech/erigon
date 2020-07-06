@@ -235,7 +235,6 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 	}
 	newKStr := string(newK)
 	if _, ok := r.storageMap[newKStr]; ok {
-		//fmt.Printf("Duplicate: %x\n", newKStr)
 		return nil
 	}
 	if len(value) > 0 {
