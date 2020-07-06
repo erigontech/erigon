@@ -45,13 +45,16 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	defer blockchain.Stop()
 	ch := ctx.Done()
 
-	for {
+	stopAt := progress(db, stages.Senders).BlockNumber
+	for progress(db, stages.Execution).BlockNumber+2*blocksPerStep < stopAt {
+
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
 
+		// All stages forward to `execStage + 2*blocksPerStep` block
 		{
 			stage := progress(db, stages.Execution)
 			execToBlock := stage.BlockNumber + 2*blocksPerStep
@@ -124,6 +127,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 	}
+
+	return nil
 }
 
 func progress(db ethdb.Getter, stage stages.SyncStage) *stagedsync.StageState {
