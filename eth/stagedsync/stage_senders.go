@@ -82,7 +82,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if toBlock > 0 && toBlock < bodiesStageProgress {
 		toBlockNumber = toBlock
 	}
-	log.Info("Senders recovery", "from", s.BlockNumber, "to", toBlockNumber)
+	log.Info("Senders recovery", "from", s.BlockNumber+1, "to", toBlockNumber)
 
 	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
