@@ -149,8 +149,8 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
-func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error {
-	var isIH bool
+func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) error {
+	var isIH, isIHSequence bool
 	var minKey []byte
 	var err error
 	if !first {
@@ -200,6 +200,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 				// Looking for storage sub-tree
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
+			if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(dbPrefix); err != nil {
+				return err
+			}
+			if isIHSequence {
+				fstl.k = common.CopyBytes(fstl.ihK)
+				return nil
+			}
+
 			if fstl.k, fstl.v, err = c.Seek(dbPrefix); err != nil {
 				return err
 			}
@@ -211,19 +219,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 					}
 				} else {
 					fstl.k = nil
-				}
-			}
-			if fstl.ihK, fstl.ihV, err = ih.Seek(dbPrefix); err != nil {
-				return err
-			}
-			if len(dbPrefix) <= common.HashLength && len(fstl.ihK) > common.HashLength {
-				// Advance to the first account
-				if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-					if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.nextAccountKey[:]); err != nil {
-						return err
-					}
-				} else {
-					fstl.ihK = nil
 				}
 			}
 			isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
@@ -303,6 +298,17 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], fstl.accountValue.Incarnation)
 
+			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
+				if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+					return err
+				}
+
+				if isIHSequence {
+					fstl.k = common.CopyBytes(fstl.ihK)
+					return nil
+				}
+			}
+
 			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
@@ -312,62 +318,13 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and Seek: %x\n", fstl.k)
 			}
-			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
-				if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
-					return err
-				}
-			}
 		}
 		return nil
 	}
 
 	// ih part
-	DecompressNibbles(minKey, &fstl.minKeyAsNibbles)
-
-	if len(fstl.minKeyAsNibbles) < cutoff {
-		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
-			return err
-		} // go to children, not to sibling
-		return nil
-	}
-
-	retain := fstl.rl.Retain(fstl.minKeyAsNibbles)
-	if fstl.trace {
-		fmt.Printf("fstl.rl.Retain(%x)=%t\n", fstl.minKeyAsNibbles, retain)
-	}
-
-	if retain { // can't use ih as is, need go to children
-		// Collect deletions
-		if fstl.hc != nil {
-			if err = fstl.hc(fstl.minKeyAsNibbles, nil); err != nil {
-				return err
-			}
-		}
-		if fstl.ihK, fstl.ihV, err = ih.Next(); err != nil {
-			return err
-		} // go to children, not to sibling
-		return nil
-	}
-
 	if fstl.trace {
 		fmt.Printf("fstl.ihK %x, fstl.accAddrHashWithInc %x\n", fstl.ihK, fstl.accAddrHashWithInc[:])
-	}
-	if len(fstl.ihK) > common.HashLength && !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
-		if bytes.Compare(fstl.ihK, fstl.accAddrHashWithInc[:]) < 0 {
-			// Skip all the irrelevant storage in the middle
-			if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
-				return err
-			}
-		} else {
-			if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-				if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.nextAccountKey[:]); err != nil {
-					return err
-				}
-			} else {
-				fstl.ihK = nil
-			}
-		}
-		return nil
 	}
 	fstl.itemPresent = true
 	if len(fstl.ihK) > common.HashLength {
@@ -387,22 +344,24 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	// skip subtree
 	next, ok := dbutils.NextSubtree(fstl.ihK)
 	if !ok { // no siblings left
-		if !retain { // last sub-tree was taken from IH, then nothing to look in the main bucket. Can stop.
-			fstl.k = nil
-			fstl.ihK = nil
-			return nil
-		}
-		fstl.ihK, fstl.ihV = nil, nil
+		fstl.k, fstl.ihK, fstl.ihV = nil, nil, nil
 		return nil
 	}
 	if fstl.trace {
 		fmt.Printf("next: %x\n", next)
 	}
 
-	if isBefore, _ := keyIsBefore(fstl.k, next); isBefore {
-		if fstl.k, fstl.v, err = c.Seek(next); err != nil {
-			return err
-		}
+	if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(next); err != nil {
+		return err
+	}
+
+	if isIHSequence {
+		fstl.k = common.CopyBytes(fstl.ihK)
+		return nil
+	}
+
+	if fstl.k, fstl.v, err = c.Seek(next); err != nil {
+		return err
 	}
 	if len(next) <= common.HashLength && len(fstl.k) > common.HashLength {
 		// Advance past the storage to the first account
@@ -416,9 +375,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	}
 	if fstl.trace {
 		fmt.Printf("k after next: %x\n", fstl.k)
-	}
-	if fstl.ihK, fstl.ihV, err = ih.Seek(next); err != nil {
-		return err
 	}
 	return nil
 }
@@ -623,7 +579,22 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	}
 	if err := fstl.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.CurrentStateBucket)
-		ih := tx.Cursor(dbutils.IntermediateTrieHashBucket)
+		var filter = func(k []byte) bool {
+
+			if fstl.rl.Retain(k) {
+				if fstl.hc != nil {
+					_ = fstl.hc(k, nil)
+				}
+				return false
+			}
+
+			if len(k) < fstl.cutoffs[fstl.rangeIdx] {
+				return false
+			}
+
+			return true
+		}
+		ih := IH(Filter(filter, tx.Cursor(dbutils.IntermediateTrieHashBucket)))
 		if err := fstl.iteration(c, ih, true /* first */); err != nil {
 			return err
 		}
@@ -794,6 +765,116 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 		}
 	}
 	return nil
+}
+
+// FilterCursor - skip all elements for which RetainDecider returns true
+type FilterCursor struct {
+	c ethdb.Cursor
+
+	k, kHex, v        []byte
+	filter            func(k []byte) bool
+	seekAccCouner     int
+	seekStorageCouner int
+	nextCounter       int
+}
+
+func Filter(filter func(k []byte) bool, c ethdb.Cursor) *FilterCursor {
+	return &FilterCursor{c: c, filter: filter}
+}
+
+func (c *FilterCursor) _seekTo(seek []byte) (err error) {
+	if len(seek) > 64 {
+		c.seekStorageCouner++
+	} else {
+		c.seekAccCouner++
+	}
+
+	c.k, c.v, err = c.c.Seek(seek)
+	if err != nil {
+		return err
+	}
+	if c.k == nil {
+		return nil
+	}
+
+	DecompressNibbles(c.k, &c.kHex)
+	if c.filter(c.kHex) {
+		return nil
+	}
+
+	return c._next()
+}
+
+func (c *FilterCursor) _next() (err error) {
+	c.nextCounter++
+	c.k, c.v, err = c.c.Next()
+	if err != nil {
+		return err
+	}
+	for {
+		if c.k == nil {
+			return nil
+		}
+
+		DecompressNibbles(c.k, &c.kHex)
+		if c.filter(c.kHex) {
+			return nil
+		}
+
+		c.nextCounter++
+		c.k, c.v, err = c.c.Next()
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func (c *FilterCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
+	if err := c._seekTo(seek); err != nil {
+		return []byte{}, nil, err
+	}
+
+	return c.k, c.v, nil
+}
+
+func IHIsValid(nibbles []byte) bool {
+	return len(nibbles) != 0 && len(nibbles)%2 == 0
+}
+
+// IHCursor - manage 2 cursors - make it looks as 1
+type IHCursor struct {
+	c *FilterCursor
+}
+
+func IH(c *FilterCursor) *IHCursor {
+	return &IHCursor{c: c}
+}
+
+func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
+	k, v, err := c.c.SeekTo(seek)
+	if err != nil {
+		return []byte{}, nil, false, err
+	}
+
+	if k != nil {
+		isSequence := false
+		if bytes.HasPrefix(k, seek) {
+			tail := k[len(seek):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
+			isSequence = true
+			for _, n := range tail {
+				if n != 0 {
+					isSequence = false
+					break
+				}
+			}
+		}
+
+		if isSequence {
+			return k, v, true, nil
+		}
+	}
+
+	return k, v, false, nil
 }
 
 func nextAccount(in, out []byte) bool {
