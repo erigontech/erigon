@@ -197,7 +197,7 @@ func (db *LmdbKV) Close() {
 		if err := db.env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
-			db.log.Info("database closed")
+			db.log.Info("database closed (LMDB)")
 		}
 	}
 

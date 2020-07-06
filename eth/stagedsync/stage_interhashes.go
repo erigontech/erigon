@@ -25,7 +25,6 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		return err
 	}
 
-	fmt.Printf("22: %d %d\n", s.BlockNumber, syncHeadNumber)
 	if s.BlockNumber == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally

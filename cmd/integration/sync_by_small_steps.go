@@ -34,73 +34,43 @@ func init() {
 }
 
 func syncBySmallSteps(ctx context.Context, chaindata string) error {
-	core.UsePlainStateExecution = true
-
-	var execProgress, ihProgress uint64
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-
-	blockchain, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		rewind := blocksPerStep
-
-		// Stage 4: 1 step back
+		// Stage 4: forward
 		{
-			execProgress, ihProgress = progress(db)
-			if execProgress < blocksPerStep+1 {
-				goto Unwind4End
-			}
-
-			u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execProgress - rewind}
-			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
-			if err = stagedsync.UnwindExecutionStage(u, s, db); err != nil {
+			var err error
+			db := ethdb.MustOpen(chaindata)
+			var stage4progress uint64
+			if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
 				return err
 			}
-		}
-	Unwind4End:
-
-		// Stage 4: 2 forward
-		{
-			execProgress, ihProgress = progress(db)
-			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: execProgress}
-			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, execProgress+2*blocksPerStep, ctx.Done(), nil, false); err != nil {
+			core.UsePlainStateExecution = true
+			ch := make(chan struct{})
+			s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
+			blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+			if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, stage4progress+2, ch, nil, false); err != nil {
 				return err
 			}
+			close(ch)
+			db.Close()
 		}
 
-		// Stage 5: 1 step back
+		// Stage 5: forward
 		{
-			execProgress, ihProgress = progress(db)
-			if ihProgress < blocksPerStep+1 {
-				goto Unwind5End
-			}
-
-			u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: execProgress - rewind}
-			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
-			if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ctx.Done()); err != nil {
+			var err error
+			db := ethdb.MustOpen(chaindata)
+			var stage5progress uint64
+			if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 				return err
 			}
-		}
-	Unwind5End:
-
-		// Stage 5: 2 forward
-		{
-			execProgress, ihProgress = progress(db)
-			s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: ihProgress}
-			if err = stagedsync.SpawnIntermediateHashesStage(s, db, "", ctx.Done()); err != nil {
+			log.Info("Stage5", "progress", stage5progress)
+			core.UsePlainStateExecution = true
+			ch := make(chan struct{})
+			stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
+			if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
 				return err
 			}
+			close(ch)
+			db.Close()
 		}
 	}
 }
