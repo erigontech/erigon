@@ -74,7 +74,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		return err
 	}
 	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
-	currentHeaderIdx := 0
+	currentHeaderIdx := uint64(0)
 
 	err = db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 		if err = common.Stopped(quitCh); err != nil {
@@ -84,6 +84,10 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		// Skip non relevant records
 		if !dbutils.CheckCanonicalKey(k) {
 			return true, nil
+		}
+
+		if currentHeaderIdx >= toBlockNumber { // if header stage is ehead of body stage
+			return false, nil
 		}
 
 		copy(canonical[currentHeaderIdx][:], v)
@@ -102,6 +106,10 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
+			if blockNumber >= toBlockNumber {
+				return false, nil
+			}
+
 			if canonical[blockNumber-s.BlockNumber-1] != blockHash {
 				// non-canonical case
 				return true, nil
