@@ -5,10 +5,28 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
+
+var stateBuckets = [][]byte{
+	dbutils.CurrentStateBucket,
+	dbutils.AccountChangeSetBucket,
+	dbutils.StorageChangeSetBucket,
+	dbutils.ContractCodeBucket,
+	dbutils.PlainStateBucket,
+	dbutils.PlainAccountChangeSetBucket,
+	dbutils.PlainStorageChangeSetBucket,
+	dbutils.PlainContractCodeBucket,
+	dbutils.IncarnationMapBucket,
+	dbutils.CodeBucket,
+	dbutils.IntermediateTrieHashBucket,
+	dbutils.AccountsHistoryBucket,
+	dbutils.StorageHistoryBucket,
+	dbutils.TxLookupPrefix,
+}
 
 var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
@@ -18,7 +36,24 @@ var cmdCompareBucket = &cobra.Command{
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
-		err := compareBucket(ctx, chaindata, referenceChaindata, bucket)
+		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdCompareStates = &cobra.Command{
+	Use:   "compare_states",
+	Short: "compare state buckets to buckets in '--reference_chaindata'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := rootContext()
+		if referenceChaindata == "" {
+			referenceChaindata = chaindata + "-copy"
+		}
+		err := compareStates(ctx, chaindata, referenceChaindata)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -33,47 +68,78 @@ func init() {
 	withBucket(cmdCompareBucket)
 
 	rootCmd.AddCommand(cmdCompareBucket)
+
+	withChaindata(cmdCompareStates)
+	withReferenceChaindata(cmdCompareStates)
+	withBucket(cmdCompareStates)
+
+	rootCmd.AddCommand(cmdCompareStates)
 }
 
-func compareBucket(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
+func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
 	refDB := ethdb.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	tx, err := db.KV().Begin(context.Background(), false)
-	if err != nil {
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		if err := refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
+			for _, bucket := range stateBuckets {
+				fmt.Printf("\nBucket: %s\n", bucket)
+				if err := compareBuckets(ctx, tx.Bucket(bucket), refTX.Bucket(bucket)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	defer tx.Rollback()
 
-	refTX, err := refDB.KV().Begin(context.Background(), false)
-	if err != nil {
+	return nil
+}
+func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	refDB := ethdb.MustOpen(referenceChaindata)
+	defer refDB.Close()
+
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		return refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
+			return compareBuckets(ctx, tx.Bucket([]byte(bucket)), refTX.Bucket([]byte(bucket)))
+		})
+	}); err != nil {
 		return err
 	}
-	defer refTX.Rollback()
 
+	return nil
+}
+
+func compareBuckets(ctx context.Context, b ethdb.Bucket, refB ethdb.Bucket) error {
 	count := 0
-	c := tx.Bucket([]byte(bucket)).Cursor()
+	c := b.Cursor()
 	k, v, e := c.First()
 	if e != nil {
 		return e
 	}
-	refC := refTX.Bucket([]byte(bucket)).Cursor()
+	refC := refB.Cursor()
 	refK, refV, revErr := refC.First()
 	if revErr != nil {
 		return revErr
 	}
 	for k != nil || refK != nil {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		count++
-		if count%100000 == 0 {
+		if count%100_000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			fmt.Printf("Compared %d records\n", count)
 		}
 		if k == nil {

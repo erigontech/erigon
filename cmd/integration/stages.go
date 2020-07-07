@@ -81,6 +81,18 @@ var cmdStage78 = &cobra.Command{
 	},
 }
 
+var cmdStage9 = &cobra.Command{
+	Use:   "stage9",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := rootContext()
+		if err := stage9(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
 var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
@@ -95,6 +107,9 @@ var cmdPrintStages = &cobra.Command{
 }
 
 func init() {
+	withChaindata(cmdPrintStages)
+	rootCmd.AddCommand(cmdPrintStages)
+
 	withChaindata(cmdStage3)
 	withReset(cmdStage3)
 	withBlock(cmdStage3)
@@ -130,8 +145,12 @@ func init() {
 
 	rootCmd.AddCommand(cmdStage78)
 
-	withChaindata(cmdPrintStages)
-	rootCmd.AddCommand(cmdPrintStages)
+	withChaindata(cmdStage9)
+	withReset(cmdStage9)
+	withBlock(cmdStage9)
+	withUnwind(cmdStage9)
+
+	rootCmd.AddCommand(cmdStage9)
 }
 
 func stage3(_ context.Context) error {
@@ -269,6 +288,29 @@ func stage78(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func stage9(ctx context.Context) error {
+	core.UsePlainStateExecution = true
+
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	if reset {
+		if err := resetTxLookup(db); err != nil {
+			return err
+		}
+	}
+	stage9 := progress(db, stages.TxLookup)
+	log.Info("Stage9", "progress", stage9.BlockNumber)
+	ch := ctx.Done()
+
+	if unwind > 0 {
+		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
+		return stagedsync.UnwindTxLookup(u, db, "", ch)
+	}
+
+	return stagedsync.SpawnTxLookup(stage9, db, "", ch)
 }
 
 func printAllStages(_ context.Context) error {

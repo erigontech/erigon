@@ -104,6 +104,13 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
+		{
+			stage9 := progress(db, stages.TxLookup)
+			if err = stagedsync.SpawnTxLookup(stage9, db, "", ch); err != nil {
+				return fmt.Errorf("spawnTxLookup: %w", err)
+			}
+		}
+
 		// Unwind all stages to `execStage - unwind` block
 		if unwind == 0 {
 			continue
@@ -111,6 +118,13 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		execStage := progress(db, stages.Execution)
 		to := execStage.BlockNumber - unwind
+		{
+			u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: to}
+			if err = stagedsync.UnwindTxLookup(u, db, "", ch); err != nil {
+				return fmt.Errorf("unwindTxLookup: %w", err)
+			}
+		}
+
 		{
 			u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: to}
 			if err = stagedsync.UnwindStorageHistoryIndex(u, db, ch); err != nil {
