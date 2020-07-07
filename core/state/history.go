@@ -104,7 +104,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 
 		if plain {
 			if storage {
-				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).Find(key)
+				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithIncarnation(key)
 			} else {
 				data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
 			}
@@ -319,13 +319,13 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		var err error
 		for goOn {
 			cmp,br:= keyCmp(addrHash, hAddrHash)
-			fmt.Println("core/state/history.go:319 addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
+			//fmt.Println("core/state/history.go:319 addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
 			if br {
 				break
 			}
 			if cmp==0 {
 				cmp,br= keyCmp(keyHash, hKeyHash)
-				fmt.Println("core/state/history.go:325 key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
+				//fmt.Println("core/state/history.go:325 key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
 			}
 			if br {
 				break
@@ -533,8 +533,8 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte)([]byte
 		}
 		return nil, true,  nil
 	}
-	dec,_,_:=index.Decode()
-	fmt.Println("core/state/history.go:548", "not in history", timestamp,common.Bytes2Hex(hK), dec)
+	//dec,_,_:=index.Decode()
+	//fmt.Println("core/state/history.go:548", "not in history", timestamp,common.Bytes2Hex(hK), dec)
 	return nil, false, nil
 }
 
@@ -829,7 +829,7 @@ func (csd *changesetSearchDecorator) matchKey(k []byte) bool {
 }
 
 func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
-	fmt.Println("buildChangeset")
+	//fmt.Println("core/state/history.go:832 buildChangeset")
 	cs:=make([]struct{
 		Walker changeset.Walker
 		BlockNum uint64
@@ -863,7 +863,7 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 		replace:=cs[i].BlockNum>=csd.timestamp
 		err = cs[i].Walker.Walk(func(k, v []byte) error {
 			if replace {
-				fmt.Println(cs[i].BlockNum, "replace ", common.Bytes2Hex(k), string(v))
+				//fmt.Println("core/state/history.go:866", cs[i].BlockNum, "replace ", common.Bytes2Hex(k), string(v))
 				mp[string(k)]=v
 			}
 			return nil
