@@ -34,6 +34,7 @@ type csStorageBytes interface {
 	Walk(func([]byte, []byte) error) error
 	Find([]byte) ([]byte, error)
 	FindWithoutIncarnation([]byte, []byte) ([]byte, error)
+	FindWithIncarnation([]byte) ([]byte, error)
 }
 
 func getHashedBytes(b []byte) csStorageBytes {
@@ -277,7 +278,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 }
 
 func regularFindFunc(b csStorageBytes, k []byte) ([]byte, error) {
-	return b.Find(k)
+	return b.FindWithIncarnation(k)
 }
 
 func findWithoutIncarnationFunc(b csStorageBytes, k []byte) ([]byte, error) {
@@ -304,6 +305,7 @@ func doTestFind(
 	csStorageBytes func([]byte) csStorageBytes,
 	findFunc func(csStorageBytes, []byte) ([]byte, error),
 ) {
+	t.Helper()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
@@ -327,8 +329,8 @@ func doTestFind(
 				t.Error(err, i)
 			}
 			if !bytes.Equal(val, v.Value) {
-				t.Error("value not equal for ", v, val)
-				panic("boom!")
+				t.Fatal("value not equal for ", v, val)
+				//panic("boom!")
 			}
 		}
 	}
