@@ -63,6 +63,14 @@ func resetState(_ context.Context) error {
 	}
 	return nil
 }
+func resetSenders(db *ethdb.ObjectDatabase) error {
+	if err := db.ClearBuckets(
+		dbutils.Senders,
+	); err != nil {
+		return err
+	}
+	return stages.SaveStageProgress(db, stages.Senders, 0, nil)
+}
 
 func resetExec(db *ethdb.ObjectDatabase) error {
 	if err := db.ClearBuckets(
