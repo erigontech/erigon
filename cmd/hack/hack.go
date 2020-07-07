@@ -50,9 +50,9 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+var verbosity = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
-var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
@@ -2281,6 +2281,8 @@ func buildHistory(chaindata string, reset bool) error {
 }
 
 func main() {
+	flag.Parse()
+
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -2294,9 +2296,9 @@ func main() {
 	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.LvlInfo)
 
-	flag.Parse()
+	glogger.Verbosity(log.Lvl(*verbosity))
+
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
