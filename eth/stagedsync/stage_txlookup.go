@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/big"
+
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -13,10 +15,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"math/big"
 )
 
-func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan struct{}) error {
+func SpawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh <-chan struct{}) error {
 	var blockNum uint64
 	var startKey []byte
 
@@ -37,7 +38,7 @@ func spawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh chan
 	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
-func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan struct{}, datadir string) error {
+func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan struct{}, datadir string) error {
 	return etl.Transform(db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, datadir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		if !dbutils.CheckCanonicalKey(k) {
 			return nil
@@ -63,7 +64,7 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh chan s
 	})
 }
 
-func unwindTxLookup(u *UnwindState, db ethdb.Database, quitCh chan struct{}) error {
+func UnwindTxLookup(u *UnwindState, db ethdb.Database, quitCh <-chan struct{}) error {
 	var txsToRemove [][]byte
 	// Remove lookup entries for all blocks above unwindPoint
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
