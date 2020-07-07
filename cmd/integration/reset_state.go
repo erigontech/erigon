@@ -51,7 +51,9 @@ func resetState(_ context.Context) error {
 	if err := resetHistory(db); err != nil {
 		return err
 	}
-	// don't reset txLookup here
+	if err := resetTxLookup(db); err != nil {
+		return err
+	}
 
 	// set genesis after reset all buckets
 	if _, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false); err != nil {
@@ -138,7 +140,6 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 
 	return nil
 }
-
 func printStages(db *ethdb.ObjectDatabase) error {
 	var err error
 	var progress uint64

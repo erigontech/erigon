@@ -93,7 +93,6 @@ var cmdStage9 = &cobra.Command{
 		return nil
 	},
 }
-
 var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
@@ -308,7 +307,7 @@ func stage9(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
-		return stagedsync.UnwindTxLookup(u, db, ch)
+		return stagedsync.UnwindTxLookup(u, db, "", ch)
 	}
 
 	return stagedsync.SpawnTxLookup(stage9, db, "", ch)

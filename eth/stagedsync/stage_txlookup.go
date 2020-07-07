@@ -64,10 +64,10 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, db ethdb.Database, quitCh <-chan struct{}) error {
-	var txsToRemove [][]byte
+func UnwindTxLookup(u *UnwindState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
+	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	// Remove lookup entries for all blocks above unwindPoint
-	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
+	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 8*8, func(k, v []byte) (b bool, e error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
@@ -84,21 +84,17 @@ func UnwindTxLookup(u *UnwindState, db ethdb.Database, quitCh <-chan struct{}) e
 			return false, fmt.Errorf("unwindTxLookup, rlp decode err: %w", err)
 		}
 		for _, tx := range body.Transactions {
-			txsToRemove = append(txsToRemove, tx.Hash().Bytes())
+			if err := collector.Collect(tx.Hash().Bytes(), nil); err != nil {
+				return false, err
+			}
 		}
 
 		return true, nil
 	}); err != nil {
 		return err
 	}
-	// TODO: Do it in a batcn and update the progress
-	for _, v := range txsToRemove {
-		if err := db.Delete(dbutils.TxLookupPrefix, v); err != nil {
-			return err
-		}
+	if err := collector.Load(db, dbutils.TxLookupPrefix, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+		return err
 	}
-	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind TxLookup: %w", err)
-	}
-	return nil
+	return u.Done(db)
 }
