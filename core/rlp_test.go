@@ -17,7 +17,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"testing"
@@ -53,7 +52,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 	)
 
 	// We need to generate as many blocks +1 as uncles
-	blocks, _, _ := GenerateChain(context.Background(), params.TestChainConfig, genesis, engine, db, uncles+1,
+	blocks, _, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1,
 		func(n int, b *BlockGen) {
 			if n == uncles {
 				// Add transactions and stuff on the last block

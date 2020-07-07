@@ -22,6 +22,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -201,7 +202,7 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts, error) {
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
@@ -233,11 +234,25 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 			if _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
-
+			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			// Write state changes to db
+			//fmt.Printf("Before commitng %d------------\n", i)
 			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock:  %w", err)
 			}
+			/*
+			fmt.Printf("State after %d================\n", i)
+			dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
+				bucket := tx.Bucket(dbutils.CurrentStateBucket)
+				cursor := bucket.Cursor()
+				k, v, e := cursor.First()
+				for ; k != nil && e == nil; k, v, e = cursor.Next() {
+					fmt.Printf("%x: %x\n", k, v)
+				}
+				return e
+			})
+			fmt.Printf("===============================\n")
+			*/
 			loader := trie.NewFlatDbSubTrieLoader()
 			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
@@ -256,12 +271,6 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 	}
 
 	for i := 0; i < n; i++ {
-		select {
-		case <-ctx.Done():
-			return nil, nil, nil
-		default:
-		}
-
 		stateReader := state.NewDbStateReader(dbCopy)
 		stateWriter := state.NewDbStateWriter(dbCopy, uint64(parent.Number().Uint64() + uint64(i) + 1))
 		ibs := state.New(stateReader)
@@ -303,8 +312,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 }
 
 // makeHeaderChain creates a deterministic chain of headers rooted at parent.
-func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Header {
-	blocks := makeBlockChain(ctx, types.NewBlockWithHeader(parent), n, engine, db, seed)
+func makeHeaderChain(parent *types.Header, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Header {
+	blocks := makeBlockChain(types.NewBlockWithHeader(parent), n, engine, db, seed)
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
 		headers[i] = block.Header()
@@ -313,8 +322,8 @@ func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine co
 }
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
-func makeBlockChain(ctx context.Context, parent *types.Block, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Block {
-	blocks, _, _ := GenerateChain(ctx, params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
+func makeBlockChain(parent *types.Block, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Block {
+	blocks, _, _ := GenerateChain(params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
 	})
 	return blocks

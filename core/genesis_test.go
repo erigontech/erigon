@@ -129,9 +129,8 @@ func TestSetupGenesis(t *testing.T) {
 
 				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 				defer bc.Stop()
-				ctx := bc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-				blocks, _, err := GenerateChain(ctx, oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil)
+				blocks, _, err := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil)
 				if err != nil {
 					return nil, common.Hash{}, nil, err
 				}

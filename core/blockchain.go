@@ -1798,7 +1798,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
 				return k, err
 			}
-
 			err = bc.Validator().ValidateReceipts(block, receipts)
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)

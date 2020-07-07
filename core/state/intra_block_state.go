@@ -667,7 +667,7 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject = sdb.createObject(addr, nil /* previous */, nil /* original */)
+		stateObject = sdb.createObject(addr, stateObject /* previous */, nil /* original */)
 	}
 	return stateObject
 }
@@ -677,7 +677,7 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject, original *accounts.Account) (newobj *stateObject) {
 	account := new(accounts.Account)
 	if previous != nil {
-		account.Copy(&previous.data)
+		account.Balance.Set(&previous.data.Balance)
 	}
 	if original == nil {
 		original = &accounts.Account{}
@@ -722,14 +722,13 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}
 	}
 
-	var previous *stateObject
 	var original *accounts.Account
 	var prevInc uint64
+	previous := sdb.getStateObject(addr)
+	if previous != nil {
+		original = &previous.original
+	}
 	if contractCreation {
-		previous = sdb.getStateObject(addr)
-		if previous != nil {
-			original = &previous.original
-		}
 		if previous != nil && previous.suicided {
 			prevInc = previous.data.Incarnation
 		} else {
@@ -740,11 +739,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 			if err == nil {
 				prevInc = inc
 			}
-		}
-	} else {
-		p := sdb.getStateObject(addr)
-		if p != nil {
-			original = &p.original
 		}
 	}
 

@@ -1298,7 +1298,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	if err != nil {
 		return err
 	}
-
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
 	if original != nil {
