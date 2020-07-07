@@ -98,6 +98,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 }
 
 func TestMutationCommitThinHistory(t *testing.T) {
+	t.Skip()
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	mutDB := db.NewBatch()
@@ -634,7 +635,6 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
-	ctx := context.Background()
 	emptyValAcc := accounts.NewAccount()
 	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
@@ -651,16 +651,6 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
 	stateValAcc.EncodeForStorage(stateVal)
 
-	/*
-	block 3 acc 0, 2,3 - create
-	block 5 acc 0,1 - create,  3 delete
-
-	walk as of
-	block 2 - empty
-	block 4 - 0,2,3 - block 3
-	block 6 - 0, 1 - state, 2 - block 3
-	 */
-
 	numOfAccounts:=uint8(4)
 	addrs:=make([]common.Address, numOfAccounts)
 	addrHashes:=make([]common.Hash, numOfAccounts)
@@ -670,50 +660,46 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 		addrHashes[i] = addrHash
 	}
 
+	writeBlockData(t, tds, 3, []accData{
+		{
+			addrs[0],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[2],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[3],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+	}, false, true)
+
+	writeBlockData(t, tds, 5, []accData{
+		{
+			addrs[0], block3ValAcc, stateValAcc,
+		},
+		{
+			addrs[1],
+			&emptyValAcc,
+			stateValAcc,
+		},
+		{
+			addrs[3],
+			block3ValAcc,
+			nil,
+		},
+	}, false, true)
+
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
 
 	block2Expected := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
-	}
-
-	tds.SetBlockNr(3)
-	blockWriter := tds.DbStateWriter()
-
-	if err := blockWriter.UpdateAccountData(ctx, addrs[0], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[2], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[3], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteHistory(); err != nil {
-		t.Fatal(err)
-	}
-
-	tds.SetBlockNr(5)
-	blockWriter = tds.DbStateWriter()
-
-	if err := blockWriter.UpdateAccountData(ctx, addrs[0], block3ValAcc, stateValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[1], &emptyValAcc, stateValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.DeleteAccount(ctx, addrs[3], block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteHistory(); err != nil {
-		t.Fatal(err)
 	}
 
 	var startKey [32]byte
@@ -727,21 +713,11 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sort.Sort(block2Expected)
-	sort.Sort(block2)
-	if !reflect.DeepEqual(block2, block2Expected) {
-		fmt.Println("expected:")
-		fmt.Println(block2Expected.String())
-		fmt.Println("obtained:")
-		fmt.Println(block2.String())
-		t.Fatal("block 2 result is incorrect")
-	}
-
+	assertChangesEquals(t, block2, block2Expected)
 
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-
 	block4Expected := &changeset.ChangeSet{
 		Changes: []changeset.Change{
 			{
@@ -758,7 +734,6 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 			},
 		},
 	}
-
 	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
@@ -770,15 +745,7 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sort.Sort(block4Expected)
-	sort.Sort(block4)
-	if !reflect.DeepEqual(block4, block4Expected) {
-		fmt.Println("expected:")
-		fmt.Println(block4Expected.String())
-		fmt.Println("obtained:", )
-		fmt.Println(block4.String())
-		t.Fatal("block 4 result is incorrect")
-	}
+	assertChangesEquals(t, block4, block4Expected)
 
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -812,22 +779,13 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sort.Sort(block6Expected)
-	sort.Sort(block6)
-	if !reflect.DeepEqual(block6, block6Expected) {
-		fmt.Println("expected:")
-		fmt.Println(block6Expected.String())
-		fmt.Println("obtained:")
-		fmt.Println(block6.String())
-		t.Fatal("block 6 result is incorrect")
-	}
+	assertChangesEquals(t, block6, block6Expected)
 }
 
 func TestWalkAsOfAccountPlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
-	ctx := context.Background()
 	emptyValAcc := accounts.NewAccount()
 	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
@@ -871,43 +829,42 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	tds.SetBlockNr(3)
-	blockWriter := tds.PlainStateWriter()
+	writeBlockData(t, tds, 3, []accData{
+		{
+			addrs[0],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[2],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[3],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+	}, true, true)
 
-	if err := blockWriter.UpdateAccountData(ctx, addrs[0], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[2], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[3], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteHistory(); err != nil {
-		t.Fatal(err)
-	}
 
-	tds.SetBlockNr(5)
-	blockWriter = tds.PlainStateWriter()
-
-	if err := blockWriter.UpdateAccountData(ctx, addrs[0], block3ValAcc, stateValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[1], &emptyValAcc, stateValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.DeleteAccount(ctx, addrs[3], block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteHistory(); err != nil {
-		t.Fatal(err)
-	}
+	writeBlockData(t, tds, 5, []accData{
+		{
+			addrs[0],
+			block3ValAcc,
+			stateValAcc,
+		},
+		{
+			addrs[1],
+			&emptyValAcc,
+			stateValAcc,
+		},
+		{
+			addrs[3],
+			block3ValAcc,
+			nil,
+		},
+	}, true, true)
 
 	var startKey [20]byte
 	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
@@ -920,16 +877,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sort.Sort(block2Expected)
-	sort.Sort(block2)
-	if !reflect.DeepEqual(block2, block2Expected) {
-		fmt.Println("expected:")
-		fmt.Println(block2Expected.String())
-		fmt.Println("obtained:")
-		fmt.Println(block2.String())
-		t.Fatal("block 2 result is incorrect")
-	}
-
+	assertChangesEquals(t, block2, block2Expected)
 
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -962,16 +910,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	sort.Sort(block4Expected)
-	sort.Sort(block4)
-	if !reflect.DeepEqual(block4, block4Expected) {
-		fmt.Println("expected:")
-		fmt.Println(block4Expected.String())
-		fmt.Println("obtained:", )
-		fmt.Println(block4.String())
-		t.Fatal("block 4 result is incorrect")
-	}
+	assertChangesEquals(t, block4, block4Expected)
 
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -1004,16 +943,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	sort.Sort(block6Expected)
-	sort.Sort(block6)
-	if !reflect.DeepEqual(block6, block6Expected) {
-		fmt.Println("expected:")
-		fmt.Println(block6Expected.String())
-		fmt.Println("obtained:")
-		fmt.Println(block6.String())
-		t.Fatal("block 6 result is incorrect")
-	}
+	assertChangesEquals(t, block6, block6Expected)
 }
 
 
@@ -1513,7 +1443,6 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
-	ctx := context.Background()
 	emptyValAcc := accounts.NewAccount()
 	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
@@ -1547,38 +1476,36 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	tds.SetBlockNr(3)
-	blockWriter := tds.DbStateWriter()
+	writeBlockData(t, tds, 3, []accData{
+		{
+			addrs[0],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[2],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[3],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+	}, false, false)
 
-	if err := blockWriter.UpdateAccountData(ctx, addrs[0], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[2], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[3], &emptyValAcc, block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		t.Fatal(err)
-	}
+	writeBlockData(t, tds, 5, []accData{
+		{
+			addrs[0], block3ValAcc, stateValAcc,
+		},
+		{
+			addrs[1], &emptyValAcc, stateValAcc,
+		},
+		{
+			addrs[3], block3ValAcc, nil,
+		},
+	}, false, false)
 
-	tds.SetBlockNr(5)
-	blockWriter = tds.DbStateWriter()
-
-	if err := blockWriter.UpdateAccountData(ctx, addrs[0], block3ValAcc, stateValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.UpdateAccountData(ctx, addrs[1], &emptyValAcc, stateValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.DeleteAccount(ctx, addrs[3], block3ValAcc); err != nil {
-		t.Fatal(err)
-	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		t.Fatal(err)
-	}
- 
 	var startKey [32]byte
 	err := WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
@@ -1683,5 +1610,205 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		fmt.Println("obtained:")
 		fmt.Println(block6.String())
 		t.Fatal("block 6 result is incorrect")
+	}
+}
+
+func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+	emptyValAcc := accounts.NewAccount()
+	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
+	emptyValAcc.EncodeForStorage(emptyVal)
+
+	block3ValAcc:= emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce=3
+	block3ValAcc.Initialised=true
+	block3Val:=make([]byte,block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc.EncodeForStorage(block3Val)
+
+	stateValAcc:= emptyValAcc.SelfCopy()
+	stateValAcc.Nonce=5
+	stateValAcc.Initialised=true
+	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
+	stateValAcc.EncodeForStorage(stateVal)
+
+	numOfAccounts:=uint8(4)
+	addrs:=make([]common.Address, numOfAccounts)
+	for i:=uint8(0); i<numOfAccounts; i++ {
+		addrs[i] = common.Address{i+1}
+	}
+
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block2Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	writeBlockData(t,tds, 3, []accData{
+		{
+			addrs[0],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[2],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+		{
+			addrs[3],
+			&emptyValAcc,
+			block3ValAcc,
+		},
+	},true,false)
+
+	writeBlockData(t,tds, 5, []accData{
+		{
+			addrs[0],
+			block3ValAcc,
+			stateValAcc,
+		},
+		{
+			addrs[1],
+			&emptyValAcc,
+			stateValAcc,
+		},
+		{
+			addrs[3],
+			block3ValAcc,
+			nil,
+		},
+	},true,false)
+
+
+	var startKey [32]byte
+	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertChangesEquals(t, block2, block2Expected)
+
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+
+	block4Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
+			{
+				addrs[0].Bytes(),
+				block3Val,
+			},
+			{
+				addrs[2].Bytes(),
+				block3Val,
+			},
+			{
+				addrs[3].Bytes(),
+				block3Val,
+			},
+		},
+	}
+	assertChangesEquals(t, block4, block4Expected)
+
+
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block6Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
+			{
+				addrs[0].Bytes(),
+				stateVal,
+			},
+			{
+				addrs[1].Bytes(),
+				stateVal,
+			},
+			{
+				addrs[2].Bytes(),
+				block3Val,
+			},
+		},
+	}
+	assertChangesEquals(t, block6, block6Expected)
+}
+
+type accData struct {
+	addr common.Address
+	oldVal *accounts.Account
+	newVal *accounts.Account
+}
+func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData, plain, writeHistory bool) {
+	tds.SetBlockNr(blockNum)
+	var blockWriter WriterWithChangeSets
+	if plain {
+		blockWriter = tds.PlainStateWriter()
+	} else {
+		blockWriter = tds.DbStateWriter()
+	}
+
+	for i:=range data{
+		if data[i].newVal !=nil {
+			if err := blockWriter.UpdateAccountData(context.Background(), data[i].addr, data[i].oldVal, data[i].newVal); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := blockWriter.DeleteAccount(context.Background(), data[i].addr, data[i].oldVal); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if writeHistory {
+		if err := blockWriter.WriteHistory(); err!=nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changeset.ChangeSet)  {
+	t.Helper()
+	sort.Sort(changesObtained)
+	sort.Sort(changesExpected)
+	if !reflect.DeepEqual(changesObtained, changesExpected) {
+		fmt.Println("expected:")
+		fmt.Println(changesExpected.String())
+		fmt.Println("obtained:", )
+		fmt.Println(changesObtained.String())
+		t.Fatal("block 4 result is incorrect")
 	}
 }
