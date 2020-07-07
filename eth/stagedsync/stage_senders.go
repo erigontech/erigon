@@ -84,7 +84,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	}
 	log.Info("Senders recovery", "from", s.BlockNumber+1, "to", toBlockNumber)
 
-	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
+	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber+1)
 	currentHeaderIdx := uint64(0)
 
 	err = db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
@@ -97,7 +97,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return true, nil
 		}
 
-		if currentHeaderIdx >= toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
+		if currentHeaderIdx > toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
 			return false, nil
 		}
 
@@ -117,7 +117,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
-			if blockNumber >= toBlockNumber {
+			if blockNumber > toBlockNumber {
 				return false, nil
 			}
 

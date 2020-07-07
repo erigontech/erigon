@@ -13,8 +13,8 @@ import (
 )
 
 var cmdResetState = &cobra.Command{
-	Use:   "reset",
-	Short: "Reset sync stages and buckets",
+	Use:   "reset_state",
+	Short: "Reset StateStages (4,5,6,7,8) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		if err := resetState(ctx, chaindata); err != nil {

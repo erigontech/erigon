@@ -15,9 +15,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cmdSyncBySmallSteps = &cobra.Command{
-	Use:   "sync_by_small_steps",
-	Short: "Staged sync in mode '1 step back 2 steps forward' with integrity checks after each step",
+var stateStags = &cobra.Command{
+	Use: "state_stages",
+	Short: `
+		Move all StateStages (4,5,6,7,8) forward. 
+		Stops at Stage 3 progress or at "--stop".
+		Each iteration test will move forward "--unwind_every" blocks, then unwind "--unwind" blocks.
+		Use reset_state command to re-run this test.
+		Example: go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000
+		`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		if err := syncBySmallSteps(ctx, chaindata); err != nil {
@@ -28,11 +34,12 @@ var cmdSyncBySmallSteps = &cobra.Command{
 }
 
 func init() {
-	withChaindata(cmdSyncBySmallSteps)
-	withStride(cmdSyncBySmallSteps)
-	withBlockNumber(cmdSyncBySmallSteps)
+	withChaindata(stateStags)
+	withUnwind(stateStags)
+	withUnwindEvery(stateStags)
+	withStop(stateStags)
 
-	rootCmd.AddCommand(cmdSyncBySmallSteps)
+	rootCmd.AddCommand(stateStags)
 }
 
 func syncBySmallSteps(ctx context.Context, chaindata string) error {
@@ -50,21 +57,21 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	senderStageProgress := progress(db, stages.Senders).BlockNumber
 
 	var stopAt = senderStageProgress
-	if block > 0 && block < senderStageProgress {
-		stopAt = block
+	if stop > 0 && stop < senderStageProgress {
+		stopAt = stop
 	}
 
-	for progress(db, stages.Execution).BlockNumber+2*stride < stopAt {
+	for progress(db, stages.Execution).BlockNumber+unwindEvery < stopAt {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
 
-		// All stages forward to `execStage + 2*stride` block
+		// All stages forward to `execStage + unwindEvery` block
 		{
 			stage := progress(db, stages.Execution)
-			execToBlock := stage.BlockNumber + 2*stride
+			execToBlock := stage.BlockNumber + unwindEvery
 			if err = stagedsync.SpawnExecuteBlocksStage(stage, db, blockchain, execToBlock, ch, nil, false); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
@@ -95,9 +102,9 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 		}
 
-		// Unwind all stages to `execStage - stride` block
+		// Unwind all stages to `execStage - unwind` block
 		execStage := progress(db, stages.Execution)
-		to := execStage.BlockNumber - stride
+		to := execStage.BlockNumber - unwind
 		{
 			u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: to}
 			if err = stagedsync.UnwindStorageHistoryIndex(u, db, ch); err != nil {
