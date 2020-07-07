@@ -3,11 +3,13 @@ package main
 import "github.com/spf13/cobra"
 
 var (
-	chaindata   string
-	block       uint64
-	unwind      uint64
-	unwindEvery uint64
-	reset       bool //nolint
+	chaindata          string
+	referenceChaindata string
+	block              uint64
+	unwind             uint64
+	unwindEvery        uint64
+	reset              bool
+	bucket             string
 )
 
 func must(err error) {
@@ -22,6 +24,11 @@ func withChaindata(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chaindata"))
 }
 
+func withReferenceChaindata(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&referenceChaindata, "reference_chaindata", "", "path to the 2nd (reference/etalon) db")
+	must(cmd.MarkFlagDirname("referenceChaindata"))
+}
+
 func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
@@ -34,6 +41,10 @@ func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind_every", 100, "each iteration test will move forward `--unwind_every` blocks, then unwind `--unwind` blocks")
 }
 
-func withReset(cmd *cobra.Command) { //nolint
+func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
+}
+
+func withBucket(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
