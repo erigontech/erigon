@@ -1222,9 +1222,8 @@ func TestSideLogRebirth(t *testing.T) {
 	blockchain.SubscribeLogsEvent(newLogCh)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 
-	dbCopy := db.MemCopy()
-	defer dbCopy.Close()
-	chain, _, err := GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), dbCopy, 2, func(i int, gen *BlockGen) {
+	// Generate main chain
+	chain, _, err := GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), db, 2, func(i int, gen *BlockGen) {
 		if i == 1 {
 			gen.OffsetTime(-9) // higher block difficulty
 
@@ -1233,13 +1232,8 @@ func TestSideLogRebirth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %w", err)
 	}
-	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
-		t.Fatalf("failed to insert forked chain: %v", err)
-	}
-	checkLogEvents(t, newLogCh, rmLogsCh, 0, 0)
-
 	// Generate side chain with lower difficulty
-	sideChain, _, err := GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), dbCopy, 2, func(i int, gen *BlockGen) {
+	sideChain, _, err := GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), db, 3, func(i int, gen *BlockGen) {
 		if i == 1 {
 			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
 			if err != nil {
@@ -1251,17 +1245,16 @@ func TestSideLogRebirth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate side chain: %w", err)
 	}
-	if _, err := blockchain.InsertChain(context.Background(), sideChain); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
+		t.Fatalf("failed to insert forked chain: %v", err)
+	}
+	checkLogEvents(t, newLogCh, rmLogsCh, 0, 0)
+	if _, err := blockchain.InsertChain(context.Background(), sideChain[:2]); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 0, 0)
 
-	// Generate a new block based on side chain
-	newBlocks, _, err := GenerateChain(context.Background(), params.TestChainConfig, sideChain[len(sideChain)-1], ethash.NewFaker(), dbCopy, 1, func(i int, gen *BlockGen) {})
-	if err != nil {
-		t.Fatalf("generate new blocks: %w", err)
-	}
-	if _, err := blockchain.InsertChain(context.Background(), newBlocks); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), sideChain[2:]); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 0)
