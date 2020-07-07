@@ -95,9 +95,9 @@ func (s *ChangeSet) Equals(s2 *ChangeSet) bool {
 }
 
 func (s *ChangeSet) String() string {
-	str:=""
-	for _,v:=range s.Changes {
-		str+=fmt.Sprintf("%v %s : %s\n",len(v.Key), common.Bytes2Hex(v.Key), string(v.Value))
+	str := ""
+	for _, v := range s.Changes {
+		str += fmt.Sprintf("%v %s : %s\n", len(v.Key), common.Bytes2Hex(v.Key), string(v.Value))
 	}
 	return str
 }
@@ -107,7 +107,6 @@ func (s *ChangeSet) String() string {
 func Len(b []byte) int {
 	return int(binary.BigEndian.Uint32(b[0:4]))
 }
-
 
 var Mapper = map[string]struct {
 	IndexBucket   []byte

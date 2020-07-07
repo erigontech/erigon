@@ -421,8 +421,6 @@ func TestUnwindTruncateHistory(t *testing.T) {
 	}
 }
 
-
-
 /*
 	before 3:
 	addr1(f22b):""
@@ -446,15 +444,15 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyVal := uint256.NewInt()
-	block3Val:= uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal:= uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	key:=common.Hash{123}
-	keyHash,_:=common.HashData(key.Bytes())
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	key := common.Hash{123}
+	keyHash, _ := common.HashData(key.Bytes())
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -471,8 +469,8 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	withoutInc:= func(addrHash, keyHash common.Hash) []byte {
-		expectedKey:=make([]byte, common.HashLength*2)
+	withoutInc := func(addrHash, keyHash common.Hash) []byte {
+		expectedKey := make([]byte, common.HashLength*2)
 		copy(expectedKey[:common.HashLength], addrHash.Bytes())
 		copy(expectedKey[common.HashLength:], keyHash.Bytes())
 		return expectedKey
@@ -503,8 +501,7 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	},false, true)
-
+	}, false, true)
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -529,8 +526,6 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 			emptyVal,
 		},
 	}, false, true)
-
-
 
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -567,17 +562,17 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block4Expected.Changes=[]changeset.Change{
+	block4Expected.Changes = []changeset.Change{
 		{
 			withoutInc(addrHashes[0], keyHash),
 			block3Val.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[2],keyHash),
+			withoutInc(addrHashes[2], keyHash),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[3],keyHash),
+			withoutInc(addrHashes[3], keyHash),
 			block3Val.Bytes(),
 		},
 	}
@@ -596,17 +591,16 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block6Expected.Changes=[]changeset.Change{
+	block6Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrHashes[0],keyHash),
+			withoutInc(addrHashes[0], keyHash),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[1],keyHash), stateVal.Bytes(),
+			withoutInc(addrHashes[1], keyHash), stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[2],keyHash), stateVal.Bytes(),
-
+			withoutInc(addrHashes[2], keyHash), stateVal.Bytes(),
 		},
 	}
 
@@ -619,14 +613,14 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 
 	emptyVal := uint256.NewInt()
-	block3Val:= uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal:= uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	key:=common.Hash{123}
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	key := common.Hash{123}
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -643,8 +637,8 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	withoutInc:= func(addr common.Address, keyHash common.Hash) []byte {
-		expectedKey:=make([]byte, common.HashLength+common.AddressLength)
+	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
+		expectedKey := make([]byte, common.HashLength+common.AddressLength)
 		copy(expectedKey[:common.AddressLength], addr.Bytes())
 		copy(expectedKey[common.AddressLength:], keyHash.Bytes())
 		return expectedKey
@@ -672,8 +666,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	},true, true)
-
+	}, true, true)
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -699,7 +692,6 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		},
 	}, true, true)
 
-
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
@@ -717,7 +709,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertChangesEquals(t,block2, block2Expected)
+	assertChangesEquals(t, block2, block2Expected)
 
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -733,17 +725,17 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block4Expected.Changes=[]changeset.Change{
+	block4Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrs[0],key),
+			withoutInc(addrs[0], key),
 			block3Val.Bytes(),
 		},
 		{
-			withoutInc(addrs[2],key),
+			withoutInc(addrs[2], key),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[3],key),
+			withoutInc(addrs[3], key),
 			block3Val.Bytes(),
 		},
 	}
@@ -765,15 +757,15 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	block6Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrs[0],key),
+			withoutInc(addrs[0], key),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[1],key),
+			withoutInc(addrs[1], key),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[2],key),
+			withoutInc(addrs[2], key),
 			stateVal.Bytes(),
 		},
 	}
@@ -785,26 +777,26 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyValAcc := accounts.NewAccount()
-	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
+	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
 
-	block3ValAcc:= emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce=3
-	block3ValAcc.Initialised=true
-	block3Val:=make([]byte,block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc := emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce = 3
+	block3ValAcc.Initialised = true
+	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
 	block3ValAcc.EncodeForStorage(block3Val)
 
-	stateValAcc:= emptyValAcc.SelfCopy()
-	stateValAcc.Nonce=5
-	stateValAcc.Initialised=true
-	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
+	stateValAcc := emptyValAcc.SelfCopy()
+	stateValAcc.Nonce = 5
+	stateValAcc.Initialised = true
+	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
 	stateValAcc.EncodeForStorage(stateVal)
 
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -936,26 +928,26 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyValAcc := accounts.NewAccount()
-	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
+	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
 
-	block3ValAcc:= emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce=3
-	block3ValAcc.Initialised=true
-	block3Val:=make([]byte,block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc := emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce = 3
+	block3ValAcc.Initialised = true
+	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
 	block3ValAcc.EncodeForStorage(block3Val)
 
-	stateValAcc:= emptyValAcc.SelfCopy()
-	stateValAcc.Nonce=5
-	stateValAcc.Initialised=true
-	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
+	stateValAcc := emptyValAcc.SelfCopy()
+	stateValAcc.Nonce = 5
+	stateValAcc.Initialised = true
+	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
 	stateValAcc.EncodeForStorage(stateVal)
 
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -985,7 +977,6 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 			block3ValAcc,
 		},
 	}, true, true)
-
 
 	writeBlockData(t, tds, 5, []accData{
 		{
@@ -1091,15 +1082,15 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 
 	emptyVal := uint256.NewInt()
-	block3Val:= uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal:= uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	key:=common.Hash{123}
-	keyHash,_:=common.HashData(key.Bytes())
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	key := common.Hash{123}
+	keyHash, _ := common.HashData(key.Bytes())
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -1116,8 +1107,8 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	withoutInc:= func(addrHash, keyHash common.Hash) []byte {
-		expectedKey:=make([]byte, common.HashLength*2)
+	withoutInc := func(addrHash, keyHash common.Hash) []byte {
+		expectedKey := make([]byte, common.HashLength*2)
 		copy(expectedKey[:common.HashLength], addrHash.Bytes())
 		copy(expectedKey[common.HashLength:], keyHash.Bytes())
 		return expectedKey
@@ -1148,7 +1139,7 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	},false, false)
+	}, false, false)
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -1174,7 +1165,6 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		},
 	}, false, false)
 
-
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [72]byte
@@ -1199,7 +1189,6 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-
 	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
@@ -1211,23 +1200,22 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block4Expected.Changes=[]changeset.Change{
+	block4Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrHashes[0],keyHash),
+			withoutInc(addrHashes[0], keyHash),
 			block3Val.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[2],keyHash),
+			withoutInc(addrHashes[2], keyHash),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[3],keyHash),
+			withoutInc(addrHashes[3], keyHash),
 			block3Val.Bytes(),
 		},
 	}
 
 	assertChangesEquals(t, block4, block4Expected)
-
 
 	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
@@ -1240,17 +1228,17 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	block6Expected.Changes=[]changeset.Change{
+	block6Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrHashes[0],keyHash),
+			withoutInc(addrHashes[0], keyHash),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[1],keyHash),
+			withoutInc(addrHashes[1], keyHash),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrHashes[2],keyHash),
+			withoutInc(addrHashes[2], keyHash),
 			stateVal.Bytes(),
 		},
 	}
@@ -1263,14 +1251,14 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 
 	emptyVal := uint256.NewInt()
-	block3Val:= uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal:= uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	key:=common.Hash{123}
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	key := common.Hash{123}
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -1287,8 +1275,8 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	withoutInc:= func(addrHash common.Address, keyHash common.Hash) []byte {
-		expectedKey:=make([]byte, common.AddressLength+common.HashLength)
+	withoutInc := func(addrHash common.Address, keyHash common.Hash) []byte {
+		expectedKey := make([]byte, common.AddressLength+common.HashLength)
 		copy(expectedKey[:common.AddressLength], addrHash.Bytes())
 		copy(expectedKey[common.AddressLength:], keyHash.Bytes())
 		return expectedKey
@@ -1307,9 +1295,9 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		{
 			addrs[3], 1, key, emptyVal, block3Val,
 		},
-	},true, false)
+	}, true, false)
 
-	writeStorageBlockData(t, tds, 5,[]storageData{
+	writeStorageBlockData(t, tds, 5, []storageData{
 		{
 			addrs[0], 1, key, block3Val, stateVal,
 		},
@@ -1351,22 +1339,21 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	block4Expected.Changes=[]changeset.Change{
+	block4Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrs[0],key),
+			withoutInc(addrs[0], key),
 			block3Val.Bytes(),
 		},
 		{
-			withoutInc(addrs[2],key),
+			withoutInc(addrs[2], key),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[3],key),
+			withoutInc(addrs[3], key),
 			block3Val.Bytes(),
 		},
 	}
 	assertChangesEquals(t, block4, block4Expected)
-
 
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -1383,17 +1370,17 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block6Expected.Changes=[]changeset.Change{
+	block6Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrs[0],key),
+			withoutInc(addrs[0], key),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[1],key),
+			withoutInc(addrs[1], key),
 			stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[2],key),
+			withoutInc(addrs[2], key),
 			stateVal.Bytes(),
 		},
 	}
@@ -1405,26 +1392,26 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyValAcc := accounts.NewAccount()
-	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
+	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
 
-	block3ValAcc:= emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce=3
-	block3ValAcc.Initialised=true
-	block3Val:=make([]byte,block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc := emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce = 3
+	block3ValAcc.Initialised = true
+	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
 	block3ValAcc.EncodeForStorage(block3Val)
 
-	stateValAcc:= emptyValAcc.SelfCopy()
-	stateValAcc.Nonce=5
-	stateValAcc.Initialised=true
-	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
+	stateValAcc := emptyValAcc.SelfCopy()
+	stateValAcc.Nonce = 5
+	stateValAcc.Initialised = true
+	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
 	stateValAcc.EncodeForStorage(stateVal)
 
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	addrHashes:=make([]common.Hash, numOfAccounts)
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -1553,25 +1540,25 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyValAcc := accounts.NewAccount()
-	emptyVal:=make([]byte,emptyValAcc.EncodingLengthForStorage())
+	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
 
-	block3ValAcc:= emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce=3
-	block3ValAcc.Initialised=true
-	block3Val:=make([]byte,block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc := emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce = 3
+	block3ValAcc.Initialised = true
+	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
 	block3ValAcc.EncodeForStorage(block3Val)
 
-	stateValAcc:= emptyValAcc.SelfCopy()
-	stateValAcc.Nonce=5
-	stateValAcc.Initialised=true
-	stateVal:=make([]byte,stateValAcc.EncodingLengthForStorage())
+	stateValAcc := emptyValAcc.SelfCopy()
+	stateValAcc.Nonce = 5
+	stateValAcc.Initialised = true
+	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
 	stateValAcc.EncodeForStorage(stateVal)
 
-	numOfAccounts:=uint8(4)
-	addrs:=make([]common.Address, numOfAccounts)
-	for i:=uint8(0); i<numOfAccounts; i++ {
-		addrs[i] = common.Address{i+1}
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
 	}
 
 	block2 := &changeset.ChangeSet{
@@ -1582,7 +1569,7 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	writeBlockData(t,tds, 3, []accData{
+	writeBlockData(t, tds, 3, []accData{
 		{
 			addrs[0],
 			&emptyValAcc,
@@ -1598,9 +1585,9 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 			&emptyValAcc,
 			block3ValAcc,
 		},
-	},true,false)
+	}, true, false)
 
-	writeBlockData(t,tds, 5, []accData{
+	writeBlockData(t, tds, 5, []accData{
 		{
 			addrs[0],
 			block3ValAcc,
@@ -1616,8 +1603,7 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 			block3ValAcc,
 			nil,
 		},
-	},true,false)
-
+	}, true, false)
 
 	var startKey [32]byte
 	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
@@ -1647,7 +1633,6 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
 	block4Expected := &changeset.ChangeSet{
 		Changes: []changeset.Change{
 			{
@@ -1665,7 +1650,6 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 		},
 	}
 	assertChangesEquals(t, block4, block4Expected)
-
 
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -1700,10 +1684,11 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 }
 
 type accData struct {
-	addr common.Address
+	addr   common.Address
 	oldVal *accounts.Account
 	newVal *accounts.Account
 }
+
 func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData, plain, writeHistory bool) {
 	tds.SetBlockNr(blockNum)
 	var blockWriter WriterWithChangeSets
@@ -1713,8 +1698,8 @@ func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accD
 		blockWriter = tds.DbStateWriter()
 	}
 
-	for i:=range data{
-		if data[i].newVal !=nil {
+	for i := range data {
+		if data[i].newVal != nil {
 			if err := blockWriter.UpdateAccountData(context.Background(), data[i].addr, data[i].oldVal, data[i].newVal); err != nil {
 				t.Fatal(err)
 			}
@@ -1729,16 +1714,16 @@ func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accD
 		t.Fatal(err)
 	}
 	if writeHistory {
-		if err := blockWriter.WriteHistory(); err!=nil {
+		if err := blockWriter.WriteHistory(); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 type storageData struct {
-	addr common.Address
-	inc uint64
-	key common.Hash
+	addr   common.Address
+	inc    uint64
+	key    common.Hash
 	oldVal *uint256.Int
 	newVal *uint256.Int
 }
@@ -1752,7 +1737,7 @@ func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data
 		blockWriter = tds.DbStateWriter()
 	}
 
-	for i:=range data{
+	for i := range data {
 		if err := blockWriter.WriteAccountStorage(context.Background(),
 			data[i].addr,
 			data[i].inc,
@@ -1772,14 +1757,14 @@ func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data
 		}
 	}
 }
-func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changeset.ChangeSet)  {
+func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changeset.ChangeSet) {
 	t.Helper()
 	sort.Sort(changesObtained)
 	sort.Sort(changesExpected)
 	if !reflect.DeepEqual(changesObtained, changesExpected) {
 		fmt.Println("expected:")
 		fmt.Println(changesExpected.String())
-		fmt.Println("obtained:", )
+		fmt.Println("obtained:")
 		fmt.Println(changesObtained.String())
 		t.Fatal("block result is incorrect")
 	}
