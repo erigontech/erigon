@@ -551,6 +551,7 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
+	fmt.Println("Block 4")
 	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {

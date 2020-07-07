@@ -317,7 +317,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		var err error
 		for goOn {
 			cmp, br := keyCmp(addrHash, hAddrHash)
-			//fmt.Println("core/state/history.go:319 addr",common.Bytes2Hex(addrHash),"vs", common.Bytes2Hex(hAddrHash), cmp)
+			fmt.Println("core/state/history.go:319 addr", common.Bytes2Hex(addrHash), "vs", common.Bytes2Hex(hAddrHash), cmp)
 			if br {
 				break
 			}
@@ -702,7 +702,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
 			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
-			if err != nil {
+			if innderErr != nil {
 				return nil, nil, nil, nil, innderErr
 			}
 			csd.kc1, csd.kc2, csd.kc3, csd.cv = hAddrHash, hKeyHash, tsEnc, data
@@ -789,7 +789,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
 			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, csd.bucket.Get, csd.walkerAdapter)
-			if err != nil {
+			if innderErr != nil {
 				return nil, nil, nil, nil, innderErr
 			}
 			csd.kc1, csd.kc2, csd.kc3, csd.cv = hAddrHash, hKeyHash, tsEnc, data
