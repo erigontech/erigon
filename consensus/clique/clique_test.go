@@ -60,9 +60,7 @@ func TestReimportMirroredState(t *testing.T) {
 	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, nil)
 	defer chain.Stop()
 
-	ctx := context.Background()
-
-	blocks, _ := core.GenerateChain(ctx, params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
 		block.SetDifficulty(diffInTurn)
@@ -77,6 +75,9 @@ func TestReimportMirroredState(t *testing.T) {
 			block.AddTxWithChain(chain, tx)
 		}
 	})
+	if err != nil {
+		t.Fatalf("generate blocks: %w", err)
+	}
 	for i, block := range blocks {
 		header := block.Header()
 		if i > 0 {
