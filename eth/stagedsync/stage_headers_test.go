@@ -81,15 +81,16 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
-
-	reorg, _, err := InsertHeaderChain(db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	blockNumber := origin.Number.Uint64()
+	collection := NewHeaderNumSets(1000)
+	reorg, _, err := InsertHeaderChain(db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), collection, &blockNumber, 0, 0)
 	assert.NoError(t, err)
 	assert.False(t, reorg)
 
 	td := rawdb.ReadTd(db, lastHeader1.Hash(), lastHeader1.Number.Uint64())
 	assert.Equal(t, expectedTdBlock3, td)
 
-	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), collection, &blockNumber, 0, 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
@@ -97,7 +98,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 
 	assert.Equal(t, expectedTdBlock4, td)
 
-	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), collection, &blockNumber, 0, 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
