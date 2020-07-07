@@ -17,8 +17,10 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (4,5,6,7,8) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
-		if err := resetState(ctx, chaindata); err != nil {
-			log.Error("Error", "err", err)
+		err := resetState(ctx)
+		if err != nil {
+			log.Error(err.Error())
+			return err
 		}
 		return nil
 	},
@@ -30,7 +32,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func resetState(_ context.Context, chaindata string) error {
+func resetState(_ context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	fmt.Printf("Before reset: \n")
@@ -39,6 +41,7 @@ func resetState(_ context.Context, chaindata string) error {
 	}
 
 	core.UsePlainStateExecution = true
+	// don't reset senders here
 	if err := resetExec(db); err != nil {
 		return err
 	}
@@ -62,8 +65,7 @@ func resetState(_ context.Context, chaindata string) error {
 }
 
 func resetExec(db *ethdb.ObjectDatabase) error {
-	var err error
-	err = db.ClearBuckets(
+	if err := db.ClearBuckets(
 		dbutils.CurrentStateBucket,
 		dbutils.AccountChangeSetBucket,
 		dbutils.StorageChangeSetBucket,
@@ -74,15 +76,10 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		dbutils.PlainContractCodeBucket,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
-	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
-	if err != nil {
-		return err
-	}
-	return nil
+	return stages.SaveStageProgress(db, stages.Execution, 0, nil)
 }
 
 func resetHashState(db *ethdb.ObjectDatabase) error {

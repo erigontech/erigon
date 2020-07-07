@@ -19,15 +19,17 @@ var stateStags = &cobra.Command{
 	Use: "state_stages",
 	Short: `
 		Move all StateStages (4,5,6,7,8) forward. 
-		Stops at Stage 3 progress or at "--stop".
+		Stops at Stage 3 progress or at "--block".
 		Each iteration test will move forward "--unwind_every" blocks, then unwind "--unwind" blocks.
 		Use reset_state command to re-run this test.
-		Example: go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000
 		`,
+	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
-		if err := syncBySmallSteps(ctx, chaindata); err != nil {
+		err := syncBySmallSteps(ctx, chaindata)
+		if err != nil {
 			log.Error("Error", "err", err)
+			return err
 		}
 		return nil
 	},
@@ -37,7 +39,7 @@ func init() {
 	withChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
-	withStop(stateStags)
+	withBlock(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 }
@@ -57,8 +59,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	senderStageProgress := progress(db, stages.Senders).BlockNumber
 
 	var stopAt = senderStageProgress
-	if stop > 0 && stop < senderStageProgress {
-		stopAt = stop
+	if block > 0 && block < senderStageProgress {
+		stopAt = block
 	}
 
 	for progress(db, stages.Execution).BlockNumber+unwindEvery < stopAt {
@@ -103,6 +105,10 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 
 		// Unwind all stages to `execStage - unwind` block
+		if unwind == 0 {
+			continue
+		}
+
 		execStage := progress(db, stages.Execution)
 		to := execStage.BlockNumber - unwind
 		{
