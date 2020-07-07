@@ -12,7 +12,7 @@ import (
 
 var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
-	Short: "compare bucket to the same bucket in reference db",
+	Short: "compare bucket to the same bucket in '--reference_chaindata'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		if referenceChaindata == "" {

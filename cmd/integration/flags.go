@@ -25,7 +25,7 @@ func withChaindata(cmd *cobra.Command) {
 }
 
 func withReferenceChaindata(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&referenceChaindata, "reference_chaindata", "", "path to the 2nd db")
+	cmd.Flags().StringVar(&referenceChaindata, "reference_chaindata", "", "path to the 2nd (reference/etalon) db")
 	must(cmd.MarkFlagDirname("referenceChaindata"))
 }
 
