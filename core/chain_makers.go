@@ -201,14 +201,15 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts, error) {
+func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &fakeChainReader{config: config}
+	dbCopy := db.MemCopy()
+	defer dbCopy.Close()
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
-		ibs.SetTrace(i == 0)
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
@@ -233,16 +234,12 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 
-			//ctx2, _ := params.GetNoHistoryByBlock(config.WithEIPsFlags(ctx, b.header.Number), b.header.Number)
-			//if err := ibs.FinalizeTx(ctx2, state.NewNoopWriter()); err != nil {
-			//	return nil, nil, fmt.Errorf("call to FinalizeTx: %w", err)
-			//}
 			// Write state changes to db
 			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock:  %w", err)
 			}
 			loader := trie.NewFlatDbSubTrieLoader()
-			if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if subTries, err := loader.LoadSubTries(); err == nil {
@@ -265,8 +262,8 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 		default:
 		}
 
-		stateReader := state.NewDbStateReader(db)
-		stateWriter := state.NewDbStateWriter(db, uint64(parent.Number().Uint64() + uint64(i) + 1))
+		stateReader := state.NewDbStateReader(dbCopy)
+		stateWriter := state.NewDbStateWriter(dbCopy, uint64(parent.Number().Uint64() + uint64(i) + 1))
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
@@ -287,10 +284,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 	number := new(big.Int).Add(parent.Number(), common.Big1)
-	//root, err := tds.IntermediateRoot(state, chain.Config().IsEIP158(number))
-	//if err != nil {
-	//	panic(err)
-	//}
 
 	return &types.Header{
 		Root:       common.Hash{},
@@ -310,7 +303,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 }
 
 // makeHeaderChain creates a deterministic chain of headers rooted at parent.
-func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine consensus.Engine, db ethdb.Database, seed int) []*types.Header {
+func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Header {
 	blocks := makeBlockChain(ctx, types.NewBlockWithHeader(parent), n, engine, db, seed)
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
@@ -320,7 +313,7 @@ func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine co
 }
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
-func makeBlockChain(ctx context.Context, parent *types.Block, n int, engine consensus.Engine, db ethdb.Database, seed int) []*types.Block {
+func makeBlockChain(ctx context.Context, parent *types.Block, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Block {
 	blocks, _, _ := GenerateChain(ctx, params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
 	})

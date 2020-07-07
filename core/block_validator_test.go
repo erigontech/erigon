@@ -18,7 +18,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"runtime"
 	"testing"
@@ -45,8 +44,7 @@ func TestHeaderVerification(t *testing.T) {
 	defer chain.Stop()
 	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	fmt.Printf("Genesis root: %x\n", genesis.Header().Root)
-	blocks, _, err := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb.NewBatch(), 8, nil)
+	blocks, _, err := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
 	if err != nil {
 		t.Fatalf("genetate chain: %w", err)
 	}
