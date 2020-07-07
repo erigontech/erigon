@@ -84,7 +84,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	}
 	log.Info("Senders recovery", "from", s.BlockNumber+1, "to", toBlockNumber)
 
-	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
+	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber+1)
 	currentHeaderIdx := uint64(0)
 
 	err = db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
@@ -97,7 +97,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return true, nil
 		}
 
-		if currentHeaderIdx >= toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
+		if currentHeaderIdx > toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
 			return false, nil
 		}
 
@@ -117,7 +117,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
-			if blockNumber >= toBlockNumber {
+			if blockNumber > toBlockNumber {
 				return false, nil
 			}
 
@@ -189,7 +189,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
-
 	return s.DoneAndUpdate(db, toBlockNumber)
 }
 
@@ -201,7 +200,7 @@ type senderRecoveryJob struct {
 	err         error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit chan struct{}) {
+func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	for job := range in {
 		if job == nil {
 			return
@@ -239,7 +238,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 	}
 }
 
-func unwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
+func UnwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
 	// Does not require any special processing
 	mutation := stateDB.NewBatch()
 	err := u.Done(mutation)

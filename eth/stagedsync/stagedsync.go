@@ -67,7 +67,7 @@ func PrepareStagedSync(
 				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(u, stateDB)
+				return UnwindSendersStage(u, stateDB)
 			},
 		},
 		{

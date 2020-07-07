@@ -88,12 +88,9 @@ func Transform(
 		disposeProviders(collector.dataProviders)
 		return err
 	}
-	log.Info("Extraction finished", "it took", time.Since(t))
+	log.Debug("Extraction finished", "it took", time.Since(t))
 
-	t = time.Now()
-	defer func() {
-		log.Info("Collection finished", "it took", time.Since(t))
-	}()
+	defer func(t time.Time) { log.Debug("Collection finished", "it took", time.Since(t)) }(time.Now())
 	return collector.Load(db, toBucket, loadFunc, args)
 }
 
