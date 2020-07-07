@@ -130,10 +130,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnTxLookup(s, stateDB, datadir, quitCh)
+				return SpawnTxLookup(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindTxLookup(u, stateDB, quitCh)
+				return UnwindTxLookup(u, stateDB, datadir, quitCh)
 			},
 		},
 	}

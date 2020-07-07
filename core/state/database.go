@@ -432,7 +432,9 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageKeys) error { //nolint
 	for _, storageKey := range storageTouches {
-		tds.retainListBuilder.AddStorageTouch(storageKey[:])
+		addr, _, hash := dbutils.ParseCompositeStorageKey(storageKey[:])
+		key := dbutils.GenerateCompositeTrieKey(addr, hash)
+		tds.retainListBuilder.AddStorageTouch(key[:])
 	}
 	return nil
 }

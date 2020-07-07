@@ -51,6 +51,9 @@ func resetState(_ context.Context) error {
 	if err := resetHistory(db); err != nil {
 		return err
 	}
+	if err := resetTxLookup(db); err != nil {
+		return err
+	}
 
 	// set genesis after reset all buckets
 	if _, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false); err != nil {
@@ -62,6 +65,15 @@ func resetState(_ context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func resetSenders(db *ethdb.ObjectDatabase) error {
+	if err := db.ClearBuckets(
+		dbutils.Senders,
+	); err != nil {
+		return err
+	}
+	return stages.SaveStageProgress(db, stages.Senders, 0, nil)
 }
 
 func resetExec(db *ethdb.ObjectDatabase) error {
@@ -116,6 +128,18 @@ func resetHistory(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
+func resetTxLookup(db *ethdb.ObjectDatabase) error {
+	if err := db.ClearBuckets(
+		dbutils.TxLookupPrefix,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.TxLookup, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
 func printStages(db *ethdb.ObjectDatabase) error {
 	var err error
 	var progress uint64
