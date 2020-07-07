@@ -123,7 +123,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 				return err
 			}
 			runtime.ReadMemStats(&m)
-			log.Debug(
+			log.Info(
 				"Committed batch",
 				"bucket", string(bucket),
 				"size", common.StorageSize(batchSize),

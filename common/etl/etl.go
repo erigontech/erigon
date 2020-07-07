@@ -90,10 +90,7 @@ func Transform(
 	}
 	log.Debug("Extraction finished", "it took", time.Since(t))
 
-	t = time.Now()
-	defer func() {
-		log.Debug("Collection finished", "it took", time.Since(t))
-	}()
+	defer func(t time.Time) { log.Debug("Collection finished", "it took", time.Since(t)) }(time.Now())
 	return collector.Load(db, toBucket, loadFunc, args)
 }
 
