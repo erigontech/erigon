@@ -3,15 +3,12 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"os/signal"
@@ -24,7 +21,6 @@ import (
 	"time"
 
 	"github.com/AskAlexSharov/lmdb-go/lmdb"
-	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -38,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/mgr"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -55,9 +50,9 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+var verbosity = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
-var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
@@ -66,39 +61,6 @@ var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata dat
 var bucket = flag.String("bucket", "", "bucket in the database")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 var preImage = flag.String("preimage", "0x00", "preimage")
-
-func bucketList(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, dbutils.CurrentStateBucket) {
-				n := make([]byte, len(name))
-				copy(n, name)
-				bucketList = append(bucketList, n)
-			}
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
-// prefixLen returns the length of the common prefix of a and b.
-func prefixLen(a, b []byte) int {
-	var i, length = 0, len(a)
-	if len(b) < length {
-		length = len(b)
-	}
-	for ; i < length; i++ {
-		if a[i] != b[i] {
-			break
-		}
-	}
-	return i
-}
 
 func check(e error) {
 	if e != nil {
@@ -637,151 +599,6 @@ func trieChart() {
 	check(err)
 }
 
-func mgrSchedule(chaindata string, block uint64) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
-	bc, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	check(err)
-	defer db.Close()
-	tds, err := bc.GetTrieDbState()
-	check(err)
-	//t3 := time.Now()
-	//rl := trie.NewRetainList(3)
-	//rl.AddHex([]byte{})
-	//loader := trie.NewFlatDbSubTrieLoader()
-	//tr := tds.Trie()
-	//err = loader.Reset(db, rl, rl, [][]byte{nil}, []int{0}, false)
-	//check(err)
-	//subTries, err := loader.LoadSubTries()
-	//check(err)
-	//fmt.Println("LoadSubTries: ", time.Since(t3))
-	//t4 := time.Now()
-	//err = tr.HookSubTries(subTries, [][]byte{nil}) // hook up to the root
-	//check(err)
-	//fmt.Println("HookSubTries: ", time.Since(t4))
-	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit() // apply IH changes
-	//check(err)
-
-	//r1, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 46814683)
-	//r2, _ := tds.PrefixByCumulativeWitnessSize([]byte{}, 47126779)
-	//fmt.Printf("R: %x %x\n", r1, r2)
-
-	t5 := time.Now()
-	//var buf bytes.Buffer
-	var witnessSizeAccumulator uint64
-	var witnessCount int64
-	var witnessEstimatedSizeAccumulator uint64
-	schedule := mgr.NewSchedule(tds)
-	var toBlock = block + mgr.BlocksPerCycle
-	var (
-		max float64
-		min float64 = 1_000_000_000_000_000
-		avg float64
-	)
-
-	counters := []int{}
-	counters2 := []int{}
-	counters3 := []int{}
-	counters4 := []int{}
-	tx, _ := db.KV().Begin(context.Background(), false)
-	defer func() {
-		_ = tx.Rollback()
-	}()
-	for block <= toBlock {
-		tick, err2 := schedule.Tick(block)
-		if err2 != nil {
-			panic(err2)
-		}
-		counter := 0
-		counter2 := 0
-		counter3 := 0
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		for k, v, err3 := c.SeekTo(tick.From); k != nil; k, v, err3 = c.Next() {
-			if err3 != nil {
-				panic(err3)
-			}
-			if bytes.Compare(k, tick.To) > 0 && !bytes.HasPrefix(k, tick.To) {
-				break
-			}
-			counter += len(k) + len(v)
-			counter2 += len(v)
-			counter3++
-		}
-		check(err)
-
-		counters = append(counters, counter)
-		counters2 = append(counters2, counter2)
-		counters3 = append(counters3, counter3)
-
-		//retain := trie.NewRetainRange(common.CopyBytes(tick.From), common.CopyBytes(tick.To))
-		//dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rl)
-		//err = loader.Reset(db, retain, retain, dbPrefixes, fixedbits, false)
-		//check(err)
-		//subTries, err2 := loader.LoadSubTries()
-		//check(err2)
-		//err = tr.HookSubTries(subTries, hooks) // hook up to the root
-		//check(err)
-		//witness, err2 := tr.ExtractWitness(false, retain)
-		//if err2 != nil {
-		//	panic(err2)
-		//}
-		//buf.Reset()
-		//_, err = witness.WriteTo(&buf)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//counters4 = append(counters4, buf.Len())
-
-		min = math.Min(min, float64(counter))
-		max = math.Max(max, float64(counter))
-		if avg == 0 {
-			avg = float64(counter)
-		} else {
-			avg = (avg + float64(counter)) / 2
-		}
-
-		witnessEstimatedSizeAccumulator += tick.ToSize - tick.FromSize
-		block = tick.ToBlock + 1
-	}
-
-	fmt.Println("MGR Time of All Ticks: ", time.Since(t5))
-	fmt.Println("Min: ", min, "Max: ", max, "Avg: ", avg)
-
-	accs := map[int]int{}
-	for _, counter := range counters {
-		accs[counter/100_000]++
-	}
-	fmt.Printf("Counter Aggs: %v\n", accs)
-
-	accs2 := map[int]int{}
-	for _, counter := range counters2 {
-		accs2[counter/100_000]++
-	}
-	fmt.Printf("Counter Aggs2: %v\n", accs2)
-
-	accs3 := map[int]int{}
-	for _, counter := range counters3 {
-		accs3[counter/1_000]++
-	}
-	fmt.Printf("Counter Aggs3: %v\n", accs3)
-
-	accs4 := map[int]int{}
-	for _, counter := range counters4 {
-		accs4[counter/1_000]++
-	}
-	fmt.Printf("Counter Aggs4: %v\n", accs4)
-
-	fmt.Printf("witnessCount: %s\n", humanize.Comma(witnessCount))
-	fmt.Printf("witnessSizeAccumulator: %s\n", humanize.Bytes(witnessSizeAccumulator))
-	fmt.Printf("witnessEstimatedSizeAccumulator: %s\n", humanize.Bytes(witnessEstimatedSizeAccumulator))
-
-	//defer func(t time.Time) { fmt.Println("hack.go:746", time.Since(t)) }(time.Now())
-	//tr.EvictNode([]byte{})
-	//_, err = bc.ChainDb().(ethdb.DbWithPendingMutations).Commit()
-	//check(err)
-}
-
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
 	blockDb := ethdb.MustOpen(chaindata)
@@ -1147,56 +964,6 @@ func relayoutKeys() {
 	fmt.Printf("Total: %d\n", accountChangeSetCount+storageChangeSetCount)
 }
 
-func upgradeBlocks() {
-	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	defer ethDb.Close()
-	start := []byte{}
-	var keys [][]byte
-	if err := ethDb.Walk([]byte("b"), start, 0, func(k, v []byte) (bool, error) {
-		if len(keys)%1000 == 0 {
-			fmt.Printf("Collected keys: %d\n", len(keys))
-		}
-		keys = append(keys, common.CopyBytes(k))
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	for i, key := range keys {
-		v, err := ethDb.Get([]byte("b"), key)
-		if err != nil {
-			panic(err)
-		}
-		smallBody := new(types.SmallBody) // To be changed to SmallBody
-		if err := rlp.Decode(bytes.NewReader(v), smallBody); err != nil {
-			panic(err)
-		}
-		body := new(types.Body)
-		blockNum := binary.BigEndian.Uint64(key[:8])
-		signer := types.MakeSigner(params.MainnetChainConfig, big.NewInt(int64(blockNum)))
-		body.Senders = make([]common.Address, len(smallBody.Transactions))
-		for j, tx := range smallBody.Transactions {
-			addr, err := signer.Sender(tx)
-			if err != nil {
-				panic(err)
-			}
-			body.Senders[j] = addr
-		}
-		body.Transactions = smallBody.Transactions
-		body.Uncles = smallBody.Uncles
-		newV, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			panic(err)
-		}
-		ethDb.Put([]byte("b"), key, newV)
-		if i%1000 == 0 {
-			fmt.Printf("Upgraded keys: %d\n", i)
-		}
-	}
-
-	check(ethDb.ClearBuckets(dbutils.BlockReceiptsPrefix))
-}
-
 func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
 	check(err)
@@ -1422,442 +1189,6 @@ func printBucket(chaindata string) {
 	}
 }
 
-func GenerateTxLookups(chaindata string) {
-	startTime := time.Now()
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	check(db.ClearBuckets(dbutils.TxLookupPrefix))
-	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
-	startTime = time.Now()
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-	var blockNum uint64 = 1
-	var finished bool
-	for !finished {
-		blockNum, finished = generateLoop(db, blockNum, interruptCh)
-	}
-	log.Info("All done", "duration", time.Since(startTime))
-}
-
-func generateLoop(db ethdb.Database, startBlock uint64, interruptCh chan bool) (uint64, bool) {
-	startTime := time.Now()
-	var lookups []uint64
-	var entry [8]byte
-	var blockNum = startBlock
-	var interrupt bool
-	var finished = true
-	for !interrupt {
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
-		if body == nil {
-			break
-		}
-		for txIndex, tx := range body.Transactions {
-			copy(entry[:2], tx.Hash().Bytes()[:2])
-			binary.BigEndian.PutUint32(entry[2:6], uint32(blockNum))
-			binary.BigEndian.PutUint16(entry[6:8], uint16(txIndex))
-			lookups = append(lookups, binary.BigEndian.Uint64(entry[:]))
-		}
-		blockNum++
-		if blockNum%100000 == 0 {
-			log.Info("Processed", "blocks", blockNum, "tx count", len(lookups))
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			log.Info("interrupted, please wait for cleanup...")
-		default:
-		}
-		if len(lookups) >= 100000000 {
-			log.Info("Reached specified number of transactions")
-			finished = false
-			break
-		}
-	}
-	log.Info("Processed", "blocks", blockNum, "tx count", len(lookups))
-	log.Info("Filling up lookup array done", "duration", time.Since(startTime))
-	startTime = time.Now()
-	sort.Slice(lookups, func(i, j int) bool {
-		return lookups[i] < lookups[j]
-	})
-	log.Info("Sorting lookup array done", "duration", time.Since(startTime))
-	if len(lookups) == 0 {
-		return blockNum, true
-	}
-	startTime = time.Now()
-	var rangeStartIdx int
-	var range2Bytes uint64
-	for i, lookup := range lookups {
-		// Find the range where lookups entries share the same first two bytes
-		if i == 0 {
-			rangeStartIdx = 0
-			range2Bytes = lookup & 0xffff000000000000
-			continue
-		}
-		twoBytes := lookup & 0xffff000000000000
-		if range2Bytes != twoBytes {
-			// Range finished
-			fillSortRange(db, lookups, entry[:], rangeStartIdx, i)
-			rangeStartIdx = i
-			range2Bytes = twoBytes
-		}
-		if i%1000000 == 0 {
-			log.Info("Processed", "transactions", i)
-		}
-	}
-	fillSortRange(db, lookups, entry[:], rangeStartIdx, len(lookups))
-	log.Info("Second roung of sorting done", "duration", time.Since(startTime))
-	startTime = time.Now()
-	batch := db.NewBatch()
-	var n big.Int
-	for i, lookup := range lookups {
-		binary.BigEndian.PutUint64(entry[:], lookup)
-		blockNumber := uint64(binary.BigEndian.Uint32(entry[2:6]))
-		txIndex := int(binary.BigEndian.Uint16(entry[6:8]))
-		blockHash := rawdb.ReadCanonicalHash(db, blockNumber)
-		body := rawdb.ReadBody(db, blockHash, blockNumber)
-		tx := body.Transactions[txIndex]
-		n.SetInt64(int64(blockNumber))
-		err := batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
-		check(err)
-		if i != 0 && i%1000000 == 0 {
-			_, err = batch.Commit()
-			check(err)
-			log.Info("Commited", "transactions", i)
-		}
-	}
-	_, err := batch.Commit()
-	check(err)
-	log.Info("Commited", "transactions", len(lookups))
-	log.Info("Tx committing done", "duration", time.Since(startTime))
-	return blockNum, finished
-}
-
-func generateLoop1(db ethdb.Database, startBlock uint64, interruptCh chan bool) (uint64, bool) {
-	f, _ := os.OpenFile(".lookups.tmp",
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer f.Close()
-	entry := make([]byte, 36)
-	var blockNum = startBlock
-	var interrupt bool
-	var finished = true
-	for !interrupt {
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
-		if body == nil {
-			break
-		}
-		for _, tx := range body.Transactions {
-			copy(entry[:32], tx.Hash().Bytes())
-			binary.BigEndian.PutUint32(entry[32:], uint32(blockNum))
-			_, _ = f.Write(append(entry, '\n'))
-		}
-		blockNum++
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			log.Info("interrupted, please wait for cleanup...")
-		default:
-		}
-	}
-	return blockNum, finished
-}
-
-func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, start, end int) {
-	for j := start; j < end; j++ {
-		binary.BigEndian.PutUint64(entry[:], lookups[j])
-		blockNum := uint64(binary.BigEndian.Uint32(entry[2:6]))
-		txIndex := int(binary.BigEndian.Uint16(entry[6:8]))
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
-		tx := body.Transactions[txIndex]
-		copy(entry[:2], tx.Hash().Bytes()[2:4])
-		lookups[j] = binary.BigEndian.Uint64(entry[:])
-	}
-	sort.Slice(lookups[start:end], func(i, j int) bool {
-		return lookups[i] < lookups[j]
-	})
-}
-
-func GenerateTxLookups1(chaindata string, block int) {
-	startTime := time.Now()
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	//nolint: errcheck
-	db.ClearBuckets(dbutils.TxLookupPrefix)
-	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
-	startTime = time.Now()
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-	var blockNum uint64 = 1
-	var interrupt bool
-	var txcount int
-	var n big.Int
-	batch := db.NewBatch()
-	for !interrupt {
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
-		if body == nil {
-			break
-		}
-		for _, tx := range body.Transactions {
-			txcount++
-			n.SetInt64(int64(blockNum))
-			err := batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
-			check(err)
-			if txcount%100000 == 0 {
-				_, err = batch.Commit()
-				check(err)
-			}
-			if txcount%1000000 == 0 {
-				log.Info("Commited", "transactions", txcount)
-			}
-		}
-		blockNum++
-		if blockNum%100000 == 0 {
-			log.Info("Processed", "blocks", blockNum)
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			log.Info("interrupted, please wait for cleanup...")
-		default:
-		}
-		if block != 1 && int(blockNum) > block {
-			log.Info("Reached specified block count")
-			break
-		}
-	}
-	_, err := batch.Commit()
-	check(err)
-	log.Info("Commited", "transactions", txcount)
-	log.Info("Processed", "blocks", blockNum)
-	log.Info("Tx committing done", "duration", time.Since(startTime))
-}
-
-func GenerateTxLookups2(chaindata string) {
-	startTime := time.Now()
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	//nolint: errcheck
-	db.ClearBuckets(dbutils.TxLookupPrefix)
-	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
-	startTime = time.Now()
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-	var blockNum uint64 = 1
-	generateTxLookups2(db, blockNum, interruptCh)
-	log.Info("All done", "duration", time.Since(startTime))
-}
-
-type LookupFile struct {
-	reader io.Reader
-	file   *os.File
-	buffer []byte
-	pos    uint64
-}
-
-type Entries []byte
-
-type HeapElem struct {
-	val   []byte
-	index int
-}
-
-type Heap []HeapElem
-
-func (h Heap) Len() int {
-	return len(h)
-}
-
-func (h Heap) Less(i, j int) bool {
-	return bytes.Compare(h[i].val, h[j].val) < 0
-}
-func (h Heap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *Heap) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*h = append(*h, x.(HeapElem))
-}
-
-func (h *Heap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
-}
-
-func (a Entries) Len() int {
-	return len(a) / 35
-}
-
-func (a Entries) Less(i, j int) bool {
-	return bytes.Compare(a[35*i:35*i+35], a[35*j:35*j+35]) < 0
-}
-
-func (a Entries) Swap(i, j int) {
-	tmp := common.CopyBytes(a[35*i : 35*i+35])
-	copy(a[35*i:35*i+35], a[35*j:35*j+35])
-	copy(a[35*j:35*j+35], tmp)
-}
-
-func insertInFileForLookups2(file *os.File, entries Entries, it uint64) {
-	sorted := entries[:35*it]
-	sort.Sort(sorted)
-	_, err := file.Write(sorted)
-	check(err)
-	log.Info("File Insertion Occured")
-}
-
-func generateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan bool) {
-	var bufferLen int = 143360 // 35 * 4096
-	var count uint64 = 5000000
-	var entries Entries = make([]byte, count*35)
-	bn := make([]byte, 3)
-	var lookups []LookupFile
-	var iterations uint64
-	var blockNum = startBlock
-	var interrupt bool
-	filename := fmt.Sprintf(".lookups_%d.tmp", len(lookups))
-	fileTmp, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
-	for !interrupt {
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
-
-		if body == nil {
-			log.Info("Now Inserting to file")
-			insertInFileForLookups2(fileTmp, entries, iterations)
-			lookups = append(lookups, LookupFile{nil, nil, nil, 35})
-			iterations = 0
-			entries = nil
-			fileTmp.Close()
-			break
-		}
-
-		select {
-		case interrupt = <-interruptCh:
-			log.Info("interrupted, please wait for cleanup...")
-		default:
-		}
-		bn[0] = byte(blockNum >> 16)
-		bn[1] = byte(blockNum >> 8)
-		bn[2] = byte(blockNum)
-
-		for _, tx := range body.Transactions {
-			copy(entries[35*iterations:], tx.Hash().Bytes())
-			copy(entries[35*iterations+32:], bn)
-			iterations++
-			if iterations == count {
-				log.Info("Now Inserting to file")
-				insertInFileForLookups2(fileTmp, entries, iterations)
-				lookups = append(lookups, LookupFile{nil, nil, nil, 35})
-				iterations = 0
-				fileTmp.Close()
-				filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
-				fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
-			}
-		}
-		blockNum++
-		if blockNum%100000 == 0 {
-			log.Info("Processed", "blocks", blockNum, "iterations", iterations)
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		}
-	}
-	batch := db.NewBatch()
-	h := &Heap{}
-	heap.Init(h)
-	for i := range lookups {
-		file, err := os.Open(fmt.Sprintf(".lookups_%d.tmp", i))
-		check(err)
-		lookups[i].file = file
-		lookups[i].reader = bufio.NewReader(file)
-		lookups[i].buffer = make([]byte, bufferLen)
-		check(err)
-		n, err := lookups[i].file.Read(lookups[i].buffer)
-		if n != bufferLen {
-			lookups[i].buffer = lookups[i].buffer[:n]
-		}
-		heap.Push(h, HeapElem{lookups[i].buffer[:35], i})
-	}
-
-	for !interrupt && len(*h) != 0 {
-		val := (heap.Pop(h)).(HeapElem)
-		if lookups[val.index].pos == uint64(bufferLen) {
-			if val.val[32] != 0 {
-				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[32:]))
-				check(err)
-			} else {
-				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
-				check(err)
-			}
-			n, _ := lookups[val.index].reader.Read(lookups[val.index].buffer)
-			iterations++
-			if n == 0 {
-				err := lookups[val.index].file.Close()
-				check(err)
-				os.Remove(fmt.Sprintf(".lookups_%d.tmp", val.index))
-			} else {
-				if n != bufferLen {
-					lookups[val.index].buffer = lookups[val.index].buffer[:n]
-				}
-				lookups[val.index].pos = 35
-				heap.Push(h, HeapElem{lookups[val.index].buffer[:35], val.index})
-			}
-			continue
-		}
-
-		heap.Push(h, HeapElem{lookups[val.index].buffer[lookups[val.index].pos : lookups[val.index].pos+35], val.index})
-		lookups[val.index].pos += 35
-		iterations++
-		if val.val[32] != 0 {
-			err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[32:]))
-			check(err)
-		} else {
-			err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
-			check(err)
-		}
-
-		if iterations%1000000 == 0 {
-			batch.Commit()
-			log.Info("Commit Occured", "progress", iterations)
-		}
-		select {
-		case interrupt = <-interruptCh:
-			log.Info("interrupted, please wait for cleanup...")
-		default:
-		}
-	}
-	batch.Commit()
-	batch.Close()
-}
-
 func ValidateTxLookups2(chaindata string) {
 	startTime := time.Now()
 	db := ethdb.MustOpen(chaindata)
@@ -1913,77 +1244,6 @@ func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh 
 	}
 }
 
-func indexSize(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	fStorage, err := os.Create("index_sizes_storage.csv")
-	check(err)
-	defer fStorage.Close()
-	fAcc, err := os.Create("index_sizes_acc.csv")
-	check(err)
-	defer fAcc.Close()
-	csvAcc := csv.NewWriter(fAcc)
-	defer csvAcc.Flush()
-	err = csvAcc.Write([]string{"key", "ln"})
-	check(err)
-	csvStorage := csv.NewWriter(fStorage)
-	defer csvStorage.Flush()
-	err = csvStorage.Write([]string{"key", "ln"})
-
-	i := 0
-	maxLenAcc := 0
-	accountsOver4096 := 0
-	if err := db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		i++
-		if i%10_000_000 == 0 {
-			fmt.Println(i/10_000_000, maxLenAcc)
-		}
-		if len(v) > maxLenAcc {
-			maxLenAcc = len(v)
-		}
-		if len(v) > 4096 {
-			accountsOver4096++
-		}
-		if err := csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
-			panic(err)
-		}
-
-		return true, nil
-	}); err != nil {
-		check(err)
-	}
-
-	i = 0
-	maxLenSt := 0
-	storageOver4096 := 0
-	if err := db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		i++
-		if i%10_000_000 == 0 {
-			fmt.Println(i/10_000_000, maxLenSt)
-		}
-
-		if len(v) > maxLenSt {
-			maxLenSt = len(v)
-		}
-		if len(v) > 4096 {
-			storageOver4096++
-		}
-		if err := csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
-			panic(err)
-		}
-
-		return true, nil
-	}); err != nil {
-		check(err)
-	}
-
-	fmt.Println("Results:")
-	fmt.Println("maxLenAcc:", maxLenAcc)
-	fmt.Println("maxLenSt:", maxLenSt)
-	fmt.Println("account over 4096 index:", accountsOver4096)
-	fmt.Println("storage over 4096 index:", storageOver4096)
-}
-
 func getModifiedAccounts(chaindata string) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2007,10 +1267,8 @@ func resetState(chaindata string) {
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	))
-	_, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false)
-	check(err)
 	core.UsePlainStateExecution = true
-	_, _, err = core.DefaultGenesisBlock().CommitGenesisState(db, false)
+	_, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false)
 	check(err)
 	err = stages.SaveStageProgress(db, stages.Execution, 0, nil)
 	check(err)
@@ -2029,22 +1287,6 @@ func resetHashedState(chaindata string) {
 	fmt.Printf("Reset hashed state done\n")
 }
 
-func resetHistoryIndex(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	check(db.ClearBuckets(
-		dbutils.AccountsHistoryBucket,
-		dbutils.StorageHistoryBucket,
-	))
-	err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil)
-	check(err)
-	err = stages.SaveStageProgress(db, stages.HashState, 0, nil)
-	check(err)
-	fmt.Printf("Reset history index done\n")
-}
-
 type Receiver struct {
 	defaultReceiver *trie.DefaultReceiver
 	accountMap      map[string]*accounts.Account
@@ -2061,7 +1303,6 @@ func (r *Receiver) Receive(
 	storageValue []byte,
 	hash []byte,
 	cutoff int,
-	witnessSize uint64,
 ) error {
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
@@ -2076,19 +1317,19 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
 			if len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0); err != nil {
 					return err
 				}
 			}
@@ -2099,7 +1340,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff, witnessSize)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -2112,7 +1353,6 @@ func regenerate(chaindata string) error {
 	defer db.Close()
 	check(db.ClearBuckets(
 		dbutils.IntermediateTrieHashBucket,
-		dbutils.IntermediateWitnessSizeBucket,
 	))
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -2125,6 +1365,9 @@ func regenerate(chaindata string) error {
 		}
 		var k []byte
 		trie.CompressNibbles(keyHex, &k)
+		if hash == nil {
+			return collector.Collect(k, nil)
+		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
@@ -2297,27 +1540,50 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func testSeek(chaindata string) {
+func testStage3(chaindata string, reset bool, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		c := b.Cursor()
-		//kk := common.FromHex("0x434751")
-		kk := common.FromHex("0x434750c1bd61c93ad930ba5b31d2181636e06fcad87ea82ac78c3ad9515d099f")
-		c.Seek(kk)
-		/*
-			for k, _ := c.Seek(common.FromHex("4347500d81465512b2397af46c12792c44f2a89e3601af951cf9c7735385b0cb")); k != nil; k, _ = c.Next() {
-				if bytes.Compare(k, kk) > 0 {
-					fmt.Printf("Found nexgt key: %x\n", k)
-					break
-				}
-			}
-		*/
-		return nil
-	}); err != nil {
-		panic(err)
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.Senders,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+			return err
+		}
 	}
+	var err error
+	var stage2progress uint64
+	if stage2progress, _, err = stages.GetStageProgress(db, stages.Bodies); err != nil {
+		return err
+	}
+	log.Info("Stage2", "progress", stage2progress)
+	var stage3progress uint64
+	if stage3progress, _, err = stages.GetStageProgress(db, stages.Senders); err != nil {
+		return err
+	}
+	log.Info("Stage3", "progress", stage3progress)
+	ch := make(chan struct{})
+	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: stage3progress}
+	const batchSize = 10000
+	const blockSize = 4096
+	n := runtime.NumCPU()
+
+	cfg := stagedsync.Stage3Config{
+		BatchSize:       batchSize,
+		BlockSize:       blockSize,
+		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
+		StartTrace:      false,
+		Prof:            false,
+		NumOfGoroutines: n,
+		ReadChLen:       4,
+		Now:             time.Now(),
+	}
+	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, block, "", ch); err != nil {
+		return err
+	}
+	return nil
 }
 
 func testStage4(chaindata string, block uint64) error {
@@ -2364,8 +1630,10 @@ func testStage5(chaindata string, reset bool) error {
 			dbutils.CurrentStateBucket,
 			dbutils.ContractCodeBucket,
 			dbutils.IntermediateTrieHashBucket,
-			dbutils.IntermediateWitnessSizeBucket,
 		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
 			return err
 		}
 		if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
@@ -2378,15 +1646,15 @@ func testStage5(chaindata string, reset bool) error {
 		return err
 	}
 	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
 	log.Info("Stage4", "progress", stage4progress)
 	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage5progress}
-	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
+	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
+	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
@@ -2398,14 +1666,14 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	defer db.Close()
 	var err error
 	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
 	log.Info("Stage5", "progress", stage5progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage5progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage5progress}
+	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
 	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
 		return err
 	}
@@ -2413,36 +1681,29 @@ func testUnwind5(chaindata string, rewind uint64) error {
 	return nil
 }
 
-/*
 func testStage6(chaindata string, reset bool) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if reset {
-		if err := db.ClearBuckets(
-			dbutils.IntermediateTrieHashBucket,
-			dbutils.IntermediateWitnessSizeBucket,
-		); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
+		if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
 			return err
 		}
 	}
 	var err error
 	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
+	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
 		return err
 	}
 	var stage6progress uint64
-	if stage6progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+	if stage6progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
 		return err
 	}
 	log.Info("Stage5", "progress", stage5progress)
 	log.Info("Stage6", "progress", stage6progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage6progress}
-	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
+	stageState := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
+	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
@@ -2454,21 +1715,417 @@ func testUnwind6(chaindata string, rewind uint64) error {
 	defer db.Close()
 	var err error
 	var stage6progress uint64
-	if stage6progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
+	if stage6progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
 		return err
 	}
 	log.Info("Stage6", "progress", stage6progress)
 	core.UsePlainStateExecution = true
 	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage6progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage6progress}
+	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6progress - rewind}
+	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
 	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
 		return err
 	}
 	close(ch)
 	return nil
 }
+
+func testStage78(chaindata string, reset bool) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.AccountsHistoryBucket,
+			dbutils.StorageHistoryBucket,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+	}
+	var err error
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	var stage7progress uint64
+	if stage7progress, _, err = stages.GetStageProgress(db, stages.AccountHistoryIndex); err != nil {
+		return err
+	}
+	var stage8progress uint64
+	if stage8progress, _, err = stages.GetStageProgress(db, stages.StorageHistoryIndex); err != nil {
+		return err
+	}
+	log.Info("Stage4", "progress", stage4progress)
+	log.Info("Stage7", "progress", stage7progress)
+	log.Info("Stage8", "progress", stage8progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
+	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
+	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
+func findPreimage(chaindata string, hash common.Hash) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.PlainStateBucket)
+		c := b.Cursor()
+		k, _, e := c.First()
+		if e != nil {
+			return e
+		}
+		for k != nil {
+			if bytes.Equal(crypto.Keccak256(k), hash[:]) {
+				fmt.Printf("preimage: %x\n", k)
+				break
+			}
+			k, _, e = c.Next()
+			if e != nil {
+				return e
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+/*
+CurrentStateBucket layout which utilises DupSort feature of LMDB (store multiple values inside 1 key).
+LMDB stores multiple values of 1 key in B+ tree (as keys which have no values).
+It allows do Seek by values and other features of LMDB.
+You can think about it as Sub-Database which doesn't store any values.
+-------------------------------------------------------------
+       key              |            value
+-------------------------------------------------------------
+[acc_hash]              | [acc_value]
+[acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
+                        | [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+                        | [storage3_hash]+[storage3_value]
+                        | ...
+[acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
+                        | ...
+[acc2_hash]             | [acc2_value]
+                        ...
+
+
+On 5M block CurrentState bucket using 5.9Gb. This layout using 2.3Gb. See dupSortState()
+
+Another feature of this layout is:
+- DupSort stores values in B+ tree
+- To delete key with multiple values - LMDB does add pages (of sub-tree) to the free list
+- Same logic used when `drop bucket`
+- LMDB doesn't deletes much. Deletion of 17GB (1 key with 1 billions values 8 bytes each) took 2sec on SSD. See deleteLargeDupSortKey()
+- It means performance of deletion contracts with huge storage is predictable
+- Means we can drop incarnations concept
+
+
+As further evolution of this idea:
+- Can add CodeHash as 2-nd value of [acc_hash] key (just use 1st byte to store type of value)
+- And drop ContractCodeBucket
 */
+func dupSortState(chaindata string) {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	dbFile := "statedb_dupsort"
+	dbFile2 := "statedb_no_dupsort"
+
+	err := os.MkdirAll(dbFile, 0744)
+	check(err)
+	env, err := lmdb.NewEnv()
+	check(err)
+	err = env.SetMaxDBs(100)
+	check(err)
+	err = env.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags uint = lmdb.NoReadahead
+	err = env.Open(dbFile, flags, 0664)
+	check(err)
+	defer env.Close()
+
+	err = os.MkdirAll(dbFile2, 0744)
+	check(err)
+	env2, err := lmdb.NewEnv()
+	check(err)
+	err = env2.SetMaxDBs(100)
+	check(err)
+	err = env2.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags2 uint = lmdb.NoReadahead
+	err = env2.Open(dbFile2, flags2, 0664)
+	check(err)
+	defer env.Close()
+
+	var newStateBucket lmdb.DBI
+	err = env.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
+		check(createErr)
+		return nil
+	})
+	check(err)
+
+	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.CurrentStateBucket)
+		sz, _ := b.Size()
+		fmt.Printf("Current State bucket size: %s\n", common.StorageSize(sz))
+
+		txn, _ := env.BeginTxn(nil, 0)
+		err = txn.Drop(newStateBucket, false)
+		check(err)
+
+		txn2, _ := env2.BeginTxn(nil, 0)
+		err = txn2.Drop(newStateBucket, false)
+		check(err)
+
+		c := b.Cursor()
+		i := 0
+		for k, v, err1 := c.First(); k != nil; k, v, err = c.Next() {
+			check(err1)
+			i++
+			if i%1_000_000 == 0 {
+				err = txn.Commit()
+				check(err)
+				txn, _ = env.BeginTxn(nil, 0)
+				err = txn2.Commit()
+				check(err)
+				txn2, _ = env2.BeginTxn(nil, 0)
+				fmt.Printf("%x\n", k[:2])
+			}
+
+			if len(k) == common.HashLength {
+				err = txn.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.AppendDup)
+				check(err)
+				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
+				check(err)
+			} else {
+				prefix := k[:common.HashLength+common.IncarnationLength]
+				suffix := k[common.HashLength+common.IncarnationLength:]
+				err = txn.Put(newStateBucket, common.CopyBytes(prefix), append(suffix, v...), lmdb.AppendDup)
+				check(err)
+				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
+				check(err)
+			}
+		}
+		err = txn.Commit()
+		check(err)
+		err = txn2.Commit()
+		check(err)
+
+		return nil
+	})
+	check(err)
+
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		i := 0
+		for k, v, err := cur.Get(nil, nil, lmdb.First); !lmdb.IsNotFound(err); k, v, err = cur.Get(nil, nil, lmdb.Next) {
+			check(err)
+			i++
+			if i == 100 { // print first 100
+				return nil
+			}
+			if len(k) == 32 {
+				fmt.Printf("Acc: %x, %x\n", k, v)
+				continue
+			}
+
+			// try to seek on incarnation=2 and check that no incarnation=1 are visible
+			for _, v, err := cur.Get(nil, nil, lmdb.FirstDup); !lmdb.IsNotFound(err); _, v, err = cur.Get(nil, nil, lmdb.NextDup) {
+				fmt.Printf("Storage: %x, %x\n", k, v)
+			}
+		}
+		return nil
+	})
+	check(err)
+}
+
+func deleteLargeDupSortKey() {
+	dbFile := "statedb_dupsort_delete"
+	err := os.MkdirAll(dbFile, 0744)
+	check(err)
+	env, err := lmdb.NewEnv()
+	check(err)
+	err = env.SetMaxDBs(100)
+	check(err)
+	err = env.SetMapSize(32 << 40) // 32TB
+	check(err)
+
+	var flags uint = lmdb.NoReadahead
+	err = env.Open(dbFile, flags, 0664)
+	check(err)
+	defer env.Close()
+
+	var newStateBucket lmdb.DBI
+	err = env.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
+		check(createErr)
+		return nil
+	})
+	check(err)
+
+	k := common.FromHex("000034c2eb874b6125c8a84e69fe77640d468ccef4c02a2d20c284446dbb1460")
+
+	txn, _ := env.BeginTxn(nil, 0)
+	err = txn.Drop(newStateBucket, false)
+	check(err)
+
+	for i := uint64(0); i < 1_000_000_000; i++ {
+		if i%10_000_000 == 0 {
+			err = txn.Commit()
+			check(err)
+			txn, err = env.BeginTxn(nil, 0)
+			check(err)
+			fmt.Printf("%dM\n", i/1_000_000)
+		}
+
+		v := make([]byte, 8)
+		binary.BigEndian.PutUint64(v, i)
+		err = txn.Put(newStateBucket, k, v, lmdb.AppendDup)
+		check(err)
+	}
+	err = txn.Commit()
+	check(err)
+
+	//print new bucket size
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
+	// delete single DupSort key
+	t := time.Now()
+	err = env.Update(func(txn *lmdb.Txn) (err error) {
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		k, _, err = cur.Get(k, nil, lmdb.SetRange)
+		check(err)
+		err = cur.Del(lmdb.NoDupData)
+		check(err)
+		return nil
+	})
+	check(err)
+	fmt.Printf("Deletion took: %s\n", time.Since(t))
+
+	// check that no keys are left in the bucket
+	err = env.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+
+		cur, err := txn.OpenCursor(newStateBucket)
+		check(err)
+		for k, v, err := cur.Get(nil, nil, lmdb.First); !lmdb.IsNotFound(err); k, v, err = cur.Get(nil, nil, lmdb.Next) {
+			check(err)
+			fmt.Printf("Still see some key: %x, %x\n", k, v)
+			panic(1)
+		}
+		return nil
+	})
+	check(err)
+}
+
+func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	copyDb := ethdb.MustOpen(chaindataCopy)
+	defer copyDb.Close()
+	count := 0
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		c := b.Cursor()
+		k, v, e := c.First()
+		if e != nil {
+			return e
+		}
+		return copyDb.KV().View(context.Background(), func(copyTx ethdb.Tx) error {
+			copyB := copyTx.Bucket([]byte(bucket))
+			copyC := copyB.Cursor()
+			copyK, copyV, copyE := copyC.First()
+			if copyE != nil {
+				return copyE
+			}
+			for k != nil || copyK != nil {
+				count++
+				if count%100000 == 0 {
+					fmt.Printf("Compared %d records\n", count)
+				}
+				if k == nil {
+					fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
+					copyK, copyV, copyE = copyC.Next()
+					if copyE != nil {
+						return copyE
+					}
+				} else if copyK == nil {
+					fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
+					k, v, e = c.Next()
+					if e != nil {
+						return e
+					}
+				} else {
+					switch bytes.Compare(k, copyK) {
+					case -1:
+						fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
+						k, v, e = c.Next()
+						if e != nil {
+							return e
+						}
+					case 1:
+						fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
+						copyK, copyV, copyE = copyC.Next()
+						if copyE != nil {
+							return copyE
+						}
+					case 0:
+						if !bytes.Equal(v, copyV) {
+							fmt.Printf("Different values for %x. db: [%x], copyDb: [%x]\n", k, v, copyV)
+						}
+						k, v, e = c.Next()
+						if e != nil {
+							return e
+						}
+						copyK, copyV, copyE = copyC.Next()
+						if copyE != nil {
+							return copyE
+						}
+					default:
+						fmt.Printf("Unexpected result of bytes.Compare: %d\n", bytes.Compare(k, copyK))
+					}
+				}
+			}
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+	return nil
+}
 
 func printStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
@@ -2480,6 +2137,27 @@ func printStages(chaindata string) error {
 			return err
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+	}
+	return nil
+}
+
+func fixStages(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var err error
+	var progress uint64
+	var list []uint64
+	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
+			return err
+		}
+		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+		list = append(list, progress)
+	}
+	for stage := stages.IntermediateHashes; stage < stages.TxLookup; stage++ {
+		if err = stages.SaveStageProgress(db, stage+1, list[int(stage)], nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -2496,19 +2174,49 @@ func testStageLoop(chaindata string) error {
 	return nil
 }
 
-func searchChangeSet(chaindata string, key []byte) error {
+func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block)
 		c := st.Cursor()
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			timestamp, _ := dbutils.DecodeTimestamp(k)
 			//fmt.Printf("timestamp: %d\n", timestamp)
+			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
+				if bytes.Equal(kk, key) {
+					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
+				}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
+	fmt.Printf("Searching storage changesets\n")
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
 			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
 				if bytes.Equal(kk, key) {
 					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
@@ -2525,7 +2233,56 @@ func searchChangeSet(chaindata string, key []byte) error {
 	return nil
 }
 
+func buildHistory(chaindata string, reset bool) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if reset {
+		if err := db.ClearBuckets(
+			dbutils.AccountsHistoryBucket,
+			dbutils.StorageHistoryBucket,
+		); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+			return err
+		}
+	}
+	var err error
+	var stage4progress uint64
+	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return err
+	}
+	var stage7progress uint64
+	if stage7progress, _, err = stages.GetStageProgress(db, stages.AccountHistoryIndex); err != nil {
+		return err
+	}
+	var stage8progress uint64
+	if stage8progress, _, err = stages.GetStageProgress(db, stages.StorageHistoryIndex); err != nil {
+		return err
+	}
+	log.Info("Stage4", "progress", stage4progress)
+	log.Info("Stage7", "progress", stage7progress)
+	log.Info("Stage8", "progress", stage8progress)
+	core.UsePlainStateExecution = true
+	ch := make(chan struct{})
+	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
+	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
+	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
+		return err
+	}
+	close(ch)
+	return nil
+}
+
 func main() {
+	flag.Parse()
+
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -2539,9 +2296,9 @@ func main() {
 	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.LvlInfo)
 
-	flag.Parse()
+	glogger.Verbosity(log.Lvl(*verbosity))
+
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
@@ -2596,7 +2353,9 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	if *action == "preimage" {
-		preimage(*chaindata, common.HexToHash(*hash))
+		if err := findPreimage(*chaindata, common.HexToHash(*hash)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "addPreimage" {
 		addPreimage(*chaindata, common.HexToHash(*hash), common.FromHex(*preImage))
@@ -2631,22 +2390,9 @@ func main() {
 	if *action == "bucket" {
 		printBucket(*chaindata)
 	}
-	if *action == "gen-tx-lookup" {
-		GenerateTxLookups(*chaindata)
-	}
-	if *action == "gen-tx-lookup-1" {
-		GenerateTxLookups1(*chaindata, *block)
-	}
-
-	if *action == "gen-tx-lookup-2" {
-		GenerateTxLookups2(*chaindata)
-	}
 
 	if *action == "val-tx-lookup-2" {
 		ValidateTxLookups2(*chaindata)
-	}
-	if *action == "indexSize" {
-		indexSize(*chaindata)
 	}
 	if *action == "modiAccounts" {
 		getModifiedAccounts(*chaindata)
@@ -2654,25 +2400,26 @@ func main() {
 	if *action == "slice" {
 		dbSlice(*chaindata, []byte(*bucket), common.FromHex(*hash))
 	}
-	if *action == "mgrSchedule" {
-		mgrSchedule(*chaindata, uint64(*block))
-	}
 	if *action == "resetState" {
 		resetState(*chaindata)
 	}
 	if *action == "resetHashed" {
 		resetHashedState(*chaindata)
 	}
-	if *action == "resetHistoryIndex" {
-		resetHistoryIndex(*chaindata)
-	}
 	if *action == "getProof" {
 		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "seek" {
-		testSeek(*chaindata)
+	if *action == "reset3" {
+		if err := testStage3(*chaindata, true, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage3" {
+		if err := testStage3(*chaindata, false, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "stage4" {
 		if err := testStage4(*chaindata, uint64(*block)); err != nil {
@@ -2699,6 +2446,31 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
+	if *action == "stage6" {
+		if err := testStage6(*chaindata, false /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "reset6" {
+		if err := testStage6(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "unwind6" {
+		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "stage78" {
+		if err := testStage78(*chaindata, false /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "reset78" {
+		if err := testStage78(*chaindata, true /* reset */); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
 	if *action == "stageLoop" {
 		if err := testStageLoop(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -2710,12 +2482,38 @@ func main() {
 		}
 	}
 	if *action == "searchChangeSet" {
-		if err := searchChangeSet(*chaindata, common.FromHex(*hash)); err != nil {
+		if err := searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "searchStorageChangeSet" {
+		if err := searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "printStages" {
 		if err := printStages(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "fixStages" {
+		if err := fixStages(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "deleteLargeDupSortKey" {
+		deleteLargeDupSortKey()
+	}
+	if *action == "dupSortState" {
+		dupSortState(*chaindata)
+	}
+	if *action == "compare" {
+		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "resetHistory" {
+		if err := buildHistory(*chaindata, true /* reset */); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

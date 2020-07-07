@@ -197,7 +197,7 @@ func (db *LmdbKV) Close() {
 		if err := db.env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
-			db.log.Info("database closed")
+			db.log.Info("database closed (LMDB)")
 		}
 	}
 
@@ -366,10 +366,9 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	return tx.tx.Commit()
 }
 
-func (tx *lmdbTx) Rollback() error {
+func (tx *lmdbTx) Rollback() {
 	tx.closeCursors()
 	tx.tx.Reset()
-	return nil
 }
 
 func (tx *lmdbTx) closeCursors() {

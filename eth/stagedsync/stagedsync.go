@@ -1,7 +1,9 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
+	"runtime"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -48,10 +50,24 @@ func PrepareStagedSync(
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
+				const batchSize = 10000
+				const blockSize = 4096
+				n := runtime.NumCPU()
+
+				cfg := Stage3Config{
+					BatchSize:       batchSize,
+					BlockSize:       blockSize,
+					BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
+					StartTrace:      false,
+					Prof:            false,
+					NumOfGoroutines: n,
+					ReadChLen:       4,
+					Now:             time.Now(),
+				}
+				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(u, stateDB)
+				return UnwindSendersStage(u, stateDB)
 			},
 		},
 		{
@@ -62,6 +78,16 @@ func PrepareStagedSync(
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)
+			},
+		},
+		{
+			ID:          stages.IntermediateHashes,
+			Description: "Generating intermediate hashes and compiting state root",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return UnwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
@@ -80,10 +106,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnAccountHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				return SpawnAccountHistoryIndex(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindAccountHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
+				return UnwindAccountHistoryIndex(u, stateDB, quitCh)
 			},
 		},
 		{
@@ -92,10 +118,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnStorageHistoryIndex(s, stateDB, datadir, core.UsePlainStateExecution, quitCh)
+				return SpawnStorageHistoryIndex(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindStorageHistoryIndex(u, stateDB, core.UsePlainStateExecution, quitCh)
+				return UnwindStorageHistoryIndex(u, stateDB, quitCh)
 			},
 		},
 		{

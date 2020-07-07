@@ -33,7 +33,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum)
 
 			ig.ChangeSetBufSize = 16 * 1024
-			err := ig.GenerateIndex(0, 0, csBucket)
+			err := ig.GenerateIndex(0, uint64(blocksNum), csBucket)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,16 +54,14 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		}
 	}
 
-	t.Run("account hashed state", test(2100, dbutils.AccountChangeSetBucket))
 	t.Run("account plain state", test(2100, dbutils.PlainAccountChangeSetBucket))
-	t.Run("storage hashed state", test(2100, dbutils.StorageChangeSetBucket))
 	t.Run("storage plain state", test(2100, dbutils.PlainStorageChangeSetBucket))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	buckets := [][]byte{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket, dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	buckets := [][]byte{dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
 	for i := range buckets {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
@@ -71,7 +69,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		mp := changeset.Mapper[string(csbucket)]
 		indexBucket := mp.IndexBucket
 		ig := NewIndexGenerator(db, make(chan struct{}))
-		err := ig.GenerateIndex(0, 0, csbucket)
+		err := ig.GenerateIndex(0, uint64(2100), csbucket)
 		if err != nil {
 			t.Fatal(err)
 		}

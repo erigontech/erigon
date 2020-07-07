@@ -84,9 +84,6 @@ var (
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket = []byte("iTh")
 
-	// some_prefix_of(hash_of_address_of_account) => estimated_number_of_witness_bytes
-	IntermediateWitnessSizeBucket = []byte("iws")
-
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = []byte("DBINFO")
 
@@ -153,6 +150,9 @@ var (
 
 	// this bucket stored in separated database
 	InodesBucket = []byte("inodes")
+
+	// Transaction senders - stored separately from the block bodies
+	Senders = []byte("txSenders")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -167,7 +167,6 @@ var Buckets = [][]byte{
 	AccountChangeSetBucket,
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
-	IntermediateWitnessSizeBucket,
 	DatabaseVerisionKey,
 	HeadHeaderKey,
 	HeadBlockKey,
@@ -201,6 +200,7 @@ var Buckets = [][]byte{
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
 	InodesBucket,
+	Senders,
 }
 
 var BucketsIndex = map[string]int{}

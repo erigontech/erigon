@@ -141,12 +141,6 @@ func rlpHash(x interface{}) (h common.Hash) {
 // a block's data contents (transactions and uncles) together.
 type Body struct {
 	Transactions []*Transaction
-	Senders      []common.Address // Transaction senders
-	Uncles       []*Header
-}
-
-type SmallBody struct {
-	Transactions []*Transaction
 	Uncles       []*Header
 }
 
@@ -200,25 +194,24 @@ type storageblock struct {
 }
 
 // Copy transaction senders from body into the transactions
-func (b *Body) SendersToTxs() {
-	if b.Senders == nil {
+func (b *Body) SendersToTxs(senders []common.Address) {
+	if senders == nil {
 		return
 	}
 	for i, tx := range b.Transactions {
-		if b.Senders[i] != (common.Address{}) {
-			tx.from.Store(b.Senders[i])
-		}
+		tx.from.Store(senders[i])
 	}
 }
 
 // Copy transaction senders from transactions to the body
-func (b *Body) SendersFromTxs() {
-	b.Senders = make([]common.Address, len(b.Transactions))
+func (b *Body) SendersFromTxs() []common.Address {
+	senders := make([]common.Address, len(b.Transactions))
 	for i, tx := range b.Transactions {
 		if sc := tx.from.Load(); sc != nil {
-			b.Senders[i] = sc.(common.Address)
+			senders[i] = sc.(common.Address)
 		}
 	}
+	return senders
 }
 
 // NewBlock creates a new block. The input data is copied,

@@ -39,7 +39,6 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 			if v == nil {
 				return ethdb.ErrKeyNotFound
 			}
-
 			dat = make([]byte, len(v))
 			copy(dat, v)
 			return nil
@@ -91,7 +90,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 	if ok {
 		// set == true if this change was from empty record (non-existent account) to non-empty
 		// In such case, we do not need to examine changeSet and return empty data
-		if set {
+		if set && !storage {
 			return []byte{}, nil
 		}
 		csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
@@ -105,7 +104,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 
 		if plain {
 			if storage {
-				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
+				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).Find(key)
 			} else {
 				data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
 			}
@@ -115,12 +114,13 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			data, err = changeset.AccountChangeSetBytes(changeSetData).Find(key)
 		}
 		if err != nil {
-			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			if !errors.Is(err, changeset.ErrNotFound) {
 				return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
 			}
-			return nil, err
+			return nil, ethdb.ErrKeyNotFound
 		}
 	} else if plain {
+		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
 		var lastChangesetBlock, lastIndexBlock uint64
 		stageBucket := tx.Bucket(dbutils.SyncStageProgress)
 		if stageBucket != nil {
@@ -143,6 +143,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 				lastIndexBlock = binary.BigEndian.Uint64(v1[:8])
 			}
 		}
+		//fmt.Printf("lastChangesetBlock=%d, lastIndexBlock=%d\n", lastChangesetBlock, lastIndexBlock)
 		if lastChangesetBlock > lastIndexBlock {
 			// iterate over changeset to compensate for lacking of the history index
 			csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
@@ -158,7 +159,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			err = nil
 			for k, v, err1 := c.Seek(startKey); k != nil && err1 == nil; k, v, err1 = c.Next() {
 				if storage {
-					data, err = changeset.StorageChangeSetPlainBytes(v).FindWithoutIncarnation(key[:common.AddressLength], key[common.AddressLength+common.IncarnationLength:])
+					data, err = changeset.StorageChangeSetPlainBytes(v).Find(key)
 				} else {
 					data, err = changeset.AccountChangeSetPlainBytes(v).Find(key)
 				}
@@ -172,6 +173,8 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			if err != nil {
 				return nil, ethdb.ErrKeyNotFound
 			}
+		} else {
+			return nil, ethdb.ErrKeyNotFound
 		}
 	} else {
 		return nil, ethdb.ErrKeyNotFound

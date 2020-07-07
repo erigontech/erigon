@@ -27,7 +27,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(&StageState{}, m2, 0, 50, getDataDir(), nil)
+	err := promoteHashedStateCleanly(&StageState{}, m2, 50, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(&StageState{}, m2, 0, 50, getDataDir(), nil)
+	err := promoteHashedStateCleanly(&StageState{}, m2, 50, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 51, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 = db2.NewBatch()
-	err = promoteHashedState(&StageState{BlockNumber: 50}, m2, 50, 101, getDataDir(), nil)
+	err = promoteHashedStateIncrementally(&StageState{BlockNumber: 50}, 50, 101, m2, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 51, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
 	m2 := db2.NewBatch()
-	err := promoteHashedState(&StageState{}, m2, 50, 101, getDataDir(), nil)
+	err := promoteHashedStateIncrementally(&StageState{}, 50, 101, m2, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestUnwindHashed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(db1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(db2), changeCodeWithIncarnations)
 
-	err := promoteHashedState(&StageState{}, db2, 0, 100, getDataDir(), nil)
+	err := promoteHashedStateCleanly(&StageState{}, db2, 100, getDataDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}

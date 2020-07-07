@@ -35,12 +35,11 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 	if err != nil {
 		return nil, err
 	}
+	defer bufferFile.Sync() //nolint:errcheck
 
-	w := bufio.NewWriter(bufferFile)
+	w := bufio.NewWriterSize(bufferFile, BufIOSize)
 	defer w.Flush() //nolint:errcheck
-	defer func() {
-		bufferFile.Sync() //nolint:errcheck
-	}()
+
 	encoder.Reset(w)
 	for _, entry := range b.GetEntries() {
 		err = writeToDisk(encoder, entry.key, entry.value)
@@ -50,17 +49,9 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	var currentKeyStr string
-	if currentKey == nil {
-		currentKeyStr = "final"
-	} else if len(currentKey) < 4 {
-		currentKeyStr = fmt.Sprintf("%x", currentKey)
-	} else {
-		currentKeyStr = fmt.Sprintf("%x...", currentKey[:4])
-	}
 	log.Info(
 		"Flushed buffer file",
-		"current key", currentKeyStr,
+		"current key", makeCurrentKeyStr(currentKey),
 		"name", bufferFile.Name(),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	b.Reset()
@@ -74,7 +65,7 @@ func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		p.reader = bufio.NewReader(p.file)
+		p.reader = bufio.NewReaderSize(p.file, BufIOSize)
 	}
 	decoder.Reset(p.reader)
 	return readElementFromDisk(decoder)

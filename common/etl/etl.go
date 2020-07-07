@@ -2,7 +2,6 @@ package etl
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -60,12 +58,11 @@ type LoadCommitHandler func(ethdb.Putter, []byte, bool) error
 type TransformArgs struct {
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
-	Chunks          [][]byte
 	FixedBits       int
 	BufferType      int
 	BufferSize      int
 	LoadStartKey    []byte
-	Quit            chan struct{}
+	Quit            <-chan struct{}
 	OnLoadCommit    LoadCommitHandler
 	loadBatchSize   int // used in testing
 }
@@ -87,53 +84,13 @@ func Transform(
 	collector := NewCollector(datadir, buffer)
 
 	t := time.Now()
-	numOfChunks := 1 + len(args.Chunks)
-	if numOfChunks > 1 {
-		errg, _ := errgroup.WithContext(context.TODO())
-		f := func(startKey, endKey []byte, collector *Collector, i int) func() error {
-			return func() error {
-				if err := extractBucketIntoFiles(db, fromBucket, startKey, endKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
-					disposeProviders(collector.dataProviders)
-					return err
-				}
-				log.Info("Chunk finished successfully", "i", i, "dp", len(collector.dataProviders))
-				return nil
-			}
-		}
-		errg.Go(f(args.ExtractStartKey, args.Chunks[0], collector, 0))
-
-		localCollectors := make([]*Collector, len(args.Chunks))
-		for i := range args.Chunks {
-			i := i
-			localCollectors[i] = NewCollector(datadir, NewSortableBuffer(bufferSize))
-			extractStartKey := args.Chunks[i]
-			var endKey []byte
-			if i == len(args.Chunks)-1 {
-				endKey = args.ExtractEndKey
-			} else {
-				endKey = args.Chunks[i+1]
-			}
-			errg.Go(f(extractStartKey, endKey, localCollectors[i], i+1))
-		}
-		err := errg.Wait()
-		if err != nil {
-			return err
-		}
-		for i := range localCollectors {
-			collector.dataProviders = append(collector.dataProviders, localCollectors[i].dataProviders...)
-		}
-	} else {
-		if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
-			disposeProviders(collector.dataProviders)
-			return err
-		}
+	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+		disposeProviders(collector.dataProviders)
+		return err
 	}
-	log.Info("Extraction finished", "it took", time.Since(t))
+	log.Debug("Extraction finished", "it took", time.Since(t))
 
-	t = time.Now()
-	defer func() {
-		log.Info("Collection finished", "it took", time.Since(t))
-	}()
+	defer func(t time.Time) { log.Debug("Collection finished", "it took", time.Since(t)) }(time.Now())
 	return collector.Load(db, toBucket, loadFunc, args)
 }
 
@@ -145,7 +102,7 @@ func extractBucketIntoFiles(
 	fixedBits int,
 	collector *Collector,
 	extractFunc ExtractFunc,
-	quit chan struct{},
+	quit <-chan struct{},
 ) error {
 	if err := db.Walk(bucket, startkey, fixedBits, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
@@ -175,7 +132,7 @@ func disposeProviders(providers []dataProvider) {
 type bucketState struct {
 	getter ethdb.Getter
 	bucket []byte
-	quit   chan struct{}
+	quit   <-chan struct{}
 }
 
 func (s *bucketState) Get(key []byte) ([]byte, error) {
@@ -188,5 +145,5 @@ func (s *bucketState) Stopped() error {
 
 // IdentityLoadFunc loads entries as they are, without transformation
 func IdentityLoadFunc(k []byte, value []byte, _ State, next LoadNextFunc) error {
-	return next(k, value)
+	return next(k, k, value)
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -17,7 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewIndexGenerator(db ethdb.Database, quitCh chan struct{}) *IndexGenerator {
+func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
 	return &IndexGenerator{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -30,7 +29,7 @@ type IndexGenerator struct {
 	db               ethdb.Database
 	ChangeSetBufSize int
 	TempDir          string
-	quitCh           chan struct{}
+	quitCh           <-chan struct{}
 }
 
 
@@ -39,17 +38,9 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Info("Index generation started", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
+	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
-	}
-	var (
-		endBlockKey []byte
-		chunks      [][]byte
-	)
-	if endBlock != 0 {
-		endBlockKey = dbutils.EncodeTimestamp(endBlock)
-		chunks = calculateIndexChunks(startBlock, endBlock, runtime.NumCPU()/2+1)
 	}
 	t := time.Now()
 	err := etl.Transform(ig.db, changeSetBucket,
@@ -59,9 +50,8 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		loadFunc,
 		etl.TransformArgs{
 			ExtractStartKey: dbutils.EncodeTimestamp(startBlock),
-			ExtractEndKey:   endBlockKey,
+			ExtractEndKey:   dbutils.EncodeTimestamp(endBlock),
 			FixedBits:       0,
-			Chunks:          chunks,
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
@@ -71,7 +61,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Info("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
+	log.Debug("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
 	return nil
 }
 
@@ -90,7 +80,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 
 		currentKey = common.CopyBytes(k)
 		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
-			keys[string(kk)] = struct{}{}
+			keys[string(common.CopyBytes(kk))] = struct{}{}
 			return nil
 		})
 		if err != nil {
@@ -111,8 +101,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 	var startKey = make([]byte, keySize+8)
 
 	for key := range keys {
-		key := common.CopyBytes([]byte(key))
-		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation(key))
+		copy(startKey[:keySize], dbutils.CompositeKeyWithoutIncarnation([]byte(key)))
 
 		binary.BigEndian.PutUint64(startKey[keySize:], timestampTo)
 		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*keySize, func(k, v []byte) (bool, error) {
@@ -169,13 +158,15 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		log.Error("Value must be a multiple of 9", "ln", len(value), "k", common.Bytes2Hex(k))
 		return errors.New("incorrect value")
 	}
-
+	k = common.CopyBytes(k)
+	if len(k) >= 28 {
+		binary.BigEndian.PutUint64(k[common.AddressLength:], ^binary.BigEndian.Uint64(k[common.AddressLength:]))
+	}
 	currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 	indexBytes, err1 := state.Get(currentChunkKey)
 	if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
 		return fmt.Errorf("find chunk failed: %w", err1)
 	}
-
 	currentIndex := dbutils.WrapHistoryIndex(indexBytes)
 
 	for i := 0; i < len(value); i += 9 {
@@ -193,7 +184,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 				return err3
 			}
 			// Flush the old chunk
-			if err4 := next(indexKey, currentIndex); err4 != nil {
+			if err4 := next(k, indexKey, currentIndex); err4 != nil {
 				return err4
 			}
 			// Start a new chunk
@@ -201,7 +192,7 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		}
 		currentIndex = currentIndex.Append(blockNr, vzero)
 	}
-	err := next(currentChunkKey, currentIndex)
+	err := next(k, currentChunkKey, currentIndex)
 	if err != nil {
 		return err
 	}
@@ -211,47 +202,18 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 
 func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc { //nolint
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		bufferMap := make(map[string][][]byte)
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
-		err := bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
-			sKey := string(changesetKey)
-			list := bufferMap[sKey]
-			b := blockNum
+		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
+			key := common.CopyBytes(changesetKey)
+			if len(key) >= 28 {
+				binary.BigEndian.PutUint64(key[common.AddressLength:], ^binary.BigEndian.Uint64(key[common.AddressLength:]))
+			}
 			v := make([]byte, 9)
-			binary.BigEndian.PutUint64(v, b)
+			binary.BigEndian.PutUint64(v, blockNum)
 			if len(changesetValue) == 0 {
 				v[8] = 1
 			}
-			list = append(list, v)
-
-			bufferMap[sKey] = list
-			return nil
+			return next(dbKey, key, v)
 		})
-		if err != nil {
-			return err
-		}
-
-		for k, v := range bufferMap {
-			for i := range v {
-				err = next(dbKey, []byte(k), v[i])
-				if err != nil {
-					return err
-				}
-			}
-		}
-		return nil
 	}
-}
-
-func calculateIndexChunks(startBlock, endBlock uint64, numOfChunks int) [][]byte {
-	if endBlock < startBlock+1000000 || numOfChunks < 2 {
-		return nil
-	}
-
-	chunkSize := (endBlock - startBlock) / uint64(numOfChunks)
-	var chunks = make([][]byte, numOfChunks-1)
-	for i := uint64(1); i < uint64(numOfChunks); i++ {
-		chunks[i-1] = dbutils.EncodeTimestamp(i*chunkSize + 1)
-	}
-	return chunks
 }

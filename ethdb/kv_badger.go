@@ -230,10 +230,9 @@ func (tx *badgerTx) Commit(ctx context.Context) error {
 	return tx.badger.Commit()
 }
 
-func (tx *badgerTx) Rollback() error {
+func (tx *badgerTx) Rollback() {
 	tx.closeCursors()
 	tx.badger.Discard()
-	return nil
 }
 
 func (tx *badgerTx) closeCursors() {
@@ -449,6 +448,10 @@ func (c *badgerCursor) Put(key []byte, value []byte) error {
 	}
 
 	return c.bucket.Put(key, value)
+}
+
+func (c *badgerCursor) Append(key []byte, value []byte) error {
+	return c.Put(key, value)
 }
 
 func (c *badgerCursor) Walk(walker func(k, v []byte) (bool, error)) error {

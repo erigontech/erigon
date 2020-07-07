@@ -37,7 +37,7 @@ type structInfoReceiver interface {
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(hash []byte, dataLen uint64) error
+	hash(hash []byte) error
 	topHash() []byte
 }
 
@@ -71,8 +71,7 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash        common.Hash
-	WitnessSize uint64
+	Hash common.Hash
 }
 
 func (GenStructStepHashData) GenStructStepData() {}
@@ -114,7 +113,7 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		if trace {
+		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}
 		// Add the digit immediately following the max common prefix and compute length of remainder length
@@ -134,7 +133,7 @@ func GenStructStep(
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash[:], v.WitnessSize); err != nil {
+				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
 				buildExtensions = true

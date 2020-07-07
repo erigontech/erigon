@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"sort"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -16,6 +18,7 @@ const (
 	SortableOldestAppearedBuffer
 
 	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
+	BufIOSize         = 64 * 4096         // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
 )
 
 type Buffer interface {
@@ -36,6 +39,7 @@ type sortableBufferEntry struct {
 var (
 	_ Buffer = &sortableBuffer{}
 	_ Buffer = &appendSortableBuffer{}
+	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
 func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
@@ -113,6 +117,7 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	stored, ok := b.entries[string(k)]
 	if !ok {
 		b.size += len(k)
+		k = common.CopyBytes(k)
 	}
 	b.size += len(v)
 	stored = append(stored, v...)
@@ -130,7 +135,7 @@ func (b *appendSortableBuffer) Sort() {
 	for i := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
 	}
-	sort.Sort(b)
+	sort.Stable(b)
 }
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
@@ -182,6 +187,10 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 
 	b.size += len(k)
 	b.size += len(v)
+	k = common.CopyBytes(k)
+	if v != nil {
+		v = common.CopyBytes(v)
+	}
 	b.entries[string(k)] = v
 }
 
@@ -196,7 +205,7 @@ func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
-	sort.Sort(b)
+	sort.Stable(b)
 }
 
 func (b *oldestEntrySortableBuffer) Less(i, j int) bool {

@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
@@ -52,6 +51,7 @@ type APIImpl struct {
 // PrivateDebugAPI
 type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error)
+	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -227,7 +227,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error) {
-	_, _, _, dbstate, err := eth.ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, vm.NewDestsCache(10))
+	_, _, _, dbstate, err := eth.ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
 	if err != nil {
 		return eth.StorageRangeResult{}, err
 	}
@@ -266,7 +266,19 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 
-	db, err := ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
+	var db ethdb.KV
+	var err error
+	if cfg.remoteDbAddress != "" {
+		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
+	} else if cfg.chaindata != "" {
+		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
+			db = database.KV()
+		} else {
+			err = errOpen
+		}
+	} else {
+		err = fmt.Errorf("either remote db or bolt db must be specified")
+	}
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return

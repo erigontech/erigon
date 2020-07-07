@@ -285,7 +285,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 			if bytes.Equal(n.Key, hex) {
 				var hn common.Hash
 				h.hash(n, isRoot, hn[:])
-				return true, hashNode{hash: hn[:], iws: n.iws}
+				return true, hashNode{hash: hn[:]}
 			}
 			pLen := prefixLen(n.Key, hex)
 			if pLen > 0 {
@@ -298,7 +298,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 			if folded {
 				var hn common.Hash
 				h.hash(n, isRoot, hn[:])
-				return true, hashNode{hash: hn[:], iws: n.iws}
+				return true, hashNode{hash: hn[:]}
 			}
 			return false, n
 		}
@@ -326,7 +326,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 		if folded1 && folded2 {
 			var hn common.Hash
 			h.hash(n, isRoot, hn[:])
-			return true, hashNode{hash: hn[:], iws: n.iws}
+			return true, hashNode{hash: hn[:]}
 		}
 		return false, n
 	case *fullNode:
@@ -354,7 +354,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 		if !unfolded {
 			var hn common.Hash
 			h.hash(n, isRoot, hn[:])
-			return true, hashNode{hash: hn[:], iws: n.iws}
+			return true, hashNode{hash: hn[:]}
 		}
 		return false, n
 	}

@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -49,7 +50,7 @@ func (l *progressLogger) Start(numberRef *uint64) {
 			speed := float64(now-prev) / float64(l.interval)
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Executed blocks:",
+			log.Debug("Executed blocks:",
 				"currentBlock", now,
 				"speed (blk/second)", speed,
 				"state batch", common.StorageSize(l.batch.BatchSize()),
@@ -76,7 +77,12 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit chan struct{}, dests vm.Cache, writeReceipts bool) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool) error {
+	if limit <= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	nextBlockNumber := s.BlockNumber
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
@@ -104,7 +110,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1)
+	log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1, "to", limit-1)
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -120,6 +126,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		if block == nil {
 			break
 		}
+		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
+		block.Body().SendersToTxs(senders)
 		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
 		type cacheSetter interface {
@@ -204,6 +212,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+	if u.UnwindPoint >= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 
@@ -308,7 +321,7 @@ func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) erro
 		},
 		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
-		return err
+		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 	}
 
 	return rawdb.PlainWriteAccount(db, address, acc)
@@ -333,8 +346,8 @@ func cleanupContractCodeBucket(
 ) error {
 	var original accounts.Account
 	got, err := readAccountFunc(db, &original)
-	if err != nil {
-		return err
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return fmt.Errorf("cleanupContractCodeBucket: %w", err)
 	}
 	if got {
 		// clean up all the code incarnations original incarnation and the new one
