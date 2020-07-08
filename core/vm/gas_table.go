@@ -18,6 +18,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -342,6 +343,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 			gas += params.CallNewAccountGas
 		}
 	} else if !evm.IntraBlockState.Exist(address) {
+		fmt.Printf("Change for new account\n")
 		gas += params.CallNewAccountGas
 	}
 	if transfersValue {

@@ -18,7 +18,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -650,7 +649,7 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject = sdb.createObject(addr, stateObject /* previous */, nil /* original */)
+		stateObject = sdb.createObject(addr, nil /* previous */, nil /* original */)
 	}
 	return stateObject
 }
@@ -674,6 +673,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
 	} else {
+		fmt.Printf("resetObjectChange %x\n", addr)
 		sdb.journal.append(resetObjectChange{prev: previous})
 	}
 	sdb.setStateObject(newobj)
@@ -691,6 +691,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
+	fmt.Printf("CreateAccount %x\n", addr)
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -770,21 +771,10 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-type Addresses []common.Address
-
-func (a *Addresses) Len() int {
-	return len(*a)
-}
-func (a *Addresses) Less(i, j int) bool {
-	return bytes.Compare((*a)[i][:], (*a)[j][:]) == -1
-}
-func (a *Addresses) Swap(i, j int) {
-	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
-}
-
 func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
-	if (stateObject.suicided && !stateObject.created) || (isDirty && emptyRemoval) {
+	if stateObject.suicided || (isDirty && emptyRemoval) {
+		//fmt.Printf("Delete %x\n", addr)
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 			return err
 		}
