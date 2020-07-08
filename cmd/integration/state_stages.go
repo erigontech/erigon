@@ -120,7 +120,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		to := execStage.BlockNumber - unwind
 		{
 			u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: to}
-			if err = stagedsync.UnwindTxLookup(u, db, "", ch); err != nil {
+			stage9 := progress(db, stages.TxLookup)
+			if err = stagedsync.UnwindTxLookup(u, stage9, db, "", ch); err != nil {
 				return fmt.Errorf("unwindTxLookup: %w", err)
 			}
 		}

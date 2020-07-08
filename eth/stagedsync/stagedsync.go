@@ -133,7 +133,7 @@ func PrepareStagedSync(
 				return SpawnTxLookup(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return UnwindTxLookup(u, stateDB, datadir, quitCh)
+				return UnwindTxLookup(u, s, stateDB, datadir, quitCh)
 			},
 		},
 	}
