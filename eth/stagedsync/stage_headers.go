@@ -142,9 +142,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		return false, 0, nil
 	}
 
-	/*if rawdb.ReadHeaderNumber(db, headers[0].ParentHash) == nil {
+	if origin > headers[0].Number.Uint64() && rawdb.ReadHeaderNumber(db, headers[0].ParentHash) == nil {
 		return false, 0, errors.New("unknown parent")
-	}*/
+	}
+
 	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
@@ -214,11 +215,11 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		// we always add header difficulty to TD, because next blocks might
 		// be inserted and we need the right value for them
 		td = td.Add(td, header.Difficulty)
-		/*if !newCanonical && rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
+		if !newCanonical && rawdb.ReadHeader(batch, header.Hash(), header.Number.Uint64()) != nil {
 			// We cannot ignore blocks if they cause reorg
 			ignored++
 			continue
-		} TODO REORG*/
+		}
 		number := header.Number.Uint64()
 		hashesMatch := header.Hash() == rawdb.ReadCanonicalHash(batch, number)
 		if newCanonical && !deepFork && forkBlockNumber == 0 && !hashesMatch {
