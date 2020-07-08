@@ -87,7 +87,6 @@ type DefaultReceiver struct {
 	leafData     GenStructStepLeafData
 	accData      GenStructStepAccountData
 	witnessSize  uint64
-	empty        bool
 }
 
 func NewDefaultReceiver() *DefaultReceiver {
@@ -292,7 +291,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			if fstl.trace {
 				fmt.Printf("k after storageWalker and Next: %x\n", fstl.k)
 			}
-		} else {
+		} else if len(fstl.k) > 0 {
 			fstl.itemType = AccountStreamItem
 			fstl.accountKey = append(fstl.accountKey[:0], fstl.k...)
 			fstl.storageKey = nil
@@ -441,7 +440,6 @@ func (dr *DefaultReceiver) Reset(rl RetainDecider, hc HashCollector, trace bool)
 	dr.subTries = SubTries{}
 	dr.trace = trace
 	dr.hb.trace = trace
-	dr.empty = true
 }
 
 func (dr *DefaultReceiver) Receive(itemType StreamItem,
@@ -459,7 +457,6 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 			if err := dr.genStructStorage(); err != nil {
 				return err
 			}
-			dr.empty = false
 		}
 		dr.saveValueStorage(false, storageValue, hash)
 	case SHashStreamItem:
@@ -468,7 +465,6 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 			if err := dr.genStructStorage(); err != nil {
 				return err
 			}
-			dr.empty = false
 		}
 		dr.saveValueStorage(true, storageValue, hash)
 	case AccountStreamItem:
@@ -479,7 +475,6 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				if err := dr.genStructStorage(); err != nil {
 					return err
 				}
-				dr.empty = false
 			}
 			if dr.currStorage.Len() > 0 {
 				if len(dr.groups) >= 2*common.HashLength {
@@ -499,7 +494,6 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 			if err := dr.genStructAccount(); err != nil {
 				return err
 			}
-			dr.empty = false
 		}
 		if err := dr.saveValueAccount(false, accountValue, hash); err != nil {
 			return err
@@ -512,7 +506,6 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				if err := dr.genStructStorage(); err != nil {
 					return err
 				}
-				dr.empty = false
 			}
 			if dr.currStorage.Len() > 0 {
 				if len(dr.groups) >= 2*common.HashLength {
@@ -532,7 +525,6 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 			if err := dr.genStructAccount(); err != nil {
 				return err
 			}
-			dr.empty = false
 		}
 		if err := dr.saveValueAccount(true, accountValue, hash); err != nil {
 			return err
@@ -565,9 +557,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 				dr.subTries.Hashes = append(dr.subTries.Hashes, common.Hash{})
 			}
 		} else {
-			if !dr.empty {
-				dr.cutoffKeysAccount(cutoff)
-			}
+			dr.cutoffKeysAccount(cutoff)
 			if dr.curr.Len() > 0 && !dr.wasIH {
 				dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 				if dr.currStorage.Len() > 0 {
@@ -602,12 +592,12 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 					dr.groups = dr.groups[:len(dr.groups)-1]
 				}
 			}
-			if dr.empty {
-				dr.subTries.roots = append(dr.subTries.roots, nil)
-				dr.subTries.Hashes = append(dr.subTries.Hashes, EmptyRoot)
-			} else {
+			if dr.hb.hasRoot() {
 				dr.subTries.roots = append(dr.subTries.roots, dr.hb.root())
 				dr.subTries.Hashes = append(dr.subTries.Hashes, dr.hb.rootHash())
+			} else {
+				dr.subTries.roots = append(dr.subTries.roots, nil)
+				dr.subTries.Hashes = append(dr.subTries.Hashes, EmptyRoot)
 			}
 			dr.groups = dr.groups[:0]
 			dr.hb.Reset()

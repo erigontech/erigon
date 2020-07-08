@@ -240,7 +240,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock:  %w", err)
 			}
-			/*
+/*
 			fmt.Printf("State after %d================\n", i)
 			dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
 				bucket := tx.Bucket(dbutils.CurrentStateBucket)
@@ -252,9 +252,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return e
 			})
 			fmt.Printf("===============================\n")
-			*/
+*/
 			loader := trie.NewFlatDbSubTrieLoader()
-			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, true); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if subTries, err := loader.LoadSubTries(); err == nil {
