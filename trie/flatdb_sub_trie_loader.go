@@ -204,6 +204,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				return err
 			}
 			if isIHSequence {
+				// If IH records form sequence, then no reason move State cursor.
+				// But need change .k - then minKey of next iteration will equal to .ihK
 				fstl.k = common.CopyBytes(fstl.ihK)
 				return nil
 			}
@@ -857,6 +859,19 @@ func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
 	}
 
 	if k != nil {
+		/*
+			Sequence - if between 2 IH records not possible insert any state record - then they form "sequence"
+			Example1:
+				1234
+				1235
+			Example2:
+				12ff
+				13
+			Example3:
+				12ff
+				13000000
+			If 2 IH records form "sequence" then it can be consumed without moving StateCursor
+		*/
 		isSequence := false
 		if bytes.HasPrefix(k, seek) {
 			tail := k[len(seek):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
