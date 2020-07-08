@@ -210,7 +210,7 @@ func generateTestChain() (*core.Genesis, []*types.Block) {
 	gblock := genesis.MustCommit(db)
 	engine := ethash.NewFaker()
 	blocks, _, err := core.GenerateChain(config, gblock, engine, db, 1, generate)
-	if  err != nil {
+	if err != nil {
 		panic(err)
 	}
 	blocks = append([]*types.Block{gblock}, blocks...)

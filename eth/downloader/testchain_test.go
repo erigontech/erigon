@@ -138,7 +138,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	defer tc.cpyLock.Unlock()
 
 	existingLen := len(tc.chain) - 1
-	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, existingLen + n, func(i int, block *core.BlockGen) {
+	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, existingLen+n, func(i int, block *core.BlockGen) {
 		if i < existingLen || existingLen == 0 {
 			block.SetCoinbase(common.Address{0})
 			// Include transactions to the miner to make blocks more interesting.
@@ -184,7 +184,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 		tc.chain = append(tc.chain, hash)
 		tc.blockm[hash] = b
 		tc.headerm[hash] = b.Header()
-		tc.receiptm[hash] = receipts[existingLen + i]
+		tc.receiptm[hash] = receipts[existingLen+i]
 		tc.tdm[hash] = new(big.Int).Set(td)
 	}
 }

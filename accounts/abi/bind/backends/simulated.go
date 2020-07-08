@@ -64,8 +64,8 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database   *ethdb.ObjectDatabase        // In memory database to store our testing data
-	kv         ethdb.KV                     // Same as database, but different interface
+	database   *ethdb.ObjectDatabase // In memory database to store our testing data
+	kv         ethdb.KV              // Same as database, but different interface
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
