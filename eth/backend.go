@@ -269,6 +269,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
+	eth.txPool.AddInit(eth.StartTxPool)
+	eth.txPool.AddInit(eth.StopTxPool)
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {
 			return nil, err
@@ -653,9 +655,10 @@ func (s *Ethereum) StartTxPool() error {
 	return s.protocolManager.StartTxPool()
 }
 
-func (s *Ethereum) StopTxPool() {
+func (s *Ethereum) StopTxPool() error {
 	s.protocolManager.StopTxPool()
 	s.txPool.Stop()
+	return nil
 }
 
 // Stop implements node.Service, terminating all internal goroutines used by the
@@ -670,7 +673,9 @@ func (s *Ethereum) Stop() error {
 	// Then stop everything else.
 	s.bloomIndexer.Close()
 	close(s.closeBloomHandler)
-	s.StopTxPool()
+	if err := s.StopTxPool(); err != nil {
+		log.Warn("error while stopping transaction pool", "err", err)
+	}
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()

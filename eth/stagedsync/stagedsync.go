@@ -22,6 +22,7 @@ func PrepareStagedSync(
 	quitCh chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
+	txPoolControl *TxPoolStartStopper,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
 
@@ -140,10 +141,10 @@ func PrepareStagedSync(
 			ID:          stages.TxPool,
 			Description: "Starts the transaction pool",
 			ExecFunc: func(s *StageState, _ Unwinder) error {
-				return spawnTxPool(s, blockchain)
+				return spawnTxPool(s, txPoolControl.Start)
 			},
 			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
-				return unwindTxPool(blockchain)
+				return txPoolControl.Stop()
 			},
 		},
 	}

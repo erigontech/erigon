@@ -178,6 +178,14 @@ func (p *testTxPool) IsStarted() bool {
 	return true
 }
 
+func (p *testTxPool) RunInit() error {
+	return nil
+}
+
+func (p *testTxPool) RunStop() error {
+	return nil
+}
+
 // newTestTransaction create a new dummy transaction.
 func newTestTransaction(from *ecdsa.PrivateKey, nonce uint64, datasize int) *types.Transaction {
 	tx := types.NewTransaction(nonce, common.Address{}, u256.Num0, 100000, u256.Num0, make([]byte, datasize))

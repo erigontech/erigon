@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -247,6 +248,8 @@ type TxPool struct {
 	reorgShutdownCh chan struct{}    // requests shutdown of scheduleReorgLoop
 	wg              common.WaitGroup // tracks loop, scheduleReorgLoop
 	isStarted       bool
+	initFns         []func() error
+	stopFns         []func() error
 }
 
 type txpoolResetRequest struct {
@@ -317,6 +320,8 @@ func (pool *TxPool) Start(chain BlockChainer) error {
 	go pool.loop()
 
 	pool.isStarted = true
+
+	log.Info("transaction pool started")
 	return nil
 }
 
@@ -1436,6 +1441,50 @@ func (pool *TxPool) IsStarted() bool {
 	}
 
 	return pool.isStarted
+}
+
+func (pool *TxPool) AddInit(fns ...func() error) {
+	if pool == nil {
+		return
+	}
+
+	pool.initFns = append(pool.initFns, fns...)
+}
+
+func (pool *TxPool) RunInit() error {
+	if pool == nil {
+		return errors.New("can't init a nil transaction pool")
+	}
+
+	var err error
+	for _, fn := range pool.initFns {
+		if err = fn(); err != nil {
+			return fmt.Errorf("can't init a transaction pool: %w", err)
+		}
+	}
+	return nil
+}
+
+func (pool *TxPool) AddStop(fns ...func() error) {
+	if pool == nil {
+		return
+	}
+
+	pool.stopFns = append(pool.stopFns, fns...)
+}
+
+func (pool *TxPool) RunStop() error {
+	if pool == nil {
+		return errors.New("can't stop a nil transaction pool")
+	}
+
+	var err error
+	for _, fn := range pool.stopFns {
+		if err = fn(); err != nil {
+			return fmt.Errorf("can't stop a transaction pool: %w", err)
+		}
+	}
+	return nil
 }
 
 // addressByHeartbeat is an account address tagged with its last activity timestamp.

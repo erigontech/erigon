@@ -1,30 +1,15 @@
 package stagedsync
 
-func spawnTxPool(s *StageState, blockchain BlockChain) error {
-	type startTxPool interface {
-		StartTxPool() error
-	}
-	txPoolStarter, ok := blockchain.Engine().(startTxPool)
-	if !ok {
-		return nil
-	}
+type TxPoolStartStopper struct {
+	Start func() error
+	Stop  func() error
+}
 
-	if err := txPoolStarter.StartTxPool(); err != nil {
+func spawnTxPool(s *StageState, start func() error) error {
+	if err := start(); err != nil {
 		return err
 	}
 
 	s.Done()
-	return nil
-}
-
-func unwindTxPool(blockchain BlockChain) error {
-	type stopTxPool interface {
-		StopTxPool()
-	}
-	txPoolStopper, ok := blockchain.Engine().(stopTxPool)
-	if !ok {
-		return nil
-	}
-	txPoolStopper.StopTxPool()
 	return nil
 }

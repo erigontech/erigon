@@ -126,6 +126,8 @@ type txPool interface {
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 
 	IsStarted() bool
+	RunInit() error
+	RunStop() error
 }
 
 // statusData63 is the network packet for the status message for eth/63.
