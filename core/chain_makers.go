@@ -243,7 +243,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
-				if err := dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
+				if err := dbCopy.KV().View(context.Background(), func(tx ethdb.Tx) error {
 					bucket := tx.Bucket(dbutils.CurrentStateBucket)
 					cursor := bucket.Cursor()
 					k, v, e := cursor.First()
@@ -265,7 +265,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			} else {
 				return nil, nil, fmt.Errorf("call to LoadSubTries: %w", err)
 			}
-			
+
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			return block, b.receipts, nil
@@ -275,7 +275,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewDbStateReader(dbCopy)
-		stateWriter := state.NewDbStateWriter(dbCopy, uint64(parent.Number().Uint64() + uint64(i) + 1))
+		stateWriter := state.NewDbStateWriter(dbCopy, uint64(parent.Number().Uint64()+uint64(i)+1))
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
