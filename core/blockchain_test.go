@@ -1875,6 +1875,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	forks := make([]*types.Block, len(blocks))
 	for i := 0; i < len(forks); i++ {
 		fork, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, i+1, func(j int, b *BlockGen) {
+			//nolint:scopelint
 			if j == i {
 				b.SetCoinbase(common.Address{2})
 				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
