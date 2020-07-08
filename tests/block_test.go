@@ -49,7 +49,10 @@ func TestBlockchain(t *testing.T) {
 
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongTransactionsTrie.json`, "Validation happens in the fetcher")
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongUncleHash.json`, "Validation happens in the fetcher")
-
+	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_EIP150`, "No receipt validation before Byzantium")
+	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_EIP158`, "No receipt validation before Byzantium")
+	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Frontier`, "No receipt validation before Byzantium")
+	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Homestead`, "No receipt validation before Byzantium")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailure(t, test.Run(false)); err != nil {
 			t.Error(err)

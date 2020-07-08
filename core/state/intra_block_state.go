@@ -21,12 +21,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"sort"
 	"sync"
 
 	"github.com/holiman/uint256"
-	"github.com/petar/GoLLRB/llrb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
@@ -641,21 +639,6 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	return obj
 }
 
-type AccountItem struct {
-	SecKey  []byte
-	Balance *big.Int
-}
-
-func (a *AccountItem) Less(b llrb.Item) bool {
-	bi := b.(*AccountItem)
-	c := a.Balance.Cmp(bi.Balance)
-	if c == 0 {
-		return bytes.Compare(a.SecKey, bi.SecKey) < 0
-	} else {
-		return c < 0
-	}
-}
-
 func (sdb *IntraBlockState) setStateObject(object *stateObject) {
 	sdb.stateObjects[object.Address()] = object
 }
@@ -747,6 +730,8 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if contractCreation {
 		newObj.created = true
 		newObj.data.Incarnation = prevInc + 1
+	} else {
+		newObj.suicided = false
 	}
 }
 
@@ -799,7 +784,7 @@ func (a *Addresses) Swap(i, j int) {
 
 func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
-	if stateObject.suicided || (isDirty && emptyRemoval) {
+	if (stateObject.suicided && !stateObject.created) || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 			return err
 		}
