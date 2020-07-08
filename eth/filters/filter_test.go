@@ -64,7 +64,7 @@ func BenchmarkFilters(b *testing.B) {
 	)
 
 	genesis := core.GenesisBlockForTesting(db, addr1, big.NewInt(1000000))
-	chain, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {
+	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 2403:
 			receipt := makeReceipt(addr1)
@@ -81,6 +81,9 @@ func BenchmarkFilters(b *testing.B) {
 
 		}
 	})
+	if err != nil {
+		b.Fatalf("generate chain: %w", err)
+	}
 	for i, block := range chain {
 		rawdb.WriteBlock(context.Background(), db, block)
 		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
@@ -114,7 +117,7 @@ func TestFilters(t *testing.T) {
 	)
 
 	genesis := core.GenesisBlockForTesting(db, addr, big.NewInt(1000000))
-	chain, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), db, 1000, func(i int, gen *core.BlockGen) {
+	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 1000, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 1:
 			receipt := types.NewReceipt(false, 0)
@@ -159,6 +162,9 @@ func TestFilters(t *testing.T) {
 			gen.AddUncheckedTx(types.NewTransaction(999, common.HexToAddress("0x999"), uint256.NewInt().SetUint64(999), 999, uint256.NewInt().SetUint64(999), nil))
 		}
 	})
+	if err != nil {
+		t.Fatalf("generate chain: %w", err)
+	}
 	for i, block := range chain {
 		rawdb.WriteBlock(context.Background(), db, block)
 		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
