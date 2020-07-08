@@ -100,7 +100,7 @@ func TestBasisAccountPruning(t *testing.T) {
 		block.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Insert blocks
@@ -265,7 +265,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		block.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
@@ -486,7 +486,7 @@ func TestStoragePruning(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
@@ -620,7 +620,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		block.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	pruner, err := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1, BlocksToPrune: 10, PruneTimeout: time.Second})
