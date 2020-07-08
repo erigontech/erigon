@@ -247,7 +247,6 @@ func (sdb *IntraBlockState) Exist(addr common.Address) bool {
 		}
 	}
 	s := sdb.getStateObject(addr)
-	fmt.Printf("Exist %x: %t\n", addr, s != nil && !s.deleted)
 	return s != nil && !s.deleted
 }
 
@@ -661,6 +660,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	account := new(accounts.Account)
 	if previous != nil {
 		account.Balance.Set(&previous.data.Balance)
+		account.Initialised = true
 	}
 	if original == nil {
 		original = &accounts.Account{}
@@ -674,7 +674,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
 	} else {
-		fmt.Printf("resetObjectChange %x\n", addr)
 		sdb.journal.append(resetObjectChange{prev: previous})
 	}
 	sdb.setStateObject(newobj)
@@ -692,7 +691,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
-	fmt.Printf("CreateAccount %x\n", addr)
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -775,7 +773,6 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
-		//fmt.Printf("Delete %x\n", addr)
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 			return err
 		}

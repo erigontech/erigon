@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -153,7 +152,6 @@ type (
 )
 
 func (ch createObjectChange) revert(s *IntraBlockState) {
-	fmt.Printf("journal revert create %x\n", *ch.account)
 	delete(s.stateObjects, *ch.account)
 	delete(s.stateObjectsDirty, *ch.account)
 }
@@ -163,7 +161,6 @@ func (ch createObjectChange) dirtied() *common.Address {
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) {
-	fmt.Printf("journal revert reset %x\n", ch.prev.Address())
 	s.setStateObject(ch.prev)
 }
 
