@@ -649,21 +649,24 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject = sdb.createObject(addr, nil /* previous */, nil /* original */)
+		stateObject = sdb.createObject(addr, nil /* previous */)
 	}
 	return stateObject
 }
 
 // createObject creates a new state object. If there is an existing account with
 // the given address, it is overwritten.
-func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject, original *accounts.Account) (newobj *stateObject) {
+func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj *stateObject) {
 	account := new(accounts.Account)
 	if previous != nil {
 		account.Balance.Set(&previous.data.Balance)
 		account.Initialised = true
 	}
-	if original == nil {
+	var original *accounts.Account
+	if previous == nil {
 		original = &accounts.Account{}
+	} else {
+		original = &previous.original
 	}
 	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
@@ -705,12 +708,8 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}
 	}
 
-	var original *accounts.Account
 	var prevInc uint64
 	previous := sdb.getStateObject(addr)
-	if previous != nil {
-		original = &previous.original
-	}
 	if contractCreation {
 		if previous != nil && previous.suicided {
 			prevInc = previous.data.Incarnation
@@ -725,7 +724,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}
 	}
 
-	newObj := sdb.createObject(addr, previous, original)
+	newObj := sdb.createObject(addr, previous)
 
 	if contractCreation {
 		newObj.created = true

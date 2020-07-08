@@ -22,7 +22,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -190,6 +190,8 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 	return b.receipts
 }
 
+var GenerateTrace bool
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -236,23 +238,22 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			// Write state changes to db
-			//fmt.Printf("Before commitng %d------------\n", i)
 			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock:  %w", err)
 			}
-/*
-			fmt.Printf("State after %d================\n", i)
-			dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
-				bucket := tx.Bucket(dbutils.CurrentStateBucket)
-				cursor := bucket.Cursor()
-				k, v, e := cursor.First()
-				for ; k != nil && e == nil; k, v, e = cursor.Next() {
-					fmt.Printf("%x: %x\n", k, v)
-				}
-				return e
-			})
-			fmt.Printf("===============================\n")
-*/
+			if GenerateTrace {
+				fmt.Printf("State after %d================\n", i)
+				dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
+					bucket := tx.Bucket(dbutils.CurrentStateBucket)
+					cursor := bucket.Cursor()
+					k, v, e := cursor.First()
+					for ; k != nil && e == nil; k, v, e = cursor.Next() {
+						fmt.Printf("%x: %x\n", k, v)
+					}
+					return e
+				})
+				fmt.Printf("===============================\n")
+			}
 			loader := trie.NewFlatDbSubTrieLoader()
 			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
