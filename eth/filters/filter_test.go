@@ -82,7 +82,7 @@ func BenchmarkFilters(b *testing.B) {
 		}
 	})
 	if err != nil {
-		b.Fatalf("generate chain: %w", err)
+		b.Fatalf("generate chain: %v", err)
 	}
 	for i, block := range chain {
 		rawdb.WriteBlock(context.Background(), db, block)
@@ -163,7 +163,7 @@ func TestFilters(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	for i, block := range chain {
 		rawdb.WriteBlock(context.Background(), db, block)

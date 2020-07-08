@@ -581,7 +581,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	}
 	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	pm.BroadcastBlock(chain[0], true /*propagate*/)
 
@@ -1364,7 +1364,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	// Create various combinations of malformed blocks
 	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 
 	malformedUncles := chain[0].Header()
