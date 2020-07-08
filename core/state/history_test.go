@@ -872,7 +872,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var err error
-	startKey:=make([]byte,60)
+	startKey := make([]byte, 60)
 	copy(startKey[:common.AddressLength], addr1.Bytes())
 	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
@@ -917,7 +917,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block4, block4Expected)
 
 	block4.Changes = block4.Changes[:0]
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60),0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -929,11 +929,10 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	}
 
 	block4Expected.Changes = append(block4Expected.Changes, changeset.Change{
-		Key: withoutInc(addr2, key3),
+		Key:   withoutInc(addr2, key3),
 		Value: block3Val.Bytes(),
 	})
 	assertChangesEquals(t, block4, block4Expected)
-
 
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -961,7 +960,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block6, block6Expected)
 
-	block6.Changes=block6.Changes[:0]
+	block6.Changes = block6.Changes[:0]
 	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
@@ -973,7 +972,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		t.Fatal(err)
 	}
 	block6Expected.Changes = append(block6Expected.Changes, changeset.Change{
-		Key: withoutInc(addr2, key3),
+		Key:   withoutInc(addr2, key3),
 		Value: stateVal.Bytes(),
 	})
 	assertChangesEquals(t, block6, block6Expected)
