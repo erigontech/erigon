@@ -64,10 +64,16 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
+func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	// Remove lookup entries for all blocks above unwindPoint
-	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 8*8, func(k, v []byte) (b bool, e error) {
+
+	// Remove lookup entries for blocks between unwindPoint+1 and stage.BlockNumber
+	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		if blockNumber > s.BlockNumber {
+			return false, nil
+		}
+
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}

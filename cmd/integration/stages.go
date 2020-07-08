@@ -307,7 +307,8 @@ func stage9(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
-		return stagedsync.UnwindTxLookup(u, db, "", ch)
+		s := progress(db, stages.TxLookup)
+		return stagedsync.UnwindTxLookup(u, s, db, "", ch)
 	}
 
 	return stagedsync.SpawnTxLookup(stage9, db, "", ch)
