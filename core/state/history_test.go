@@ -3,7 +3,9 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -1371,6 +1373,11 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		},
 	}, false, false)
 
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, 0)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.StorageHistoryIndex)}, b)
+	binary.BigEndian.PutUint64(b, 7)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [72]byte
@@ -1514,6 +1521,12 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 			addrs[3], 1, key, block3Val, emptyVal,
 		},
 	}, true, false)
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, 0)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.StorageHistoryIndex)}, b)
+	binary.BigEndian.PutUint64(b, 7)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
 
 	//walk and collect walkAsOf result
 	var err error
@@ -1659,6 +1672,12 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 			addrs[3], block3ValAcc, nil,
 		},
 	}, false, false)
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, 0)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.AccountHistoryIndex)}, b)
+	binary.BigEndian.PutUint64(b, 7)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
 
 	var startKey [32]byte
 	err := WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
@@ -1810,6 +1829,12 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 			nil,
 		},
 	}, true, false)
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, 0)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.AccountHistoryIndex)}, b)
+	binary.BigEndian.PutUint64(b, 7)
+	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
 
 	var startKey [32]byte
 	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {

@@ -16,6 +16,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+//MaxChangesetsSearch -
+const MaxChangesetsSearch = 256
+
 func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
@@ -238,6 +241,15 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
 			csBucket = dbutils.PlainStorageChangeSetBucket
 		}
+
+		generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.StorageHistoryIndex)
+		if innerErr != nil {
+			return innerErr
+		}
+		if executedTo > generatedTo+MaxChangesetsSearch {
+			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
+		}
+
 		csB := tx.Bucket(csBucket)
 		if csB == nil {
 			return fmt.Errorf("storageChangeBucket not found")
@@ -251,7 +263,6 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 			part1End = common.AddressLength
 			part2Start = common.AddressLength + common.IncarnationLength
 			part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
-
 		}
 
 		//for storage
@@ -286,23 +297,23 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 			part2Start, /* part2start */
 			part3Start, /* part3start */
 		)
-		if true {
-			part1End := common.HashLength
-			part2Start := common.HashLength + common.IncarnationLength
-			part3Start := common.HashLength + common.IncarnationLength + common.HashLength
-			if bytes.Equal(bucket, dbutils.PlainStateBucket) {
-				part1End = common.AddressLength
-				part2Start = common.AddressLength + common.IncarnationLength
-				part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
-			}
 
-			decorator := NewChangesetSearchDecorator(historyCursor, csB, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
-			err := decorator.buildChangeset(0, 7)
-			if err != nil {
-				return err
-			}
-			historyCursor = decorator
+		part1End = common.HashLength
+		part2Start = common.HashLength + common.IncarnationLength
+		part3Start = common.HashLength + common.IncarnationLength + common.HashLength
+		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+			part1End = common.AddressLength
+			part2Start = common.AddressLength + common.IncarnationLength
+			part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
 		}
+
+		decorator := NewChangesetSearchDecorator(historyCursor, csB, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+		err := decorator.buildChangeset(generatedTo, executedTo)
+		if err != nil {
+			return err
+		}
+		historyCursor = decorator
+
 		addrHash, keyHash, _, v, err1 := mainCursor.Seek()
 		if err1 != nil {
 			return err1
@@ -314,7 +325,6 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		}
 
 		goOn := true
-		var err error
 		for goOn {
 			cmp, br := keyCmp(addrHash, hAddrHash)
 			//fmt.Println("core/state/history.go:319 addr", common.Bytes2Hex(addrHash), "vs", common.Bytes2Hex(hAddrHash), cmp)
@@ -382,6 +392,14 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			csBucket = dbutils.PlainAccountChangeSetBucket
 		}
 
+		generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.AccountHistoryIndex)
+		if innerErr != nil {
+			return innerErr
+		}
+		if executedTo > generatedTo+MaxChangesetsSearch {
+			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
+		}
+
 		csB := tx.Bucket(csBucket)
 		if csB == nil {
 			return fmt.Errorf("accountChangeBucket not found")
@@ -408,14 +426,12 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			part3Start, /* part3start */
 		)
 
-		if true {
-			decorator := NewChangesetSearchDecorator(hCursor, csB, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
-			err := decorator.buildChangeset(0, 7)
-			if err != nil {
-				return err
-			}
-			hCursor = decorator
+		decorator := NewChangesetSearchDecorator(hCursor, csB, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+		innerErr = decorator.buildChangeset(generatedTo, executedTo)
+		if innerErr != nil {
+			return innerErr
 		}
+		hCursor = decorator
 
 		k, v, err1 := mainCursor.Seek(startkey)
 		if err1 != nil {
@@ -428,7 +444,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			}
 		}
 		hK, _, _, hV, err2 := hCursor.Seek()
-		if err2 != nil {
+		if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 			return err2
 		}
 
@@ -475,9 +491,9 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 					}
 				}
 				if cmp >= 0 {
-					hK, _, _, hV, err1 = hCursor.Next()
-					if err1 != nil {
-						return err1
+					hK, _, _, hV, err2 = hCursor.Next()
+					if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+						return err2
 					}
 				}
 			}
@@ -544,6 +560,25 @@ func returnCorrectWalker(bucket, hBucket []byte) func(v []byte) changeset.Walker
 	default:
 		panic("not implemented")
 	}
+}
+
+func getIndexGenerationProgress(tx ethdb.Tx, stage stages.SyncStage) (generatedTo uint64, executedTo uint64, err error) {
+	b := tx.Bucket(dbutils.SyncStageProgress)
+	v, err := b.Get([]byte{byte(stage)})
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, 0, err
+	}
+	if len(v) >= 8 {
+		generatedTo = binary.BigEndian.Uint64(v[:8])
+	}
+	v, err = b.Get([]byte{byte(stages.Execution)})
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, 0, err
+	}
+	if len(v) >= 8 {
+		executedTo = binary.BigEndian.Uint64(v[:8])
+	}
+	return generatedTo, executedTo, nil
 }
 
 type historyCursor interface {
@@ -613,14 +648,15 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 	if err2 != nil {
 		return nil, nil, nil, nil, err2
 	}
-	//find firsh chunk after timestamp
-	for hKeyHash != nil && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
+
+	//find first chunk after timestamp
+	for hAddrHash != nil && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
 		hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
 		}
 	}
-	if len(hKeyHash) > 0 {
+	if len(hAddrHash) > 0 {
 		hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 		copy(hK[:len(hAddrHash)], hAddrHash)
 		copy(hK[len(hAddrHash):], hKeyHash)
@@ -691,13 +727,13 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 	if cmp >= 0 {
 		hKeyHash0 := hKeyHash
 		hAddrHash0 := hAddrHash
-		for bytes.Equal(hAddrHash0, hAddrHash) && hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
+		for bytes.Equal(hAddrHash0, hAddrHash) && hAddrHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
 			hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
 			if err2 != nil {
 				return nil, nil, nil, nil, err2
 			}
 		}
-		if len(hAddrHash) > 0 && len(hKeyHash) > 0 {
+		if len(hAddrHash) > 0 {
 			hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
@@ -778,13 +814,13 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 			return nil, nil, nil, nil, err2
 		}
 
-		for bytes.Equal(hAddrHash0, hAddrHash) && hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
+		for bytes.Equal(hAddrHash0, hAddrHash) && hAddrHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
 			hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
 			if err2 != nil {
 				return nil, nil, nil, nil, err2
 			}
 		}
-		if len(hAddrHash) > 0 && len(hKeyHash) > 0 {
+		if len(hAddrHash) > 0 {
 			hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
@@ -826,6 +862,9 @@ func (csd *changesetSearchDecorator) matchKey(k []byte) bool {
 
 func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	//fmt.Println("core/state/history.go:832 buildChangeset")
+	if from >= to {
+		return nil
+	}
 	cs := make([]struct {
 		Walker   changeset.Walker
 		BlockNum uint64
