@@ -69,9 +69,6 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 	if err = apis.RegisterIntermediateHashAPI(root.Group("intermediate-hash"), e); err != nil {
 		return err
 	}
-	if err = apis.RegisterIntermediateDataLenAPI(root.Group("intermediate-data-len"), e); err != nil {
-		return err
-	}
 	if err = apis.RegisterDBAPI(root.Group("db"), e); err != nil {
 		return err
 	}

@@ -27,18 +27,17 @@ var EmptyCodeHash = crypto.Keccak256Hash(nil)
 type HashBuilder struct {
 	byteArrayWriter *ByteArrayWriter
 
-	hashStack    []byte                // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
-	nodeStack    []node                // Stack of nodes
-	dataLenStack []uint64              // Stack of witness length. It's very similar to hashStack, just calculating another kind of hash
-	acc          accounts.Account      // Working account instance (to avoid extra allocations)
-	sha          keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
-	hashBuf      [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	keyPrefix    [1]byte
-	lenPrefix    [4]byte
-	valBuf       [128]byte // Enough to accomodate hash encoding of any account
-	b            [1]byte   // Buffer for single byte
-	prefixBuf    [8]byte
-	trace        bool // Set to true when HashBuilder is required to print trace information for diagnostics
+	hashStack []byte                // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
+	nodeStack []node                // Stack of nodes
+	acc       accounts.Account      // Working account instance (to avoid extra allocations)
+	sha       keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
+	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
+	keyPrefix [1]byte
+	lenPrefix [4]byte
+	valBuf    [128]byte // Enough to accommodate hash encoding of any account
+	b         [1]byte   // Buffer for single byte
+	prefixBuf [8]byte
+	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -57,9 +56,6 @@ func (hb *HashBuilder) Reset() {
 	}
 	if len(hb.nodeStack) > 0 {
 		hb.nodeStack = hb.nodeStack[:0]
-	}
-	if len(hb.dataLenStack) > 0 {
-		hb.dataLenStack = hb.dataLenStack[:0]
 	}
 }
 
@@ -82,10 +78,8 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 		s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0xc0 + 1
 		copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength-1:])
 	}
-	s.iws = hb.dataLenStack[len(hb.dataLenStack)-1]
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
-
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
 }
@@ -124,11 +118,6 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
 	if err != nil {
 		return err
-	}
-	if CountWitnessSizeWithoutStructure {
-		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes())))
-	} else {
-		hb.dataLenStack = append(hb.dataLenStack, uint64(len(val.RawBytes()))+1+uint64(len(key))/2) // + node opcode + len(key)/2
 	}
 
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
@@ -198,7 +187,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSeria
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32, accountCodeSize int) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -217,9 +206,8 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		if hb.acc.Root != EmptyRoot {
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
-			l := hb.dataLenStack[len(hb.dataLenStack)-popped-1]
 			if root == nil {
-				root = hashNode{hash: common.CopyBytes(hb.acc.Root[:]), iws: l}
+				root = hashNode{hash: common.CopyBytes(hb.acc.Root[:])}
 			}
 		}
 		popped++
@@ -243,7 +231,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	accountCodeSize := codeSizeUncached
 	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
 		accountCodeSize = len(accountCode)
 	}
@@ -257,11 +244,10 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	s.ref.len = 32
-	s.iws = hb.dataLenStack[len(hb.dataLenStack)-1]
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 
 	}
 	return nil
@@ -333,27 +319,14 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	if err != nil {
 		return err
 	}
-	dataLen := uint64(0)
-	if CountWitnessSizeWithoutStructure {
-		dataLen = uint64(hb.acc.EncodingLengthForStorage())
-	} else {
-		dataLen = 1 + uint64(hb.acc.EncodingLengthForStorage()) // + opcode + account data len
-		dataLen += 1 + uint64(len(key))/2                       // + opcode + len(key)/2
-	}
-
 	if popped > 0 {
 		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*hashStackStride]
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
-		for _, l := range hb.dataLenStack[len(hb.dataLenStack)-popped:] { // + storage size + code size
-			dataLen += l
-		}
-		hb.dataLenStack = hb.dataLenStack[:len(hb.dataLenStack)-popped]
 	}
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	hb.nodeStack = append(hb.nodeStack, nil)
-	hb.dataLenStack = append(hb.dataLenStack, dataLen)
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
 }
@@ -367,8 +340,7 @@ func (hb *HashBuilder) extension(key []byte) error {
 	switch n := nd.(type) {
 	case nil:
 		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-common.HashLength:])
-		dataLen := hb.dataLenStack[len(hb.dataLenStack)-1]
-		s = &shortNode{Key: common.CopyBytes(key), Val: hashNode{hash: branchHash, iws: dataLen}}
+		s = &shortNode{Key: common.CopyBytes(key), Val: hashNode{hash: branchHash}}
 	case *fullNode:
 		s = &shortNode{Key: common.CopyBytes(key), Val: n}
 	default:
@@ -380,9 +352,8 @@ func (hb *HashBuilder) extension(key []byte) error {
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	s.ref.len = 32
-	s.iws = hb.dataLenStack[len(hb.dataLenStack)-1]
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
 }
@@ -449,11 +420,6 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		return err
 	}
 	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
-	if CountWitnessSizeWithoutStructure {
-		hb.dataLenStack[len(hb.dataLenStack)-1] = 0 + hb.dataLenStack[len(hb.dataLenStack)-1] // + opcode + len(key)/2 + childrenWitnessSize
-	} else {
-		hb.dataLenStack[len(hb.dataLenStack)-1] = 1 + uint64(len(key))/2 + hb.dataLenStack[len(hb.dataLenStack)-1] // + opcode + len(key)/2 + childrenWitnessSize
-	}
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
 		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
 	}
@@ -465,7 +431,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 		fmt.Printf("BRANCH (%b)\n", set)
 	}
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	f := &fullNode{}
 	digits := bits.OnesCount16(set)
@@ -474,12 +440,11 @@ func (hb *HashBuilder) branch(set uint16) error {
 	}
 	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
-	dataLengths := hb.dataLenStack[len(hb.dataLenStack)-digits:]
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
 		if ((uint16(1) << digit) & set) != 0 {
 			if nodes[i] == nil {
-				f.Children[digit] = hashNode{hash: common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)]), iws: dataLengths[i]}
+				f.Children[digit] = hashNode{hash: common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}
@@ -493,9 +458,8 @@ func (hb *HashBuilder) branch(set uint16) error {
 	}
 	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	f.ref.len = 32
-	f.iws = hb.dataLenStack[len(hb.dataLenStack)-1]
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 
 	return nil
@@ -557,21 +521,6 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
 		return err
 	}
-	if CountWitnessSizeWithoutStructure {
-		dataLen := uint64(0)
-		for _, l := range hb.dataLenStack[len(hb.dataLenStack)-digits:] {
-			dataLen += l
-		}
-		hb.dataLenStack[len(hb.dataLenStack)-digits] = dataLen
-		hb.dataLenStack = hb.dataLenStack[:len(hb.dataLenStack)-digits+1]
-	} else {
-		dataLen := uint64(1 + 1) // fullNode: opcode + mask + childrenWitnessSize
-		for _, l := range hb.dataLenStack[len(hb.dataLenStack)-digits:] {
-			dataLen += l
-		}
-		hb.dataLenStack[len(hb.dataLenStack)-digits] = dataLen
-		hb.dataLenStack = hb.dataLenStack[:len(hb.dataLenStack)-digits+1]
-	}
 
 	if hashStackStride*len(hb.nodeStack) > len(hb.hashStack) {
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
@@ -581,21 +530,20 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
 }
 
-func (hb *HashBuilder) hash(hash []byte, dataLen uint64) error {
+func (hb *HashBuilder) hash(hash []byte) error {
 	if hb.trace {
-		fmt.Printf("HASH %d\n", dataLen)
+		fmt.Printf("HASH\n")
 	}
 	hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
 	hb.hashStack = append(hb.hashStack, hash...)
 	hb.nodeStack = append(hb.nodeStack, nil)
-	hb.dataLenStack = append(hb.dataLenStack, dataLen) // count only data nodes, not hash nodes. so, no opcode added.
 	if hb.trace {
-		fmt.Printf("Stack depth: %d, %d\n", len(hb.nodeStack), len(hb.dataLenStack))
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 
 	return nil
@@ -608,11 +556,6 @@ func (hb *HashBuilder) code(code []byte) error {
 	codeCopy := common.CopyBytes(code)
 	n := codeNode(codeCopy)
 	hb.nodeStack = append(hb.nodeStack, n)
-	if CountWitnessSizeWithoutStructure {
-		hb.dataLenStack = append(hb.dataLenStack, 0)
-	} else {
-		hb.dataLenStack = append(hb.dataLenStack, 0)
-	}
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(codeCopy); err != nil {
 		return err
@@ -631,7 +574,6 @@ func (hb *HashBuilder) emptyRoot() {
 		fmt.Printf("EMPTYROOT\n")
 	}
 	hb.nodeStack = append(hb.nodeStack, nil)
-	hb.dataLenStack = append(hb.dataLenStack, 0)
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 0x80 + common.HashLength
 	copy(hash[1:], EmptyRoot[:])
@@ -658,7 +600,6 @@ func (hb *HashBuilder) topHash() []byte {
 func (hb *HashBuilder) root() node {
 	if hb.trace && len(hb.nodeStack) > 0 {
 		fmt.Printf("len(hb.nodeStack)=%d\n", len(hb.nodeStack))
-		fmt.Printf("len(hb.dataLenStack)=%d\n", len(hb.dataLenStack))
 	}
 	return hb.nodeStack[len(hb.nodeStack)-1]
 }

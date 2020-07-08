@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AskAlexSharov/lmdb-go/exp/lmdbpool"
-	"github.com/AskAlexSharov/lmdb-go/lmdb"
+	"github.com/ledgerwatch/lmdb-go/exp/lmdbpool"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -197,7 +197,7 @@ func (db *LmdbKV) Close() {
 		if err := db.env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
-			db.log.Info("database closed")
+			db.log.Info("database closed (LMDB)")
 		}
 	}
 

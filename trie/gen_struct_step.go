@@ -31,13 +31,13 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
 	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32, codeSize int) error
 	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(hash []byte, dataLen uint64) error
+	hash(hash []byte) error
 	topHash() []byte
 }
 
@@ -71,8 +71,7 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash        common.Hash
-	WitnessSize uint64
+	Hash common.Hash
 }
 
 func (GenStructStepHashData) GenStructStepData() {}
@@ -134,13 +133,13 @@ func GenStructStep(
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash[:], v.WitnessSize); err != nil {
+				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
 				if retain(curr[:maxLen]) {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, err
 					}
 				} else {

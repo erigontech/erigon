@@ -1,6 +1,9 @@
 package stagedsync
 
 import (
+	"runtime"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -47,10 +50,24 @@ func PrepareStagedSync(
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnRecoverSendersStage(s, stateDB, blockchain.Config(), quitCh)
+				const batchSize = 10000
+				const blockSize = 4096
+				n := runtime.NumCPU()
+
+				cfg := Stage3Config{
+					BatchSize:       batchSize,
+					BlockSize:       blockSize,
+					BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
+					StartTrace:      false,
+					Prof:            false,
+					NumOfGoroutines: n,
+					ReadChLen:       4,
+					Now:             time.Now(),
+				}
+				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(u, stateDB)
+				return UnwindSendersStage(u, stateDB)
 			},
 		},
 		{
@@ -113,10 +130,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnTxLookup(s, stateDB, datadir, quitCh)
+				return SpawnTxLookup(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindTxLookup(u, stateDB, quitCh)
+				return UnwindTxLookup(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{

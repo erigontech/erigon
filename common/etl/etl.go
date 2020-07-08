@@ -62,7 +62,7 @@ type TransformArgs struct {
 	BufferType      int
 	BufferSize      int
 	LoadStartKey    []byte
-	Quit            chan struct{}
+	Quit            <-chan struct{}
 	OnLoadCommit    LoadCommitHandler
 	loadBatchSize   int // used in testing
 }
@@ -88,12 +88,9 @@ func Transform(
 		disposeProviders(collector.dataProviders)
 		return err
 	}
-	log.Info("Extraction finished", "it took", time.Since(t))
+	log.Debug("Extraction finished", "it took", time.Since(t))
 
-	t = time.Now()
-	defer func() {
-		log.Info("Collection finished", "it took", time.Since(t))
-	}()
+	defer func(t time.Time) { log.Debug("Collection finished", "it took", time.Since(t)) }(time.Now())
 	return collector.Load(db, toBucket, loadFunc, args)
 }
 
@@ -105,7 +102,7 @@ func extractBucketIntoFiles(
 	fixedBits int,
 	collector *Collector,
 	extractFunc ExtractFunc,
-	quit chan struct{},
+	quit <-chan struct{},
 ) error {
 	if err := db.Walk(bucket, startkey, fixedBits, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
@@ -135,7 +132,7 @@ func disposeProviders(providers []dataProvider) {
 type bucketState struct {
 	getter ethdb.Getter
 	bucket []byte
-	quit   chan struct{}
+	quit   <-chan struct{}
 }
 
 func (s *bucketState) Get(key []byte) ([]byte, error) {

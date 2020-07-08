@@ -142,8 +142,47 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			if err != nil {
 				return err
 			}
-
+			equal := true
 			if !bytes.Equal(dbStorageChanges, expectedtorageSerialized) {
+				var addrs [][]byte
+				var keys [][]byte
+				var vals [][]byte
+				if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
+					addrs = append(addrs, common.CopyBytes(k[:common.AddressLength]))
+					keys = append(keys, common.CopyBytes(k[common.AddressLength+common.IncarnationLength:]))
+					vals = append(vals, common.CopyBytes(v))
+					return nil
+				}); err != nil {
+					return err
+				}
+				i := 0
+				if err = changeset.StorageChangeSetPlainBytes(expectedtorageSerialized).Walk(func(k, v []byte) error {
+					if !equal {
+						return nil
+					}
+					if i >= len(addrs) {
+						equal = false
+						return nil
+					}
+					if !bytes.Equal(k[:common.AddressLength], addrs[i]) {
+						equal = false
+						return nil
+					}
+					if !bytes.Equal(k[common.AddressLength+common.IncarnationLength:], keys[i]) {
+						equal = false
+						return nil
+					}
+					if !bytes.Equal(v, vals[i]) {
+						equal = false
+						return nil
+					}
+					i++
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			if !equal {
 				fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 				if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
 					fmt.Printf("0x%x: [%x]\n", k, v)

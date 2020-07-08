@@ -12,7 +12,7 @@ type Observer interface {
 	CodeNodeTouched(hex []byte)
 	CodeNodeSizeChanged(hex []byte, newSize uint)
 
-	WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64, witnessSize uint64)
+	WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64)
 	WillUnloadNode(key []byte, nodeHash common.Hash)
 	BranchNodeLoaded(prefixAsNibbles []byte, incarnation uint64)
 }
@@ -22,16 +22,16 @@ var _ Observer = (*NoopObserver)(nil) // make sure that NoopTrieObserver is comp
 // NoopTrieObserver might be used to emulate optional methods in observers
 type NoopObserver struct{}
 
-func (*NoopObserver) BranchNodeCreated(_ []byte)                                       {}
-func (*NoopObserver) BranchNodeDeleted(_ []byte)                                       {}
-func (*NoopObserver) BranchNodeTouched(_ []byte)                                       {}
-func (*NoopObserver) CodeNodeCreated(_ []byte, _ uint)                                 {}
-func (*NoopObserver) CodeNodeDeleted(_ []byte)                                         {}
-func (*NoopObserver) CodeNodeTouched(_ []byte)                                         {}
-func (*NoopObserver) CodeNodeSizeChanged(_ []byte, _ uint)                             {}
-func (*NoopObserver) WillUnloadBranchNode(_ []byte, _ common.Hash, _ uint64, _ uint64) {}
-func (*NoopObserver) WillUnloadNode(_ []byte, _ common.Hash)                           {}
-func (*NoopObserver) BranchNodeLoaded(_ []byte, _ uint64)                              {}
+func (*NoopObserver) BranchNodeCreated(_ []byte)                             {}
+func (*NoopObserver) BranchNodeDeleted(_ []byte)                             {}
+func (*NoopObserver) BranchNodeTouched(_ []byte)                             {}
+func (*NoopObserver) CodeNodeCreated(_ []byte, _ uint)                       {}
+func (*NoopObserver) CodeNodeDeleted(_ []byte)                               {}
+func (*NoopObserver) CodeNodeTouched(_ []byte)                               {}
+func (*NoopObserver) CodeNodeSizeChanged(_ []byte, _ uint)                   {}
+func (*NoopObserver) WillUnloadBranchNode(_ []byte, _ common.Hash, _ uint64) {}
+func (*NoopObserver) WillUnloadNode(_ []byte, _ common.Hash)                 {}
+func (*NoopObserver) BranchNodeLoaded(_ []byte, _ uint64)                    {}
 
 // TrieObserverMux multiplies the callback methods and sends them to
 // all it's children.
@@ -99,9 +99,9 @@ func (mux *ObserverMux) WillUnloadNode(key []byte, nodeHash common.Hash) {
 	}
 }
 
-func (mux *ObserverMux) WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64, witnessSize uint64) {
+func (mux *ObserverMux) WillUnloadBranchNode(key []byte, nodeHash common.Hash, incarnation uint64) {
 	for _, child := range mux.children {
-		child.WillUnloadBranchNode(key, nodeHash, incarnation, witnessSize)
+		child.WillUnloadBranchNode(key, nodeHash, incarnation)
 	}
 }
 

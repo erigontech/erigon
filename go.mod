@@ -3,7 +3,6 @@ module github.com/ledgerwatch/turbo-geth
 go 1.13
 
 require (
-	github.com/AskAlexSharov/lmdb-go v1.9.0
 	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
@@ -22,7 +21,6 @@ require (
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200219165308-d1232e640a87
-	github.com/dustin/go-humanize v1.0.0
 	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
 	github.com/ethereum/evmc/v7 v7.3.0
 	github.com/fatih/color v1.7.0
@@ -46,6 +44,7 @@ require (
 	github.com/karalabe/usb v0.0.0-20190919080040-51dc0efba356
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
+	github.com/ledgerwatch/lmdb-go v1.11.0
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12
