@@ -431,13 +431,13 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		b.OffsetTime(first[i])
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	diffBlocks, _, err := GenerateChain(params.TestChainConfig, blockchain.CurrentBlock(), ethash.NewFaker(), db, len(second), func(i int, b *BlockGen) {
 		b.OffsetTime(second[i])
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	if full {
 		if _, err := blockchain.InsertChain(context.Background(), easyBlocks); err != nil {
@@ -694,7 +694,7 @@ func TestFastVsFullChains(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	// Import the chain as an archive node for the comparison baseline
 	archiveDb := ethdb.NewMemDatabase()
@@ -804,7 +804,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 	height := uint64(1024)
 	blocks, receipts, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil)
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 
 	// makeDb creates a db instance for testing.
@@ -984,7 +984,7 @@ func TestChainTxReorgs(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	// Import the chain. This runs all block validation rules.
 	if i, err := blockchain.InsertChain(context.Background(), chain); err != nil {
@@ -1012,7 +1012,7 @@ func TestChainTxReorgs(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
@@ -1085,7 +1085,7 @@ func TestLogReorgs(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 
 	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
@@ -1094,7 +1094,7 @@ func TestLogReorgs(t *testing.T) {
 
 	chain, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), genesisDB, 3, func(i int, gen *BlockGen) {})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -1155,7 +1155,7 @@ func TestLogRebirth(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
 		t.Fatalf("failed to insert chain: %v", err)
@@ -1175,7 +1175,7 @@ func TestLogRebirth(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate fork chain: %w", err)
+		t.Fatalf("generate fork chain: %v", err)
 	}
 	if _, err := blockchain.InsertChain(context.Background(), forkChain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
@@ -1187,7 +1187,7 @@ func TestLogRebirth(t *testing.T) {
 	// the log event for the old chain, as well as a RemovedLogsEvent for forkChain.
 	newBlocks, _, err := GenerateChain(params.TestChainConfig, chain[len(chain)-1], engine, db, 1, func(i int, gen *BlockGen) {})
 	if err != nil {
-		t.Fatalf("generate new blocks: %w", err)
+		t.Fatalf("generate new blocks: %v", err)
 	}
 
 	if _, err := blockchain.InsertChain(context.Background(), newBlocks); err != nil {
@@ -1226,7 +1226,7 @@ func TestSideLogRebirth(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	// Generate side chain with lower difficulty
 	sideChain, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 3, func(i int, gen *BlockGen) {
@@ -1239,7 +1239,7 @@ func TestSideLogRebirth(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate side chain: %w", err)
+		t.Fatalf("generate side chain: %v", err)
 	}
 	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
@@ -1297,7 +1297,7 @@ func TestReorgSideEvent(t *testing.T) {
 
 	chain, _, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), genesisDb, 3, func(i int, gen *BlockGen) {})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 	if _, err := blockchain.InsertChain(context.Background(), chain); err != nil {
 		t.Fatalf("failed to insert chain: %v", err)
@@ -1314,7 +1314,7 @@ func TestReorgSideEvent(t *testing.T) {
 		gen.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate replacement chain: %w", err)
+		t.Fatalf("generate replacement chain: %v", err)
 	}
 	chainSideCh := make(chan ChainSideEvent, 64)
 	blockchain.SubscribeChainSideEvent(chainSideCh)
@@ -1379,7 +1379,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 
 	chain, _, err := GenerateChain(blockchain.chainConfig, blockchain.genesisBlock, ethash.NewFaker(), db, 10, func(i int, gen *BlockGen) {})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 
 	var pend sync.WaitGroup
@@ -1481,7 +1481,7 @@ func TestEIP155Transition(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate chain: %w", err)
+		t.Fatalf("generate chain: %v", err)
 	}
 
 	if _, err := blockchain.InsertChain(context.Background(), blocks); err != nil {
@@ -1522,7 +1522,7 @@ func TestEIP155Transition(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	_, err = blockchain.InsertChain(context.Background(), blocks)
 	if err != types.ErrInvalidChainId {
@@ -1613,7 +1613,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 		}
 	})
 	if err != nil {
-		return fmt.Errorf("generate blocks: %w", err)
+		return fmt.Errorf("generate blocks: %v", err)
 	}
 
 	if _, err := blockchain.InsertChain(context.Background(), blocks); err != nil {
@@ -1737,7 +1737,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		block.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
@@ -1811,7 +1811,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
@@ -1868,7 +1868,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
@@ -1883,7 +1883,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 			}
 		})
 		if err != nil {
-			t.Fatalf("generate fork %d: %w", i, err)
+			t.Fatalf("generate fork %d: %v", i, err)
 		}
 		forks[i] = fork[len(fork)-1]
 	}
@@ -1936,7 +1936,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
-		t.Fatalf("generate shared chain: %w", err)
+		t.Fatalf("generate shared chain: %v", err)
 	}
 	original, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 64+2*triesInMemory, func(i int, b *BlockGen) {
 		if i < 64 {
@@ -1946,7 +1946,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate original chain: %w", err)
+		t.Fatalf("generate original chain: %v", err)
 	}
 	competitor, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 64+2*triesInMemory+1, func(i int, b *BlockGen) {
 		if i < 64 {
@@ -1957,7 +1957,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate competitor chain: %w", err)
+		t.Fatalf("generate competitor chain: %v", err)
 	}
 
 	// Import the shared chain and the original canonical one
@@ -1994,7 +1994,7 @@ func TestBlockchainRecovery(t *testing.T) {
 	height := uint64(1024)
 	blocks, receipts, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil)
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Import the chain as a ancient-first node and ensure all pointers are updated
@@ -2061,7 +2061,7 @@ func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
 	height := uint64(1024)
 	blocks, receipts, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil)
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Import the chain as a ancient-first node and ensure all pointers are updated
@@ -2130,7 +2130,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		b.OffsetTime(-9)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
 	fork, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 11+8*triesInMemory, func(i int, b *BlockGen) {
@@ -2142,7 +2142,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate fork: %w", err)
+		t.Fatalf("generate fork: %v", err)
 	}
 
 	// Import the canonical chain
@@ -2203,7 +2203,7 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	defer side.Close()
 
@@ -2240,7 +2240,7 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 		b.SetCoinbase(common.Address{2})
 	})
 	if err != nil {
-		t.Fatalf("generate fork: %w", err)
+		t.Fatalf("generate fork: %v", err)
 	}
 	// Prepend the parent(s)
 	var sidechain []*types.Block
@@ -2292,12 +2292,12 @@ func testInsertKnownChainData(t *testing.T, typ string) {
 
 	blocks, receipts, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// A longer chain but total difficulty is lower.
 	blocks2, receipts2, err := GenerateChain(params.TestChainConfig, blocks[len(blocks)-1], engine, db, 65, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
-		t.Fatalf("generate blocks2: %w", err)
+		t.Fatalf("generate blocks2: %v", err)
 	}
 	// A shorter chain but total difficulty is higher.
 	blocks3, receipts3, err := GenerateChain(params.TestChainConfig, blocks[len(blocks)-1], engine, db, 64, func(i int, b *BlockGen) {
@@ -2305,7 +2305,7 @@ func testInsertKnownChainData(t *testing.T, typ string) {
 		b.OffsetTime(-9) // A higher difficulty
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the shared chain and the original canonical one
 	dir, err := ioutil.TempDir("", "")
@@ -2435,7 +2435,7 @@ func getLongAndShortChains() (*BlockChain, []*types.Block, []*types.Block, error
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("generate long chain: %w", err)
+		return nil, nil, nil, fmt.Errorf("generate long chain: %v", err)
 	}
 	diskdb := ethdb.NewMemDatabase()
 	defer diskdb.Close()
@@ -2455,7 +2455,7 @@ func getLongAndShortChains() (*BlockChain, []*types.Block, []*types.Block, error
 		b.OffsetTime(-9)
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("generate heavy chain: %w", err)
+		return nil, nil, nil, fmt.Errorf("generate heavy chain: %v", err)
 	}
 	// Verify that the test is sane
 	var (
@@ -2609,7 +2609,7 @@ func benchmarkLargeNumberOfValueToNonexisting(b *testing.B, numTxs, numBlocks in
 
 	shared, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, numBlocks, blockGenerator)
 	if err != nil {
-		b.Fatalf("generate shared chain: %w", err)
+		b.Fatalf("generate shared chain: %v", err)
 	}
 	b.StopTimer()
 	b.ResetTimer()
@@ -2703,7 +2703,7 @@ func TestSideImportPrunedBlocks(t *testing.T) {
 	// Generate and import the canonical chain
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 2*triesInMemory, nil)
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	diskdb := ethdb.NewMemDatabase()
 	new(Genesis).MustCommit(diskdb)
@@ -2800,7 +2800,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		b.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
 	diskdb := ethdb.NewMemDatabase()
@@ -2916,7 +2916,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		b.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
 	diskdb := ethdb.NewMemDatabase()
@@ -3019,7 +3019,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		b.AddTx(tx)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
 	diskdb := ethdb.NewMemDatabase()
@@ -3211,7 +3211,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		current = exp
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
 	diskdb := ethdb.NewMemDatabase()
@@ -3369,7 +3369,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		nonce++
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Import the canonical chain

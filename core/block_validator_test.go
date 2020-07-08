@@ -44,7 +44,7 @@ func TestHeaderVerification(t *testing.T) {
 
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
 	if err != nil {
-		t.Fatalf("genetate chain: %w", err)
+		t.Fatalf("genetate chain: %v", err)
 	}
 
 	headers := make([]*types.Header, len(blocks))
@@ -100,7 +100,7 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
 	)
 	if err != nil {
-		t.Fatalf("genetate chain: %w", err)
+		t.Fatalf("genetate chain: %v", err)
 	}
 	headers := make([]*types.Header, len(blocks))
 	seals := make([]bool, len(blocks))
@@ -179,7 +179,7 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil)
 	)
 	if err != nil {
-		t.Fatalf("genetate chain: %w", err)
+		t.Fatalf("genetate chain: %v", err)
 	}
 	headers := make([]*types.Header, len(blocks))
 	seals := make([]bool, len(blocks))
