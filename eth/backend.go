@@ -267,8 +267,12 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
+
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 	if config.SyncMode != downloader.StagedSync {
-		eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
+		if err := eth.StartTxPool(); err != nil {
+			return nil, err
+		}
 	}
 
 	checkpoint := config.Checkpoint
@@ -633,12 +637,28 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 		}
 		maxPeers -= s.config.LightPeers
 	}
+
+	withTxPool := s.config.SyncMode != downloader.StagedSync
 	// Start the networking layer and the light server if requested
-	s.protocolManager.Start(maxPeers)
+	if err := s.protocolManager.Start(maxPeers, withTxPool); err != nil {
+		return err
+	}
 	if s.lesServer != nil {
 		s.lesServer.Start(srvr)
 	}
 	return nil
+}
+
+func (s *Ethereum) StartTxPool() error {
+	if err := s.txPool.Start(s.blockchain); err != nil {
+		return err
+	}
+	return s.protocolManager.StartTxPool()
+}
+
+func (s *Ethereum) StopTxPool() {
+	s.protocolManager.StopTxPool()
+	s.txPool.Stop()
 }
 
 // Stop implements node.Service, terminating all internal goroutines used by the
@@ -653,7 +673,7 @@ func (s *Ethereum) Stop() error {
 	// Then stop everything else.
 	s.bloomIndexer.Close()
 	close(s.closeBloomHandler)
-	s.txPool.Stop()
+	s.StopTxPool()
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()

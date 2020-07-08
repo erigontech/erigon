@@ -192,8 +192,14 @@ func TestForkIDSplit(t *testing.T) {
 		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
 		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
 	)
-	ethNoFork.Start(1000)
-	ethProFork.Start(1000)
+
+	if err := ethNoFork.Start(1000, true); err != nil {
+		t.Fatalf("error on protocol manager start: %v", err)
+	}
+
+	if err := ethProFork.Start(1000, true); err != nil {
+		t.Fatalf("error on protocol manager start: %v", err)
+	}
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()

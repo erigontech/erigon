@@ -119,6 +119,16 @@ func PrepareStagedSync(
 				return unwindTxLookup(u, stateDB, quitCh)
 			},
 		},
+		{
+			ID:          stages.TxPool,
+			Description: "Starts the transaction pool",
+			ExecFunc: func(s *StageState, _ Unwinder) error {
+				return spawnTxPool(s, blockchain)
+			},
+			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
+				return unwindTxPool(blockchain)
+			},
+		},
 	}
 
 	state := NewState(stages)

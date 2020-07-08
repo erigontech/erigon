@@ -124,6 +124,8 @@ type txPool interface {
 	// SubscribeNewTxsEvent should return an event subscription of
 	// NewTxsEvent and send events to the given channel.
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
+
+	IsStarted() bool
 }
 
 // statusData63 is the network packet for the status message for eth/63.
