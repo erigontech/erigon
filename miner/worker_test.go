@@ -168,7 +168,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 				gen.SetCoinbase(testCase.testBankAddress)
 			})
 			if err != nil {
-				t.Fatalf("generate blocks: %w", err)
+				t.Fatalf("generate blocks: %v", err)
 			}
 			if _, err = chain.InsertChain(context.Background(), blocks); err != nil {
 				t.Fatalf("failed to insert origin chain: %v", err)
@@ -184,7 +184,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 			gen.SetCoinbase(testCase.testBankAddress)
 		})
 		if err != nil {
-			t.Fatalf("generate blocks: %w", err)
+			t.Fatalf("generate blocks: %v", err)
 		}
 		if _, err = chain.InsertChain(ctx, blocks); err != nil {
 			t.Fatalf("failed to insert origin chain: %v", err)
@@ -202,7 +202,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 		gen.SetCoinbase(testCase.testUserAddress)
 	})
 	if err != nil {
-		t.Fatalf("generage sideBlocks: %w", err)
+		t.Fatalf("generage sideBlocks: %v", err)
 	}
 
 	return &testWorkerBackend{
