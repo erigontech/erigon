@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -580,8 +579,10 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 
 		peers = append(peers, peer)
 	}
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	chain, _ := core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+	if err != nil {
+		t.Fatalf("generate chain: %w", err)
+	}
 	pm.BroadcastBlock(chain[0], true /*propagate*/)
 
 	errCh := make(chan error, totalPeers)
@@ -1360,9 +1361,11 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	sink, _ := newTestPeer("sink", eth63, pm, true)
 	defer sink.close()
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	// Create various combinations of malformed blocks
-	chain, _ := core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+	if err != nil {
+		t.Fatalf("generate chain: %w", err)
+	}
 
 	malformedUncles := chain[0].Header()
 	malformedUncles.UncleHash[0]++

@@ -76,9 +76,11 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, err
 	}
 	blockchain.EnableReceipts(true)
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+	chain, _, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate chain: %w", err)
+	}
 
 	if _, err = blockchain.InsertChain(context.Background(), chain); err != nil {
 		return nil, nil, err
