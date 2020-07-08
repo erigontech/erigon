@@ -76,7 +76,7 @@ func TestReimportMirroredState(t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 	for i, block := range blocks {
 		header := block.Header()

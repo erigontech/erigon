@@ -432,7 +432,7 @@ func TestClique(t *testing.T) {
 			}
 		})
 		if err != nil {
-			t.Fatalf("generate blocks: %w", err)
+			t.Fatalf("generate blocks: %v", err)
 		}
 		// Iterate through the blocks and seal them individually
 		for j, block := range blocks {

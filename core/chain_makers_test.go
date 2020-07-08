@@ -94,7 +94,7 @@ func ExampleGenerateChain() {
 		}
 	})
 	if err != nil {
-		fmt.Printf("generate chain: %w\n", err)
+		fmt.Printf("generate chain: %v\n", err)
 	}
 
 	// Import the chain. This runs all block validation rules.
