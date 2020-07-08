@@ -90,7 +90,7 @@ ios:
 	@echo "Done building."
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
-test: #semantics/z3/build/libz3.a all
+test: semantics/z3/build/libz3.a all
 	$(GORUN) build/ci.go test
 
 test-lmdb: semantics/z3/build/libz3.a all

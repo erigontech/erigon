@@ -330,7 +330,6 @@ func doTestFind(
 			}
 			if !bytes.Equal(val, v.Value) {
 				t.Fatal("value not equal for ", v, val)
-				//panic("boom!")
 			}
 		}
 	}

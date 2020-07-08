@@ -551,7 +551,6 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
-	fmt.Println("Block 4")
 	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
@@ -618,12 +617,9 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	stateVal := uint256.NewInt().SetBytes([]byte("state"))
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
 	key := common.Hash{123}
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = common.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
-		addrHashes[i] = addrHash
 	}
 
 	block2Expected := &changeset.ChangeSet{
@@ -688,6 +684,169 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 			addrs[3],
 			changeset.DefaultIncarnation,
 			key,
+			block3Val,
+			emptyVal,
+		},
+	}, true, true)
+
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	//walk and collect walkAsOf result
+	var err error
+	var startKey [60]byte
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertChangesEquals(t, block2, block2Expected)
+
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block4Expected.Changes = []changeset.Change{
+		{
+			withoutInc(addrs[0], key),
+			block3Val.Bytes(),
+		},
+		{
+			withoutInc(addrs[2], key),
+			stateVal.Bytes(),
+		},
+		{
+			withoutInc(addrs[3], key),
+			block3Val.Bytes(),
+		},
+	}
+	assertChangesEquals(t, block4, block4Expected)
+
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block6Expected.Changes = []changeset.Change{
+		{
+			withoutInc(addrs[0], key),
+			stateVal.Bytes(),
+		},
+		{
+			withoutInc(addrs[1], key),
+			stateVal.Bytes(),
+		},
+		{
+			withoutInc(addrs[2], key),
+			stateVal.Bytes(),
+		},
+	}
+	assertChangesEquals(t, block6, block6Expected)
+}
+
+func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+
+	emptyVal := uint256.NewInt()
+	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+
+	addr1 := common.Address{1}
+	addr2 := common.Address{2}
+
+	key1 := common.Hash{1}
+	key2 := common.Hash{2}
+	key3 := common.Hash{3}
+
+	block2Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block4Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block6Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
+		expectedKey := make([]byte, common.HashLength+common.AddressLength)
+		copy(expectedKey[:common.AddressLength], addr.Bytes())
+		copy(expectedKey[common.AddressLength:], keyHash.Bytes())
+		return expectedKey
+	}
+
+	writeStorageBlockData(t, tds, 3, []storageData{
+		{
+			addr1,
+			changeset.DefaultIncarnation,
+			key1,
+			emptyVal,
+			block3Val,
+		},
+		{
+			addr1,
+			changeset.DefaultIncarnation,
+			key2,
+			emptyVal,
+			stateVal,
+		},
+		{
+			addr1,
+			changeset.DefaultIncarnation,
+			key3,
+			emptyVal,
+			block3Val,
+		},
+	}, true, true)
+
+	writeStorageBlockData(t, tds, 5, []storageData{
+		{
+			addr1,
+			changeset.DefaultIncarnation,
+			key1,
+			block3Val,
+			stateVal,
+		},
+		{
+			addr1,
+			changeset.DefaultIncarnation,
+			key2,
+			emptyVal,
+			stateVal,
+		},
+		{
+			addr1,
+			changeset.DefaultIncarnation,
+			key3,
 			block3Val,
 			emptyVal,
 		},
