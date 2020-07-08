@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewIndexGenerator(db ethdb.Database, quitCh chan struct{}) *IndexGenerator {
+func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
 	return &IndexGenerator{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -29,7 +29,7 @@ type IndexGenerator struct {
 	db               ethdb.Database
 	ChangeSetBufSize int
 	TempDir          string
-	quitCh           chan struct{}
+	quitCh           <-chan struct{}
 }
 
 var CSMapper = map[string]struct {
@@ -67,7 +67,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Info("Index generation started", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
+	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
@@ -90,7 +90,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Info("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
+	log.Debug("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
 	return nil
 }
 

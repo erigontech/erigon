@@ -38,7 +38,11 @@ type Stage3Config struct {
 	Now             time.Time
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, datadir string, quitCh chan struct{}) error {
+func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh chan struct{}) error {
+	if toBlock > 0 && toBlock <= s.BlockNumber {
+		return nil
+	}
+
 	if cfg.StartTrace {
 		filePath := fmt.Sprintf("trace_%d_%d_%d.out", cfg.Now.Day(), cfg.Now.Hour(), cfg.Now.Minute())
 		f1, err := os.Create(filePath)
@@ -69,12 +73,19 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := common.Stopped(quitCh); err != nil {
 		return err
 	}
-	toBlockNumber, _, err := stages.GetStageProgress(db, stages.Bodies)
+	bodiesStageProgress, _, err := stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return err
 	}
-	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber)
-	currentHeaderIdx := 0
+
+	var toBlockNumber = bodiesStageProgress
+	if toBlock > 0 && toBlock < bodiesStageProgress {
+		toBlockNumber = toBlock
+	}
+	log.Info("Senders recovery", "from", s.BlockNumber+1, "to", toBlockNumber)
+
+	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber+1)
+	currentHeaderIdx := uint64(0)
 
 	err = db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 		if err = common.Stopped(quitCh); err != nil {
@@ -84,6 +95,10 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		// Skip non relevant records
 		if !dbutils.CheckCanonicalKey(k) {
 			return true, nil
+		}
+
+		if currentHeaderIdx > toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
+			return false, nil
 		}
 
 		copy(canonical[currentHeaderIdx][:], v)
@@ -102,6 +117,10 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
+			if blockNumber > toBlockNumber {
+				return false, nil
+			}
+
 			if canonical[blockNumber-s.BlockNumber-1] != blockHash {
 				// non-canonical case
 				return true, nil
@@ -170,7 +189,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
-
 	return s.DoneAndUpdate(db, toBlockNumber)
 }
 
@@ -182,7 +200,7 @@ type senderRecoveryJob struct {
 	err         error
 }
 
-func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit chan struct{}) {
+func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	for job := range in {
 		if job == nil {
 			return
@@ -220,7 +238,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 	}
 }
 
-func unwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
+func UnwindSendersStage(u *UnwindState, stateDB ethdb.Database) error {
 	// Does not require any special processing
 	mutation := stateDB.NewBatch()
 	err := u.Done(mutation)

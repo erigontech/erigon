@@ -23,6 +23,7 @@ func generateOperands() []WitnessOperator {
 			big.NewInt(552),
 			true,
 			false,
+			10,
 		},
 		&OperatorLeafAccount{
 			[]byte{2, 2, 4, 5, 7},
@@ -30,6 +31,7 @@ func generateOperands() []WitnessOperator {
 			big.NewInt(334),
 			true,
 			true,
+			11,
 		},
 		&OperatorLeafAccount{
 			[]byte{2, 2, 4, 5, 8},
@@ -37,6 +39,7 @@ func generateOperands() []WitnessOperator {
 			big.NewInt(11112),
 			false,
 			false,
+			12,
 		},
 		&OperatorLeafAccount{
 			[]byte{2, 2, 4, 5, 9},
@@ -44,6 +47,7 @@ func generateOperands() []WitnessOperator {
 			big.NewInt(0),
 			false,
 			false,
+			13,
 		},
 	}
 }

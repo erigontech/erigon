@@ -19,7 +19,7 @@ import (
 
 var cbor codec.CborHandle
 
-func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	syncHeadNumber, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -314,8 +314,8 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 			newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 			var codeHash []byte
 			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
-			if err != nil {
-				return err
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, newK)
 			}
 			return next(k, newK, codeHash)
 		})
@@ -370,7 +370,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Debug("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 	skip := false
@@ -440,7 +440,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Info("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
+	log.Debug("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
@@ -503,7 +503,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	)
 }
 
-func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
+func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
 	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */, 0x00); err != nil {

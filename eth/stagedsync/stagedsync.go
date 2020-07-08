@@ -64,10 +64,10 @@ func PrepareStagedSync(
 					ReadChLen:       4,
 					Now:             time.Now(),
 				}
-				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), datadir, quitCh)
+				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(u, stateDB)
+				return UnwindSendersStage(u, stateDB)
 			},
 		},
 		{
@@ -130,10 +130,10 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnTxLookup(s, stateDB, datadir, quitCh)
+				return SpawnTxLookup(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindTxLookup(u, stateDB, quitCh)
+				return UnwindTxLookup(u, s, stateDB, datadir, quitCh)
 			},
 		},
 	}
