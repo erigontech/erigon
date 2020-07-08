@@ -132,7 +132,7 @@ func TestCreate2Revive(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -342,7 +342,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -515,7 +515,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -657,7 +657,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		fmt.Println("commited i=", i)
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -678,7 +678,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		contractBackendLonger.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate longer blocks: %w", err)
+		t.Fatalf("generate longer blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -825,7 +825,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
@@ -971,7 +971,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -1119,7 +1119,7 @@ func TestEip2200Gas(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -1206,7 +1206,7 @@ func TestWrongIncarnation(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -1338,7 +1338,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	if knownContractAddress != contractAddress {
@@ -1367,7 +1367,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		contractBackendLonger.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate longer blocks: %w", err)
+		t.Fatalf("generate longer blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
@@ -1484,10 +1484,10 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		t.Errorf("error committing block: %w", err)
+		t.Errorf("error committing block: %v", err)
 	}
 
 	if _, err := tds.ResolveStateTrie(false /* extractWitness */, true /* trace */); err != nil {
@@ -1543,10 +1543,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		t.Errorf("error committing block: %w", err)
+		t.Errorf("error committing block: %v", err)
 	}
 	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		assert.NoError(t, err)
