@@ -105,7 +105,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		contractBackend.Commit()
 	})
 	if err != nil {
-		t.Fatalf("generate blocks: %w", err)
+		t.Fatalf("generate blocks: %v", err)
 	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
