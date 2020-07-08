@@ -17,7 +17,6 @@
 package downloader
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"os"
@@ -67,7 +66,7 @@ func TestMain(m *testing.M) {
 }
 
 type testChain struct {
-	db       ethdb.Database
+	db       *ethdb.ObjectDatabase
 	genesis  *types.Block
 	chain    []common.Hash
 	headerm  map[common.Hash]*types.Header
@@ -78,7 +77,7 @@ type testChain struct {
 }
 
 // newTestChain creates a blockchain of the given length.
-func newTestChain(length int, db ethdb.Database, genesis *types.Block) *testChain {
+func newTestChain(length int, db *ethdb.ObjectDatabase, genesis *types.Block) *testChain {
 	tc := new(testChain).copy(length)
 	tc.db = db
 	tc.genesis = genesis
@@ -111,13 +110,11 @@ func (tc *testChain) copy(newlen int) *testChain {
 	defer tc.cpyLock.Unlock()
 	cpy := &testChain{
 		genesis:  tc.genesis,
+		db:       tc.db,
 		headerm:  make(map[common.Hash]*types.Header, newlen),
 		blockm:   make(map[common.Hash]*types.Block, newlen),
 		receiptm: make(map[common.Hash][]*types.Receipt, newlen),
 		tdm:      make(map[common.Hash]*big.Int, newlen),
-	}
-	if tc.db != nil {
-		cpy.db = tc.db.NewBatch()
 	}
 	for i := 0; i < len(tc.chain) && i < newlen; i++ {
 		hash := tc.chain[i]
@@ -140,39 +137,54 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
 
-	blocks, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
-		block.SetCoinbase(common.Address{seed})
-		// If a heavy chain is requested, delay blocks to raise difficulty
-		if heavy {
-			block.OffsetTime(-1)
-		}
-		// Include transactions to the miner to make blocks more interesting.
-		if parent == tc.genesis && i%22 == 0 {
-			signer := types.MakeSigner(params.TestChainConfig, block.Number())
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
-			if err != nil {
-				panic(err)
+	existingLen := len(tc.chain) - 1
+	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, existingLen + n, func(i int, block *core.BlockGen) {
+		if i < existingLen || existingLen == 0 {
+			block.SetCoinbase(common.Address{0})
+			// Include transactions to the miner to make blocks more interesting.
+			if i%22 == 0 {
+				signer := types.MakeSigner(params.TestChainConfig, block.Number())
+				tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{0}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
+				if err != nil {
+					panic(err)
+				}
+				block.AddTx(tx)
 			}
-			block.AddTx(tx)
-		}
-		// if the block number is a multiple of 5, add a bonus uncle to the block
-		if i > 0 && i%5 == 0 {
-			block.AddUncle(&types.Header{
-				ParentHash: block.PrevBlock(i - 1).Hash(),
-				Number:     big.NewInt(block.Number().Int64() - 1),
-			})
+			// if the block number is a multiple of 5, add a bonus uncle to the block
+			if i > 0 && i%5 == 0 {
+				block.AddUncle(&types.Header{
+					ParentHash: block.PrevBlock(i - 1).Hash(),
+					Number:     big.NewInt(block.Number().Int64() - 1),
+				})
+			}
+		} else {
+			block.SetCoinbase(common.Address{seed})
+			// If a heavy chain is requested, delay blocks to raise difficulty
+			if heavy {
+				block.OffsetTime(-1)
+			}
+			// if the block number is a multiple of 5, add a bonus uncle to the block
+			if i > existingLen && (i-existingLen)%5 == 0 {
+				block.AddUncle(&types.Header{
+					ParentHash: block.PrevBlock(i - existingLen - 1).Hash(),
+					Number:     big.NewInt(block.Number().Int64() - 1),
+				})
+			}
 		}
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	// Convert the block-chain into a hash-chain and header/block maps
 	td := new(big.Int).Set(tc.td(parent.Hash()))
-	for i, b := range blocks {
+	for i, b := range blocks[existingLen:] {
 		td := td.Add(td, b.Difficulty())
 		hash := b.Hash()
 		tc.chain = append(tc.chain, hash)
 		tc.blockm[hash] = b
 		tc.headerm[hash] = b.Header()
-		tc.receiptm[hash] = receipts[i]
+		tc.receiptm[hash] = receipts[existingLen + i]
 		tc.tdm[hash] = new(big.Int).Set(td)
 	}
 }
