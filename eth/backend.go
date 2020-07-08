@@ -270,7 +270,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 	if config.SyncMode != downloader.StagedSync {
-		if err := eth.StartTxPool(); err != nil {
+		if err = eth.StartTxPool(); err != nil {
 			return nil, err
 		}
 	}

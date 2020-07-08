@@ -281,7 +281,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	return pool
 }
 
-func (pool *TxPool) Start(chain blockChain) error {
+func (pool *TxPool) Start(chain BlockChainer) error {
 	pool.wg.Reset()
 
 	if err := pool.wg.Add(2); err != nil {
@@ -1431,7 +1431,7 @@ func (pool *TxPool) demoteUnexecutables() {
 }
 
 func (pool *TxPool) IsStarted() bool {
-	if !pool.IsStarted() {
+	if pool == nil {
 		return false
 	}
 
