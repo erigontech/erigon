@@ -1848,12 +1848,18 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, 0)
-	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.AccountHistoryIndex)}, b)
+	err := db.Put(dbutils.SyncStageProgress, []byte{byte(stages.AccountHistoryIndex)}, b)
+	if err != nil {
+		t.Fatal(err)
+	}
 	binary.BigEndian.PutUint64(b, 7)
-	db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
+	err = db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var startKey [32]byte
-	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
