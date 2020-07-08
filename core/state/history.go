@@ -317,7 +317,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		var err error
 		for goOn {
 			cmp, br := keyCmp(addrHash, hAddrHash)
-			fmt.Println("core/state/history.go:319 addr", common.Bytes2Hex(addrHash), "vs", common.Bytes2Hex(hAddrHash), cmp)
+			//fmt.Println("core/state/history.go:319 addr", common.Bytes2Hex(addrHash), "vs", common.Bytes2Hex(hAddrHash), cmp)
 			if br {
 				break
 			}

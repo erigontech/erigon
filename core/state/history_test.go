@@ -779,7 +779,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	stateVal := uint256.NewInt().SetBytes([]byte("state"))
 
 	addr1 := common.Address{1}
-	//addr2 := common.Address{2}
+	addr2 := common.Address{2}
 
 	key1 := common.Hash{1}
 	key2 := common.Hash{2}
@@ -792,11 +792,11 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4Expected := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	//
-	//block6Expected := &changeset.ChangeSet{
-	//	Changes: make([]changeset.Change, 0),
-	//}
-	//
+
+	block6Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
 	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
 		expectedKey := make([]byte, common.HashLength+common.AddressLength)
 		copy(expectedKey[:common.AddressLength], addr.Bytes())
@@ -826,6 +826,13 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
+		{
+			addr2,
+			changeset.DefaultIncarnation,
+			key3,
+			emptyVal,
+			block3Val,
+		},
 	}, true, true)
 
 	writeStorageBlockData(t, tds, 5, []storageData{
@@ -840,7 +847,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			addr1,
 			changeset.DefaultIncarnation,
 			key2,
-			emptyVal,
+			block3Val,
 			stateVal,
 		},
 		{
@@ -850,6 +857,13 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			block3Val,
 			emptyVal,
 		},
+		{
+			addr2,
+			changeset.DefaultIncarnation,
+			key3,
+			block3Val,
+			stateVal,
+		},
 	}, true, true)
 
 	block2 := &changeset.ChangeSet{
@@ -858,8 +872,9 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var err error
-	var startKey [60]byte
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	startKey:=make([]byte,60)
+	copy(startKey[:common.AddressLength], addr1.Bytes())
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -874,7 +889,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -892,7 +907,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		},
 		{
 			withoutInc(addr1, key2),
-			stateVal.Bytes(),
+			block3Val.Bytes(),
 		},
 		{
 			withoutInc(addr1, key3),
@@ -900,36 +915,68 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		},
 	}
 	assertChangesEquals(t, block4, block4Expected)
-	//
-	//block6 := &changeset.ChangeSet{
-	//	Changes: make([]changeset.Change, 0),
-	//}
-	//err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-	//	err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-	//	if err != nil {
-	//		t.Fatal(err)
-	//	}
-	//	return true, nil
-	//})
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//
-	//block6Expected.Changes = []changeset.Change{
-	//	{
-	//		withoutInc(addrs[0], key),
-	//		stateVal.Bytes(),
-	//	},
-	//	{
-	//		withoutInc(addrs[1], key),
-	//		stateVal.Bytes(),
-	//	},
-	//	{
-	//		withoutInc(addrs[2], key),
-	//		stateVal.Bytes(),
-	//	},
-	//}
-	//assertChangesEquals(t, block6, block6Expected)
+
+	block4.Changes = block4.Changes[:0]
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60),0, 4, func(k []byte, v []byte) (b bool, e error) {
+		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block4Expected.Changes = append(block4Expected.Changes, changeset.Change{
+		Key: withoutInc(addr2, key3),
+		Value: block3Val.Bytes(),
+	})
+	assertChangesEquals(t, block4, block4Expected)
+
+
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 6, func(k []byte, v []byte) (b bool, e error) {
+		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block6Expected.Changes = []changeset.Change{
+		{
+			withoutInc(addr1, key1),
+			stateVal.Bytes(),
+		},
+		{
+			withoutInc(addr1, key2),
+			stateVal.Bytes(),
+		},
+	}
+	assertChangesEquals(t, block6, block6Expected)
+
+	block6.Changes=block6.Changes[:0]
+	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 6, func(k []byte, v []byte) (b bool, e error) {
+		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block6Expected.Changes = append(block6Expected.Changes, changeset.Change{
+		Key: withoutInc(addr2, key3),
+		Value: stateVal.Bytes(),
+	})
+	assertChangesEquals(t, block6, block6Expected)
 }
 
 func TestWalkAsOfAccountHashed(t *testing.T) {
