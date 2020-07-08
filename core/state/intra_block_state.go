@@ -247,6 +247,7 @@ func (sdb *IntraBlockState) Exist(addr common.Address) bool {
 		}
 	}
 	s := sdb.getStateObject(addr)
+	fmt.Printf("Exist %x: %t\n", addr, s != nil && !s.deleted)
 	return s != nil && !s.deleted
 }
 
