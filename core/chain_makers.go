@@ -243,7 +243,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
-				dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
+				if err := dbCopy.KV().View(context.Background(), func (tx ethdb.Tx) error {
 					bucket := tx.Bucket(dbutils.CurrentStateBucket)
 					cursor := bucket.Cursor()
 					k, v, e := cursor.First()
@@ -251,7 +251,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 						fmt.Printf("%x: %x\n", k, v)
 					}
 					return e
-				})
+				}); err != nil {
+					return nil, nil, fmt.Errorf("print state: %w", err)
+				}
 				fmt.Printf("===============================\n")
 			}
 			loader := trie.NewFlatDbSubTrieLoader()
