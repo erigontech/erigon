@@ -590,14 +590,4 @@ Date:   Fri Jul 3 20:50:35 2020 +0800
     This PR also changes the behavior for empty blocks. If the block is empty,
     the lastest price is reused for sampling.
 
-commit 07a95ce571b2a8c183e9986040032a7049bb24f4
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu Jul 2 10:15:11 2020 +0200
-
-    les/checkpointoracle: don't lookup checkpoint more than once per minute (#21285)
-    
-    * les/checkpointoracle: don't lookup checkpoint more than once per second
-    
-    * les/checkpoint/oracle: change oracle checktime to 1 minute
-
 
