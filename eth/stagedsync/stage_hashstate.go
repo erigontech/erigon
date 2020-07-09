@@ -244,43 +244,8 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-var promoterMapper = map[string]struct {
-	WalkerAdapter func(v []byte) changeset.Walker
-	KeySize       int
-	Template      string
-}{
-	string(dbutils.PlainAccountChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetPlainBytes(v)
-		},
-		KeySize:  common.AddressLength,
-		Template: "acc-prom-",
-	},
-	string(dbutils.PlainStorageChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetPlainBytes(v)
-		},
-		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
-		Template: "st-prom-",
-	},
-	string(dbutils.AccountChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength,
-		Template: "acc-prom-",
-	},
-	string(dbutils.StorageChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength + common.IncarnationLength + common.HashLength,
-		Template: "st-prom-",
-	},
-}
-
 func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := promoterMapper[string(changeSetBucket)].WalkerAdapter
+	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, _ []byte) error {
 			return next(k, k, nil)
@@ -289,7 +254,7 @@ func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
 }
 
 func getUnwindExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := promoterMapper[string(changeSetBucket)].WalkerAdapter
+	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 			return next(k, k, v)
