@@ -501,8 +501,8 @@ func testBadHashes(t *testing.T, full bool) {
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
-	defer blockchain.Stop()
 	defer db.Close()
+	defer blockchain.Stop()
 
 	// Create a chain, ban a hash and try to import
 	if full {
@@ -536,8 +536,8 @@ func testReorgBadHashes(t *testing.T, full bool) {
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
-	defer blockchain.Stop()
 	defer db.Close()
+	defer blockchain.Stop()
 
 	// Create a chain, import and ban afterwards
 	headers := makeHeaderChain(blockchain.CurrentHeader(), 4, ethash.NewFaker(), db, 10)
