@@ -75,7 +75,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
+				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, nil)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)
