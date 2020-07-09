@@ -423,11 +423,6 @@ func (db *BadgerDatabase) MemCopy() Database {
 	return newDb
 }
 
-// TODO [Issue 144] Implement the methods
-
-func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	panic("Not implemented")
-}
 
 func (db *BadgerDatabase) Keys() ([][]byte, error) {
 	panic("Not implemented")

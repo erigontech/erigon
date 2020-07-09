@@ -74,8 +74,7 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		//Some transactions to generate blocks and history
 		var (
 			tx     *types.Transaction
@@ -100,6 +99,9 @@ func TestBasisAccountPruning(t *testing.T) {
 		}
 		block.AddTx(tx)
 	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	// Insert blocks
 	_, err = blockchain.InsertChain(context.Background(), blocks)
@@ -237,8 +239,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		//Some transactions to generate blocks and history
 		var (
 			tx     *types.Transaction
@@ -263,6 +264,9 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		}
 		block.AddTx(tx)
 	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
 	if err != nil {
@@ -396,8 +400,7 @@ func TestStoragePruning(t *testing.T) {
 
 	var eipContract *contracts.Testcontract
 	blockNum := 6
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, blockNum, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, blockNum, func(i int, block *core.BlockGen) {
 		//Some manipulations with contract to generate blocks with state history
 		var (
 			tx       *types.Transaction
@@ -482,6 +485,9 @@ func TestStoragePruning(t *testing.T) {
 
 		contractBackend.Commit()
 	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
 	if err != nil {
@@ -589,8 +595,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		var (
 			tx     *types.Transaction
 			genErr error
@@ -614,6 +619,9 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		}
 		block.AddTx(tx)
 	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	pruner, err := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1, BlocksToPrune: 10, PruneTimeout: time.Second})
 	assertNil(t, err)

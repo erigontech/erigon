@@ -85,7 +85,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := ethdb.WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	if err := WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
@@ -136,7 +136,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 
 func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
-	err := ethdb.WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err := WalkAsOf(dbs.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
@@ -274,7 +274,7 @@ func (dbs *PlainDBState) WalkStorageRange(addrHash common.Hash, prefix trie.Keyb
 
 	i := 0
 
-	err := ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
+	err := WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			val := new(big.Int).SetBytes(value)
 
@@ -304,7 +304,7 @@ func (dbs *PlainDBState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int,
 	i := 0
 
 	var acc accounts.Account
-	err := ethdb.WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
+	err := WalkAsOf(dbs.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			if len(key) > 32 {
 				return true, nil

@@ -82,8 +82,6 @@ type Database interface {
 
 	Keys() ([][]byte, error)
 
-	// MemCopy creates a copy of the database in memory.
-	MemCopy() Database
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)

@@ -291,7 +291,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			if fstl.trace {
 				fmt.Printf("k after storageWalker and Next: %x\n", fstl.k)
 			}
-		} else {
+		} else if len(fstl.k) > 0 {
 			fstl.itemType = AccountStreamItem
 			fstl.accountKey = append(fstl.accountKey[:0], fstl.k...)
 			fstl.storageKey = nil
@@ -592,8 +592,13 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 					dr.groups = dr.groups[:len(dr.groups)-1]
 				}
 			}
-			dr.subTries.roots = append(dr.subTries.roots, dr.hb.root())
-			dr.subTries.Hashes = append(dr.subTries.Hashes, dr.hb.rootHash())
+			if dr.hb.hasRoot() {
+				dr.subTries.roots = append(dr.subTries.roots, dr.hb.root())
+				dr.subTries.Hashes = append(dr.subTries.Hashes, dr.hb.rootHash())
+			} else {
+				dr.subTries.roots = append(dr.subTries.roots, nil)
+				dr.subTries.Hashes = append(dr.subTries.Hashes, EmptyRoot)
+			}
 			dr.groups = dr.groups[:0]
 			dr.hb.Reset()
 			dr.wasIH = false
