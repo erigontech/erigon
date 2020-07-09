@@ -269,24 +269,24 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
-	eth.txPool.AddInit(eth.StartTxPool)
-	eth.txPool.AddInit(eth.StopTxPool)
-	if config.SyncMode != downloader.StagedSync {
-		if err = eth.StartTxPool(); err != nil {
-			return nil, err
-		}
-	}
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-
 	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
-
 	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
+
+	if config.SyncMode != downloader.StagedSync {
+		if err = eth.StartTxPool(); err != nil {
+			return nil, err
+		}
+	} else {
+		eth.txPool.AddInit(eth.StartTxPool)
+		eth.txPool.AddStop(eth.StopTxPool)
+	}
 
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, dests)
