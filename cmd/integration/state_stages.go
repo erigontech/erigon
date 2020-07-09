@@ -139,7 +139,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		for blockN := range expectedAccountChanges {
 			if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
-				panic(err)
+				return err
 			}
 			delete(expectedAccountChanges, blockN)
 		}
@@ -228,7 +228,7 @@ func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountCh
 		}); err != nil {
 			return err
 		}
-		return nil
+		return fmt.Errorf("check change set failed")
 	}
 
 	dbStorageChanges, err := db.GetChangeSetByBlock(true /* storage */, blockNum)
@@ -290,7 +290,7 @@ func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountCh
 		}); err != nil {
 			return err
 		}
-		return nil
+		return fmt.Errorf("check change set failed")
 	}
 	return nil
 }
