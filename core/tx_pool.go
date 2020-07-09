@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -145,7 +146,8 @@ type TxPoolConfig struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+	Lifetime    time.Duration // Maximum amount of time non-executable transaction are queued
+	StartOnInit bool
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -246,6 +248,9 @@ type TxPool struct {
 	reorgDoneCh     chan chan struct{}
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
+	isStarted       bool
+	initFns         []func() error
+	stopFns         []func() error
 }
 
 type txpoolResetRequest struct {
@@ -276,8 +281,19 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		reorgShutdownCh: make(chan struct{}),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 	}
+
+	if config.StartOnInit {
+		if err := pool.Start(chain); err != nil {
+			log.Error("cannot start transaction pool", "err", err)
+		}
+	}
+
+	return pool
+}
+
+func (pool *TxPool) Start(chain BlockChainer) error {
 	pool.locals = newAccountSet(pool.signer)
-	for _, addr := range config.Locals {
+	for _, addr := range pool.config.Locals {
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 	}
@@ -289,8 +305,8 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	go pool.scheduleReorgLoop()
 
 	// If local transactions and journaling is enabled, load from disk
-	if !config.NoLocals && config.Journal != "" {
-		pool.journal = newTxJournal(config.Journal)
+	if !pool.config.NoLocals && pool.config.Journal != "" {
+		pool.journal = newTxJournal(pool.config.Journal)
 
 		if err := pool.journal.load(pool.AddLocals); err != nil {
 			log.Warn("Failed to load transaction journal", "err", err)
@@ -302,10 +318,14 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 
 	// Subscribe events from blockchain and start the main event loop.
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
+
 	pool.wg.Add(1)
 	go pool.loop()
 
-	return pool
+	pool.isStarted = true
+
+	log.Info("transaction pool started")
+	return nil
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -475,7 +495,7 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 // Stop terminates the transaction pool.
 func (pool *TxPool) Stop() {
 	// Unsubscribe all subscriptions registered from txpool
-	if pool == nil {
+	if !pool.IsStarted() {
 		return
 	}
 
@@ -492,7 +512,7 @@ func (pool *TxPool) Stop() {
 // SubscribeNewTxsEvent registers a subscription of NewTxsEvent and
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription {
-	if pool == nil {
+	if !pool.IsStarted() {
 		return nil
 	}
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
@@ -573,7 +593,7 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 // freely modified by calling code.
 func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
 	pending := make(map[common.Address]types.Transactions)
-	if pool == nil {
+	if !pool.IsStarted() {
 		return pending, nil
 	}
 	pool.mu.Lock()
@@ -1416,6 +1436,58 @@ func (pool *TxPool) demoteUnexecutables() {
 			delete(pool.beats, addr)
 		}
 	}
+}
+
+func (pool *TxPool) IsStarted() bool {
+	if pool == nil {
+		return false
+	}
+
+	return pool.isStarted
+}
+
+func (pool *TxPool) AddInit(fns ...func() error) {
+	if pool == nil {
+		return
+	}
+
+	pool.initFns = append(pool.initFns, fns...)
+}
+
+func (pool *TxPool) RunInit() error {
+	if pool == nil {
+		return errors.New("can't init a nil transaction pool")
+	}
+
+	var err error
+	for _, fn := range pool.initFns {
+		if err = fn(); err != nil {
+			return fmt.Errorf("can't init a transaction pool: %w", err)
+		}
+	}
+	return nil
+}
+
+func (pool *TxPool) AddStop(fns ...func() error) {
+	if pool == nil {
+		return
+	}
+
+	pool.stopFns = append(pool.stopFns, fns...)
+}
+
+func (pool *TxPool) RunStop() error {
+	if pool == nil {
+		return errors.New("can't stop a nil transaction pool")
+	}
+
+	var err error
+	for _, fn := range pool.stopFns {
+		if err = fn(); err != nil {
+			return fmt.Errorf("can't stop a transaction pool: %w", err)
+		}
+	}
+	return nil
 }
 
 // addressByHeartbeat is an account address tagged with its last activity timestamp.

@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +45,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	core.UsePlainStateExecution = true
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	blockchain, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	blockchain, err := newBlockChain(db)
 	if err != nil {
 		return err
 	}

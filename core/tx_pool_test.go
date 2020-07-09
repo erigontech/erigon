@@ -46,6 +46,7 @@ var testTxPoolConfig TxPoolConfig
 func init() {
 	testTxPoolConfig = DefaultTxPoolConfig
 	testTxPoolConfig.Journal = ""
+	testTxPoolConfig.StartOnInit = true
 }
 
 type testBlockChain struct {

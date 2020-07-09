@@ -78,7 +78,7 @@ func (l *progressLogger) Stop() {
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool) error {
-	if limit <= s.BlockNumber {
+	if limit > 0 && limit <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
