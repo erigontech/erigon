@@ -488,11 +488,6 @@ func TestStorageSubTrieLoader2(t *testing.T) {
 		assert.NoError(err)
 	}
 }
-func TestName(t *testing.T) {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, ^uint64(1))
-	t.Log(common.Bytes2Hex(b))
-}
 
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)

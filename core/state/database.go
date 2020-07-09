@@ -554,7 +554,7 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 			nibbles[i*2] = b / 16
 			nibbles[i*2+1] = b % 16
 		}
-		binary.BigEndian.PutUint64(bytes8[:], ^incarnation)
+		binary.BigEndian.PutUint64(bytes8[:], incarnation)
 		for i, b := range bytes8[:] {
 			nibbles[2*common.HashLength+i*2] = b / 16
 			nibbles[2*common.HashLength+i*2+1] = b % 16

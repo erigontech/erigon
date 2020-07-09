@@ -32,7 +32,6 @@ type IndexGenerator struct {
 	quitCh           <-chan struct{}
 }
 
-
 func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte) error {
 	v, ok := changeset.Mapper[string(changeSetBucket)]
 	if !ok {
@@ -159,9 +158,6 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		return errors.New("incorrect value")
 	}
 	k = common.CopyBytes(k)
-	if len(k) >= 28 {
-		binary.BigEndian.PutUint64(k[common.AddressLength:], ^binary.BigEndian.Uint64(k[common.AddressLength:]))
-	}
 	currentChunkKey := dbutils.IndexChunkKey(k, ^uint64(0))
 	indexBytes, err1 := state.Get(currentChunkKey)
 	if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
@@ -205,9 +201,6 @@ func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc 
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
 		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
 			key := common.CopyBytes(changesetKey)
-			if len(key) >= 28 {
-				binary.BigEndian.PutUint64(key[common.AddressLength:], ^binary.BigEndian.Uint64(key[common.AddressLength:]))
-			}
 			v := make([]byte, 9)
 			binary.BigEndian.PutUint64(v, blockNum)
 			if len(changesetValue) == 0 {

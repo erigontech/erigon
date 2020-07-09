@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -292,7 +293,7 @@ func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes,
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	// TODO: [Issue 99] Support incarnations
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(1))
+	binary.BigEndian.PutUint64(startkey[common.HashLength:], changeset.DefaultIncarnation)
 	copy(startkey[common.HashLength+common.IncarnationLength:], prefix.Data)
 
 	fixedbits := (common.HashLength + common.IncarnationLength + len(prefix.Data)) * 8

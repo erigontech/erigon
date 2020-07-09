@@ -270,7 +270,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		if len(account.Code) == 0 && len(account.Storage) > 0 {
 			// Special case for weird tests - inaccessible storage
 			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], 1)
+			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
 			if err := db.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
 				return nil, nil, nil, err
 			}
