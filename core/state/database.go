@@ -412,7 +412,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 		for keyHash := range m {
 			var storageKey common.StorageKey
 			copy(storageKey[:], addrHash[:])
-			binary.BigEndian.PutUint64(storageKey[common.HashLength:], ^tds.aggregateBuffer.storageIncarnation[addrHash])
+			binary.BigEndian.PutUint64(storageKey[common.HashLength:], tds.aggregateBuffer.storageIncarnation[addrHash])
 			copy(storageKey[common.HashLength+common.IncarnationLength:], keyHash[:])
 			storageTouches = append(storageTouches, storageKey)
 		}
@@ -883,7 +883,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		b.storageIncarnation[addrHash] = ^binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
+		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
 		var storageKey common.StorageKey
 		copy(storageKey[:], []byte(key))
 		b.storageReads[storageKey] = struct{}{}

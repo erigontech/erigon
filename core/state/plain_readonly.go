@@ -67,7 +67,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		log.Error("Error decoding account", "error", err)
 		return err
 	}
-	binary.BigEndian.PutUint64(s[common.AddressLength:], ^acc.Incarnation)
+	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
 	copy(s[common.AddressLength+common.IncarnationLength:], start)
 	var lastKey common.Hash
 	overrideCounter := 0
