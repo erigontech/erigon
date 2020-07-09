@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -195,9 +196,13 @@ func (cs *chainSyncer) loop() {
 	defer cs.pm.wg.Done()
 
 	cs.pm.blockFetcher.Start()
-	cs.pm.txFetcher.Start()
 	defer cs.pm.blockFetcher.Stop()
-	defer cs.pm.txFetcher.Stop()
+
+	defer func() {
+		if cs.pm.txFetcher != nil {
+			cs.pm.txFetcher.Stop()
+		}
+	}()
 
 	// The force timer lowers the peer count threshold down to one when it fires.
 	// This ensures we'll always start sync even if there aren't enough peers.
@@ -312,7 +317,7 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 		}
 	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
-	err := pm.downloader.Synchronise(op.peer.id, op.head, op.td, op.mode, pm.blockchain.DestsCache)
+	err := pm.downloader.Synchronise(op.peer.id, op.head, op.td, op.mode, pm.blockchain.DestsCache, &stagedsync.TxPoolStartStopper{Start: pm.txpool.RunInit, Stop: pm.txpool.RunStop})
 	if err != nil {
 		return err
 	}

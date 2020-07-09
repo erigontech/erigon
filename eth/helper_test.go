@@ -90,7 +90,9 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	if err != nil {
 		return nil, nil, err
 	}
-	pm.Start(1000)
+	if err = pm.Start(1000, true); err != nil {
+		return nil, nil, fmt.Errorf("error on protocol manager start: %w", err)
+	}
 	return pm, db, nil
 }
 
@@ -172,6 +174,18 @@ func (p *testTxPool) Pending() (map[common.Address]types.Transactions, error) {
 
 func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return p.txFeed.Subscribe(ch)
+}
+
+func (p *testTxPool) IsStarted() bool {
+	return true
+}
+
+func (p *testTxPool) RunInit() error {
+	return nil
+}
+
+func (p *testTxPool) RunStop() error {
+	return nil
 }
 
 // newTestTransaction create a new dummy transaction.
