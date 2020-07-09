@@ -181,7 +181,7 @@ func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 		}
 	}
 
-	if buf.Len() > (1 << 16) {
+if buf.Len() > (1 << 16) {
 		fmt.Println("storage_changeset_utils.go:162", time.Since(t), buf.Len()/1000)
 	}
 
