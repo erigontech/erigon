@@ -217,28 +217,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	var (
-		vmConfig = vm.Config{
-			EnablePreimageRecording: config.EnablePreimageRecording,
-			EWASMInterpreter:        config.EWASMInterpreter,
-			EVMInterpreter:          config.EVMInterpreter,
-		}
-		cacheConfig = &core.CacheConfig{
-			Pruning:             config.Pruning,
-			BlocksBeforePruning: config.BlocksBeforePruning,
-			BlocksToPrune:       config.BlocksToPrune,
-			PruneTimeout:        config.PruningTimeout,
-			TrieCleanLimit:      config.TrieCleanCache,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieTimeLimit:       config.TrieTimeout,
-			DownloadOnly:        config.DownloadOnly,
-			NoHistory:           !config.StorageMode.History,
-			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
-		}
-	)
-
-	dests := vm.NewDestsCache(50000)
+	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, dests)
 	if err != nil {
 		return nil, err
@@ -308,6 +287,30 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	return eth, nil
+}
+
+func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig, *vm.DestsCache) {
+	var (
+		vmConfig = vm.Config{
+			EnablePreimageRecording: config.EnablePreimageRecording,
+			EWASMInterpreter:        config.EWASMInterpreter,
+			EVMInterpreter:          config.EVMInterpreter,
+		}
+		cacheConfig = &core.CacheConfig{
+			Pruning:             config.Pruning,
+			BlocksBeforePruning: config.BlocksBeforePruning,
+			BlocksToPrune:       config.BlocksToPrune,
+			PruneTimeout:        config.PruningTimeout,
+			TrieCleanLimit:      config.TrieCleanCache,
+			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieDirtyLimit:      config.TrieDirtyCache,
+			TrieTimeLimit:       config.TrieTimeout,
+			DownloadOnly:        config.DownloadOnly,
+			NoHistory:           !config.StorageMode.History,
+			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
+		}
+	)
+	return vmConfig, cacheConfig, vm.NewDestsCache(50000)
 }
 
 func makeExtraData(extra []byte) []byte {
