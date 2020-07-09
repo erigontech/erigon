@@ -197,7 +197,7 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
-		if vs == nil || len(vs) == 0 {
+		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
