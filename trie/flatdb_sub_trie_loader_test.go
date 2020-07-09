@@ -489,8 +489,8 @@ func TestStorageSubTrieLoader2(t *testing.T) {
 	}
 }
 func TestName(t *testing.T) {
-	b:=make([]byte, 8)
-	binary.BigEndian.PutUint64(b,^uint64(1))
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, ^uint64(1))
 	t.Log(common.Bytes2Hex(b))
 }
 

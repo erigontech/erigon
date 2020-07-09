@@ -300,8 +300,8 @@ func (pm *ProtocolManager) removePeer(id string) {
 	log.Debug("Removing Ethereum peer", "peer", id)
 
 	// Unregister the peer from the downloader and Ethereum peer set
-	pm.downloader.UnregisterPeer(id)
-	pm.txFetcher.Drop(id) // nolint:errcheck
+	pm.downloader.UnregisterPeer(id) // nolint:errcheck
+	pm.txFetcher.Drop(id)            // nolint:errcheck
 
 	if err := pm.peers.Unregister(id); err != nil {
 		log.Error("Peer removal failed", "peer", id, "err", err)
