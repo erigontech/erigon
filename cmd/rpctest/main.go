@@ -749,7 +749,7 @@ func bench1(needCompare bool, fullTest bool) {
 					for nextKey != nil {
 						var sr DebugStorageRange
 						reqGen.reqID++
-                        res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
+						res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange (turbo-geth): %s: %v\n", tx.Hash, res.Err)
@@ -768,15 +768,15 @@ func bench1(needCompare bool, fullTest bool) {
 							nextKey = sr.Result.NextKey
 						}
 					}
-					
+
 					for nextKeyG != nil {
 						var srGeth DebugStorageRange
 						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyG), &srGeth)
-                        resultsCh <- res
+						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange (geth): %s: %v\n", tx.Hash, res.Err)
 							return
-                        }
+						}
 						if srGeth.Error != nil {
 							fmt.Printf("Error getting storageRange (geth): %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
 							break
@@ -1509,7 +1509,7 @@ func bench7() {
 			nextKey = sr.Result.NextKey
 		}
 	}
-	
+
 	for nextKeyG != nil {
 		var srg DebugStorageRange
 		if err := post(client, gethURL, fmt.Sprintf(template, blockhash, i, to, *nextKeyG, 1024, reqID), &srg); err != nil {
