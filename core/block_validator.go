@@ -126,18 +126,20 @@ func (v *BlockValidator) ValidateReceipts(block *types.Block, receipts types.Rec
 	}
 
 	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, R1]]))
-	receiptSha := types.DeriveSha(receipts)
-	if receiptSha != header.ReceiptHash {
-		if errorBuf.Len() > 0 {
-			errorBuf.WriteString("; ")
-		}
-		for _, r := range receipts {
-			for _, l := range r.Logs {
-				fmt.Printf("receipts: %s %x\n", l.Data, l.Data)
+	if v.config.IsByzantium(block.Header().Number) {
+		receiptSha := types.DeriveSha(receipts)
+		if receiptSha != header.ReceiptHash {
+			if errorBuf.Len() > 0 {
+				errorBuf.WriteString("; ")
 			}
+			for _, r := range receipts {
+				for _, l := range r.Logs {
+					fmt.Printf("receipts: %s %x\n", l.Data, l.Data)
+				}
 
+			}
+			fmt.Fprintf(&errorBuf, "invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
 		}
-		fmt.Fprintf(&errorBuf, "invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
 	}
 
 	if errorBuf.Len() > 0 {

@@ -18,15 +18,12 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"sort"
 	"sync"
 
 	"github.com/holiman/uint256"
-	"github.com/petar/GoLLRB/llrb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
@@ -641,21 +638,6 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	return obj
 }
 
-type AccountItem struct {
-	SecKey  []byte
-	Balance *big.Int
-}
-
-func (a *AccountItem) Less(b llrb.Item) bool {
-	bi := b.(*AccountItem)
-	c := a.Balance.Cmp(bi.Balance)
-	if c == 0 {
-		return bytes.Compare(a.SecKey, bi.SecKey) < 0
-	} else {
-		return c < 0
-	}
-}
-
 func (sdb *IntraBlockState) setStateObject(object *stateObject) {
 	sdb.stateObjects[object.Address()] = object
 }
@@ -667,20 +649,24 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject = sdb.createObject(addr, nil /* previous */, nil /* original */)
+		stateObject = sdb.createObject(addr, nil /* previous */)
 	}
 	return stateObject
 }
 
 // createObject creates a new state object. If there is an existing account with
 // the given address, it is overwritten.
-func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject, original *accounts.Account) (newobj *stateObject) {
+func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj *stateObject) {
 	account := new(accounts.Account)
 	if previous != nil {
-		account.Copy(&previous.data)
+		account.Balance.Set(&previous.data.Balance)
+		account.Initialised = true
 	}
-	if original == nil {
+	var original *accounts.Account
+	if previous == nil {
 		original = &accounts.Account{}
+	} else {
+		original = &previous.original
 	}
 	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
@@ -722,14 +708,9 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}
 	}
 
-	var previous *stateObject
-	var original *accounts.Account
 	var prevInc uint64
+	previous := sdb.getStateObject(addr)
 	if contractCreation {
-		previous = sdb.getStateObject(addr)
-		if previous != nil {
-			original = &previous.original
-		}
 		if previous != nil && previous.suicided {
 			prevInc = previous.data.Incarnation
 		} else {
@@ -741,18 +722,15 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 				prevInc = inc
 			}
 		}
-	} else {
-		p := sdb.getStateObject(addr)
-		if p != nil {
-			original = &p.original
-		}
 	}
 
-	newObj := sdb.createObject(addr, previous, original)
+	newObj := sdb.createObject(addr, previous)
 
 	if contractCreation {
 		newObj.created = true
 		newObj.data.Incarnation = prevInc + 1
+	} else {
+		newObj.suicided = false
 	}
 }
 
@@ -789,18 +767,6 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	sdb.RLock()
 	defer sdb.RUnlock()
 	return sdb.refund
-}
-
-type Addresses []common.Address
-
-func (a *Addresses) Len() int {
-	return len(*a)
-}
-func (a *Addresses) Less(i, j int) bool {
-	return bytes.Compare((*a)[i][:], (*a)[j][:]) == -1
-}
-func (a *Addresses) Swap(i, j int) {
-	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
 func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {

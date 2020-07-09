@@ -382,7 +382,7 @@ func (db *ObjectDatabase) KV() KV {
 	return db.kv
 }
 
-func (db *ObjectDatabase) MemCopy() Database {
+func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	var mem *ObjectDatabase
 	// Open the db and recover any potential corruptions
 	switch db.kv.(type) {

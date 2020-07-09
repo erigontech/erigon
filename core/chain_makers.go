@@ -22,6 +22,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -29,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // BlockGen creates blocks for testing.
@@ -38,8 +40,9 @@ type BlockGen struct {
 	parent      *types.Block
 	chain       []*types.Block
 	header      *types.Header
-	statedb     *state.IntraBlockState
-	triedbstate *state.TrieDbState
+	stateReader state.StateReader
+	stateWriter state.StateWriter
+	ibs         *state.IntraBlockState
 
 	gasPool  *GasPool
 	txs      []*types.Transaction
@@ -104,13 +107,10 @@ func (b *BlockGen) AddTxWithChain(bc ChainContext, tx *types.Transaction) {
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.statedb.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	receipt, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.triedbstate.TrieStateWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil)
+	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
+	receipt, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil)
 	if err != nil {
 		panic(err)
-	}
-	if !b.config.IsByzantium(b.header.Number) {
-		b.triedbstate.StartNewBuffer()
 	}
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -142,10 +142,10 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr common.Address) uint64 {
-	if !b.statedb.Exist(addr) {
+	if !b.ibs.Exist(addr) {
 		panic("account does not exist")
 	}
-	return b.statedb.GetNonce(addr)
+	return b.ibs.GetNonce(addr)
 }
 
 // AddUncle adds an uncle header to the generated block.
@@ -190,6 +190,8 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 	return b.receipts
 }
 
+var GenerateTrace bool
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -202,15 +204,17 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts) {
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &fakeChainReader{config: config}
-	genblock := func(i int, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState) (*types.Block, types.Receipts) {
-		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, triedbstate: tds, config: config, engine: engine}
-		b.header = makeHeader(chainreader, parent, statedb, b.engine)
+	dbCopy := db.MemCopy()
+	defer dbCopy.Close()
+	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
+		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine}
+		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
@@ -220,9 +224,8 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 				}
 			}
 		}
-		tds.StartNewBuffer()
 		if config.DAOForkSupport && config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(b.header.Number) == 0 {
-			misc.ApplyDAOHardFork(statedb)
+			misc.ApplyDAOHardFork(ibs)
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
@@ -230,49 +233,59 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			_, err := b.engine.FinalizeAndAssemble(config, b.header, statedb, b.txs, b.uncles, b.receipts)
-
-			ctx2, _ := params.GetNoHistoryByBlock(config.WithEIPsFlags(ctx, b.header.Number), b.header.Number)
-			if err := statedb.FinalizeTx(ctx2, tds.TrieStateWriter()); err != nil {
-				panic(err)
+			if _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts); err != nil {
+				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
-			roots, err := tds.ComputeTrieRoots()
-			if err != nil {
-				panic(err)
+			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
+			// Write state changes to db
+			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+				return nil, nil, fmt.Errorf("call to CommitBlock:  %w", err)
 			}
-			if !b.config.IsByzantium(b.header.Number) {
-				for i, receipt := range b.receipts {
-					receipt.PostState = roots[i].Bytes()
+			if GenerateTrace {
+				fmt.Printf("State after %d================\n", i)
+				if err := dbCopy.KV().View(context.Background(), func(tx ethdb.Tx) error {
+					bucket := tx.Bucket(dbutils.CurrentStateBucket)
+					cursor := bucket.Cursor()
+					k, v, e := cursor.First()
+					for ; k != nil && e == nil; k, v, e = cursor.Next() {
+						fmt.Printf("%x: %x\n", k, v)
+					}
+					return e
+				}); err != nil {
+					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
+				fmt.Printf("===============================\n")
 			}
-			b.header.Root = roots[len(roots)-1]
+			loader := trie.NewFlatDbSubTrieLoader()
+			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
+			}
+			if subTries, err := loader.LoadSubTries(); err == nil {
+				b.header.Root = subTries.Hashes[0]
+			} else {
+				return nil, nil, fmt.Errorf("call to LoadSubTries: %w", err)
+			}
+
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
-			tds.SetBlockNr(block.NumberU64())
-			// Write state changes to db
-			if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-				panic(fmt.Sprintf("state write error: %v", err))
-			}
-			return block, b.receipts
+			return block, b.receipts, nil
 		}
-		return nil, nil
+		return nil, nil, fmt.Errorf("no engine to generate blocks")
 	}
 
-	tds := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
 	for i := 0; i < n; i++ {
-		select {
-		case <-ctx.Done():
-			return nil, nil
-		default:
+		stateReader := state.NewDbStateReader(dbCopy)
+		stateWriter := state.NewDbStateWriter(dbCopy, parent.Number().Uint64()+uint64(i)+1)
+		ibs := state.New(stateReader)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		if err != nil {
+			return nil, nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
-
-		statedb := state.New(tds)
-		block, receipt := genblock(i, parent, statedb, tds)
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
 	}
-	return blocks, receipts
+	return blocks, receipts, nil
 }
 
 func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
@@ -283,10 +296,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 	number := new(big.Int).Add(parent.Number(), common.Big1)
-	//root, err := tds.IntermediateRoot(state, chain.Config().IsEIP158(number))
-	//if err != nil {
-	//	panic(err)
-	//}
 
 	return &types.Header{
 		Root:       common.Hash{},
@@ -306,8 +315,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 }
 
 // makeHeaderChain creates a deterministic chain of headers rooted at parent.
-func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine consensus.Engine, db ethdb.Database, seed int) []*types.Header {
-	blocks := makeBlockChain(ctx, types.NewBlockWithHeader(parent), n, engine, db, seed)
+func makeHeaderChain(parent *types.Header, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Header {
+	blocks := makeBlockChain(types.NewBlockWithHeader(parent), n, engine, db, seed)
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
 		headers[i] = block.Header()
@@ -316,8 +325,8 @@ func makeHeaderChain(ctx context.Context, parent *types.Header, n int, engine co
 }
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
-func makeBlockChain(ctx context.Context, parent *types.Block, n int, engine consensus.Engine, db ethdb.Database, seed int) []*types.Block {
-	blocks, _ := GenerateChain(ctx, params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
+func makeBlockChain(parent *types.Block, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Block {
+	blocks, _, _ := GenerateChain(params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
 	})
 	return blocks

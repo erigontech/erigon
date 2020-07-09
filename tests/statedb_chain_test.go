@@ -83,8 +83,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDB, 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDB, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -105,6 +104,9 @@ func TestSelfDestructReceive(t *testing.T) {
 		}
 		contractBackend.Commit()
 	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {

@@ -296,9 +296,6 @@ func (d *RWCounterDecorator) MultiPut(tuples ...[]byte) (uint64, error) {
 	atomic.AddUint64(&d.DBCounterStats.MultiPut, 1)
 	return d.Database.MultiPut(tuples...)
 }
-func (d *RWCounterDecorator) MemCopy() Database {
-	return d.Database.MemCopy()
-}
 func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:   d,

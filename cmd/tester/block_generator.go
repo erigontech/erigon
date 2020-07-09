@@ -365,7 +365,10 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			}
 
 			// Generate a batch of blocks, each properly signed
-			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
+			blocksSlice, _, err := core.GenerateChain(genesis.Config, parent, engine, db, n, genBlock)
+			if err != nil {
+				panic(err)
+			}
 			parent = blocksSlice[len(blocksSlice)-1]
 			for _, block := range blocksSlice {
 				blocks <- block
@@ -446,7 +449,10 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 				}
 			}
 
-			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
+			blocksSlice, _, err1 := core.GenerateChain(genesis.Config, parent, engine, db, n, genBlock)
+			if err1 != nil {
+				panic(err1)
+			}
 			parent = blocksSlice[len(blocksSlice)-1]
 			for _, block := range blocksSlice {
 				blocks <- block
