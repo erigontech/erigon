@@ -159,6 +159,9 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	dbCopy := db.MemCopy()
 	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
+	if err := txpool.Start(chain); err != nil {
+		t.Fatal(err)
+	}
 
 	// Generate a small n-block chain and an uncle block for it
 	var dbSide ethdb.Database

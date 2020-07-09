@@ -146,7 +146,8 @@ type TxPoolConfig struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+	Lifetime    time.Duration // Maximum amount of time non-executable transaction are queued
+	StartOnInit bool
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -245,8 +246,8 @@ type TxPool struct {
 	reqPromoteCh    chan *accountSet
 	queueTxEventCh  chan *types.Transaction
 	reorgDoneCh     chan chan struct{}
-	reorgShutdownCh chan struct{}    // requests shutdown of scheduleReorgLoop
-	wg              common.WaitGroup // tracks loop, scheduleReorgLoop
+	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
+	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
 	isStarted       bool
 	initFns         []func() error
 	stopFns         []func() error
@@ -281,16 +282,16 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 	}
 
+	if config.StartOnInit {
+		if err := pool.Start(chain); err != nil {
+			log.Error("cannot start transaction pool", "err", err)
+		}
+	}
+
 	return pool
 }
 
 func (pool *TxPool) Start(chain BlockChainer) error {
-	pool.wg.Reset()
-
-	if err := pool.wg.Add(2); err != nil {
-		return err
-	}
-
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
 		log.Info("Setting new local account", "address", addr)
@@ -300,6 +301,7 @@ func (pool *TxPool) Start(chain BlockChainer) error {
 	pool.reset(nil, chain.CurrentBlock().Header())
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
+	pool.wg.Add(1)
 	go pool.scheduleReorgLoop()
 
 	// If local transactions and journaling is enabled, load from disk
@@ -317,6 +319,7 @@ func (pool *TxPool) Start(chain BlockChainer) error {
 	// Subscribe events from blockchain and start the main event loop.
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
 
+	pool.wg.Add(1)
 	go pool.loop()
 
 	pool.isStarted = true

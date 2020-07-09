@@ -97,7 +97,7 @@ type ProtocolManager struct {
 	quitSync chan struct{}
 
 	chainSync *chainSyncer
-	wg        common.WaitGroup
+	wg        sync.WaitGroup
 	peerWG    sync.WaitGroup
 
 	// Test fields or hooks
@@ -231,9 +231,7 @@ func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
 			case <-pm.quitSync:
 				return p2p.DiscQuitting
 			default:
-				if err := pm.wg.Add(1); err != nil {
-					return err
-				}
+				pm.wg.Add(1)
 				defer pm.wg.Done()
 				return pm.handleDebug(peer)
 			}
@@ -312,7 +310,6 @@ func (pm *ProtocolManager) removePeer(id string) {
 
 func (pm *ProtocolManager) Start(maxPeers int, withTxPool bool) error {
 	pm.maxPeers = maxPeers
-	pm.wg.Reset()
 
 	if withTxPool {
 		// broadcast transactions
@@ -324,23 +321,17 @@ func (pm *ProtocolManager) Start(maxPeers int, withTxPool bool) error {
 	// broadcast mined blocks
 	pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
 	if pm.minedBlockSub != nil {
-		if err := pm.wg.Add(1); err != nil {
-			return err
-		}
+		pm.wg.Add(1)
 		go pm.minedBroadcastLoop()
 	}
 
 	// start sync handlers
 	if pm.chainSync != nil {
-		if err := pm.wg.Add(1); err != nil {
-			return err
-		}
+		pm.wg.Add(1)
 		go pm.chainSync.loop()
 	}
 
-	if err := pm.wg.Add(1); err != nil {
-		return err
-	}
+	pm.wg.Add(1)
 	go pm.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
 
 	return nil
@@ -359,9 +350,7 @@ func (pm *ProtocolManager) StartTxPool() error {
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
 	if pm.txsSub != nil {
-		if err := pm.wg.Add(1); err != nil {
-			return err
-		}
+		pm.wg.Add(1)
 		go pm.txBroadcastLoop()
 	}
 
