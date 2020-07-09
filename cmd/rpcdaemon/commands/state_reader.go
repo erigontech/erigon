@@ -169,7 +169,7 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("account %x not found at %d", addr, r.blockNr)
 		}
-		return fmt.Errorf("retrieving account %x: %w", err)
+		return fmt.Errorf("retrieving account %x: %w", addr, err)
 	}
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
