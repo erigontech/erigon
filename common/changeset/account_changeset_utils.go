@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 // walkAccountChangeSet iterates the account bytes with the keys of provided size
@@ -157,7 +158,9 @@ uint32 integers are serialized as big-endian.
 */
 func encodeAccounts(s *ChangeSet) ([]byte, error) {
 	sort.Sort(s)
-	buf := new(bytes.Buffer)
+	buf := pool.GetBuffer(1 << 14)
+	buf.Reset()
+	defer pool.PutBuffer(buf)
 	intArr := make([]byte, 4)
 	n := s.Len()
 	binary.BigEndian.PutUint32(intArr, uint32(n))
@@ -190,5 +193,5 @@ func encodeAccounts(s *ChangeSet) ([]byte, error) {
 		}
 	}
 
-	return buf.Bytes(), nil
+	return common.CopyBytes(buf.Bytes()), nil
 }
