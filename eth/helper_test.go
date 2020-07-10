@@ -77,7 +77,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	}
 	blockchain.EnableReceipts(true)
 
-	chain, _, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+	chain, _, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator, false /* intermediateHashes */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}

@@ -175,7 +175,7 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 
 	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	defer chainman.Stop()
-	chain, _, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen)
+	chain, _, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen, false /* intermediateHashes */)
 	if err != nil {
 		b.Fatalf("generate chain: %v", err)
 	}

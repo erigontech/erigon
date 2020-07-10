@@ -732,7 +732,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 		}
 
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("generate chain: %w", err)
 	}

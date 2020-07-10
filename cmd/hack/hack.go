@@ -1834,6 +1834,68 @@ func fixStages(chaindata string) error {
 	return nil
 }
 
+func changeSetStats(chaindata string, block1, block2 uint64) error {
+	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	accounts := make(map[string]struct{})
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block1)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if timestamp >= block2 {
+				break
+			}
+			if timestamp%100000 == 0 {
+				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
+			}
+			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
+				accounts[string(common.CopyBytes(kk))] = struct{}{}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	storage := make(map[string]struct{})
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block1)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if timestamp >= block2 {
+				break
+			}
+			if timestamp%100000 == 0 {
+				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
+			}
+			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
+				storage[string(common.CopyBytes(kk))] = struct{}{}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("accounts changed: %d, storage changed: %d\n", len(accounts), len(storage))
+	return nil
+}
+
 func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
@@ -2049,6 +2111,11 @@ func main() {
 	}
 	if *action == "dupSortState" {
 		dupSortState(*chaindata)
+	}
+	if *action == "changeSetStats" {
+		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 
 }
