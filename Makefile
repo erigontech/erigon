@@ -77,6 +77,11 @@ semantics/z3/build/libz3.a:
 	cd semantics/z3/build && ${MAKE} -j8
 	cp semantics/z3/build/libz3.a .	
 
+integration:
+	$(GORUN) build/ci.go install ./cmd/integration
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
+
 all:
 	$(GORUN) build/ci.go install -procs=1
 
