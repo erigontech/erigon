@@ -138,6 +138,7 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	b.size += len(v)
 	stored = append(stored, v...)
 	b.entries[ks] = stored
+	bytesPool.Put(k)
 }
 
 func (b *appendSortableBuffer) Size() int {
@@ -213,6 +214,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 		v = append(bytesPool.Get(), v...)
 	}
 	b.entries[ks] = v
+	bytesPool.Put(k)
 }
 
 func (b *oldestEntrySortableBuffer) Size() int {
