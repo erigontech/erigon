@@ -217,9 +217,6 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
-	if _, ok := r.accountMap[newKStr]; ok {
-		return nil
-	}
 	if len(value) > 0 {
 		var a accounts.Account
 		if err = a.DecodeForStorage(value); err != nil {
@@ -239,9 +236,6 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
-	if _, ok := r.storageMap[newKStr]; ok {
-		return nil
-	}
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
@@ -451,7 +445,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	if subTries.Hashes[0] != expectedRootHash {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], expectedRootHash)
 	}
-	log.Debug("Collection finished",
+	log.Info("Collection finished",
 		"root hash", subTries.Hashes[0].Hex(),
 		"gen IH", generationIHTook,
 	)
@@ -524,7 +518,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if subTries.Hashes[0] != expectedRootHash {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], expectedRootHash)
 	}
-	log.Debug("Collection finished",
+	log.Info("Collection finished",
 		"root hash", subTries.Hashes[0].Hex(),
 		"gen IH", generationIHTook,
 	)
