@@ -50,7 +50,7 @@ func (l *progressLogger) Start(numberRef *uint64) {
 			speed := float64(now-prev) / float64(l.interval)
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Debug("Executed blocks:",
+			log.Info("Executed blocks:",
 				"currentBlock", now,
 				"speed (blk/second)", speed,
 				"state batch", common.StorageSize(l.batch.BatchSize()),
