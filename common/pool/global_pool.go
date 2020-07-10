@@ -1,11 +1,12 @@
 package pool
 
 import (
+	"fmt"
 	"math/bits"
 )
 
 const MaxPoolPow = 20
-const MinPoolPow = 3
+const MinPoolPow = 4
 
 const PreAllocItems = 32 // preallocate some buffers
 
@@ -18,8 +19,7 @@ func init() {
 			continue
 		}
 		bufSize := uint(1 << i)
-		idx := poolIdx(bufSize)
-
+		idx := poolPutIdx(bufSize)
 		pool := newPool(bufSize)
 		for i := 0; i < PreAllocItems; i++ {
 			pool.Put(pool.Get())
@@ -31,20 +31,30 @@ func init() {
 
 // Calculate "nearest power 2 from bottom", then devide it to 2 - just to reduce amount of pools
 // in result we will have separate pools for next power of 2: MinPoolPow, MinPoolPow + 2, MinPoolPow + 4, ..., MaxPoolPow
-func poolIdx(n uint) int {
-	n--
-	lowPowerOf2 := bits.Len64(uint64(n)) + 1
-	if lowPowerOf2 > MaxPoolPow {
-		lowPowerOf2 = MaxPoolPow
+func poolPutIdx(n uint) int {
+	n >>= MinPoolPow + 1
+	lowPowerOf2 := bits.Len64(uint64(n))
+	if lowPowerOf2 > MaxPoolPow-MinPoolPow {
+		lowPowerOf2 = MaxPoolPow - MinPoolPow
 	}
-	if lowPowerOf2 < MinPoolPow {
-		lowPowerOf2 = MinPoolPow
+	return lowPowerOf2 / 2
+}
+
+func poolGetIdx(n uint) int {
+	n--
+	n >>= MinPoolPow - 1
+	lowPowerOf2 := bits.Len64(uint64(n))
+	if lowPowerOf2 > MaxPoolPow-MinPoolPow {
+		lowPowerOf2 = MaxPoolPow - MinPoolPow
 	}
 	return lowPowerOf2 / 2
 }
 
 func GetBuffer(size uint) *ByteBuffer {
-	pp := pools[poolIdx(size)].Get()
+	pp := pools[poolGetIdx(size)].Get()
+	if uint(cap(pp.B)) < size {
+		fmt.Printf("why?: %d, %d\n", cap(pp.B), size)
+	}
 	pp.B = pp.B[:size]
 	return pp
 }
@@ -61,5 +71,5 @@ func PutBuffer(p *ByteBuffer) {
 	if p == nil || cap(p.B) == 0 {
 		return
 	}
-	pools[poolIdx(uint(cap(p.B)))].Put(p)
+	pools[poolPutIdx(uint(cap(p.B)))].Put(p)
 }

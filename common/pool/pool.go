@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -22,7 +23,7 @@ type pool struct {
 func newPool(defaultSize uint) *pool {
 	return &pool{
 		defaultSize: uint64(defaultSize),
-		maxSize:     uint64(defaultSize),
+		maxSize:     uint64(defaultSize) * 4,
 		pool: sync.Pool{
 			New: getFn(defaultSize),
 		},
@@ -56,8 +57,15 @@ func (p *pool) Put(b *ByteBuffer) {
 	}
 
 	maxSize := int(atomic.LoadUint64(&p.maxSize))
-	if maxSize == 0 || cap(b.B) <= maxSize {
-		b.B = b.B[:0]
-		p.pool.Put(b)
+	if cap(b.B) < int(p.defaultSize) {
+		fmt.Printf("Drop2: %d, %d\n", cap(b.B), p.defaultSize)
+		return
 	}
+	if maxSize == 0 || cap(b.B) > maxSize {
+		fmt.Printf("Drop: %d, %d\n", cap(b.B), maxSize)
+		return
+	}
+
+	b.B = b.B[:0]
+	p.pool.Put(b)
 }
