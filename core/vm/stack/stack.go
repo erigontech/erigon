@@ -18,6 +18,7 @@ package stack
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/holiman/uint256"
 )
@@ -99,8 +100,14 @@ type ReturnStack struct {
 	data []uint64
 }
 
+var returnStacksPool = sync.Pool{New: func() interface{} { return make([]uint64, 0, 1024) }}
+
 func NewReturnStack() *ReturnStack {
-	return &ReturnStack{data: make([]uint64, 0, 1024)}
+	return &ReturnStack{data: returnStacksPool.Get().([]uint64)}
+}
+
+func (st *ReturnStack) Destroy() {
+	returnStacksPool.Put(st.data)
 }
 
 func (st *ReturnStack) Push(d uint64) {
