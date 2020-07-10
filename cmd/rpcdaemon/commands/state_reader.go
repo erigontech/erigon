@@ -2,6 +2,9 @@ package commands
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/petar/GoLLRB/llrb"
@@ -22,7 +25,7 @@ type storageItem struct {
 
 func (a *storageItem) Less(b llrb.Item) bool {
 	bi := b.(*storageItem)
-	return bytes.Compare(a.seckey[:], bi.seckey[:]) < 0
+	return bytes.Compare(a.key[:], bi.key[:]) < 0
 }
 
 type StateReader struct {
@@ -147,24 +150,89 @@ func (r *StateReader) WriteAccountStorage(_ context.Context, address common.Addr
 		t = llrb.New()
 		r.storage[address] = t
 	}
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
-	_, err := h.Sha.Write(key[:])
-	if err != nil {
-		return err
-	}
 	i := &storageItem{key: *key, value: *value}
-	_, err = h.Sha.Read(i.seckey[:])
-	if err != nil {
-		return err
-	}
-
 	t.ReplaceOrInsert(i)
 	return nil
 }
 
 func (r *StateReader) CreateContract(address common.Address) error {
 	delete(r.storage, address)
+	return nil
+}
+
+func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+	st := llrb.New()
+	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
+	copy(s[:], addr[:])
+	accData, err := state.GetAsOf(r.db, true /* plain */, false /* storage */, addr[:], r.blockNr+1)
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("account %x not found at %d", addr, r.blockNr)
+		}
+		return fmt.Errorf("retrieving account %x: %w", addr, err)
+	}
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(accData); err != nil {
+		return fmt.Errorf("decoding account %x: %w", addr, err)
+	}
+	binary.BigEndian.PutUint64(s[common.AddressLength:], ^acc.Incarnation)
+	copy(s[common.AddressLength+common.IncarnationLength:], start)
+	var lastKey common.Hash
+	overrideCounter := 0
+	min := &storageItem{key: common.BytesToHash(start)}
+	if t, ok := r.storage[addr]; ok {
+		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
+			item := i.(*storageItem)
+			st.ReplaceOrInsert(item)
+			if !item.value.IsZero() {
+				copy(lastKey[:], item.key[:])
+				// Only count non-zero items
+				overrideCounter++
+			}
+			return overrideCounter < maxResults
+		})
+	}
+	numDeletes := st.Len() - overrideCounter
+	if err := state.WalkAsOf(r.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), r.blockNr+1, func(ks, vs []byte) (bool, error) {
+		if !bytes.HasPrefix(ks, addr[:]) {
+			return false, nil
+		}
+		if len(vs) == 0 {
+			// Skip deleted entries
+			return true, nil
+		}
+		key := ks[common.AddressLength:]
+		//fmt.Printf("key: %x (%x)\n", key, ks)
+		si := storageItem{}
+		copy(si.key[:], key)
+		if st.Has(&si) {
+			return true, nil
+		}
+		si.value.SetBytes(vs)
+		st.InsertNoReplace(&si)
+		if bytes.Compare(key[:], lastKey[:]) > 0 {
+			// Beyond overrides
+			return st.Len() < maxResults+numDeletes, nil
+		}
+		return st.Len() < maxResults+overrideCounter+numDeletes, nil
+	}); err != nil {
+		return fmt.Errorf("walk ForEachStorage: %w", err)
+	}
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	results := 0
+	st.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
+		item := i.(*storageItem)
+		if !item.value.IsZero() {
+			h.Sha.Reset()
+			//nolint:checkerr
+			h.Sha.Write(item.key[:])
+			//nolint:checkerr
+			h.Sha.Read(item.seckey[:])
+			cb(item.key, item.seckey, item.value)
+			results++
+		}
+		return results < maxResults
+	})
 	return nil
 }
