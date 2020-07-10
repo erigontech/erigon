@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
@@ -158,7 +157,6 @@ len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{N-1})
 uint32 integers are serialized as big-endian.
 */
 func encodeAccounts(s *ChangeSet) ([]byte, error) {
-	t := time.Now()
 	sort.Sort(s)
 	buf := pool.GetBuffer(1 << 16)
 	buf.Reset()
@@ -193,10 +191,6 @@ func encodeAccounts(s *ChangeSet) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	if buf.Len() > (1 << 16) {
-		fmt.Println("account_changeset_utils.go:162", time.Since(t), buf.Len()/1000)
 	}
 
 	return common.CopyBytes(buf.Bytes()), nil
