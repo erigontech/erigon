@@ -65,7 +65,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
-		return collector.Collect(k, common.CopyBytes(hash))
+		return collector.Collect(k, hash)
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
@@ -426,7 +426,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
-		return collector.Collect(k, common.CopyBytes(hash))
+		return collector.Collect(k, hash)
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
@@ -499,7 +499,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
-		return collector.Collect(k, common.CopyBytes(hash))
+		return collector.Collect(k, hash)
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
