@@ -504,7 +504,7 @@ func TestStateSyncDoTwice(t *testing.T) {
 
 func TestStateSyncInterruptRestart(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
-	expectedErr := errors.New("interrupt!")
+	expectedErr := errors.New("interrupt")
 	s := []*Stage{
 		{
 			ID:          stages.Headers,

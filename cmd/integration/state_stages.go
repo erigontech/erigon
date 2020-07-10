@@ -18,19 +18,26 @@ import (
 
 var stateStags = &cobra.Command{
 	Use: "state_stages",
-	Short: `
-		Move all StateStages (4,5,6,7,8) forward. 
-		Stops at Stage 3 progress or at "--block".
-		Each iteration test will move forward "--unwind_every" blocks, then unwind "--unwind" blocks.
-		Use reset_state command to re-run this test.
+	Short: `Move all StateStages (4,5,6,7,8) forward. 
+			Stops at Stage 3 progress or at "--block".
+			Each iteration test will move forward "--unwind_every" blocks, then unwind "--unwind" blocks.
+			Use reset_state command to re-run this test.
+			When finish all cycles, does comparison to "--reference_chaindata" if flag provided.
 		`,
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
-		err := syncBySmallSteps(ctx, chaindata)
-		if err != nil {
+		if err := syncBySmallSteps(ctx, chaindata); err != nil {
 			log.Error("Error", "err", err)
 			return err
+		}
+
+		if referenceChaindata != "" {
+			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
+				log.Error(err.Error())
+				return err
+			}
+
 		}
 		return nil
 	},
@@ -38,6 +45,7 @@ var stateStags = &cobra.Command{
 
 func init() {
 	withChaindata(stateStags)
+	withReferenceChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
@@ -54,8 +62,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		return chainErr
 	}
 	defer blockchain.Stop()
-	ch := make(chan struct{})
-	defer close(ch)
+	ch := ctx.Done()
 
 	senderStageProgress := progress(db, stages.Senders).BlockNumber
 

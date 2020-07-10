@@ -18,6 +18,7 @@ package stages
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -45,7 +46,7 @@ const (
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
-	if err != nil && err != ethdb.ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
 	return unmarshalData(v)
@@ -61,7 +62,7 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageD
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 	v, err := db.Get(dbutils.SyncStageUnwind, []byte{byte(stage)})
-	if err != nil && err != ethdb.ErrKeyNotFound {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
 	return unmarshalData(v)

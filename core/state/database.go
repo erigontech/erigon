@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -1202,7 +1203,7 @@ func (tds *TrieDbState) ReadAccountIncarnation(address common.Address) (uint64, 
 	}
 	if b, err := tds.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
 		return binary.BigEndian.Uint64(b), nil
-	} else if entryNotFound(err) {
+	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil
 	} else {
 		return 0, err
