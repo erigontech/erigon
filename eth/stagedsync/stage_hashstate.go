@@ -13,11 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-
-	"github.com/ugorji/go/codec"
 )
-
-var cbor codec.CborHandle
 
 func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	syncHeadNumber, err := s.ExecutionAt(db)

@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -11,8 +12,6 @@ import (
 	"runtime/trace"
 	"sync"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -217,7 +216,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
-				job.err = errors.Wrap(err, fmt.Sprintf("error recovering sender for tx=%x\n", tx.Hash()))
+				job.err = fmt.Errorf("error recovering sender for tx=%x, %w", tx.Hash(), err)
 				break
 			}
 			if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
@@ -233,7 +232,7 @@ func recoverSenders(cryptoContext *secp256k1.Context, config *params.ChainConfig
 		}
 		out <- job
 
-		if job.err == common.ErrStopped {
+		if errors.Is(job.err, common.ErrStopped) {
 			return
 		}
 	}
