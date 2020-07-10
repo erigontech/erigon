@@ -65,7 +65,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 					b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
 				}
 			}
-		})
+		}, false /* intermediateHashes */)
 	block := blocks[len(blocks)-1]
 	return block
 }

@@ -172,7 +172,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blocks, _, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {})
+	blocks, _, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
@@ -628,7 +628,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 			block.AddTxWithChain(b.blockchain, tx)
 		}
 		block.AddTxWithChain(b.blockchain, tx)
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
 	}
@@ -743,7 +743,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
 	}

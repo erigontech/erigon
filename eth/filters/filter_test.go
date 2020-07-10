@@ -80,7 +80,7 @@ func BenchmarkFilters(b *testing.B) {
 			gen.AddUncheckedReceipt(receipt)
 
 		}
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		b.Fatalf("generate chain: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestFilters(t *testing.T) {
 			gen.AddUncheckedReceipt(receipt)
 			gen.AddUncheckedTx(types.NewTransaction(999, common.HexToAddress("0x999"), uint256.NewInt().SetUint64(999), 999, uint256.NewInt().SetUint64(999), nil))
 		}
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
