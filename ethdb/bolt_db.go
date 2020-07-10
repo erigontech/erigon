@@ -20,6 +20,10 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"math/rand"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"path"
 	"sync"
@@ -32,6 +36,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
+
+func init() {
+	// go tool pprof -http=:8081 http://localhost:6060/
+	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
+	go func() {
+		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+		randomPort := func(min, max int) int {
+			return r.Intn(max-min) + min
+		}
+		port := randomPort(6000, 7000)
+
+		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "\\?seconds\\=20")
+		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "debug/pprof/heap")
+		fmt.Fprintf(os.Stderr, "%s\n", http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil))
+	}()
+}
 
 var (
 	boltPagesAllocGauge    = metrics.NewRegisteredGauge("bolt/pages/alloc_bytes", nil)

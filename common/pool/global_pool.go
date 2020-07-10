@@ -1,67 +1,51 @@
 package pool
 
-var (
-	chunkSizeClasses = []uint{
-		8,
-		64,
-		75,
-		128,
-		192,
-		1 << 8,
-		1 << 9,
-		1 << 10,
-		1 << 11,
-		1 << 12,
-		1 << 13,
-		1 << 14,
-		1 << 15,
-		1 << 16,
-		1 << 17,
-		1 << 18,
-		1 << 19,
-		1 << 20,
-	}
-	chunkPools []*pool
+import (
+	"math/bits"
 )
+
+const MaxPoolPow = 20
+const MinPoolPow = 3
+
+const PreAllocItems = 32 // preallocate some buffers
+
+var pools = make([]*pool, MaxPoolPow+1)
 
 func init() {
 	// init chunkPools
-	for _, chunkSize := range chunkSizeClasses {
-		chunkPools = append(chunkPools, newPool(chunkSize))
-	}
-
-	// preallocate some buffers
-	const preAlloc = 32
-	for _, n := range chunkSizeClasses {
-
-		for i := 0; i < preAlloc; i++ {
-			PutBuffer(GetBuffer(n))
+	for i := MinPoolPow; i <= MaxPoolPow; i++ {
+		if i%2 == 1 {
+			continue
 		}
+		bufSize := uint(1 << i)
+		idx := poolIdx(bufSize)
+
+		pool := newPool(bufSize)
+		for i := 0; i < PreAllocItems; i++ {
+			pool.Put(pool.Get())
+		}
+
+		pools[idx] = pool
 	}
 }
 
+// Calculate "nearest power 2 from bottom", then devide it to 2 - just to reduce amount of pools
+// in result we will have separate pools for next power of 2: MinPoolPow, MinPoolPow + 2, MinPoolPow + 4, ..., MaxPoolPow
+func poolIdx(n uint) int {
+	n--
+	lowPowerOf2 := bits.Len64(uint64(n)) + 1
+	if lowPowerOf2 > MaxPoolPow {
+		lowPowerOf2 = MaxPoolPow
+	}
+	if lowPowerOf2 < MinPoolPow {
+		lowPowerOf2 = MinPoolPow
+	}
+	return lowPowerOf2 / 2
+}
+
 func GetBuffer(size uint) *ByteBuffer {
-	var i int
-	for i = 0; i < len(chunkSizeClasses)-1; i++ {
-		if size <= chunkSizeClasses[i] {
-			break
-		}
-	}
-
-	pp := chunkPools[i].Get()
-
-	if capB := cap(pp.B); uint(capB) < size {
-		if capB == 0 {
-			_ = pp.WriteByte(0)
-		}
-		if capB != 0 {
-			pp.B = pp.B[:capB]
-			_, _ = pp.Write(make([]byte, size-uint(capB)))
-		}
-	}
-
+	pp := pools[poolIdx(size)].Get()
 	pp.B = pp.B[:size]
-
 	return pp
 }
 
@@ -77,12 +61,5 @@ func PutBuffer(p *ByteBuffer) {
 	if p == nil || cap(p.B) == 0 {
 		return
 	}
-
-	for i, n := range chunkSizeClasses {
-		if uint(cap(p.B)) <= n {
-			p.B = p.B[:0]
-			chunkPools[i].pool.Put(p)
-			break
-		}
-	}
+	pools[poolIdx(uint(cap(p.B)))].Put(p)
 }
