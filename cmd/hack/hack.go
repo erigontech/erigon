@@ -1851,7 +1851,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			if timestamp >= block2 {
 				break
 			}
-			if timestamp % 100000 == 0 {
+			if timestamp%100000 == 0 {
 				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
 			}
 			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
@@ -1878,7 +1878,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			if timestamp >= block2 {
 				break
 			}
-			if timestamp % 100000 == 0 {
+			if timestamp%100000 == 0 {
 				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
 			}
 			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
@@ -2113,7 +2113,7 @@ func main() {
 		dupSortState(*chaindata)
 	}
 	if *action == "changeSetStats" {
-		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block) + uint64(*rewind)); err != nil {
+		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
