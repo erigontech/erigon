@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
@@ -35,9 +36,10 @@ numOfUint32Values uint16
 // - for hashed changesets it is common.HashLength (key: hash + incarnation + hash)
 // - for plain changesets it is common.AddressLength (key: address + incarnation + hash)
 func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
+	t := time.Now()
 	sort.Sort(s)
 	var err error
-	buf := pool.GetBuffer(1 << 14)
+	buf := pool.GetBuffer(1 << 16)
 	buf.Reset()
 	defer pool.PutBuffer(buf)
 	uint16Arr := make([]byte, 2)
@@ -177,6 +179,10 @@ func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 				return nil, err
 			}
 		}
+	}
+
+	if buf.Len() > (1 << 16) {
+		fmt.Println("storage_changeset_utils.go:162", time.Since(t), buf.Len()/1000)
 	}
 
 	return common.CopyBytes(buf.Bytes()), nil
