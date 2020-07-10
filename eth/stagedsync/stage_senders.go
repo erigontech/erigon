@@ -73,9 +73,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := common.Stopped(quitCh); err != nil {
 		return err
 	}
-	bodiesStageProgress, _, err := stages.GetStageProgress(db, stages.Bodies)
-	if err != nil {
-		return err
+	bodiesStageProgress, _, errStart := stages.GetStageProgress(db, stages.Bodies)
+	if errStart != nil {
+		return errStart
 	}
 
 	var toBlockNumber = bodiesStageProgress
@@ -87,8 +87,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber+1)
 	currentHeaderIdx := uint64(0)
 
-	err = db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
-		if err = common.Stopped(quitCh); err != nil {
+	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
 
@@ -104,14 +104,16 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		copy(canonical[currentHeaderIdx][:], v)
 		currentHeaderIdx++
 		return true, nil
-	})
+	}); err != nil {
+		return err
+	}
 	log.Info("Sync (Senders): Reading canonical hashes complete", "hashes", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
 	go func() {
 		defer close(jobs)
-		err = db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
-			if err = common.Stopped(quitCh); err != nil {
+		if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+			if err := common.Stopped(quitCh); err != nil {
 				return false, err
 			}
 
@@ -141,8 +143,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			jobs <- &senderRecoveryJob{bodyRlp: common.CopyBytes(v), blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}
 
 			return true, nil
-		})
-		if err != nil {
+		}); err != nil {
 			log.Error("walking over the block bodies", "error", err)
 		}
 	}()
@@ -171,7 +172,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	for j := range out {
 		if j.err != nil {
-			return err
+			return j.err
 		}
 		if err := common.Stopped(quitCh); err != nil {
 			return err
