@@ -278,7 +278,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		reqPromoteCh:    make(chan *accountSet),
 		queueTxEventCh:  make(chan *types.Transaction),
 		reorgDoneCh:     make(chan chan struct{}),
-		reorgShutdownCh: make(chan struct{}),
+		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 	}
 
