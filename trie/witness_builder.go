@@ -53,7 +53,7 @@ func (b *WitnessBuilder) addLeafOp(key []byte, value []byte) error {
 	return nil
 }
 
-func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode) error {
+func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode, codeSize int) error {
 	if b.trace {
 		fmt.Printf("LEAF_ACCOUNT: k %x acc:%v\n", key, accountNode)
 	}
@@ -70,6 +70,8 @@ func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode) 
 		op.HasCode = true
 		op.HasStorage = true
 	}
+
+	op.CodeSize = uint64(codeSize)
 
 	b.operands = append(b.operands, &op)
 
@@ -148,16 +150,20 @@ func (b *WitnessBuilder) addEmptyRoot() error {
 	return nil
 }
 
-func (b *WitnessBuilder) processAccountCode(n *accountNode, retainDec RetainDecider) error {
+func (b *WitnessBuilder) processAccountCode(n *accountNode, retainDec RetainDecider) (int, error) {
 	if n.IsEmptyRoot() && n.IsEmptyCodeHash() {
-		return nil
+		return 0, nil
 	}
 
 	if n.code == nil || (retainDec != nil && !retainDec.IsCodeTouched(n.CodeHash)) {
-		return b.addHashOp(hashNode{hash: n.CodeHash[:]})
+		codeSize := n.codeSize
+		if n.code != nil {
+			codeSize = len(n.code)
+		}
+		return codeSize, b.addHashOp(hashNode{hash: n.CodeHash[:]})
 	}
 
-	return b.addCodeOp(n.code)
+	return len(n.code), b.addCodeOp(n.code)
 }
 
 func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, limiter *MerklePathLimiter) error {
@@ -181,13 +187,15 @@ func (b *WitnessBuilder) makeBlockWitness(
 		if limiter != nil {
 			retainDec = limiter.RetainDecider
 		}
-		if err := b.processAccountCode(n, retainDec); err != nil {
+		codeSize := 0
+		var err error
+		if codeSize, err = b.processAccountCode(n, retainDec); err != nil {
 			return err
 		}
 		if err := b.processAccountStorage(n, storageKey, limiter); err != nil {
 			return err
 		}
-		return b.addAccountLeafOp(key, n)
+		return b.addAccountLeafOp(key, n, codeSize)
 	}
 
 	switch n := nd.(type) {

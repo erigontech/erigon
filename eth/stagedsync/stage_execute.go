@@ -77,7 +77,18 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool) error {
+type HasChangeSetWriter interface {
+	ChangeSetWriter() *state.ChangeSetWriter
+}
+
+type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
+
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
+	if limit > 0 && limit <= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	nextBlockNumber := s.BlockNumber
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
@@ -105,7 +116,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1)
+	log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1, "to", limit-1)
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -193,6 +204,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				}
 			}
 		}
+
+		if changeSetHook != nil {
+			if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+				changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+			}
+		}
 	}
 
 	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
@@ -207,6 +224,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+	if u.UnwindPoint >= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 

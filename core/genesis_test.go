@@ -63,14 +63,14 @@ func TestSetupGenesis(t *testing.T) {
 	oldcustomg.Config = &params.ChainConfig{HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		name       string
-		fn         func(ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error)
+		fn         func(*ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error)
 		wantConfig *params.ChainConfig
 		wantHash   common.Hash
 		wantErr    error
 	}{
 		{
 			name: "genesis without ChainConfig",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				return SetupGenesisBlock(db, new(Genesis), true /* history */)
 			},
 			wantErr:    errGenesisNoConfig,
@@ -78,7 +78,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "no block in DB, genesis == nil",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				return SetupGenesisBlock(db, nil, true /* history */)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -86,7 +86,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				return SetupGenesisBlock(db, nil, true /* history */)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -94,7 +94,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == nil",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				customg.MustCommit(db)
 				return SetupGenesisBlock(db, nil, true /* history */)
 			},
@@ -103,7 +103,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == ropsten",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				customg.MustCommit(db)
 				return SetupGenesisBlock(db, DefaultRopstenGenesisBlock(), true /* history */)
 			},
@@ -113,7 +113,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "compatible config in DB",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				oldcustomg.MustCommit(db)
 				return SetupGenesisBlock(db, &customg, true /* history */)
 			},
@@ -122,16 +122,18 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "incompatible config in DB",
-			fn: func(db ethdb.Database) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
 				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
 				defer bc.Stop()
-				ctx := bc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-				blocks, _ := GenerateChain(ctx, oldcustomg.Config, genesis, ethash.NewFaker(), db.NewBatch(), 4, nil)
+				blocks, _, err := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
+				if err != nil {
+					return nil, common.Hash{}, nil, err
+				}
 				_, _ = bc.InsertChain(context.Background(), blocks)
 				bc.CurrentBlock()
 				// This should return a compatibility error.

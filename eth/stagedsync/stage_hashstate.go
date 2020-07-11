@@ -13,13 +13,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-
-	"github.com/ugorji/go/codec"
 )
 
-var cbor codec.CborHandle
-
-func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	syncHeadNumber, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -219,7 +215,7 @@ type OldestAppearedLoad struct {
 	lastKey       bytes.Buffer
 }
 
-func (l OldestAppearedLoad) LoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
 	if bytes.Equal(k, l.lastKey.Bytes()) {
 		return nil
 	}
@@ -244,43 +240,8 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-var promoterMapper = map[string]struct {
-	WalkerAdapter func(v []byte) changeset.Walker
-	KeySize       int
-	Template      string
-}{
-	string(dbutils.PlainAccountChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetPlainBytes(v)
-		},
-		KeySize:  common.AddressLength,
-		Template: "acc-prom-",
-	},
-	string(dbutils.PlainStorageChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetPlainBytes(v)
-		},
-		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
-		Template: "st-prom-",
-	},
-	string(dbutils.AccountChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength,
-		Template: "acc-prom-",
-	},
-	string(dbutils.StorageChangeSetBucket): {
-		WalkerAdapter: func(v []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(v)
-		},
-		KeySize:  common.HashLength + common.IncarnationLength + common.HashLength,
-		Template: "st-prom-",
-	},
-}
-
 func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := promoterMapper[string(changeSetBucket)].WalkerAdapter
+	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, _ []byte) error {
 			return next(k, k, nil)
@@ -289,7 +250,7 @@ func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
 }
 
 func getUnwindExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := promoterMapper[string(changeSetBucket)].WalkerAdapter
+	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 			return next(k, k, v)
@@ -314,8 +275,8 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 			newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 			var codeHash []byte
 			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
-			if err != nil {
-				return err
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, newK)
 			}
 			return next(k, newK, codeHash)
 		})
@@ -370,7 +331,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Debug("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 	skip := false
@@ -440,7 +401,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Info("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
+	log.Debug("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
@@ -503,7 +464,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	)
 }
 
-func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit chan struct{}) error {
+func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
 	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */, 0x00); err != nil {

@@ -151,7 +151,7 @@ func genUncles(i int, gen *BlockGen) {
 
 func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	// Create the database in memory or in a temporary directory.
-	var db ethdb.Database
+	var db *ethdb.ObjectDatabase
 	if !disk {
 		db = ethdb.NewMemDatabase()
 		defer db.Close()
@@ -174,9 +174,11 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	genesis := gspec.MustCommit(db)
 
 	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	ctx := chainman.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	defer chainman.Stop()
-	chain, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen)
+	chain, _, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen, false /* intermediateHashes */)
+	if err != nil {
+		b.Fatalf("generate chain: %v", err)
+	}
 
 	// Time the insertion of the new chain.
 	// State and blocks are stored in the same DB.

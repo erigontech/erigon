@@ -3,9 +3,9 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 
 	"github.com/VictoriaMetrics/fastcache"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -14,16 +14,16 @@ import (
 
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
-	db             ethdb.Getter
-	accountCache   *fastcache.Cache
-	storageCache   *fastcache.Cache
-	codeCache      *fastcache.Cache
-	codeSizeCache  *fastcache.Cache
+	db            ethdb.Getter
+	accountCache  *fastcache.Cache
+	storageCache  *fastcache.Cache
+	codeCache     *fastcache.Cache
+	codeSizeCache *fastcache.Cache
 }
 
 func NewDbStateReader(db ethdb.Getter) *DbStateReader {
 	return &DbStateReader{
-		db:             db,
+		db: db,
 	}
 }
 
@@ -56,7 +56,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 		} else {
 			return nil, err1
 		}
-		if err != nil && !entryNotFound(err) {
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, err
 		}
 	}
@@ -89,7 +89,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 		}
 	}
 	enc, err2 := dbr.db.Get(dbutils.CurrentStateBucket, compositeKey)
-	if err2 != nil && !entryNotFound(err2) {
+	if err2 != nil && !errors.Is(err2, ethdb.ErrKeyNotFound) {
 		return nil, err2
 	}
 	if dbr.storageCache != nil {
@@ -144,7 +144,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash c
 func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	if b, err := dbr.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
 		return binary.BigEndian.Uint64(b), nil
-	} else if entryNotFound(err) {
+	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil
 	} else {
 		return 0, err

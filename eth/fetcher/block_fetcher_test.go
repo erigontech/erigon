@@ -17,7 +17,6 @@
 package fetcher
 
 import (
-	"context"
 	"errors"
 	"math/big"
 	"sync"
@@ -52,7 +51,7 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
-	blocks, _ := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 
 		// If the block number is multiple of 3, send a bonus transaction to the miner
@@ -68,7 +67,10 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 		if i%5 == 0 {
 			block.AddUncle(&types.Header{ParentHash: block.PrevBlock(i - 1).Hash(), Number: big.NewInt(int64(i - 1))})
 		}
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		panic(err)
+	}
 	hashes := make([]common.Hash, n+1)
 	hashes[len(hashes)-1] = parent.Hash()
 	blockm := make(map[common.Hash]*types.Block, n+1)

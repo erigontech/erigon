@@ -24,12 +24,14 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	if err != nil {
 		return err
 	}
+
 	if s.BlockNumber == syncHeadNumber {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally
 		s.Done()
 		return nil
 	}
+
 	if s.BlockNumber == 0 {
 		// Special case - if this is the first cycle, we need to produce hashed state first
 		log.Info("Initial hashing plain state", "to", syncHeadNumber)
@@ -63,9 +65,6 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return collector.Collect(k, nil)
-		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
@@ -78,7 +77,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		if subTries.Hashes[0] != expectedRootHash {
 			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], expectedRootHash)
 		}
-		log.Info("Collection finished",
+		log.Debug("Collection finished",
 			"root hash", subTries.Hashes[0].Hex(),
 			"gen IH", generationIHTook,
 		)
@@ -86,7 +85,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		return err
 	}
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
+		return fmt.Errorf("gen ih stage: fail load data to bucket: %d", err)
 	}
 	log.Info("Regeneration ended")
 	return nil
@@ -100,13 +99,15 @@ type Receiver struct {
 	currentAccountWithInc []byte
 	unfurlList            []string
 	currentIdx            int
+	quitCh                <-chan struct{}
 }
 
-func NewReceiver() *Receiver {
+func NewReceiver(quitCh <-chan struct{}) *Receiver {
 	return &Receiver{
 		defaultReceiver: trie.NewDefaultReceiver(),
 		accountMap:      make(map[string]*accounts.Account),
 		storageMap:      make(map[string][]byte),
+		quitCh:          quitCh,
 	}
 }
 
@@ -119,6 +120,10 @@ func (r *Receiver) Receive(
 	hash []byte,
 	cutoff int,
 ) error {
+	if err := common.Stopped(r.quitCh); err != nil {
+		return err
+	}
+
 	storage := itemType == trie.StorageStreamItem || itemType == trie.SHashStreamItem
 	for r.currentIdx < len(r.unfurlList) {
 		ks := r.unfurlList[r.currentIdx]
@@ -212,9 +217,6 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
-	if _, ok := r.accountMap[newKStr]; ok {
-		return nil
-	}
 	if len(value) > 0 {
 		var a accounts.Account
 		if err = a.DecodeForStorage(value); err != nil {
@@ -234,10 +236,6 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
-	if _, ok := r.storageMap[newKStr]; ok {
-		//fmt.Printf("Duplicate: %x\n", newKStr)
-		return nil
-	}
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
@@ -251,7 +249,7 @@ type HashPromoter struct {
 	db               ethdb.Database
 	ChangeSetBufSize uint64
 	TempDir          string
-	quitCh           chan struct{}
+	quitCh           <-chan struct{}
 }
 
 func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
@@ -259,6 +257,7 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		TempDir:          os.TempDir(),
+		quitCh:           quitCh,
 	}
 }
 
@@ -269,7 +268,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Incremental promotion of intermediate hashes", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Debug("Incremental state promotion of intermediate hashes", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 	skip := false
@@ -396,7 +395,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	r := NewReceiver()
+	r := NewReceiver(quit)
 	if err := p.Promote(s, from, to, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
@@ -427,9 +426,6 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return collector.Collect(k, nil)
-		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
@@ -460,17 +456,17 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	return nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
 	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit)
 }
 
-func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit chan struct{}) error {
+func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	r := NewReceiver()
+	r := NewReceiver(quit)
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
@@ -503,9 +499,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		}
 		k := make([]byte, len(keyHex)/2)
 		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return collector.Collect(k, nil)
-		}
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDbSubTrieLoader()

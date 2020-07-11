@@ -704,15 +704,13 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
 	var blockNumber int
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, len(txs), func(i int, block *core.BlockGen) {
+	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, len(txs), func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 		var isContractCall bool
 		blockNumber = i
 		signer := types.HomesteadSigner{}
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		if txToSend, ok := txs[i]; ok {
 			tx, isContractCall = txToSend.txFn(block, contractBackend)
@@ -724,7 +722,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 
 		if tx != nil {
 			if !isContractCall {
-				err = contractBackend.SendTransaction(ctx, tx)
+				err = contractBackend.SendTransaction(context.Background(), tx)
 				if err != nil {
 					return
 				}
@@ -734,7 +732,10 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 		}
 
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("generate chain: %w", err)
+	}
 
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("block %d, error %v", blockNumber, err)

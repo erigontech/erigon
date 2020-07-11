@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 /**
@@ -36,7 +37,9 @@ numOfUint32Values uint16
 func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 	sort.Sort(s)
 	var err error
-	buf := new(bytes.Buffer)
+	buf := pool.GetBuffer(1 << 16)
+	buf.Reset()
+	defer pool.PutBuffer(buf)
 	uint16Arr := make([]byte, 2)
 	uint32Arr := make([]byte, 4)
 	numOfElements := s.Len()
@@ -175,7 +178,8 @@ func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 			}
 		}
 	}
-	return buf.Bytes(), nil
+
+	return common.CopyBytes(buf.Bytes()), nil
 }
 
 // decodeStorage decodes a stream of bytes to a storage changeset using
@@ -356,6 +360,7 @@ func findInStorageChangeSet(b []byte, keyPrefixLen int, k []byte) ([]byte, error
 		keyPrefixLen,
 		k[0:keyPrefixLen],
 		k[keyPrefixLen+common.IncarnationLength:keyPrefixLen+common.HashLength+common.IncarnationLength],
+		^binary.BigEndian.Uint64(k[keyPrefixLen:]), /* incarnation */
 	)
 }
 
@@ -365,6 +370,7 @@ func findWithoutIncarnationInStorageChangeSet(b []byte, keyPrefixLen int, addrBy
 		keyPrefixLen,
 		addrBytesToFind,
 		keyBytesToFind,
+		0, /* incarnation */
 	)
 }
 
@@ -373,6 +379,7 @@ func doSearch(
 	keyPrefixLen int,
 	addrBytesToFind []byte,
 	keyBytesToFind []byte,
+	incarnation uint64,
 ) ([]byte, error) {
 	if len(b) == 0 {
 		return nil, ErrNotFound
@@ -388,8 +395,8 @@ func doSearch(
 	incarnatonsInfo := 4 + numOfUniqueElements*(keyPrefixLen+4)
 	numOfElements := int(binary.BigEndian.Uint32(b[incarnatonsInfo-4:]))
 	numOfNotDefaultIncarnations := int(binary.BigEndian.Uint32(b[incarnatonsInfo:]))
-	incarnatonsStart := incarnatonsInfo + 4
-	keysStart := incarnatonsStart + numOfNotDefaultIncarnations*12
+	incarnationsStart := incarnatonsInfo + 4
+	keysStart := incarnationsStart + numOfNotDefaultIncarnations*12
 	valsInfoStart := keysStart + numOfElements*common.HashLength
 
 	addrID := sort.Search(numOfUniqueElements, func(i int) bool {
@@ -403,6 +410,20 @@ func doSearch(
 	}
 	if !bytes.Equal(b[4+addrID*(4+keyPrefixLen):4+addrID*(4+keyPrefixLen)+keyPrefixLen], addrBytesToFind) {
 		return nil, ErrNotFound
+	}
+	if incarnation > 0 {
+		// Find incarnation
+		incIndex := sort.Search(numOfNotDefaultIncarnations, func(i int) bool {
+			id := int(binary.BigEndian.Uint32(b[incarnationsStart+12*i:]))
+			return id >= addrID
+		})
+		var foundIncarnation uint64 = DefaultIncarnation
+		if incIndex < numOfNotDefaultIncarnations && int(binary.BigEndian.Uint32(b[incarnationsStart+12*incIndex:])) == addrID {
+			foundIncarnation = ^binary.BigEndian.Uint64(b[incarnationsStart+12*incIndex+4:])
+		}
+		if foundIncarnation != incarnation {
+			return nil, ErrNotFound
+		}
 	}
 	from := 0
 	if addrID > 0 {

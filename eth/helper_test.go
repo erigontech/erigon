@@ -76,9 +76,11 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, err
 	}
 	blockchain.EnableReceipts(true)
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+	chain, _, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator, false /* intermediateHashes */)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate chain: %w", err)
+	}
 
 	if _, err = blockchain.InsertChain(context.Background(), chain); err != nil {
 		return nil, nil, err
@@ -88,7 +90,9 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	if err != nil {
 		return nil, nil, err
 	}
-	pm.Start(1000)
+	if err = pm.Start(1000, true); err != nil {
+		return nil, nil, fmt.Errorf("error on protocol manager start: %w", err)
+	}
 	return pm, db, nil
 }
 
@@ -170,6 +174,18 @@ func (p *testTxPool) Pending() (map[common.Address]types.Transactions, error) {
 
 func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return p.txFeed.Subscribe(ch)
+}
+
+func (p *testTxPool) IsStarted() bool {
+	return true
+}
+
+func (p *testTxPool) RunInit() error {
+	return nil
+}
+
+func (p *testTxPool) RunStop() error {
+	return nil
 }
 
 // newTestTransaction create a new dummy transaction.

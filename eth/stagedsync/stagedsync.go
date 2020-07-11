@@ -22,6 +22,7 @@ func PrepareStagedSync(
 	quitCh chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
+	txPoolControl *TxPoolStartStopper,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
 
@@ -64,17 +65,17 @@ func PrepareStagedSync(
 					ReadChLen:       4,
 					Now:             time.Now(),
 				}
-				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), datadir, quitCh)
+				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindSendersStage(u, stateDB)
+				return UnwindSendersStage(u, stateDB)
 			},
 		},
 		{
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts)
+				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, nil)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)
@@ -130,10 +131,20 @@ func PrepareStagedSync(
 			Disabled:            !storageMode.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnTxLookup(s, stateDB, datadir, quitCh)
+				return SpawnTxLookup(s, stateDB, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindTxLookup(u, stateDB, quitCh)
+				return UnwindTxLookup(u, s, stateDB, datadir, quitCh)
+			},
+		},
+		{
+			ID:          stages.TxPool,
+			Description: "Starts the transaction pool",
+			ExecFunc: func(s *StageState, _ Unwinder) error {
+				return spawnTxPool(s, txPoolControl.Start)
+			},
+			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
+				return txPoolControl.Stop()
 			},
 		},
 	}

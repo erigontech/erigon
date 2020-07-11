@@ -45,6 +45,9 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 }
 
 func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
+	return findWithoutIncarnationInStorageChangeSet(b, common.HashLength, k[:common.HashLength], k[common.HashLength:])
+}
+func (b StorageChangeSetBytes) FindWithIncarnation(k []byte) ([]byte, error) {
 	return findInStorageChangeSet(b, common.HashLength, k)
 }
 
@@ -81,6 +84,10 @@ func (b StorageChangeSetPlainBytes) Walk(f func(k, v []byte) error) error {
 }
 
 func (b StorageChangeSetPlainBytes) Find(k []byte) ([]byte, error) {
+	return findWithoutIncarnationInStorageChangeSet(b, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
+}
+
+func (b StorageChangeSetPlainBytes) FindWithIncarnation(k []byte) ([]byte, error) {
 	return findInStorageChangeSet(b, common.AddressLength, k)
 }
 

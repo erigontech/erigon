@@ -129,6 +129,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if !accountsEqual(original, account) || w.storageChanged[address] {
+
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
 	return nil

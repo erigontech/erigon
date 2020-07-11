@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/AskAlexSharov/lmdb-go/lmdb"
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -50,9 +49,9 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+var verbosity = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
-var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
@@ -61,39 +60,6 @@ var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata dat
 var bucket = flag.String("bucket", "", "bucket in the database")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 var preImage = flag.String("preimage", "0x00", "preimage")
-
-func bucketList(db *bolt.DB) [][]byte {
-	bucketList := [][]byte{}
-	err := db.View(func(tx *bolt.Tx) error {
-		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, dbutils.CurrentStateBucket) {
-				n := make([]byte, len(name))
-				copy(n, name)
-				bucketList = append(bucketList, n)
-			}
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could view db: %s", err))
-	}
-	return bucketList
-}
-
-// prefixLen returns the length of the common prefix of a and b.
-func prefixLen(a, b []byte) int {
-	var i, length = 0, len(a)
-	if len(b) < length {
-		length = len(b)
-	}
-	for ; i < length; i++ {
-		if a[i] != b[i] {
-			break
-		}
-	}
-	return i
-}
 
 func check(e error) {
 	if e != nil {
@@ -1573,236 +1539,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func resetStage3(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if err := db.ClearBuckets(
-		dbutils.Senders,
-	); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
-		return err
-	}
-	var err error
-	var stage2progress uint64
-	if stage2progress, _, err = stages.GetStageProgress(db, stages.Bodies); err != nil {
-		return err
-	}
-	log.Info("Stage2", "progress", stage2progress)
-	ch := make(chan struct{})
-	s := &stagedsync.StageState{Stage: stages.Senders, BlockNumber: 0}
-	const batchSize = 10000
-	const blockSize = 4096
-	n := runtime.NumCPU()
-
-	cfg := stagedsync.Stage3Config{
-		BatchSize:       batchSize,
-		BlockSize:       blockSize,
-		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-		StartTrace:      false,
-		Prof:            false,
-		NumOfGoroutines: n,
-		ReadChLen:       4,
-		Now:             time.Now(),
-	}
-	if err = stagedsync.SpawnRecoverSendersStage(cfg, s, db, params.MainnetChainConfig, "", ch); err != nil {
-		return err
-	}
-	return nil
-}
-
-func testStage4(chaindata string, block uint64) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
-	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
-	if err = stagedsync.SpawnExecuteBlocksStage(s, db, blockchain, block, ch, nil, false); err != nil {
-		return err
-	}
-	return nil
-}
-
-func testUnwind4(chaindata string, rewind uint64) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
-	log.Info("Stage4", "progress", stage4progress)
-	core.UsePlainStateExecution = true
-	u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.Execution, BlockNumber: stage4progress}
-	if err = stagedsync.UnwindExecutionStage(u, s, db); err != nil {
-		return err
-	}
-	return nil
-}
-
-func testStage5(chaindata string, reset bool) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if reset {
-		if err := db.ClearBuckets(
-			dbutils.CurrentStateBucket,
-			dbutils.ContractCodeBucket,
-			dbutils.IntermediateTrieHashBucket,
-		); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
-			return err
-		}
-	}
-	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
-	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	log.Info("Stage4", "progress", stage4progress)
-	log.Info("Stage5", "progress", stage5progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
-	if err = stagedsync.SpawnIntermediateHashesStage(stageState, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
-	return nil
-}
-
-func testUnwind5(chaindata string, rewind uint64) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	log.Info("Stage5", "progress", stage5progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.IntermediateHashes, BlockNumber: stage5progress}
-	if err = stagedsync.UnwindHashStateStage(u, s, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
-	return nil
-}
-
-func testStage6(chaindata string, reset bool) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if reset {
-		if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
-			return err
-		}
-	}
-	var err error
-	var stage5progress uint64
-	if stage5progress, _, err = stages.GetStageProgress(db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	var stage6progress uint64
-	if stage6progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
-		return err
-	}
-	log.Info("Stage5", "progress", stage5progress)
-	log.Info("Stage6", "progress", stage6progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
-	if err = stagedsync.SpawnHashStateStage(stageState, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
-	return nil
-}
-
-func testUnwind6(chaindata string, rewind uint64) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var stage6progress uint64
-	if stage6progress, _, err = stages.GetStageProgress(db, stages.HashState); err != nil {
-		return err
-	}
-	log.Info("Stage6", "progress", stage6progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6progress - rewind}
-	s := &stagedsync.StageState{Stage: stages.HashState, BlockNumber: stage6progress}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, s, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
-	return nil
-}
-
-func testStage78(chaindata string, reset bool) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	if reset {
-		if err := db.ClearBuckets(
-			dbutils.AccountsHistoryBucket,
-			dbutils.StorageHistoryBucket,
-		); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
-			return err
-		}
-	}
-	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
-		return err
-	}
-	var stage7progress uint64
-	if stage7progress, _, err = stages.GetStageProgress(db, stages.AccountHistoryIndex); err != nil {
-		return err
-	}
-	var stage8progress uint64
-	if stage8progress, _, err = stages.GetStageProgress(db, stages.StorageHistoryIndex); err != nil {
-		return err
-	}
-	log.Info("Stage4", "progress", stage4progress)
-	log.Info("Stage7", "progress", stage7progress)
-	log.Info("Stage8", "progress", stage8progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
-	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
-		return err
-	}
-	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
-	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
-	return nil
-}
-
 func findPreimage(chaindata string, hash common.Hash) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -1904,22 +1640,27 @@ func dupSortState(chaindata string) {
 		var createErr error
 		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
 		check(createErr)
+		err = tx.Drop(newStateBucket, false)
+		check(err)
+		return nil
+	})
+	check(err)
+
+	var newStateBucket2 lmdb.DBI
+	err = env2.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket2, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create)
+		check(createErr)
+		err = tx.Drop(newStateBucket2, false)
+		check(err)
 		return nil
 	})
 	check(err)
 
 	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
-		sz, _ := b.Size()
-		fmt.Printf("Current State bucket size: %s\n", common.StorageSize(sz))
-
 		txn, _ := env.BeginTxn(nil, 0)
-		err = txn.Drop(newStateBucket, false)
-		check(err)
-
 		txn2, _ := env2.BeginTxn(nil, 0)
-		err = txn2.Drop(newStateBucket, false)
-		check(err)
 
 		c := b.Cursor()
 		i := 0
@@ -1936,17 +1677,16 @@ func dupSortState(chaindata string) {
 				fmt.Printf("%x\n", k[:2])
 			}
 
+			err = txn2.Put(newStateBucket2, common.CopyBytes(k), common.CopyBytes(v), 0)
+			check(err)
+
 			if len(k) == common.HashLength {
 				err = txn.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.AppendDup)
-				check(err)
-				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
 				check(err)
 			} else {
 				prefix := k[:common.HashLength+common.IncarnationLength]
 				suffix := k[common.HashLength+common.IncarnationLength:]
 				err = txn.Put(newStateBucket, common.CopyBytes(prefix), append(suffix, v...), lmdb.AppendDup)
-				check(err)
-				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
 				check(err)
 			}
 		}
@@ -1959,10 +1699,23 @@ func dupSortState(chaindata string) {
 	})
 	check(err)
 
+	err = env2.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket2)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
 	err = env.View(func(txn *lmdb.Txn) (err error) {
 		st, err := txn.Stat(newStateBucket)
 		check(err)
-		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		fmt.Printf("New bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
+	err = env.View(func(txn *lmdb.Txn) (err error) {
 
 		cur, err := txn.OpenCursor(newStateBucket)
 		check(err)
@@ -2077,96 +1830,6 @@ func deleteLargeDupSortKey() {
 	check(err)
 }
 
-func compareBucket(chaindata string, chaindataCopy string, bucket string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	copyDb := ethdb.MustOpen(chaindataCopy)
-	defer copyDb.Close()
-	count := 0
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		c := b.Cursor()
-		k, v, e := c.First()
-		if e != nil {
-			return e
-		}
-		return copyDb.KV().View(context.Background(), func(copyTx ethdb.Tx) error {
-			copyB := copyTx.Bucket([]byte(bucket))
-			copyC := copyB.Cursor()
-			copyK, copyV, copyE := copyC.First()
-			if copyE != nil {
-				return copyE
-			}
-			for k != nil || copyK != nil {
-				count++
-				if count%100000 == 0 {
-					fmt.Printf("Compared %d records\n", count)
-				}
-				if k == nil {
-					fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
-					copyK, copyV, copyE = copyC.Next()
-					if copyE != nil {
-						return copyE
-					}
-				} else if copyK == nil {
-					fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
-					k, v, e = c.Next()
-					if e != nil {
-						return e
-					}
-				} else {
-					switch bytes.Compare(k, copyK) {
-					case -1:
-						fmt.Printf("Missing copyDb: %x [%x]\n", k, v)
-						k, v, e = c.Next()
-						if e != nil {
-							return e
-						}
-					case 1:
-						fmt.Printf("Missing in db: %x [%x]\n", copyK, copyV)
-						copyK, copyV, copyE = copyC.Next()
-						if copyE != nil {
-							return copyE
-						}
-					case 0:
-						if !bytes.Equal(v, copyV) {
-							fmt.Printf("Different values for %x. db: [%x], copyDb: [%x]\n", k, v, copyV)
-						}
-						k, v, e = c.Next()
-						if e != nil {
-							return e
-						}
-						copyK, copyV, copyE = copyC.Next()
-						if copyE != nil {
-							return copyE
-						}
-					default:
-						fmt.Printf("Unexpected result of bytes.Compare: %d\n", bytes.Compare(k, copyK))
-					}
-				}
-			}
-			return nil
-		})
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func printStages(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var progress uint64
-	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
-		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
-			return err
-		}
-		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
-	}
-	return nil
-}
-
 func fixStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2188,26 +1851,77 @@ func fixStages(chaindata string) error {
 	return nil
 }
 
-func testStageLoop(chaindata string) error {
-	for block := uint64(10000000); block < uint64(11000000); block += uint64(100000) {
-		if err := testStage4(chaindata, block); err != nil {
-			return err
+func changeSetStats(chaindata string, block1, block2 uint64) error {
+	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	accounts := make(map[string]struct{})
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block1)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if timestamp >= block2 {
+				break
+			}
+			if timestamp%100000 == 0 {
+				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
+			}
+			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
+				accounts[string(common.CopyBytes(kk))] = struct{}{}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
 		}
-		if err := testStage5(chaindata, true /* reset */); err != nil {
-			return err
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
+	storage := make(map[string]struct{})
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block1)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if timestamp >= block2 {
+				break
+			}
+			if timestamp%100000 == 0 {
+				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
+			}
+			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
+				storage[string(common.CopyBytes(kk))] = struct{}{}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("accounts changed: %d, storage changed: %d\n", len(accounts), len(storage))
 	return nil
 }
 
-func searchChangeSet(chaindata string, key []byte) error {
+func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block)
 		c := st.Cursor()
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -2229,54 +1943,38 @@ func searchChangeSet(chaindata string, key []byte) error {
 	return nil
 }
 
-func buildHistory(chaindata string, reset bool) error {
+func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
+	fmt.Printf("Searching storage changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if reset {
-		if err := db.ClearBuckets(
-			dbutils.AccountsHistoryBucket,
-			dbutils.StorageHistoryBucket,
-		); err != nil {
-			return err
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
+				if bytes.Equal(kk, key) {
+					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
+				}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
 		}
-		if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
-			return err
-		}
-	}
-	var err error
-	var stage4progress uint64
-	if stage4progress, _, err = stages.GetStageProgress(db, stages.Execution); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
-	var stage7progress uint64
-	if stage7progress, _, err = stages.GetStageProgress(db, stages.AccountHistoryIndex); err != nil {
-		return err
-	}
-	var stage8progress uint64
-	if stage8progress, _, err = stages.GetStageProgress(db, stages.StorageHistoryIndex); err != nil {
-		return err
-	}
-	log.Info("Stage4", "progress", stage4progress)
-	log.Info("Stage7", "progress", stage7progress)
-	log.Info("Stage8", "progress", stage8progress)
-	core.UsePlainStateExecution = true
-	ch := make(chan struct{})
-	stageState := &stagedsync.StageState{Stage: stages.AccountHistoryIndex, BlockNumber: stage7progress}
-	if err = stagedsync.SpawnAccountHistoryIndex(stageState, db, "", ch); err != nil {
-		return err
-	}
-	stageState = &stagedsync.StageState{Stage: stages.StorageHistoryIndex, BlockNumber: stage8progress}
-	if err = stagedsync.SpawnStorageHistoryIndex(stageState, db, "", ch); err != nil {
-		return err
-	}
-	close(ch)
 	return nil
 }
 
 func main() {
+	flag.Parse()
+
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -2290,9 +1988,9 @@ func main() {
 	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.LvlInfo)
 
-	flag.Parse()
+	glogger.Verbosity(log.Lvl(*verbosity))
+
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
@@ -2405,78 +2103,18 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "reset3" {
-		if err := resetStage3(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stage4" {
-		if err := testStage4(*chaindata, uint64(*block)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "unwind4" {
-		if err := testUnwind4(*chaindata, uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stage5" {
-		if err := testStage5(*chaindata, false /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "reset5" {
-		if err := testStage5(*chaindata, true /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "unwind5" {
-		if err := testUnwind5(*chaindata, uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stage6" {
-		if err := testStage6(*chaindata, false /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "reset6" {
-		if err := testStage6(*chaindata, true /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "unwind6" {
-		if err := testUnwind6(*chaindata, uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stage78" {
-		if err := testStage78(*chaindata, false /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "reset78" {
-		if err := testStage78(*chaindata, true /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "stageLoop" {
-		if err := testStageLoop(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
 	if *action == "regenerateIH" {
 		if err := regenerate(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "searchChangeSet" {
-		if err := searchChangeSet(*chaindata, common.FromHex(*hash)); err != nil {
+		if err := searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "printStages" {
-		if err := printStages(*chaindata); err != nil {
+	if *action == "searchStorageChangeSet" {
+		if err := searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
@@ -2491,14 +2129,10 @@ func main() {
 	if *action == "dupSortState" {
 		dupSortState(*chaindata)
 	}
-	if *action == "compare" {
-		if err := compareBucket(*chaindata, *chaindata+"-copy", *bucket); err != nil {
+	if *action == "changeSetStats" {
+		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "resetHistory" {
-		if err := buildHistory(*chaindata, true /* reset */); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
+
 }

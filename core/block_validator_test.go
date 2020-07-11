@@ -18,7 +18,6 @@ package core
 
 import (
 	"context"
-	"math/big"
 	"runtime"
 	"testing"
 	"time"
@@ -42,9 +41,11 @@ func TestHeaderVerification(t *testing.T) {
 	dests := vm.NewDestsCache(100)
 	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
 	defer chain.Stop()
-	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb.NewBatch(), 8, nil)
+	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("genetate chain: %v", err)
+	}
 
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
@@ -96,8 +97,11 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 	var (
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _ = GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
+		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
 	)
+	if err != nil {
+		t.Fatalf("genetate chain: %v", err)
+	}
 	headers := make([]*types.Header, len(blocks))
 	seals := make([]bool, len(blocks))
 
@@ -172,8 +176,11 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	var (
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _ = GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil)
+		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil, false /* intemediateHashes */)
 	)
+	if err != nil {
+		t.Fatalf("genetate chain: %v", err)
+	}
 	headers := make([]*types.Header, len(blocks))
 	seals := make([]bool, len(blocks))
 

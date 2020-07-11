@@ -217,28 +217,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	var (
-		vmConfig = vm.Config{
-			EnablePreimageRecording: config.EnablePreimageRecording,
-			EWASMInterpreter:        config.EWASMInterpreter,
-			EVMInterpreter:          config.EVMInterpreter,
-		}
-		cacheConfig = &core.CacheConfig{
-			Pruning:             config.Pruning,
-			BlocksBeforePruning: config.BlocksBeforePruning,
-			BlocksToPrune:       config.BlocksToPrune,
-			PruneTimeout:        config.PruningTimeout,
-			TrieCleanLimit:      config.TrieCleanCache,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieTimeLimit:       config.TrieTimeout,
-			DownloadOnly:        config.DownloadOnly,
-			NoHistory:           !config.StorageMode.History,
-			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
-		}
-	)
-
-	dests := vm.NewDestsCache(50000)
+	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, dests)
 	if err != nil {
 		return nil, err
@@ -267,20 +246,26 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
-	if config.SyncMode != downloader.StagedSync {
-		eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
-	}
+
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-
 	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
-
 	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
+
+	if config.SyncMode != downloader.StagedSync {
+		if err = eth.StartTxPool(); err != nil {
+			return nil, err
+		}
+	} else {
+		eth.txPool.AddInit(eth.StartTxPool)
+		eth.txPool.AddStop(eth.StopTxPool)
+	}
 
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, dests)
@@ -302,6 +287,30 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	return eth, nil
+}
+
+func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig, *vm.DestsCache) {
+	var (
+		vmConfig = vm.Config{
+			EnablePreimageRecording: config.EnablePreimageRecording,
+			EWASMInterpreter:        config.EWASMInterpreter,
+			EVMInterpreter:          config.EVMInterpreter,
+		}
+		cacheConfig = &core.CacheConfig{
+			Pruning:             config.Pruning,
+			BlocksBeforePruning: config.BlocksBeforePruning,
+			BlocksToPrune:       config.BlocksToPrune,
+			PruneTimeout:        config.PruningTimeout,
+			TrieCleanLimit:      config.TrieCleanCache,
+			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieDirtyLimit:      config.TrieDirtyCache,
+			TrieTimeLimit:       config.TrieTimeout,
+			DownloadOnly:        config.DownloadOnly,
+			NoHistory:           !config.StorageMode.History,
+			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
+		}
+	)
+	return vmConfig, cacheConfig, vm.NewDestsCache(50000)
 }
 
 func makeExtraData(extra []byte) []byte {
@@ -630,11 +639,28 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 		}
 		maxPeers -= s.config.LightPeers
 	}
+
+	withTxPool := s.config.SyncMode != downloader.StagedSync
 	// Start the networking layer and the light server if requested
-	s.protocolManager.Start(maxPeers)
+	if err := s.protocolManager.Start(maxPeers, withTxPool); err != nil {
+		return err
+	}
 	if s.lesServer != nil {
 		s.lesServer.Start(srvr)
 	}
+	return nil
+}
+
+func (s *Ethereum) StartTxPool() error {
+	if err := s.txPool.Start(s.blockchain); err != nil {
+		return err
+	}
+	return s.protocolManager.StartTxPool()
+}
+
+func (s *Ethereum) StopTxPool() error {
+	s.protocolManager.StopTxPool()
+	s.txPool.Stop()
 	return nil
 }
 
@@ -650,7 +676,9 @@ func (s *Ethereum) Stop() error {
 	// Then stop everything else.
 	s.bloomIndexer.Close()
 	close(s.closeBloomHandler)
-	s.txPool.Stop()
+	if err := s.StopTxPool(); err != nil {
+		log.Warn("error while stopping transaction pool", "err", err)
+	}
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()

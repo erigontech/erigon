@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -198,7 +199,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise(id, hash, td, StagedSync, vm.NewDestsCache(100))
+	err := st.downloader.synchronise(id, hash, td, StagedSync, vm.NewDestsCache(100), getTestTxPoolControl())
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle
@@ -306,5 +307,12 @@ func TestUnwind(t *testing.T) {
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
+	}
+}
+
+func getTestTxPoolControl() *stagedsync.TxPoolStartStopper {
+	return &stagedsync.TxPoolStartStopper{
+		Start: func() error { return nil },
+		Stop:  func() error { return nil },
 	}
 }
