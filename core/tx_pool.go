@@ -278,7 +278,6 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		reqPromoteCh:    make(chan *accountSet),
 		queueTxEventCh:  make(chan *types.Transaction),
 		reorgDoneCh:     make(chan chan struct{}),
-		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 	}
 
@@ -292,6 +291,8 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 }
 
 func (pool *TxPool) Start(chain BlockChainer) error {
+	pool.reorgShutdownCh = make(chan struct{}, 1)
+
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
 		log.Info("Setting new local account", "address", addr)
