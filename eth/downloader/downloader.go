@@ -944,8 +944,9 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 					end = check
 					break
 				}
-				header := rawdb.ReadHeader(d.stateDB, hash, check) // Independent of sync mode, header surely exists
-				if header == nil {                                 // Replace Number with Difficulty
+
+				header := rawdb.ReadHeader(d.stateDB, h, check) // Independent of sync mode, header surely exists
+				if header == nil {                              // Replace Number with Difficulty
 					p.log.Debug("Received non requested header", "number", n, "hash", header.Hash(), "request", check)
 					return 0, errBadPeer
 				}
