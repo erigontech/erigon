@@ -2455,39 +2455,13 @@ func InsertBodies(
 
 	stats := InsertStats{StartTime: mclock.Now()}
 
-	var offset int
 	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
-	// Find correct insertion point for this chain
-	preBlocks := []*types.Block{}
 	parentHash := chain[0].ParentHash()
 	parent = rawdb.ReadBlock(db, parentHash, parentNumber)
 	if parent == nil {
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 		return true, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
-	}
-
-	canonicalHash := rawdb.ReadCanonicalHash(db, parentNumber)
-	for canonicalHash != parentHash {
-		log.Warn("Chain segment's parent not on canonical hash, adding to pre-blocks", "block", parentNumber, "hash", parentHash)
-		preBlocks = append(preBlocks, parent)
-		parentNumber--
-		parentHash = parent.ParentHash()
-		parent = rawdb.ReadBlock(db, parentHash, parentNumber)
-		if parent == nil {
-			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
-			return true, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
-		}
-		canonicalHash = rawdb.ReadCanonicalHash(db, parentNumber)
-	}
-
-	for left, right := 0, len(preBlocks)-1; left < right; left, right = left+1, right-1 {
-		preBlocks[left], preBlocks[right] = preBlocks[right], preBlocks[left]
-	}
-
-	offset = len(preBlocks)
-	if offset > 0 {
-		chain = append(preBlocks, chain...)
 	}
 
 	// Iterate over the blocks and insert when the verifier permits

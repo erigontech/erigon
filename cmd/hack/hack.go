@@ -1852,9 +1852,33 @@ func fixStages(chaindata string) error {
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
-	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	/*
+	fmt.Printf("State stats\n")
+	stAccounts := 0
+	stStorage := 0
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStateBucket)
+		c := st.Cursor()
+		k, _, e := c.First()
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			if len(k) > 28 {
+				stStorage++
+			} else {
+				stAccounts++
+			}
+			if (stStorage + stAccounts) % 100000 == 0 {
+				fmt.Printf("State records: %d\n", stStorage + stAccounts)
+			}
+		}
+		return e
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
+	*/
+	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	accounts := make(map[string]struct{})
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
@@ -1868,7 +1892,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			if timestamp >= block2 {
 				break
 			}
-			if timestamp%100000 == 0 {
+			if (timestamp-block1)%100000 == 0 {
 				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
 			}
 			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
@@ -1895,7 +1919,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			if timestamp >= block2 {
 				break
 			}
-			if timestamp%100000 == 0 {
+			if (timestamp-block1)%100000 == 0 {
 				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
 			}
 			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {

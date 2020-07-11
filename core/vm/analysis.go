@@ -19,14 +19,12 @@ package vm
 import (
 	"github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 type Cache interface {
 	Len() int
-	Set(hash common.Hash, v *pool.ByteBuffer)
-	Get(hash common.Hash) (*pool.ByteBuffer, bool)
-	Clear(codeHash common.Hash, local *pool.ByteBuffer)
+	Set(hash common.Hash, v []uint64)
+	Get(hash common.Hash) ([]uint64, bool)
 }
 
 type DestsCache struct {
@@ -38,28 +36,15 @@ func NewDestsCache(maxSize int) *DestsCache {
 	return &DestsCache{c}
 }
 
-func (d *DestsCache) Set(hash common.Hash, v *pool.ByteBuffer) {
+func (d *DestsCache) Set(hash common.Hash, v []uint64) {
 	d.Add(hash, v)
 }
 
-func (d DestsCache) Get(hash common.Hash) (*pool.ByteBuffer, bool) {
-	v, ok := d.Cache.Get(hash)
-	if !ok {
-		return nil, false
+func (d DestsCache) Get(hash common.Hash) ([]uint64, bool) {
+	if v, ok := d.Cache.Get(hash); ok {
+		return v.([]uint64), true
 	}
-	return v.(*pool.ByteBuffer), ok
-}
-
-func (d *DestsCache) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
-	if codeHash == (common.Hash{}) {
-		return
-	}
-	_, ok := d.Get(codeHash)
-	if ok {
-		return
-	}
-	// analysis is a local one
-	pool.PutBuffer(local)
+	return nil, false
 }
 
 func (d *DestsCache) Len() int {
@@ -67,28 +52,26 @@ func (d *DestsCache) Len() int {
 }
 
 // codeBitmap collects data locations in code.
-func codeBitmap(code []byte) *pool.ByteBuffer {
+func codeBitmap(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
-	bits := pool.GetBufferZeroed(uint(len(code)/8 + 1 + 4))
+	bits := make([]uint64, (len(code)+32+63)/64)
 
-	for pc := uint64(0); pc < uint64(len(code)); {
+	for pc := 0; pc < len(code); {
 		op := OpCode(code[pc])
-
+		pc++
 		if op >= PUSH1 && op <= PUSH32 {
-			numbits := op - PUSH1 + 1
-			pc++
-			for ; numbits >= 8; numbits -= 8 {
-				bits.SetBit8Pos(pc) // 8
-				pc += 8
+			numbits := int(op - PUSH1 + 1)
+			x := uint64(1) << (op - PUSH1)
+			x = x | (x-1) // Smear the bit to the right
+			idx := pc/64
+			shift := pc&63
+			bits[idx] |= x << shift
+			if shift + shift > 64 {
+				bits[idx+1] |= x >> (64 - shift)
 			}
-			for ; numbits > 0; numbits-- {
-				bits.SetBitPos(pc)
-				pc++
-			}
-		} else {
-			pc++
+			pc += numbits
 		}
 	}
 	return bits
