@@ -359,7 +359,7 @@ func (pool *TxPool) loop() {
 
 		// System shutdown.
 		case <-pool.chainHeadSub.Err():
-			_ = common.Stopped(pool.reorgShutdownCh)
+			common.SafeClose(pool.reorgShutdownCh)
 			return
 
 		// Handle stats reporting ticks
