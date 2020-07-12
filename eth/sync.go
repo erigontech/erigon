@@ -230,9 +230,6 @@ func (cs *chainSyncer) loop() {
 		case <-cs.doneCh:
 			//fmt.Printf("Done\n")
 			cs.doneCh = nil
-			if !cs.force.Stop() {
-				<-cs.force.C
-			}
 			cs.force.Reset(forceSyncCycle)
 			cs.forced = false
 		case <-cs.force.C:
