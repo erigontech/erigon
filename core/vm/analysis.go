@@ -17,9 +17,12 @@
 package vm
 
 import (
+	"sync"
+
 	"github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 )
 
 type Cache interface {
@@ -31,6 +34,12 @@ type Cache interface {
 
 type DestsCache struct {
 	*lru.Cache
+}
+
+var buffPool = sync.Pool{
+	New: func() interface{} {
+		return &pool.ByteBuffer{ByteBuffer: &bytebufferpool.ByteBuffer{B: make([]byte, 0, 1000)}}
+	},
 }
 
 func NewDestsCache(maxSize int) *DestsCache {
@@ -59,11 +68,23 @@ func (d *DestsCache) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
 		return
 	}
 	// analysis is a local one
-	pool.PutBuffer(local)
+	buffPool.Put(local)
 }
 
 func (d *DestsCache) Len() int {
 	return d.Cache.Len()
+}
+
+func getBuffer() *pool.ByteBuffer {
+	return buffPool.Get().(*pool.ByteBuffer)
+}
+
+func getBufferZeroed() *pool.ByteBuffer {
+	pp := buffPool.Get().(*pool.ByteBuffer)
+	for i := range pp.B {
+		pp.B[i] = 0
+	}
+	return pp
 }
 
 // codeBitmap collects data locations in code.
@@ -71,7 +92,7 @@ func codeBitmap(code []byte) *pool.ByteBuffer {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
-	bits := pool.GetBufferZeroed(uint(len(code)/8 + 1 + 4))
+	bits := getBufferZeroed()
 
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])

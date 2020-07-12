@@ -24,7 +24,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -63,7 +62,8 @@ func TestJumpDestAnalysis(t *testing.T) {
 
 func BenchmarkJumpdestSet8(b *testing.B) {
 	const size = 1000
-	bits := pool.GetBuffer(size)
+	bits := getBuffer()
+	defer buffPool.Put(bits)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		for i := uint64(0); i < size*8-8; i++ {
@@ -76,7 +76,8 @@ func BenchmarkJumpdestSet8(b *testing.B) {
 
 func BenchmarkJumpdestSet(b *testing.B) {
 	const size = 1000
-	bits := pool.GetBuffer(size)
+	bits := getBuffer()
+	defer buffPool.Put(bits)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		for i := uint64(0); i < 8*size; i++ {
@@ -93,7 +94,7 @@ func BenchmarkJumpdestAnalysisEmpty_1200k(bench *testing.B) {
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
 		b := codeBitmap(code)
-		pool.PutBuffer(b)
+		buffPool.Put(b)
 	}
 	bench.StopTimer()
 }
@@ -103,7 +104,7 @@ func BenchmarkJumpdestAnalysis_1200k(bench *testing.B) {
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
 		b := codeBitmap(code)
-		pool.PutBuffer(b)
+		buffPool.Put(b)
 	}
 	bench.StopTimer()
 }

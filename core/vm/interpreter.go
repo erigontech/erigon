@@ -18,11 +18,11 @@ package vm
 
 import (
 	"hash"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -77,6 +77,37 @@ type callCtx struct {
 type keccakState interface {
 	hash.Hash
 	Read([]byte) (int, error)
+}
+
+var stackPool = NewStack()
+
+type Stack struct {
+	*sync.Pool
+}
+
+const maxCap = 1024 * 2
+
+func NewStack() *Stack {
+	return &Stack{
+		&sync.Pool{
+			New: func() interface{} {
+				return stack.New(maxCap)
+			},
+		},
+	}
+}
+
+func (p *Stack) Get() *stack.Stack {
+	return p.Pool.Get().(*stack.Stack)
+}
+
+func (p *Stack) Put(s *stack.Stack) {
+	if s == nil || s.Cap() == 0 || s.Cap() > maxCap {
+		return
+	}
+
+	s.Reset()
+	p.Pool.Put(s)
 }
 
 // EVMInterpreter represents an EVM interpreter
@@ -165,7 +196,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	var (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
-		locStack    = pool.StackPool.Get()
+		locStack    = stackPool.Get()
 		callContext = &callCtx{
 			memory:   mem,
 			stack:    locStack,
@@ -183,7 +214,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 	)
-	defer pool.StackPool.Put(locStack)
+	defer stackPool.Put(locStack)
 	contract.Input = input
 
 	if in.cfg.Debug {

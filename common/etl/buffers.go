@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"sort"
 	"strconv"
-	"sync"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -29,13 +30,6 @@ type Buffer interface {
 	Sort()
 	CheckFlushSize() bool
 }
-
-type bytesPoolT struct{ sync.Pool }
-
-func (p *bytesPoolT) Get() []byte  { return p.Pool.Get().([]byte)[:0] }
-func (p *bytesPoolT) Put(b []byte) { p.Pool.Put(b) }
-
-var bytesPool = &bytesPoolT{sync.Pool{New: func() interface{} { return make([]byte, 64) }}}
 
 type sortableBufferEntry struct {
 	key   []byte
@@ -65,10 +59,7 @@ type sortableBuffer struct {
 func (b *sortableBuffer) Put(k, v []byte) {
 	b.size += len(k)
 	b.size += len(v)
-	b.entries = append(b.entries, sortableBufferEntry{
-		append(bytesPool.Get(), k...),
-		append(bytesPool.Get(), v...),
-	})
+	b.entries = append(b.entries, sortableBufferEntry{k, v})
 }
 
 func (b *sortableBuffer) Size() int {
@@ -92,10 +83,6 @@ func (b *sortableBuffer) Get(i int) sortableBufferEntry {
 }
 
 func (b *sortableBuffer) Reset() {
-	for _, e := range b.entries {
-		bytesPool.Put(e.key)
-		bytesPool.Put(e.value)
-	}
 	b.entries = b.entries[:0] // keep the capacity
 	b.size = 0
 }
@@ -127,18 +114,14 @@ type appendSortableBuffer struct {
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
-	ks := string(k)
-	stored, ok := b.entries[ks]
+	stored, ok := b.entries[string(k)]
 	if !ok {
 		b.size += len(k)
-		k = append(bytesPool.Get(), k...)
-		stored = bytesPool.Get()
+		k = common.CopyBytes(k)
 	}
-
 	b.size += len(v)
 	stored = append(stored, v...)
-	b.entries[ks] = stored
-	bytesPool.Put(k)
+	b.entries[string(k)] = stored
 }
 
 func (b *appendSortableBuffer) Size() int {
@@ -168,9 +151,6 @@ func (b *appendSortableBuffer) Get(i int) sortableBufferEntry {
 }
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = b.sortedBuf[:0]
-	for _, e := range b.entries {
-		bytesPool.Put(e)
-	}
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
@@ -199,8 +179,7 @@ type oldestEntrySortableBuffer struct {
 }
 
 func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
-	ks := string(k)
-	_, ok := b.entries[ks]
+	_, ok := b.entries[string(k)]
 	if ok {
 		// if we already had this entry, we are going to keep it and ignore new value
 		return
@@ -208,13 +187,11 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 
 	b.size += len(k)
 	b.size += len(v)
-
-	k = append(bytesPool.Get(), k...)
+	k = common.CopyBytes(k)
 	if v != nil {
-		v = append(bytesPool.Get(), v...)
+		v = common.CopyBytes(v)
 	}
-	b.entries[ks] = v
-	bytesPool.Put(k)
+	b.entries[string(k)] = v
 }
 
 func (b *oldestEntrySortableBuffer) Size() int {
@@ -244,10 +221,6 @@ func (b *oldestEntrySortableBuffer) Get(i int) sortableBufferEntry {
 }
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = b.sortedBuf[:0]
-	for _, e := range b.sortedBuf {
-		bytesPool.Put(e.key)
-		bytesPool.Put(e.value)
-	}
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }

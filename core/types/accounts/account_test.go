@@ -6,7 +6,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -20,17 +19,15 @@ func TestEmptyAccount(t *testing.T) {
 		Incarnation: 5,
 	}
 
-	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount.B)
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount.B); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
-
-	pool.PutBuffer(encodedAccount)
 }
 
 func TestEmptyAccount2(t *testing.T) {
@@ -50,11 +47,11 @@ func TestEmptyAccount2(t *testing.T) {
 func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 	a := Account{}
 
-	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount.B)
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount.Bytes()); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 }
