@@ -1452,6 +1452,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, size uint64, bl
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
 	collection := stagedsync.NewHeaderNumSets(size * 40)
+	start := origin
 	defer func() {
 		err := collection.InsertHeaderNumbers(d.stateDB.NewBatch())
 		if err != nil {
@@ -1569,7 +1570,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, size uint64, bl
 					if d.mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), collection, blockNumber, origin, frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), collection, blockNumber, start, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {

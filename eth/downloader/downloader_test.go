@@ -16,7 +16,7 @@
 
 package downloader
 
-/*import (
+import (
 	"context"
 	"errors"
 	"fmt"
@@ -1711,4 +1711,4 @@ func makeFork(wg *sync.WaitGroup, ln, i int) {
 	wg.Done()
 
 	fmt.Println("done", i)
-}*/
+}

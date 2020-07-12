@@ -40,26 +40,30 @@ func (a HeaderNumSets) Swap(i, j int) {
 }
 
 // InsertHeaderNumbers pushes BlockHash => number bucket in ordered sequence to the Database
-func (a HeaderNumSets) InsertHeaderNumbers(batch ethdb.DbWithPendingMutations) error {
+func (a HeaderNumSets) InsertHeaderNumbers(db ethdb.Database) error {
+	batch := db.NewBatch()
 	sort.Sort(a)
+	zero := make([]byte, 40)
+	w := 0
 	for i := 0; i < len(a); i += 40 {
+		if bytes.Equal(zero, a[i:i+40]) {
+			continue
+		}
+		w++
 		if err := batch.Put(dbutils.HeaderNumberPrefix, a[i:i+32], a[i+32:i+40]); err != nil {
 			log.Crit("Failed to store hash to number mapping", "err", err)
 		}
-		if i%400000000 == 0 {
-			log.Info("Committed Headers Number")
+		if i%40000000 == 0 {
+			log.Info("Committed Headers Number", "progress", w)
 			_, err := batch.Commit()
 			if err != nil {
 				return err
 			}
 		}
 	}
-	log.Info("Committed Headers Number")
+	log.Info("Committed Headers Number", "progress", w)
 	_, err := batch.Commit()
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
