@@ -28,6 +28,7 @@ import (
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -465,8 +466,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 		if err != nil {
 			d.mux.Post(FailedEvent{err})
 		} else {
-			latest := d.lightchain.CurrentHeader()
-			d.mux.Post(DoneEvent{latest})
+			hash := rawdb.ReadHeadHeaderHash(d.stateDB)
+			rawdb.ReadHeader(d.stateDB, hash, d.headerNumber)
 		}
 	}()
 	if p.version < 62 {
@@ -931,25 +932,39 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 				n := headers[0].Number.Uint64()
 
 				var known bool
+				var err error
+
 				switch d.mode {
 				case FullSync:
 					known = d.blockchain.HasBlock(h, n)
 				case FastSync:
 					known = d.blockchain.HasFastBlock(h, n)
 				case StagedSync:
-					known = d.blockchain.HasHeader(h, n)
+					known, err = d.stateDB.Has(dbutils.HeaderPrefix, dbutils.HeaderKey(n, h))
+					if err != nil {
+						return 0, err
+					}
 				default:
-					known = d.lightchain.HasHeader(h, n)
+					known, err = d.stateDB.Has(dbutils.HeaderPrefix, dbutils.HeaderKey(n, h))
+					if err != nil {
+						return 0, err
+					}
 				}
+
 				if !known {
 					end = check
 					break
 				}
-
-				header := rawdb.ReadHeader(d.stateDB, h, check) // Independent of sync mode, header surely exists
-				if header == nil {                              // Replace Number with Difficulty
+				header := rawdb.ReadHeader(d.stateDB, h, check)
+				if d.mode == StagedSync && header == nil { // Replace Number with Difficulty
 					p.log.Debug("Received non requested header", "number", n, "hash", header.Hash(), "request", check)
 					return 0, errBadPeer
+				} else if d.mode != StagedSync {
+					header := d.lightchain.GetHeaderByHash(h)
+					if header.Number.Uint64() != check {
+						p.log.Debug("Received non requested header", "number", header.Number, "hash", header.Hash(), "request", check)
+						return 0, errBadPeer
+					}
 				}
 				start = check
 				hash = h
@@ -1438,11 +1453,11 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, size uint64, bl
 	var rollback []*types.Header
 	collection := stagedsync.NewHeaderNumSets(size * 40)
 	defer func() {
+		err := collection.InsertHeaderNumbers(d.stateDB.NewBatch())
+		if err != nil {
+			log.Error(err.Error())
+		}
 		if len(rollback) > 0 {
-			err := collection.InsertHeaderNumbers(d.stateDB.NewBatch())
-			if err != nil {
-				log.Error(err.Error())
-			}
 			// Flatten the headers and roll them back
 			hashes := make([]common.Hash, len(rollback))
 			for i, header := range rollback {
@@ -1572,6 +1587,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, size uint64, bl
 					if err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if n > 0 {
+							fmt.Println("n>0")
 							rollback = append(rollback, chunk[:n]...)
 						}
 						log.Error("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)

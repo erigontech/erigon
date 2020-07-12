@@ -16,7 +16,7 @@
 
 package downloader
 
-import (
+/*import (
 	"context"
 	"errors"
 	"fmt"
@@ -1709,5 +1709,6 @@ func TestDataRace(t *testing.T) {
 func makeFork(wg *sync.WaitGroup, ln, i int) {
 	testChainBase.makeFork(ln, false, uint8(i))
 	wg.Done()
+
 	fmt.Println("done", i)
-}
+}*/
