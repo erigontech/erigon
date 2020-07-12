@@ -225,9 +225,9 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		item := i.(*storageItem)
 		if !item.value.IsZero() {
 			h.Sha.Reset()
-			//nolint:checkerr
+			//nolint:errcheck
 			h.Sha.Write(item.key[:])
-			//nolint:checkerr
+			//nolint:errcheck
 			h.Sha.Read(item.seckey[:])
 			cb(item.key, item.seckey, item.value)
 			results++
