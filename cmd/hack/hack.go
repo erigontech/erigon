@@ -1854,7 +1854,6 @@ func fixStages(chaindata string) error {
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	/*
 	fmt.Printf("State stats\n")
 	stAccounts := 0
 	stStorage := 0
@@ -1877,7 +1876,6 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 		return err
 	}
 	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
-	*/
 	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	accounts := make(map[string]struct{})
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {

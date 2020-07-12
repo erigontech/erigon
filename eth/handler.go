@@ -393,12 +393,12 @@ func (pm *ProtocolManager) newPeer(pv int, p *p2p.Peer, rw p2p.MsgReadWriter, ge
 }
 
 func (pm *ProtocolManager) runPeer(p *peer) error {
-	fmt.Printf("runPeer\n")
+	//fmt.Printf("runPeer\n")
 	if !pm.chainSync.handlePeerEvent(p) {
-		fmt.Printf("p2p.DiscQuitting\n")
+		//fmt.Printf("p2p.DiscQuitting\n")
 		return p2p.DiscQuitting
 	}
-	fmt.Printf("handled PeerEvent\n")
+	//fmt.Printf("handled PeerEvent\n")
 	pm.peerWG.Add(1)
 	defer pm.peerWG.Done()
 	return pm.handle(p)
@@ -407,12 +407,12 @@ func (pm *ProtocolManager) runPeer(p *peer) error {
 // handle is the callback invoked to manage the life cycle of an eth peer. When
 // this function terminates, the peer is disconnected.
 func (pm *ProtocolManager) handle(p *peer) error {
-	fmt.Printf("handle\n")
+	//fmt.Printf("handle\n")
 	// Ignore maxPeers if this is a trusted peer
 	if pm.peers.Len() >= pm.maxPeers && !p.Peer.Info().Network.Trusted {
 		return p2p.DiscTooManyPeers
 	}
-	p.Log().Info("Ethereum peer connected", "name", p.Name())
+	p.Log().Debug("Ethereum peer connected", "name", p.Name())
 
 	// Execute the Ethereum handshake
 	var (
@@ -423,7 +423,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		td      = pm.blockchain.GetTd(hash, number)
 	)
 	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.blockchain), pm.forkFilter); err != nil {
-		p.Log().Info("Ethereum handshake failed", "err", err)
+		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
 
