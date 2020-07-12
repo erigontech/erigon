@@ -100,14 +100,18 @@ type ReturnStack struct {
 	data []uint64
 }
 
-var returnStacksPool = sync.Pool{New: func() interface{} { return make([]uint64, 0, 1024) }}
+var returnStacksPool = sync.Pool{New: func() interface{} {
+	data := make([]uint64, 0, 1024)
+	return &data
+}}
 
 func NewReturnStack() *ReturnStack {
-	return &ReturnStack{data: returnStacksPool.Get().([]uint64)}
+	data := returnStacksPool.Get().(*[]uint64)
+	return &ReturnStack{data: *data}
 }
 
 func (st *ReturnStack) Destroy() {
-	returnStacksPool.Put(st.data)
+	returnStacksPool.Put(&st.data)
 }
 
 func (st *ReturnStack) Push(d uint64) {
