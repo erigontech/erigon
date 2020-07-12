@@ -560,7 +560,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	}
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot, &d.headerNumber) }, // Headers are always retrieved
-		func() error { return d.processHeaders(origin+1, pivot, height-origin, &d.headerNumber, td) },
+		func() error { return d.processHeaders(origin+1, pivot, height-origin+1, &d.headerNumber, td) },
 	}
 
 	// Turbo-Geth's staged sync goes here
