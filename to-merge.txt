@@ -374,25 +374,3 @@ Date:   Tue Jul 14 02:43:30 2020 +0800
 
     core/rawdb: better log messages for ancient failure (#21327)
 
-commit 7d5267e3a2acf273215105f04a69870e79d80d77
-Author: rene <41963722+renaynay@users.noreply.github.com>
-Date:   Mon Jul 13 16:20:20 2020 +0200
-
-    .github: Change Code Owners (#21326)
-    
-    * modify code owners
-    
-    * add marius
-
-commit 4edbc1f2bb7892f8e77d7eb2a676e0fc7c029be0
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Mon Jul 13 18:45:39 2020 +0800
-
-    internal/ethapi: cap txfee for SignTransaction and Resend (#21231)
-
-commit 6cf6e1d7536adf5b8d3f130720848af9d820b358
-Author: Tien <Tiendo1011@gmail.com>
-Date:   Mon Jul 13 16:22:30 2020 +0700
-
-     README.md: point Go API reference link to pkg.go.dev (#21321)
-
