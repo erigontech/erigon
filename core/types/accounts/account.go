@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -170,8 +171,25 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 	}
 }
 
+var rlpEncodingBufPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 0, 128)
+		return &buf
+	},
+}
+
 func (a *Account) EncodeRLP(w io.Writer) error {
-	buf := make([]byte, a.EncodingLengthForHashing())
+	var buf []byte
+	l := a.EncodingLengthForHashing()
+	if l > 128 {
+		buf = make([]byte, a.EncodingLengthForHashing())
+	} else {
+		bp := rlpEncodingBufPool.Get().(*[]byte)
+		defer rlpEncodingBufPool.Put(bp)
+		buf = *bp
+		buf = buf[:a.EncodingLengthForHashing()]
+	}
+
 	a.EncodeForHashing(buf)
 	_, err := w.Write(buf)
 	return err
