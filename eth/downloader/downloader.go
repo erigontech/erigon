@@ -1461,7 +1461,6 @@ func (d *Downloader) processHeaders(pivot uint64, blockNumber *uint64, td *big.I
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
 	height, err := fetchHeight()
-	fmt.Println(height)
 	if err != nil {
 		return err
 	}

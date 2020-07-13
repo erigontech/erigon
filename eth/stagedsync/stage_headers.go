@@ -247,7 +247,6 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		} else {
 			copy((*collection)[(number-origin)*40:], entry)
 		}
-		*blockNumber = number
 		// Write the encoded header
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
@@ -276,7 +275,9 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			rawdb.DeleteCanonicalHash(batch, i)
 		}
 	}
-	if newCanonical {
+	pos := (lastHeader.Number.Uint64() - origin) * 40
+	if newCanonical && !bytes.Equal((*collection)[pos:pos+40], make([]byte, 40)) {
+		*blockNumber = lastHeader.Number.Uint64()
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {
