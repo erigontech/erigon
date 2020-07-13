@@ -190,13 +190,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	if len(contract.Code) == 0 {
 		return nil, nil
 	}
-	returns := stack.NewReturnStack() // local returns stack
-	defer returns.Destroy()
 
 	var (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = stackPool.Get()
+		returns     = stack.NewReturnStack() // local returns stack
 		callContext = &callCtx{
 			memory:   mem,
 			stack:    locStack,
