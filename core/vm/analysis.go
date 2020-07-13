@@ -21,24 +21,74 @@ import (
 
 	"github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/valyala/bytebufferpool"
 )
 
 type Cache interface {
 	Len() int
-	Set(hash common.Hash, v *pool.ByteBuffer)
-	Get(hash common.Hash) (*pool.ByteBuffer, bool)
-	Clear(codeHash common.Hash, local *pool.ByteBuffer)
+	Set(hash common.Hash, v *ByteBuffer)
+	Get(hash common.Hash) (*ByteBuffer, bool)
+	Clear(codeHash common.Hash, local *ByteBuffer)
 }
 
 type DestsCache struct {
 	*lru.Cache
 }
 
-var buffPool = sync.Pool{
-	New: func() interface{} {
-		return &pool.ByteBuffer{ByteBuffer: &bytebufferpool.ByteBuffer{B: make([]byte, 0, 1000)}}
+type ByteBuffer struct {
+	*bytebufferpool.ByteBuffer
+}
+
+func (b ByteBuffer) Get(pos int) byte {
+	return b.B[pos]
+}
+
+func (b ByteBuffer) SetBitPos(pos uint64) {
+	b.B[pos/8] |= 0x80 >> (pos % 8)
+}
+
+func (b ByteBuffer) SetBit8Pos(pos uint64) {
+	b.B[pos/8] |= 0xFF >> (pos % 8)
+	b.B[pos/8+1] |= ^(0xFF >> (pos % 8))
+}
+
+func (b ByteBuffer) CodeSegment(pos uint64) bool {
+	return b.B[pos/8]&(0x80>>(pos%8)) == 0
+}
+
+type buffPoolT struct {
+	p        sync.Pool
+	capacity int // drop all buffers more than this threshold to keep constant mem usage by pool
+}
+
+func (p *buffPoolT) Put(b *ByteBuffer) {
+	if b == nil {
+		return
+	}
+	if b.Len() > p.capacity {
+		return
+	}
+}
+
+func (p *buffPoolT) Get(size uint) *ByteBuffer {
+	pp := p.p.Get().(*ByteBuffer)
+	if uint(cap(pp.B)) < size {
+		pp.B = append(pp.B[:cap(pp.B)], make([]byte, size-uint(cap(pp.B)))...)
+	}
+	pp.B = pp.B[:size]
+
+	for i := range pp.B {
+		pp.B[i] = 0
+	}
+	return pp
+}
+
+var buffPool = buffPoolT{
+	capacity: 2048,
+	p: sync.Pool{
+		New: func() interface{} {
+			return &ByteBuffer{ByteBuffer: &bytebufferpool.ByteBuffer{B: make([]byte, 0, 2048)}}
+		},
 	},
 }
 
@@ -47,19 +97,19 @@ func NewDestsCache(maxSize int) *DestsCache {
 	return &DestsCache{c}
 }
 
-func (d *DestsCache) Set(hash common.Hash, v *pool.ByteBuffer) {
+func (d *DestsCache) Set(hash common.Hash, v *ByteBuffer) {
 	d.Add(hash, v)
 }
 
-func (d DestsCache) Get(hash common.Hash) (*pool.ByteBuffer, bool) {
+func (d DestsCache) Get(hash common.Hash) (*ByteBuffer, bool) {
 	v, ok := d.Cache.Get(hash)
 	if !ok {
 		return nil, false
 	}
-	return v.(*pool.ByteBuffer), ok
+	return v.(*ByteBuffer), ok
 }
 
-func (d *DestsCache) Clear(codeHash common.Hash, local *pool.ByteBuffer) {
+func (d *DestsCache) Clear(codeHash common.Hash, local *ByteBuffer) {
 	if codeHash == (common.Hash{}) {
 		return
 	}
@@ -75,24 +125,12 @@ func (d *DestsCache) Len() int {
 	return d.Cache.Len()
 }
 
-func getBuffer() *pool.ByteBuffer {
-	return buffPool.Get().(*pool.ByteBuffer)
-}
-
-func getBufferZeroed() *pool.ByteBuffer {
-	pp := buffPool.Get().(*pool.ByteBuffer)
-	for i := range pp.B {
-		pp.B[i] = 0
-	}
-	return pp
-}
-
 // codeBitmap collects data locations in code.
-func codeBitmap(code []byte) *pool.ByteBuffer {
+func codeBitmap(code []byte) *ByteBuffer {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
-	bits := getBufferZeroed()
+	bits := buffPool.Get(uint(len(code)/8 + 1 + 4))
 
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])

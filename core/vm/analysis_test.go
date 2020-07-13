@@ -62,7 +62,7 @@ func TestJumpDestAnalysis(t *testing.T) {
 
 func BenchmarkJumpdestSet8(b *testing.B) {
 	const size = 1000
-	bits := getBuffer()
+	bits := buffPool.Get(size)
 	defer buffPool.Put(bits)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
@@ -76,7 +76,7 @@ func BenchmarkJumpdestSet8(b *testing.B) {
 
 func BenchmarkJumpdestSet(b *testing.B) {
 	const size = 1000
-	bits := getBuffer()
+	bits := buffPool.Get(size)
 	defer buffPool.Put(bits)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
