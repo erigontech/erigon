@@ -396,16 +396,3 @@ Date:   Mon Jul 13 16:22:30 2020 +0700
 
      README.md: point Go API reference link to pkg.go.dev (#21321)
 
-commit 2e08dad9e6b3b0f675d144cd41cbbef43439a8b7
-Author: libotony <liboliqi@gmail.com>
-Date:   Mon Jul 13 17:20:47 2020 +0800
-
-    p2p/discv5: unset pingEcho on pong timeout (#21324)
-
-commit af258efdb995914394b02e75b7caa952887054a5
-Author: Felix Lange <fjl@twurst.com>
-Date:   Mon Jul 13 11:17:49 2020 +0200
-
-    light: goimports -w (#21325)
-
-
