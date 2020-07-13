@@ -182,12 +182,12 @@ func (a *Account) EncodeRLP(w io.Writer) error {
 	var buf []byte
 	l := a.EncodingLengthForHashing()
 	if l > 128 {
-		buf = make([]byte, a.EncodingLengthForHashing())
+		buf = make([]byte, l)
 	} else {
 		bp := rlpEncodingBufPool.Get().(*[]byte)
 		defer rlpEncodingBufPool.Put(bp)
 		buf = *bp
-		buf = buf[:a.EncodingLengthForHashing()]
+		buf = buf[:l]
 	}
 
 	a.EncodeForHashing(buf)

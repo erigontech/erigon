@@ -396,10 +396,12 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver(quit)
-	if err := p.Promote(s, from, to, false /* storage */, 0x01, r); err != nil {
+	fmt.Printf("%d\n", 4819951)
+	// 4819951
+	if err := p.Promote(s, 4819951, to, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
-	if err := p.Promote(s, from, to, true /* storage */, 0x02, r); err != nil {
+	if err := p.Promote(s, 4819951, to, true /* storage */, 0x02, r); err != nil {
 		return err
 	}
 	for ks, acc := range r.accountMap {
