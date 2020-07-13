@@ -193,3 +193,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 
 	return nil
 }
+
+func (w *PlainStateWriter) ChangeSetWriter() *ChangeSetWriter {
+	return w.csw
+}

@@ -98,7 +98,7 @@ func TestBasisAccountPruning(t *testing.T) {
 			t.Fatal(genErr)
 		}
 		block.AddTx(tx)
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 			t.Fatal(genErr)
 		}
 		block.AddTx(tx)
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestStoragePruning(t *testing.T) {
 		}
 
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -618,7 +618,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 			t.Fatal(genErr)
 		}
 		block.AddTx(tx)
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}

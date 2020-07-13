@@ -74,7 +74,7 @@ func TestReimportMirroredState(t *testing.T) {
 			}
 			block.AddTxWithChain(chain, tx)
 		}
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}

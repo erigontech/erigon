@@ -42,7 +42,7 @@ func TestHeaderVerification(t *testing.T) {
 	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
 	defer chain.Stop()
 
-	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
+	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -97,7 +97,7 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 	var (
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
+		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
 	)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
@@ -176,7 +176,7 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	var (
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil)
+		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil, false /* intemediateHashes */)
 	)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)

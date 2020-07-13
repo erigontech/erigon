@@ -69,6 +69,10 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir st
 
 	// Remove lookup entries for blocks between unwindPoint+1 and stage.BlockNumber
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
+		if err := common.Stopped(quitCh); err != nil {
+			return false, err
+		}
+
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		if blockNumber > s.BlockNumber {
 			return false, nil

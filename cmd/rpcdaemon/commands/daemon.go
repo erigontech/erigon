@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"strings"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -50,7 +49,7 @@ type APIImpl struct {
 
 // PrivateDebugAPI
 type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error)
+	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
 	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
 }
 
@@ -110,15 +109,11 @@ func (g *blockGetter) GetBlock(hash common.Hash, number uint64) *types.Block {
 }
 
 type chainContext struct {
-	headerCache *lru.Cache // Cache for the most recent block headers
-
 	db rawdb.DatabaseReader
 }
 
 func NewChainContext(db rawdb.DatabaseReader) *chainContext {
-	headerCache, _ := lru.New(512)
 	return &chainContext{
-		headerCache: headerCache,
 		db:          db,
 	}
 
@@ -172,17 +167,7 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	// Short circuit if the header's already in the cache, retrieve otherwise
-	if header, ok := c.headerCache.Get(hash); ok {
-		return header.(*types.Header)
-	}
-	header := rawdb.ReadHeader(c.db, hash, number)
-	if header == nil {
-		return nil
-	}
-	// Cache the found header for next time and return
-	c.headerCache.Add(hash, header)
-	return header
+	return rawdb.ReadHeader(c.db, hash, number)
 }
 
 func (c *chainContext) Engine() consensus.Engine {
@@ -226,15 +211,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error) {
-	_, _, _, dbstate, err := eth.ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
+func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
+	_, _, _, stateReader, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
 	if err != nil {
-		return eth.StorageRangeResult{}, err
+		return StorageRangeResult{}, err
 	}
-
-	//dbstate.SetBlockNr(block.NumberU64())
-	//statedb.CommitBlock(api.eth.chainConfig.IsEIP158(block.Number()), dbstate)
-	return eth.StorageRangeAt(dbstate, contractAddress, keyStart, maxResult)
+	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
 }
 
 // computeIntraBlockState retrieves the state database associated with a certain block.

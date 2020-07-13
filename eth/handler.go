@@ -215,16 +215,6 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 	}
 	manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
 
-	fetchTx := func(peer string, hashes []common.Hash) error {
-		p := manager.peers.Peer(peer)
-		if p == nil {
-			return errors.New("unknown peer")
-		}
-		return p.RequestTxs(hashes)
-	}
-	if txpool != nil {
-		manager.txFetcher = fetcher.NewTxFetcher(txpool.Has, txpool.AddRemotes, fetchTx)
-	}
 	manager.chainSync = newChainSyncer(manager)
 }
 
@@ -300,8 +290,14 @@ func (pm *ProtocolManager) removePeer(id string) {
 	log.Debug("Removing Ethereum peer", "peer", id)
 
 	// Unregister the peer from the downloader and Ethereum peer set
-	pm.downloader.UnregisterPeer(id) // nolint:errcheck
-	pm.txFetcher.Drop(id)            // nolint:errcheck
+	err := pm.downloader.UnregisterPeer(id)
+	if err != nil {
+		log.Error("Peer unregister failed", "peer", id, "err", err)
+	}
+
+	if pm.txFetcher != nil {
+		pm.txFetcher.Drop(id) // nolint:errcheck
+	}
 
 	if err := pm.peers.Unregister(id); err != nil {
 		log.Error("Peer removal failed", "peer", id, "err", err)
@@ -312,15 +308,14 @@ func (pm *ProtocolManager) removePeer(id string) {
 	}
 }
 
-func (pm *ProtocolManager) Start(maxPeers int) {
+func (pm *ProtocolManager) Start(maxPeers int, withTxPool bool) error {
 	pm.maxPeers = maxPeers
 
-	// broadcast transactions
-	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
-	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
-	if pm.txsSub != nil {
-		pm.wg.Add(1)
-		go pm.txBroadcastLoop()
+	if withTxPool {
+		// broadcast transactions
+		if err := pm.StartTxPool(); err != nil {
+			return err
+		}
 	}
 
 	// broadcast mined blocks
@@ -338,12 +333,40 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 
 	pm.wg.Add(1)
 	go pm.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
+
+	return nil
 }
 
-func (pm *ProtocolManager) Stop() {
+func (pm *ProtocolManager) StartTxPool() error {
+	fetchTx := func(peer string, hashes []common.Hash) error {
+		p := pm.peers.Peer(peer)
+		if p == nil {
+			return errors.New("unknown peer")
+		}
+		return p.RequestTxs(hashes)
+	}
+	pm.txFetcher = fetcher.NewTxFetcher(pm.txpool.Has, pm.txpool.AddRemotes, fetchTx)
+
+	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
+	if pm.txsSub != nil {
+		pm.wg.Add(1)
+		go pm.txBroadcastLoop()
+	}
+
+	pm.txFetcher.Start()
+	return nil
+}
+
+func (pm *ProtocolManager) StopTxPool() {
 	if pm.txsSub != nil {
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
 	}
+}
+
+func (pm *ProtocolManager) Stop() {
+	pm.StopTxPool()
+
 	if pm.minedBlockSub != nil {
 		pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 	}
@@ -837,6 +860,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewPooledTransactionHashesMsg && p.version >= eth65:
+		if pm.txFetcher == nil {
+			break
+		}
 		// New transaction announcement arrived, make sure we have
 		// a valid and fresh chain to handle them
 		if atomic.LoadUint32(&pm.acceptTxs) == 0 {
@@ -889,6 +915,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		return p.SendPooledTransactionsRLP(hashes, txs)
 
 	case msg.Code == TransactionMsg || (msg.Code == PooledTransactionsMsg && p.version >= eth65):
+		if pm.txFetcher == nil {
+			break
+		}
 		// Transactions arrived, make sure we have a valid and fresh chain to handle them
 		if atomic.LoadUint32(&pm.acceptTxs) == 0 {
 			break

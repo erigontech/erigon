@@ -77,6 +77,11 @@ semantics/z3/build/libz3.a:
 	cd semantics/z3/build && ${MAKE} -j8
 	cp semantics/z3/build/libz3.a .	
 
+integration:
+	$(GORUN) build/ci.go install ./cmd/integration
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
+
 all:
 	$(GORUN) build/ci.go install -procs=1
 
@@ -125,7 +130,7 @@ lintci: semantics/z3/build/libz3.a all
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.27.0
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.28.2
 
 clean:
 	env GO111MODULE=on go clean -cache

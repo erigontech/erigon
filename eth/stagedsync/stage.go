@@ -10,9 +10,9 @@ type UnwindFunc func(*UnwindState, *StageState) error
 
 type Stage struct {
 	ID                  stages.SyncStage
+	Disabled            bool
 	Description         string
 	ExecFunc            ExecFunc
-	Disabled            bool
 	DisabledDescription string
 	UnwindFunc          UnwindFunc
 }

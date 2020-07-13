@@ -50,7 +50,7 @@ func (l *progressLogger) Start(numberRef *uint64) {
 			speed := float64(now-prev) / float64(l.interval)
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Debug("Executed blocks:",
+			log.Info("Executed blocks:",
 				"currentBlock", now,
 				"speed (blk/second)", speed,
 				"state batch", common.StorageSize(l.batch.BatchSize()),
@@ -77,8 +77,14 @@ func (l *progressLogger) Stop() {
 	close(l.quit)
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool) error {
-	if limit <= s.BlockNumber {
+type HasChangeSetWriter interface {
+	ChangeSetWriter() *state.ChangeSetWriter
+}
+
+type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
+
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
+	if limit > 0 && limit <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
@@ -196,6 +202,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				if err = pprof.WriteHeapProfile(f); err != nil {
 					log.Error("could not save memory profile", "error", err)
 				}
+			}
+		}
+
+		if changeSetHook != nil {
+			if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+				changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 			}
 		}
 	}

@@ -211,7 +211,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 }
 
 func WalkAsOf(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", dbi, hBucket, startkey, fixedbits, timestamp)
+	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
 	if !(bytes.Equal(bucket, dbutils.PlainStateBucket) || bytes.Equal(bucket, dbutils.CurrentStateBucket)) {
 		return fmt.Errorf("unsupported state bucket: %s", string(bucket))
 	}

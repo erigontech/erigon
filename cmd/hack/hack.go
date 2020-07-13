@@ -1640,22 +1640,27 @@ func dupSortState(chaindata string) {
 		var createErr error
 		newStateBucket, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create|lmdb.DupSort)
 		check(createErr)
+		err = tx.Drop(newStateBucket, false)
+		check(err)
+		return nil
+	})
+	check(err)
+
+	var newStateBucket2 lmdb.DBI
+	err = env2.Update(func(tx *lmdb.Txn) error {
+		var createErr error
+		newStateBucket2, createErr = tx.OpenDBI(string(dbutils.CurrentStateBucket), lmdb.Create)
+		check(createErr)
+		err = tx.Drop(newStateBucket2, false)
+		check(err)
 		return nil
 	})
 	check(err)
 
 	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.CurrentStateBucket)
-		sz, _ := b.Size()
-		fmt.Printf("Current State bucket size: %s\n", common.StorageSize(sz))
-
 		txn, _ := env.BeginTxn(nil, 0)
-		err = txn.Drop(newStateBucket, false)
-		check(err)
-
 		txn2, _ := env2.BeginTxn(nil, 0)
-		err = txn2.Drop(newStateBucket, false)
-		check(err)
 
 		c := b.Cursor()
 		i := 0
@@ -1672,17 +1677,16 @@ func dupSortState(chaindata string) {
 				fmt.Printf("%x\n", k[:2])
 			}
 
+			err = txn2.Put(newStateBucket2, common.CopyBytes(k), common.CopyBytes(v), 0)
+			check(err)
+
 			if len(k) == common.HashLength {
 				err = txn.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.AppendDup)
-				check(err)
-				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
 				check(err)
 			} else {
 				prefix := k[:common.HashLength+common.IncarnationLength]
 				suffix := k[common.HashLength+common.IncarnationLength:]
 				err = txn.Put(newStateBucket, common.CopyBytes(prefix), append(suffix, v...), lmdb.AppendDup)
-				check(err)
-				err = txn2.Put(newStateBucket, common.CopyBytes(k), common.CopyBytes(v), lmdb.Append)
 				check(err)
 			}
 		}
@@ -1695,10 +1699,23 @@ func dupSortState(chaindata string) {
 	})
 	check(err)
 
+	err = env2.View(func(txn *lmdb.Txn) (err error) {
+		st, err := txn.Stat(newStateBucket2)
+		check(err)
+		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
 	err = env.View(func(txn *lmdb.Txn) (err error) {
 		st, err := txn.Stat(newStateBucket)
 		check(err)
-		fmt.Printf("Current bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		fmt.Printf("New bucket size: %s\n", common.StorageSize((st.LeafPages+st.BranchPages+st.OverflowPages)*uint64(os.Getpagesize())))
+		return nil
+	})
+	check(err)
+
+	err = env.View(func(txn *lmdb.Txn) (err error) {
 
 		cur, err := txn.OpenCursor(newStateBucket)
 		check(err)
@@ -1831,6 +1848,68 @@ func fixStages(chaindata string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func changeSetStats(chaindata string, block1, block2 uint64) error {
+	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	accounts := make(map[string]struct{})
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block1)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if timestamp >= block2 {
+				break
+			}
+			if timestamp%100000 == 0 {
+				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
+			}
+			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
+				accounts[string(common.CopyBytes(kk))] = struct{}{}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	storage := make(map[string]struct{})
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		start := dbutils.EncodeTimestamp(block1)
+		c := st.Cursor()
+		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			timestamp, _ := dbutils.DecodeTimestamp(k)
+			if timestamp >= block2 {
+				break
+			}
+			if timestamp%100000 == 0 {
+				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
+			}
+			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
+				storage[string(common.CopyBytes(kk))] = struct{}{}
+				return nil
+			}); err1 != nil {
+				return err1
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("accounts changed: %d, storage changed: %d\n", len(accounts), len(storage))
 	return nil
 }
 
@@ -2049,6 +2128,11 @@ func main() {
 	}
 	if *action == "dupSortState" {
 		dupSortState(*chaindata)
+	}
+	if *action == "changeSetStats" {
+		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 
 }

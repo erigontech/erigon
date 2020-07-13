@@ -158,6 +158,9 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 
 	chain, _ := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
+	if err := txpool.Start(chain); err != nil {
+		t.Fatal(err)
+	}
 
 	// Generate a small n-block chain and an uncle block for it
 	var dbSide *ethdb.ObjectDatabase
@@ -166,7 +169,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 		if n-1 > 0 {
 			blocks, _, err := core.GenerateChain(chainConfig, genesis, engine, db, n-1, func(i int, gen *core.BlockGen) {
 				gen.SetCoinbase(testCase.testBankAddress)
-			})
+			}, false /* intermediateHashes */)
 			if err != nil {
 				t.Fatalf("generate blocks: %v", err)
 			}
@@ -182,7 +185,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 		ctx := chain.WithContext(context.Background(), big.NewInt(parentSide.Number().Int64()+1))
 		blocks, _, err := core.GenerateChain(chainConfig, parentSide, engine, db, 1, func(i int, gen *core.BlockGen) {
 			gen.SetCoinbase(testCase.testBankAddress)
-		})
+		}, false /* intermediateHashes */)
 		if err != nil {
 			t.Fatalf("generate blocks: %v", err)
 		}
@@ -200,7 +203,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 
 	sideBlocks, _, err := core.GenerateChain(chainConfig, parentSide, engine, dbSide, 1, func(i int, gen *core.BlockGen) {
 		gen.SetCoinbase(testCase.testUserAddress)
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generage sideBlocks: %v", err)
 	}
@@ -345,7 +348,7 @@ func (b *testWorkerBackend) newRandomUncle() *types.Block {
 		//nolint:gosec
 		rand.Read(addr)
 		gen.SetCoinbase(common.BytesToAddress(addr))
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		panic(err)
 	}

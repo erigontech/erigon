@@ -171,7 +171,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 				})
 			}
 		}
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		panic(err)
 	}

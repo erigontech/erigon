@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -204,7 +205,9 @@ var GenerateTrace bool
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts, error) {
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen),
+	intermediateHashes bool,
+) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
@@ -256,14 +259,32 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				}
 				fmt.Printf("===============================\n")
 			}
+			var hashCollector func(keyHex []byte, hash []byte) error
+			var collector *etl.Collector
+			if intermediateHashes {
+				collector = etl.NewCollector("", etl.NewSortableBuffer(etl.BufferOptimalSize))
+				hashCollector = func(keyHex []byte, hash []byte) error {
+					if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+						return nil
+					}
+					k := make([]byte, len(keyHex)/2)
+					trie.CompressNibbles(keyHex, &k)
+					return collector.Collect(k, common.CopyBytes(hash))
+				}
+			}
 			loader := trie.NewFlatDbSubTrieLoader()
-			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if subTries, err := loader.LoadSubTries(); err == nil {
 				b.header.Root = subTries.Hashes[0]
 			} else {
 				return nil, nil, fmt.Errorf("call to LoadSubTries: %w", err)
+			}
+			if intermediateHashes {
+				if err := collector.Load(dbCopy, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+					return nil, nil, fmt.Errorf("loading intermediate hashes: %w", err)
+				}
 			}
 
 			// Recreating block to make sure Root makes it into the header
@@ -328,7 +349,7 @@ func makeHeaderChain(parent *types.Header, n int, engine consensus.Engine, db *e
 func makeBlockChain(parent *types.Block, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Block {
 	blocks, _, _ := GenerateChain(params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
-	})
+	}, false /* intermediateHashes */)
 	return blocks
 }
 

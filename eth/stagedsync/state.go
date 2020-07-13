@@ -147,28 +147,27 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 				log.Info("Unwinding... DONE!")
 			}
 			return nil
-		} else {
-			index, stage := s.CurrentStage()
+		}
 
-			if stage.Disabled {
-				message := fmt.Sprintf(
-					"Sync stage %d/%d. %v disabled. %s",
-					index+1,
-					s.Len(),
-					stage.Description,
-					stage.DisabledDescription,
-				)
+		index, stage := s.CurrentStage()
 
-				log.Info(message)
+		if stage.Disabled {
+			message := fmt.Sprintf(
+				"Sync stage %d/%d. %v disabled. %s",
+				index+1,
+				s.Len(),
+				stage.Description,
+				stage.DisabledDescription,
+			)
 
-				s.NextStage()
-				continue
-			}
+			log.Info(message)
 
-			if err := s.runStage(stage, db, index); err != nil {
-				return err
-			}
+			s.NextStage()
+			continue
+		}
 
+		if err := s.runStage(stage, db, index); err != nil {
+			return err
 		}
 	}
 	return nil

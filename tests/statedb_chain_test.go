@@ -103,7 +103,7 @@ func TestSelfDestructReceive(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}

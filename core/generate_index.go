@@ -72,7 +72,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 
 	currentKey := dbutils.EncodeTimestamp(timestampTo)
 	keys := make(map[string]struct{})
-	err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
+	if err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
 		if err := common.Stopped(ig.quitCh); err != nil {
 			return false, err
 		}
@@ -86,8 +86,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 			return false, err
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
@@ -188,8 +187,8 @@ func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) er
 		}
 		currentIndex = currentIndex.Append(blockNr, vzero)
 	}
-	err := next(k, currentChunkKey, currentIndex)
-	if err != nil {
+
+	if err := next(k, currentChunkKey, currentIndex); err != nil {
 		return err
 	}
 

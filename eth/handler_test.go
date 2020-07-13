@@ -480,7 +480,9 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
-	pm.Start(1000)
+	if err = pm.Start(1000, true); err != nil {
+		t.Fatalf("error on protocol manager start: %v", err)
+	}
 	defer pm.Stop()
 
 	// Connect a new peer and check that we receive the checkpoint challenge
@@ -570,7 +572,10 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
-	pm.Start(1000)
+	if err = pm.Start(1000, true); err != nil {
+		t.Fatalf("error on protocol manager start: %v", err)
+	}
+
 	defer pm.Stop()
 	var peers []*testPeer
 	for i := 0; i < totalPeers; i++ {
@@ -579,7 +584,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 
 		peers = append(peers, peer)
 	}
-	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -1350,7 +1355,9 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
-	pm.Start(2)
+	if err = pm.Start(2, true); err != nil {
+		t.Fatalf("error on protocol manager start: %v", err)
+	}
 	defer pm.Stop()
 
 	// Create two peers, one to send the malformed block with and one to check
@@ -1362,7 +1369,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	defer sink.close()
 
 	// Create various combinations of malformed blocks
-	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}

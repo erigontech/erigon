@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -198,15 +198,18 @@ func stage4(ctx context.Context) error {
 		// TODO
 	}
 
+	blockchain, err := newBlockChain(db)
+	if err != nil {
+		return err
+	}
 	stage4 := progress(db, stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
-	blockchain, _ := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, blockchain, block, ch, nil, false)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, blockchain, block, ch, blockchain.DestsCache, false, nil)
 }
 
 func stage5(ctx context.Context) error {
@@ -319,4 +322,14 @@ func printAllStages(_ context.Context) error {
 	defer db.Close()
 
 	return printStages(db)
+}
+
+func newBlockChain(db ethdb.Database) (*core.BlockChain, error) {
+	config := eth.DefaultConfig
+	chainConfig, _, _, err := core.SetupGenesisBlock(db, config.Genesis, config.StorageMode.History)
+	if err != nil {
+		return nil, err
+	}
+	vmConfig, cacheConfig, dests := eth.BlockchainRuntimeConfig(&config)
+	return core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, &config.TxLookupLimit, dests)
 }

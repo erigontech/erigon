@@ -348,8 +348,8 @@ func (d *Downloader) UnregisterPeer(id string) error {
 
 // Synchronise tries to sync up our local block chain with a remote peer, both
 // adding various sanity checks as well as wrapping it with various log entries.
-func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode, dests vm.Cache) error {
-	err := d.synchronise(id, head, td, mode, dests)
+func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
+	err := d.synchronise(id, head, td, mode, dests, txPoolControl)
 
 	switch err {
 	case nil, errBusy, errCanceled:
@@ -389,7 +389,7 @@ func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode 
 // synchronise will select the peer and use it for synchronising. If an empty string is given
 // it will use the best peer possible and synchronize if its TD is higher than our own. If any of the
 // checks fail an error will be returned. This method is synchronous
-func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode SyncMode, dests vm.Cache) error {
+func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
 	// Mock out the synchronisation if testing
 	if d.synchroniseMock != nil {
 		return d.synchroniseMock(id, hash)
@@ -452,12 +452,12 @@ func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode 
 	if p == nil {
 		return errUnknownPeer
 	}
-	return d.syncWithPeer(p, hash, td, dests)
+	return d.syncWithPeer(p, hash, td, dests, txPoolControl)
 }
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.
-func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.Int, dests vm.Cache) (err error) {
+func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.Int, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -573,6 +573,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 			d.quitCh,
 			fetchers,
 			dests,
+			txPoolControl,
 		)
 		if err != nil {
 			return err
