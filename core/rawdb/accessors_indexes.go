@@ -17,6 +17,7 @@
 package rawdb
 
 import (
+	"bytes"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -120,5 +121,26 @@ func ReadBloomBits(db DatabaseReader, bit uint, section uint64, head common.Hash
 func WriteBloomBits(db DatabaseWriter, bit uint, section uint64, head common.Hash, bits []byte) {
 	if err := db.Put(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head), bits); err != nil {
 		log.Crit("Failed to store bloom bits", "err", err)
+	}
+}
+
+// DeleteBloombits removes all compressed bloom bits vector belonging to the
+// given section range and bit index.
+func DeleteBloombits(db ethdb.Database, bit uint, from uint64, to uint64) {
+	start, end := bloomBitsKey(bit, from, common.Hash{}), bloomBitsKey(bit, to, common.Hash{})
+	it := db.NewIterator(nil, start)
+	defer it.Release()
+
+	for it.Next() {
+		if bytes.Compare(it.Key(), end) >= 0 {
+			break
+		}
+		if len(it.Key()) != len(bloomBitsPrefix)+2+8+32 {
+			continue
+		}
+		db.Delete(it.Key())
+	}
+	if it.Error() != nil {
+		log.Crit("Failed to delete bloom bits", "err", it.Error())
 	}
 }

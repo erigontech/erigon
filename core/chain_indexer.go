@@ -45,6 +45,9 @@ type ChainIndexerBackend interface {
 	Process(ctx context.Context, header *types.Header) error
 
 	// Commit finalizes the section metadata and stores it into the database.
+	Commit() error
+
+	// Prune deletes the chain index older than the given threshold.
 	Commit(blockNr uint64) error
 }
 
@@ -391,7 +394,6 @@ func (c *ChainIndexer) processSection(section uint64, lastHead common.Hash) (com
 	c.log.Trace("Processing new chain section", "section", section)
 
 	// Reset and partial processing
-
 	if err := c.backend.Reset(c.ctx, section, lastHead); err != nil {
 		c.setValidSections(0)
 		return common.Hash{}, err
@@ -463,6 +465,11 @@ func (c *ChainIndexer) AddChildIndexer(indexer *ChainIndexer) {
 	if sections > 0 {
 		indexer.newHead(sections*c.sectionSize-1, false)
 	}
+}
+
+// Prune deletes all chain data older than given threshold.
+func (c *ChainIndexer) Prune(threshold uint64) error {
+	return c.backend.Prune(threshold)
 }
 
 // loadValidSections reads the number of valid sections from the index database

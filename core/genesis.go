@@ -304,6 +304,8 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
+	statedb.Commit(false)
+	statedb.Database().TrieDB().Commit(root, true, nil)
 
 	return types.NewBlock(head, nil, nil, nil), statedb, tds, nil
 }

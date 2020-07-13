@@ -141,3 +141,8 @@ func (b *BloomIndexer) Commit(blockNr uint64) error {
 	_, err := batch.Commit()
 	return err
 }
+
+// PruneSections returns an empty error since we don't support pruning here.
+func (b *BloomIndexer) Prune(threshold uint64) error {
+	return nil
+}

@@ -80,6 +80,10 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 		t.Run(strconv.Itoa(int(i)), func(t *testing.T) {
 
 			// Create a pro-fork block, and try to feed into the no-fork chain
+		}
+		if err := bc.stateCache.TrieDB().Commit(bc.CurrentHeader().Root, true, nil); err != nil {
+			t.Fatalf("failed to commit contra-fork head for expansion: %v", err)
+		}
 			db = ethdb.NewMemDatabase()
 			defer db.Close()
 			gspec.MustCommit(db)
