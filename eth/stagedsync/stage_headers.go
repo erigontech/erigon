@@ -128,7 +128,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection HeaderNumSets, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection *HeaderNumSets, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -242,7 +242,12 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		entry := make([]byte, 40)
 		copy(entry, hash[:])
 		copy(entry[32:], encoded)
-		copy(collection[(number-origin)*40:], entry)
+		if (number-origin)*40 > uint64(len(*collection)) {
+			*collection = append(*collection, entry...)
+		} else {
+			copy((*collection)[(number-origin)*40:], entry)
+		}
+		*blockNumber = number
 		// Write the encoded header
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
@@ -252,7 +257,6 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			log.Crit("Failed to store header", "err", err)
 		}
 	}
-	*blockNumber = headers[len(headers)-1].Number.Uint64()
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1

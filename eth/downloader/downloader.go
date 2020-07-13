@@ -558,9 +558,18 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	if d.syncInitHook != nil {
 		d.syncInitHook(origin, height)
 	}
+	d.headerNumber = origin
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot, &d.headerNumber) }, // Headers are always retrieved
-		func() error { return d.processHeaders(origin+1, pivot, height-origin+1, &d.headerNumber, td) },
+		func() error {
+			return d.processHeaders(pivot, &d.headerNumber, td, func() (uint64, error) {
+				latest, err := d.fetchHeight(p)
+				if err != nil {
+					return 0, err
+				}
+				return latest.Number.Uint64(), nil
+			})
+		},
 	}
 
 	// Turbo-Geth's staged sync goes here
@@ -1448,11 +1457,17 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(origin uint64, pivot uint64, size uint64, blockNumber *uint64, td *big.Int) error {
+func (d *Downloader) processHeaders(pivot uint64, blockNumber *uint64, td *big.Int, fetchHeight func() (uint64, error)) error {
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
-	collection := stagedsync.NewHeaderNumSets(size * 40)
-	start := origin
+	height, err := fetchHeight()
+	fmt.Println(height)
+	if err != nil {
+		return err
+	}
+	collection := stagedsync.NewHeaderNumSets((height - *blockNumber + 1) * 40)
+	start := *blockNumber
+	origin := *blockNumber
 	defer func() {
 		err := collection.InsertHeaderNumbers(d.stateDB.NewBatch())
 		if err != nil {
@@ -1570,7 +1585,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, size uint64, bl
 					if d.mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), collection, blockNumber, start, frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), &collection, blockNumber, start, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
