@@ -581,20 +581,22 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	}
 	if err := fstl.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.CurrentStateBucket)
-		var filter = func(k []byte) bool {
+		var filter = func(k []byte) (bool, error) {
 
 			if fstl.rl.Retain(k) {
 				if fstl.hc != nil {
-					_ = fstl.hc(k, nil)
+					if err := fstl.hc(k, nil); err != nil {
+						return false, err
+					}
 				}
-				return false
+				return false, nil
 			}
 
 			if len(k) < fstl.cutoffs[fstl.rangeIdx] {
-				return false
+				return false, nil
 			}
 
-			return true
+			return true, nil
 		}
 		ih := IH(Filter(filter, tx.Cursor(dbutils.IntermediateTrieHashBucket)))
 		if err := fstl.iteration(c, ih, true /* first */); err != nil {
@@ -774,13 +776,13 @@ type FilterCursor struct {
 	c ethdb.Cursor
 
 	k, kHex, v        []byte
-	filter            func(k []byte) bool
+	filter            func(k []byte) (bool, error)
 	seekAccCouner     int
 	seekStorageCouner int
 	nextCounter       int
 }
 
-func Filter(filter func(k []byte) bool, c ethdb.Cursor) *FilterCursor {
+func Filter(filter func(k []byte) (bool, error), c ethdb.Cursor) *FilterCursor {
 	return &FilterCursor{c: c, filter: filter}
 }
 
@@ -800,7 +802,9 @@ func (c *FilterCursor) _seekTo(seek []byte) (err error) {
 	}
 
 	DecompressNibbles(c.k, &c.kHex)
-	if c.filter(c.kHex) {
+	if ok, err := c.filter(c.kHex); err != nil {
+		return err
+	} else if ok {
 		return nil
 	}
 
@@ -819,7 +823,9 @@ func (c *FilterCursor) _next() (err error) {
 		}
 
 		DecompressNibbles(c.k, &c.kHex)
-		if c.filter(c.kHex) {
+		if ok, err := c.filter(c.kHex); err != nil {
+			return err
+		} else if ok {
 			return nil
 		}
 
