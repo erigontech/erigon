@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/big"
 
 	"github.com/golang/snappy"
@@ -206,7 +205,6 @@ func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
 	if common.IsCanceled(ctx) {
 		return
 	}
-	fmt.Printf("Writing header %d with hash %x\n", number, hash)
 	if err := db.Put(dbutils.HeaderNumberPrefix, hash[:], encoded); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}

@@ -17,12 +17,10 @@
 package eth
 
 import (
-	//"fmt"
 	"math/big"
 	"math/rand"
 	"sync/atomic"
 	"time"
-	//"runtime/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -175,7 +173,6 @@ type chainSyncOp struct {
 
 // newChainSyncer creates a chainSyncer.
 func newChainSyncer(pm *ProtocolManager) *chainSyncer {
-	//fmt.Printf("newChainSyncer: %s\n", debug.Stack())
 	return &chainSyncer{
 		pm:          pm,
 		peerEventCh: make(chan struct{}),
@@ -186,13 +183,10 @@ func newChainSyncer(pm *ProtocolManager) *chainSyncer {
 // This is called for new peers and every time a peer announces a new
 // chain head.
 func (cs *chainSyncer) handlePeerEvent(p *peer) bool {
-	//fmt.Printf("About to send peer event %p\n", cs)
 	select {
 	case cs.peerEventCh <- struct{}{}:
-		//fmt.Printf("Sent peer event\n")
 		return true
 	case <-cs.pm.quitSync:
-		//fmt.Printf("Quit instead of sending peer event\n")
 		return false
 	}
 }
@@ -216,29 +210,21 @@ func (cs *chainSyncer) loop() {
 	defer cs.force.Stop()
 
 	for {
-		//fmt.Printf("Checking next sync op...\n")
 		if op := cs.nextSyncOp(); op != nil {
-			//fmt.Printf("Start sync op...\n")
 			cs.startSync(op)
 		}
 
-		//fmt.Printf("Waiting on %p...\n", cs)
 		select {
 		case <-cs.peerEventCh:
 			// Peer information changed, recheck.
-			//fmt.Printf("Peer info changed\n")
 		case <-cs.doneCh:
-			//fmt.Printf("Done\n")
 			cs.doneCh = nil
 			cs.force.Reset(forceSyncCycle)
 			cs.forced = false
 		case <-cs.force.C:
-			//fmt.Printf("Forced\n")
 			cs.forced = true
-			//cs.force.Reset(forceSyncCycle)
 
 		case <-cs.pm.quitSync:
-			//fmt.Printf("Quit\n")
 			// Disable all insertion on the blockchain. This needs to happen before
 			// terminating the downloader because the downloader waits for blockchain
 			// inserts, and these can take a long time to finish.
@@ -256,7 +242,6 @@ func (cs *chainSyncer) loop() {
 // nextSyncOp determines whether sync is required at this time.
 func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	if cs.doneCh != nil {
-		//fmt.Printf("already syncing\n")
 		return nil // Sync already running.
 	}
 
@@ -267,7 +252,6 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	} else if minPeers > cs.pm.maxPeers {
 		minPeers = cs.pm.maxPeers
 	}
-	//fmt.Printf("peers.Len(): %d, minPeers: %d\n", cs.pm.peers.Len() , minPeers)
 	if cs.pm.peers.Len() < minPeers {
 		return nil
 	}

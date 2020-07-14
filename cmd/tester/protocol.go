@@ -70,22 +70,17 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 		return fmt.Errorf("failed to send DebugSetGenesisMsg message to peer: %w", err)
 	}
 
-	// todo: Server does send DebugSetGenesisMsg, but next code does timeout
 	msg, err := rw.ReadMsg()
 	if err != nil {
 		fmt.Printf("Failed to recevied DebugSetGenesisMsg message from peer: %v\n", err)
 		return err
 	}
-	fmt.Println("2")
 	if msg.Code != eth.DebugSetGenesisMsg {
-		fmt.Printf("first msg has code %x (!= %x)\n", msg.Code, eth.DebugSetGenesisMsg)
 		return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.DebugSetGenesisMsg)
 	}
 	if msg.Size > eth.ProtocolMaxMsgSize {
-		fmt.Printf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
 		return fmt.Errorf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
 	}
-	//
 
 	log.Info("eth set custom genesis.config")
 	time.Sleep(2000*time.Second)
@@ -123,24 +118,19 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	}
 	var statusResp statusData
 	if err := msg.Decode(&statusResp); err != nil {
-		fmt.Printf("failed to decode msg %v: %v", msg, err)
 		return fmt.Errorf("failed to decode msg %v: %v", msg, err)
 	}
 	if statusResp.GenesisBlock != tp.genesisBlockHash {
-		fmt.Printf("mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 		return fmt.Errorf("mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 	}
 	if statusResp.NetworkID != tp.networkId {
-		fmt.Printf("mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 		return fmt.Errorf("mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 	}
 	if statusResp.ProtocolVersion != tp.protocolVersion {
-		fmt.Printf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 		return fmt.Errorf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 	}
 	log.Info(fmt.Sprintf("eth handshake complete, block hash: %x, block difficulty: %s", statusResp.CurrentBlock, statusResp.TD))
 
-	//lastBlockNumber := int(tp.blockFeeder.LastBlock().NumberU64())
 	sentBlocks := 0
 	emptyBlocks := 0
 	signaledHead := false

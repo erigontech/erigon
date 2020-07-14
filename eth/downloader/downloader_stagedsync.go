@@ -85,7 +85,6 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		// No more bodies to download
 		return false, nil
 	}
-	fmt.Printf("Found %d block hashes\n", hashCount)
 	from := origin + 1
 	d.queue.Prepare(from, d.mode)
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)

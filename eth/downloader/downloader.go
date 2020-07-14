@@ -659,7 +659,7 @@ func (d *Downloader) Terminate() {
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
 // the total time a pending synchronisation would take.
 func (d *Downloader) fetchHeight(p *peerConnection) (*types.Header, error) {
-	p.log.Info("Retrieving remote chain height")
+	p.log.Debug("Retrieving remote chain height")
 
 	// Request the advertised remote head block and wait for the response
 	head, _ := p.peer.Head()
@@ -689,11 +689,11 @@ func (d *Downloader) fetchHeight(p *peerConnection) (*types.Header, error) {
 				p.log.Warn("Remote head below checkpoint", "number", head.Number, "hash", head.Hash())
 				return nil, errUnsyncedPeer
 			}
-			p.log.Info("Remote head header identified", "number", head.Number, "hash", head.Hash())
+			p.log.Debug("Remote head header identified", "number", head.Number, "hash", head.Hash())
 			return head, nil
 
 		case <-timeout:
-			p.log.Info("Waiting for head header timed out", "elapsed", ttl)
+			p.log.Debug("Waiting for head header timed out", "elapsed", ttl)
 			return nil, errTimeout
 
 		case <-d.bodyCh:
@@ -1561,7 +1561,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 						if err1 := d.headersState.Update(d.stateDB, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
-						fmt.Printf("Updated progress: %d\n", chunk[len(chunk)-1].Number.Uint64())
 					}
 					if err != nil {
 						// If some headers were inserted, add them too to the rollback list
@@ -1677,7 +1676,6 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
 			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
 		}
-		fmt.Printf("Saved stage2 progress to %d\n", blocks[index-1].NumberU64())
 		return blocks[index-1].NumberU64() + 1, nil
 	}
 	return 0, nil

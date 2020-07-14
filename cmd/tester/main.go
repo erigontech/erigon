@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"syscall"
-	//"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console/prompt"
