@@ -83,14 +83,14 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 	}
 
 	log.Info("eth set custom genesis.config")
-	time.Sleep(2000*time.Second)
+	time.Sleep(2000 * time.Second)
 	return nil
 }
 
 func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	log.Info("Ethereum peer connected", "peer", peer.Name())
 	log.Debug("Protocol version", "version", tp.protocolVersion)
-	time.Sleep(3*time.Second)
+	time.Sleep(3 * time.Second)
 
 	// Synchronous "eth" handshake
 	err := p2p.Send(rw, eth.StatusMsg, &statusData{
