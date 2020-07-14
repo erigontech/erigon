@@ -507,6 +507,9 @@ func (pool *TxPool) Stop() {
 	if pool.journal != nil {
 		pool.journal.close()
 	}
+
+	pool.isStarted = false
+
 	log.Info("Transaction pool stopped")
 }
 
@@ -1460,6 +1463,10 @@ func (pool *TxPool) RunInit() error {
 		return errors.New("can't init a nil transaction pool")
 	}
 
+	if pool.IsStarted() {
+		return errors.New("transaction pool is already started")
+	}
+
 	var err error
 	for _, fn := range pool.initFns {
 		if err = fn(); err != nil {
@@ -1480,6 +1487,10 @@ func (pool *TxPool) AddStop(fns ...func() error) {
 func (pool *TxPool) RunStop() error {
 	if pool == nil {
 		return errors.New("can't stop a nil transaction pool")
+	}
+
+	if !pool.IsStarted() {
+		return errors.New("transaction pool is already stopped")
 	}
 
 	var err error
