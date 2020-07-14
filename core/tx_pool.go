@@ -507,6 +507,9 @@ func (pool *TxPool) Stop() {
 	if pool.journal != nil {
 		pool.journal.close()
 	}
+
+	pool.isStarted = false
+
 	log.Info("Transaction pool stopped")
 }
 
