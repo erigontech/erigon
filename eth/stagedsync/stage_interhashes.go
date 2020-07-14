@@ -313,13 +313,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
 			LoadStartKey:    loadStartKey,
-			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(putter, from, []byte{index})
-				}
-				return s.UpdateWithStageData(putter, from, append([]byte{index}, key...))
-			},
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	); err != nil {
 		return err
@@ -378,13 +372,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
 			LoadStartKey:    loadStartKey,
-			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return u.UpdateWithStageData(putter, []byte{index})
-				}
-				return u.UpdateWithStageData(putter, append([]byte{index}, key...))
-			},
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	); err != nil {
 		return err
