@@ -80,10 +80,7 @@ var (
 )
 
 const (
-	bodyCacheLimit      = 256
-	blockCacheLimit     = 256
 	receiptsCacheLimit  = 32
-	txLookupCacheLimit  = 1024
 	maxFutureBlocks     = 256
 	maxTimeFutureBlocks = 30
 	badBlockLimit       = 10
@@ -169,11 +166,7 @@ type BlockChain struct {
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
 	trieDbState   *state.TrieDbState
-	bodyCache     *lru.Cache // Cache for the most recent block bodies
-	bodyRLPCache  *lru.Cache // Cache for the most recent block bodies in RLP encoded format
 	receiptsCache *lru.Cache // Cache for the most recent receipts per block
-	blockCache    *lru.Cache // Cache for the most recent entire blocks
-	txLookupCache *lru.Cache // Cache for the most recent transaction lookup data.
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
 	quit          chan struct{}  // blockchain quit channel
@@ -221,11 +214,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		cacheConfig.ArchiveSyncInterval = 1024
 	}
 
-	bodyCache, _ := lru.New(bodyCacheLimit)
-	bodyRLPCache, _ := lru.New(bodyCacheLimit)
 	receiptsCache, _ := lru.New(receiptsCacheLimit)
-	blockCache, _ := lru.New(blockCacheLimit)
-	txLookupCache, _ := lru.New(txLookupCacheLimit)
 	futureBlocks, _ := lru.New(maxFutureBlocks)
 	badBlocks, _ := lru.New(badBlockLimit)
 	cdb := db.NewBatch()
@@ -237,11 +226,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		triegc:              prque.New(nil),
 		quit:                make(chan struct{}),
 		shouldPreserve:      shouldPreserve,
-		bodyCache:           bodyCache,
-		bodyRLPCache:        bodyRLPCache,
 		receiptsCache:       receiptsCache,
-		blockCache:          blockCache,
-		txLookupCache:       txLookupCache,
 		futureBlocks:        futureBlocks,
 		engine:              engine,
 		vmConfig:            vmConfig,
@@ -534,11 +519,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 	bc.hc.SetHead(head, updateFn, delFn)
 
 	// Clear out any stale content from the caches
-	bc.bodyCache.Purge()
-	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
-	bc.blockCache.Purge()
-	bc.txLookupCache.Purge()
 	bc.futureBlocks.Purge()
 
 	return bc.loadLastState()
@@ -690,11 +671,6 @@ func (bc *BlockChain) Genesis() *types.Block {
 // GetBody retrieves a block body (transactions and uncles) from the database by
 // hash, caching it if found.
 func (bc *BlockChain) GetBody(hash common.Hash) *types.Body {
-	// Short circuit if the body's already in the cache, retrieve otherwise
-	if cached, ok := bc.bodyCache.Get(hash); ok {
-		body := cached.(*types.Body)
-		return body
-	}
 	number := bc.hc.GetBlockNumber(bc.db, hash)
 	if number == nil {
 		return nil
@@ -703,18 +679,12 @@ func (bc *BlockChain) GetBody(hash common.Hash) *types.Body {
 	if body == nil {
 		return nil
 	}
-	// Cache the found body for next time and return
-	bc.bodyCache.Add(hash, body)
 	return body
 }
 
 // GetBodyRLP retrieves a block body in RLP encoding from the database by hash,
 // caching it if found.
 func (bc *BlockChain) GetBodyRLP(hash common.Hash) rlp.RawValue {
-	// Short circuit if the body's already in the cache, retrieve otherwise
-	if cached, ok := bc.bodyRLPCache.Get(hash); ok {
-		return cached.(rlp.RawValue)
-	}
 	number := bc.hc.GetBlockNumber(bc.db, hash)
 	if number == nil {
 		return nil
@@ -723,16 +693,11 @@ func (bc *BlockChain) GetBodyRLP(hash common.Hash) rlp.RawValue {
 	if len(body) == 0 {
 		return nil
 	}
-	// Cache the found body for next time and return
-	bc.bodyRLPCache.Add(hash, body)
 	return body
 }
 
 // HasBlock checks if a block is fully present in the database or not.
 func (bc *BlockChain) HasBlock(hash common.Hash, number uint64) bool {
-	if bc.blockCache.Contains(hash) {
-		return true
-	}
 	return rawdb.HasBody(bc.db, hash, number)
 }
 
@@ -756,35 +721,6 @@ func (bc *BlockChain) HasBlockAndState(hash common.Hash, number uint64) bool {
 		return false
 	}
 	return true
-}
-
-// CachedBlocks returns the hashes of the cached blocks.
-func (bc *BlockChain) CachedBlocks() []common.Hash {
-	a := bc.blockCache.Keys()
-	b := make([]common.Hash, len(a))
-	for i := range a {
-		b[i] = a[i].(common.Hash)
-	}
-	return b
-}
-
-// AvailableBlocks returns the hashes of easily available blocks.
-func (bc *BlockChain) AvailableBlocks() []common.Hash {
-	var res []common.Hash
-	blockNbr := bc.CurrentBlock().NumberU64()
-	for i := 0; i < blockCacheLimit; i++ {
-		block := bc.GetBlockByNumber(blockNbr)
-		if block == nil {
-			break
-		}
-		res = append(res, block.Hash())
-
-		if blockNbr == 0 {
-			break
-		}
-		blockNbr--
-	}
-	return res
 }
 
 // GetBlock retrieves a block from the database by hash and number,
@@ -982,17 +918,9 @@ func (bc *BlockChain) truncateAncient(head uint64) error {
 	if err := bc.db.TruncateAncients(head + 1); err != nil {
 		return err
 	}
-	// Clear out any stale content from the caches
-	bc.hc.headerCache.Purge()
-	bc.hc.tdCache.Purge()
-	bc.hc.numberCache.Purge()
 
 	// Clear out any stale content from the caches
-	bc.bodyCache.Purge()
-	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
-	bc.blockCache.Purge()
-	bc.txLookupCache.Purge()
 	bc.futureBlocks.Purge()
 
 	log.Info("Rewind ancient data", "number", head)
@@ -1907,8 +1835,8 @@ func (st *InsertStats) Report(chain []*types.Block, index int, batch ethdb.DbWit
 		}
 		end := chain[index]
 		context := []interface{}{
-			"blocks", st.Processed, "txs", txs, "mgas", float64(st.UsedGas) / 1000000,
-			"elapsed", common.PrettyDuration(elapsed), "mgasps", float64(st.UsedGas) * 1000 / float64(elapsed),
+			"blocks", st.Processed, "txs", txs,
+			"elapsed", common.PrettyDuration(elapsed),
 			"number", end.Number(), "hash", end.Hash(), "batch", common.StorageSize(batch.BatchSize()),
 		}
 		if timestamp := time.Unix(int64(end.Time()), 0); time.Since(timestamp) > time.Minute {

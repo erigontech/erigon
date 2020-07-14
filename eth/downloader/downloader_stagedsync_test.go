@@ -69,12 +69,6 @@ func (st *stagedSyncTester) dropPeer(id string) {
 	st.downloader.UnregisterPeer(id)
 }
 
-// Config is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) Config() *params.ChainConfig {
-	// This needs to match whatever is used in testchain_test.go to generate signatures
-	return params.TestChainConfig
-}
-
 // CurrentBlock is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) CurrentBlock() *types.Block {
 	panic("")

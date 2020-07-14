@@ -282,10 +282,6 @@ func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks
 	return false, nil
 }
 
-func (dl *downloadTester) Config() *params.ChainConfig {
-	return nil
-}
-
 func (dl *downloadTester) GetVMConfig() *vm.Config {
 	return nil
 }

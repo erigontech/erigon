@@ -39,14 +39,14 @@ type ServiceContext struct {
 
 // OpenDatabaseWithFreezer
 // FIXME: implement the functionality
-func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, freezer string) (ethdb.Database, error) {
+func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, freezer string) (*ethdb.ObjectDatabase, error) {
 	return ctx.OpenDatabase(name)
 }
 
 // OpenDatabase opens an existing database with the given name (or creates one
 // if no previous can be found) from within the node's data directory. If the
 // node is an ephemeral one, a memory database is returned.
-func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
+func (ctx *ServiceContext) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 	if ctx.Config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}

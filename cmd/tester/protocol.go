@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -29,6 +32,7 @@ type statusData struct {
 type TesterProtocol struct {
 	protocolVersion  uint32
 	networkId        uint64
+	mainnetGenesis   *types.Block
 	genesisBlockHash common.Hash
 	blockFeeder      BlockFeeder
 	forkFeeder       BlockFeeder
@@ -39,7 +43,9 @@ type TesterProtocol struct {
 }
 
 func NewTesterProtocol() *TesterProtocol {
-	return &TesterProtocol{}
+	db := ethdb.NewMemDatabase()
+	mainnetGenesis := core.DefaultGenesisBlock().MustCommit(db)
+	return &TesterProtocol{mainnetGenesis: mainnetGenesis}
 }
 
 // Return true if the block has already been marked. If the block has not been marked, returns false and marks it
@@ -64,7 +70,7 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 		return fmt.Errorf("failed to send DebugSetGenesisMsg message to peer: %w", err)
 	}
 
-	/* todo: Server does send DebugSetGenesisMsg, but next code does timeout
+	// todo: Server does send DebugSetGenesisMsg, but next code does timeout
 	msg, err := rw.ReadMsg()
 	if err != nil {
 		fmt.Printf("Failed to recevied DebugSetGenesisMsg message from peer: %v\n", err)
@@ -79,16 +85,17 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 		fmt.Printf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
 		return fmt.Errorf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
 	}
-	*/
+	//
 
 	log.Info("eth set custom genesis.config")
-	time.Sleep(time.Second)
+	time.Sleep(2000*time.Second)
 	return nil
 }
 
 func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	log.Info("Ethereum peer connected", "peer", peer.Name())
 	log.Debug("Protocol version", "version", tp.protocolVersion)
+	time.Sleep(3*time.Second)
 
 	// Synchronous "eth" handshake
 	err := p2p.Send(rw, eth.StatusMsg, &statusData{
@@ -96,9 +103,10 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 		NetworkID:       tp.networkId,
 		TD:              tp.blockFeeder.TotalDifficulty(),
 		CurrentBlock:    tp.blockFeeder.LastBlock().Hash(),
-		GenesisBlock:    tp.genesisBlockHash,
-		ForkID:          tp.blockFeeder.ForkID(),
+		GenesisBlock:    tp.mainnetGenesis.Hash(),
+		ForkID:          forkid.NewID(params.MainnetChainConfig, tp.mainnetGenesis.Hash(), 0),
 	})
+	log.Info("Sent status message")
 	if err != nil {
 		return fmt.Errorf("failed to send status message to peer: %w", err)
 	}
@@ -106,6 +114,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	if err != nil {
 		return fmt.Errorf("failed to recevied state message from peer: %w", err)
 	}
+	fmt.Printf("Received response from status message\n")
 	if msg.Code != eth.StatusMsg {
 		return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
 	}
@@ -114,15 +123,19 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	}
 	var statusResp statusData
 	if err := msg.Decode(&statusResp); err != nil {
+		fmt.Printf("failed to decode msg %v: %v", msg, err)
 		return fmt.Errorf("failed to decode msg %v: %v", msg, err)
 	}
 	if statusResp.GenesisBlock != tp.genesisBlockHash {
+		fmt.Printf("mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 		return fmt.Errorf("mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 	}
 	if statusResp.NetworkID != tp.networkId {
+		fmt.Printf("mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 		return fmt.Errorf("mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 	}
 	if statusResp.ProtocolVersion != tp.protocolVersion {
+		fmt.Printf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 		return fmt.Errorf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 	}
 	log.Info(fmt.Sprintf("eth handshake complete, block hash: %x, block difficulty: %s", statusResp.CurrentBlock, statusResp.TD))
@@ -326,7 +339,7 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	if err := p2p.Send(rw, eth.BlockBodiesMsg, bodies); err != nil {
 		return newSentBlocks, err
 	}
-	log.Info("Sending bodies", "progress", newSentBlocks)
+	log.Info("Sending bodies", "number", len(bodies), "progress", newSentBlocks)
 
 	return newSentBlocks, nil
 }

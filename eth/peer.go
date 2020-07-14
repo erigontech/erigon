@@ -579,6 +579,7 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 				CurrentBlock:    head,
 				GenesisBlock:    genesis,
 			})
+			fmt.Printf("sent out eth63 status\n")
 		case p.version >= eth64:
 			errc <- p2p.Send(p.rw, StatusMsg, &statusData{
 				ProtocolVersion: uint32(p.version),
@@ -588,6 +589,7 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 				Genesis:         genesis,
 				ForkID:          forkID,
 			})
+			fmt.Printf("sent out eth64 status\n")
 		default:
 			panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
 		}
@@ -597,7 +599,8 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		case p.version == eth63:
 			errc <- p.readStatusLegacy(network, &status63, genesis)
 		case p.version >= eth64:
-			errc <- p.readStatus(network, &status, genesis, forkFilter)
+			err := p.readStatus(network, &status, genesis, forkFilter)
+			errc <- err
 		default:
 			panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
 		}
@@ -680,6 +683,7 @@ func (p *peer) readStatus(network uint64, status *statusData, genesis common.Has
 	if err := forkFilter(status.ForkID); err != nil {
 		return errResp(ErrForkIDRejected, "%v", err)
 	}
+	fmt.Printf("Received StatusMsg with genesis %x\n", genesis)
 	return nil
 }
 

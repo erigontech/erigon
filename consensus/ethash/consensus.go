@@ -179,6 +179,7 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainReader, headers []
 	} else if headers[index-1].Hash() == headers[index].ParentHash {
 		parent = headers[index-1]
 	}
+	fmt.Printf("Parent block in verifier: %d %x\n", parent.Number.Uint64(), parent.Hash())
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}

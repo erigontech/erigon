@@ -23,23 +23,24 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"os"
+	//"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
+	//"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	//"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -76,8 +77,9 @@ type ProtocolManager struct {
 	checkpointHash   common.Hash // Block hash for the sync progress validator to cross reference
 
 	txpool     txPool
+	chainConfig *params.ChainConfig
 	blockchain *core.BlockChain
-	chaindb    ethdb.Database
+	chaindb    *ethdb.ObjectDatabase
 	maxPeers   int
 
 	downloader   *downloader.Downloader
@@ -109,13 +111,14 @@ type ProtocolManager struct {
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
 // with the Ethereum network.
-func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
+func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	manager := &ProtocolManager{
 		networkID:  networkID,
 		forkFilter: forkid.NewFilter(blockchain),
 		eventMux:   mux,
 		txpool:     txpool,
+		chainConfig: config,
 		blockchain: blockchain,
 		chaindb:    chaindb,
 		peers:      newPeerSet(),
@@ -159,7 +162,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	if err != nil {
 		return nil, err
 	}
-	initPm(manager, txpool, engine, blockchain, tds, chaindb)
+	initPm(manager, txpool, engine, config, blockchain, tds, chaindb)
 
 	return manager, nil
 }
@@ -171,13 +174,16 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
 	// Construct the different synchronisation mechanisms
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer, sm)
+	if manager.downloader != nil {
+		manager.downloader.Cancel()
+	}
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
 
 	// Construct the fetcher (short sync)
@@ -213,7 +219,9 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 		}
 		return n, err
 	}
-	manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+	if manager.blockFetcher == nil {
+		manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+	}
 
 	if manager.chainSync == nil {
 		manager.chainSync = newChainSyncer(manager)
@@ -228,6 +236,7 @@ func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
 		Version: DebugVersions[0],
 		Length:  DebugLengths[DebugVersions[0]],
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			fmt.Printf("debugProtocol Peer %p\n", p)
 			peer := &debugPeer{Peer: p, rw: rw}
 			select {
 			case <-pm.quitSync:
@@ -269,6 +278,7 @@ func (pm *ProtocolManager) makeProtocol(version uint) p2p.Protocol {
 		Version: version,
 		Length:  length,
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			fmt.Printf("protocol Peer %p\n", p)
 			return pm.runPeer(pm.newPeer(int(version), p, rw, pm.txpoolGet))
 		},
 		NodeInfo: func() interface{} {
@@ -422,10 +432,12 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		number  = head.Number.Uint64()
 		td      = pm.blockchain.GetTd(hash, number)
 	)
-	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.blockchain), pm.forkFilter); err != nil {
+	fmt.Printf("Before the handshake: %x\n", genesis.Hash())
+	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
+	fmt.Printf("After the handshake: %x\n", genesis.Hash())
 
 	// Register the peer locally
 	if err := pm.peers.Register(p); err != nil {
@@ -595,9 +607,11 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		return p.SendBlockHeaders(headers)
 
 	case msg.Code == BlockHeadersMsg:
+		fmt.Printf("Received BlockHeadersMsg\n")
 		// A batch of headers arrived to one of our previous requests
 		var headers []*types.Header
 		if err := msg.Decode(&headers); err != nil {
+			fmt.Printf("Error decoding\n")
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
 		// If no headers were received, but we're expencting a checkpoint header, consider it that
@@ -610,13 +624,15 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			// eclipse attacks. Unsynced nodes are welcome to connect after we're done
 			// joining the network
 			if atomic.LoadUint32(&pm.fastSync) == 1 {
-				p.Log().Warn("Dropping unsynced node during fast sync", "addr", p.RemoteAddr(), "type", p.Name())
+				fmt.Printf("unsynced node cannot serve fast sync\n")
+				p.Log().Info("Dropping unsynced node during fast sync", "addr", p.RemoteAddr(), "type", p.Name())
 				return errors.New("unsynced node cannot serve fast sync")
 			}
 		}
 		// Filter out any explicitly requested headers, deliver the rest to the downloader
 		filter := len(headers) == 1
 		if filter {
+			fmt.Printf("Filtering\n")
 			// If it's a potential sync progress check, validate the content and advertised chain weight
 			if p.syncDrop != nil && headers[0].Number.Uint64() == pm.checkpointNumber {
 				// Disable the sync drop timer
@@ -625,22 +641,28 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 				// Validate the header and either drop the peer or continue
 				if headers[0].Hash() != pm.checkpointHash {
+					fmt.Printf("filter checkpoint mismatch\n")
 					return errors.New("checkpoint hash mismatch")
 				}
+				fmt.Printf("filter nil\n")
 				return nil
 			}
 			// Otherwise if it's a whitelisted block, validate against the set
 			if want, ok := pm.whitelist[headers[0].Number.Uint64()]; ok {
 				if hash := headers[0].Hash(); want != hash {
+					fmt.Printf("Whitelist mismatch, dropping peer\n")
 					p.Log().Info("Whitelist mismatch, dropping peer", "number", headers[0].Number.Uint64(), "hash", hash, "want", want)
 					return errors.New("whitelist block mismatch")
 				}
 				p.Log().Debug("Whitelist block verified", "number", headers[0].Number.Uint64(), "hash", want)
 			}
 			// Irrelevant of the fork checks, send the header to the fetcher just in case
+			fmt.Printf("Before filtering out %d\n", len(headers))
 			headers = pm.blockFetcher.FilterHeaders(p.id, headers, time.Now())
+			fmt.Printf("Filtered out headers to %d\n", len(headers))
 		}
 		if len(headers) > 0 || !filter {
+			fmt.Printf("Delivering %d headers\n", len(headers))
 			err := pm.downloader.DeliverHeaders(p.id, headers)
 			if err != nil {
 				log.Debug("Failed to deliver headers", "err", err)
@@ -962,10 +984,12 @@ func (pm *ProtocolManager) extractAddressHash(addressOrHash []byte) (common.Hash
 }
 
 func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
+	fmt.Printf("Before reading debug msg\n")
 	msg, readErr := p.rw.ReadMsg()
 	if readErr != nil {
 		return fmt.Errorf("handleDebugMsg p.rw.ReadMsg: %w", readErr)
 	}
+	fmt.Printf("After reading debug msg\n")
 	if msg.Size > DebugMaxMsgSize {
 		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, DebugMaxMsgSize)
 	}
@@ -980,39 +1004,56 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("msgStream.Decode: %w", err)
 		}
 
-		genesis := core.DefaultGenesisBlock()
-		if err := json.Unmarshal(msgAsJson, genesis); err != nil {
+		var genesis core.Genesis
+		if err := json.Unmarshal(msgAsJson, &genesis); err != nil {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		_ = os.Remove("simulator")
-		ethDb := ethdb.MustOpen("simulator")
-		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis, true /* history */)
+		//_ = os.Remove("simulator")
+		//ethDb := ethdb.MustOpen("simulator")
+		if err := pm.chaindb.ClearBuckets(
+			dbutils.CurrentStateBucket,
+			dbutils.AccountChangeSetBucket,
+			dbutils.StorageChangeSetBucket,
+			dbutils.ContractCodeBucket,
+			dbutils.PlainStateBucket,
+			dbutils.PlainAccountChangeSetBucket,
+			dbutils.PlainStorageChangeSetBucket,
+			dbutils.PlainContractCodeBucket,
+			dbutils.IncarnationMapBucket,
+			dbutils.CodeBucket,
+			dbutils.SyncStageProgress,
+		); err != nil {
+			return fmt.Errorf("Clearing buckets: %w", err)
+		}
+		chainConfig, _, _, err := core.SetupGenesisBlock(pm.chaindb, &genesis, true /* history */, true /* overwrite */)
 		if err != nil {
 			return fmt.Errorf("SetupGenesisBlock: %w", err)
 		}
+		pm.chainConfig = chainConfig
+		pm.downloader.SetChainConfig(chainConfig)
 
 		// Clean up: reuse engine... probably we can
-		time.Sleep(100 * time.Millisecond) // wait for pm.syncer finish
+		//time.Sleep(100 * time.Millisecond) // wait for pm.syncer finish
 
-		engine := pm.blockchain.Engine()
-		pm.blockchain.ChainDb().Close()
-		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, vm.NewDestsCache(10))
-		if err != nil {
-			return fmt.Errorf("fail in NewBlockChain: %w", err)
-		}
-		pm.blockchain.Stop()
-		pm.blockchain = blockchain
-		pm.forkFilter = forkid.NewFilter(pm.blockchain)
+		//engine := pm.blockchain.Engine()
+		//pm.blockchain.ChainDb().Close()
+		//pm.blockchain.Stop()
+		//blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, vm.NewDestsCache(10))
+		//if err != nil {
+		//	return fmt.Errorf("fail in NewBlockChain: %w", err)
+		//}
+		//pm.blockchain = blockchain
+		//pm.forkFilter = forkid.NewFilter(pm.blockchain)
 
-		tds, err := pm.blockchain.GetTrieDbState()
-		if err != nil {
-			return fmt.Errorf("fail in GetTrieDbState: %w", err)
-		}
-		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, tds, pm.blockchain.ChainDb())
-		pm.quitSync = make(chan struct{})
+		//tds, err := pm.blockchain.GetTrieDbState()
+		//if err != nil {
+		//	return fmt.Errorf("fail in GetTrieDbState: %w", err)
+		//}
+		//initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, tds, pm.blockchain.ChainDb())
+		//pm.quitSync = make(chan struct{})
 
-		remotedbserver.StartDeprecated(ethDb.KV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
+		//remotedbserver.StartDeprecated(ethDb.KV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync
 		downloader.MaxHashFetch = 512 * 10
@@ -1156,7 +1197,7 @@ func (pm *ProtocolManager) NodeInfo() *NodeInfo {
 		Network:    pm.networkID,
 		Difficulty: pm.blockchain.GetTd(currentBlock.Hash(), currentBlock.NumberU64()),
 		Genesis:    pm.blockchain.Genesis().Hash(),
-		Config:     pm.blockchain.Config(),
+		Config:     pm.chainConfig,
 		Head:       currentBlock.Hash(),
 	}
 }
