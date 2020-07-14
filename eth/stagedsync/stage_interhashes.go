@@ -270,29 +270,10 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 	}
 	log.Debug("Incremental state promotion of intermediate hashes", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
-	startkey := dbutils.EncodeTimestamp(from + 1)
-	skip := false
+	// Can't skip stage even if it was done before interruptoin because need to fill non-persistent data structure: Receiver
 
-	var loadStartKey []byte
-	if len(s.StageData) != 0 {
-		// we have finished this stage but didn't start the next one
-		if len(s.StageData) == 1 && s.StageData[0] == index {
-			skip = true
-			// we are already at the next stage
-		} else if s.StageData[0] > index {
-			skip = true
-			// if we at the current stage and we have something meaningful at StageData
-		} else if s.StageData[0] == index {
-			var err error
-			loadStartKey, err = etl.NextKey(s.StageData[1:])
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if skip {
-		return nil
-	}
+	startkey := dbutils.EncodeTimestamp(from + 1)
+
 	var l OldestAppearedLoad
 	if storage {
 		l.innerLoadFunc = r.storageLoad
@@ -312,7 +293,6 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
 					return s.UpdateWithStageData(putter, from, []byte{index})
@@ -340,27 +320,8 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
-	var loadStartKey []byte
-	skip := false
-	if len(u.StageData) != 0 {
-		// we have finished this stage but didn't start the next one
-		if len(u.StageData) == 1 && u.StageData[0] == index {
-			skip = true
-			// we are already at the next stage
-		} else if u.StageData[0] > index {
-			skip = true
-			// if we at the current stage and we have something meaningful at StageData
-		} else if u.StageData[0] == index {
-			var err error
-			loadStartKey, err = etl.NextKey(u.StageData[1:])
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if skip {
-		return nil
-	}
+	// Can't skip stage even if it was done before interruptoin because need to fill non-persistent data structure: Receiver
+
 	var l OldestAppearedLoad
 	if storage {
 		l.innerLoadFunc = r.storageLoad
@@ -377,7 +338,6 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
 					return u.UpdateWithStageData(putter, []byte{index})

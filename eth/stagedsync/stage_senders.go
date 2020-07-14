@@ -37,7 +37,7 @@ type Stage3Config struct {
 	Now             time.Time
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh chan struct{}) error {
+func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh <-chan struct{}) error {
 	if toBlock > 0 && toBlock <= s.BlockNumber {
 		return nil
 	}
@@ -134,7 +134,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 				if blockNumber == uint64(cfg.ToProcess) {
 					// Flush the profiler
 					pprof.StopCPUProfile()
-					common.SafeClose(quitCh)
+					//common.SafeClose(quitCh)
 					return false, nil
 				}
 			}

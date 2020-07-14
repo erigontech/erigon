@@ -31,7 +31,7 @@ func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 }
 
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
-	fmt.Printf("UnwindTo %d\n", blockNumber)
+	log.Info("UnwindTo", "block", blockNumber)
 	for _, stage := range s.stages {
 		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
 			return err
@@ -77,7 +77,7 @@ func NewState(stages []*Stage) *State {
 
 func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
 	for _, stage := range s.stages {
-		if err := s.unwindStack.LoadFromDB(db, stage.ID); err != nil {
+		if err := s.unwindStack.AddFromDB(db, stage.ID); err != nil {
 			return err
 		}
 	}
@@ -105,7 +105,20 @@ func (s *State) findInterruptedStage(db ethdb.Getter) (*Stage, error) {
 	return nil, nil
 }
 
-func (s *State) Run(db ethdb.GetterPutter) error {
+func (s *State) findInterruptedUnwindStage(db ethdb.Getter) (*Stage, error) {
+	for _, stage := range s.stages {
+		_, stageData, err := stages.GetStageUnwind(db, stage.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(stageData) > 0 {
+			return stage, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *State) RunInterruptedStage(db ethdb.Getter) error {
 	if interruptedStage, err := s.findInterruptedStage(db); err != nil {
 		return err
 	} else if interruptedStage != nil {
@@ -114,6 +127,34 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 		}
 		// restart from 0 after completing the missing stage
 		s.currentStage = 0
+	}
+
+	if interruptedStage, err := s.findInterruptedUnwindStage(db); err != nil {
+		return err
+	} else if interruptedStage != nil {
+		u, err := s.unwindStack.LoadFromDB(db, interruptedStage.ID)
+		if err != nil {
+			return err
+		}
+		if u == nil {
+			return nil
+		}
+		st, err := s.StageState(interruptedStage.ID, db)
+		if err != nil {
+			return err
+		}
+		if err := interruptedStage.UnwindFunc(u, st); err != nil {
+			return err
+		}
+		// restart from 0 after completing the missing stage
+		s.currentStage = 0
+	}
+	return nil
+}
+
+func (s *State) Run(db ethdb.GetterPutter) error {
+	if err := s.RunInterruptedStage(db); err != nil {
+		return err
 	}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
