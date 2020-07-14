@@ -211,11 +211,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 }
 
 func progress(db ethdb.Getter, stage stages.SyncStage) *stagedsync.StageState {
-	stageProgress, _, err := stages.GetStageProgress(db, stage)
+	stageProgress, stageData, err := stages.GetStageProgress(db, stage)
 	if err != nil {
 		panic(err)
 	}
-	return &stagedsync.StageState{Stage: stage, BlockNumber: stageProgress}
+	return &stagedsync.StageState{Stage: stage, BlockNumber: stageProgress, StageData: stageData}
 }
 
 func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
