@@ -20,7 +20,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 // ContractRef is a reference to the contract's backing object
@@ -50,7 +49,7 @@ type Contract struct {
 	caller        ContractRef
 	self          ContractRef
 
-	analysis *pool.ByteBuffer // Locally cached result of JUMPDEST analysis
+	analysis *ByteBuffer // Locally cached result of JUMPDEST analysis
 	dests    Cache
 
 	Code     []byte

@@ -8,7 +8,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -160,15 +159,10 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 	for _, test := range accountCases {
 		test := test
 
+		buf := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				b.StopTimer()
-				encodedLen := test.acc.EncodingLengthForStorage()
-				b.StartTimer()
-
-				encodedAccount := pool.GetBuffer(encodedLen)
-				test.acc.EncodeForStorage(encodedAccount.B)
-				pool.PutBuffer(encodedAccount)
+				test.acc.EncodeForStorage(buf)
 			}
 		})
 	}
@@ -219,15 +213,10 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		test := test
+		buf := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				b.StopTimer()
-				encodedLen := test.acc.EncodingLengthForHashing()
-				b.StartTimer()
-
-				encodedAccount := pool.GetBuffer(encodedLen)
-				test.acc.EncodeForHashing(encodedAccount.B)
-				pool.PutBuffer(encodedAccount)
+				test.acc.EncodeForHashing(buf)
 			}
 		})
 	}
@@ -279,27 +268,25 @@ func BenchmarkDecodingAccount(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		test := test
+		encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
 
-				encodedAccount := pool.GetBuffer(test.acc.EncodingLengthForStorage())
-				test.acc.EncodeForStorage(encodedAccount.B)
+				test.acc.EncodeForStorage(encodedAccount)
 
 				b.StartTimer()
 
 				var decodedAccount Account
-				if err := decodedAccount.DecodeForStorage(encodedAccount.B); err != nil {
+				if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 					b.Fatal("cant decode the account", err, encodedAccount)
 				}
 
 				b.StopTimer()
 				decodedAccounts = append(decodedAccounts, decodedAccount)
 				b.StartTimer()
-
-				pool.PutBuffer(encodedAccount)
 			}
 		})
 	}
