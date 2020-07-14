@@ -268,7 +268,6 @@ func (pm *ProtocolManager) makeProtocol(version uint) p2p.Protocol {
 		Version: version,
 		Length:  length,
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-			fmt.Printf("protocol Peer %p\n", p)
 			return pm.runPeer(pm.newPeer(int(version), p, rw, pm.txpoolGet))
 		},
 		NodeInfo: func() interface{} {
