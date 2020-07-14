@@ -150,7 +150,7 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
 func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) error {
-	var isIH, isIHSequence bool
+	var isIH bool
 	var minKey []byte
 	var err error
 	if !first {
@@ -200,15 +200,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				// Looking for storage sub-tree
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
-			if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(dbPrefix); err != nil {
-				return err
-			}
-			if isIHSequence {
-				// If IH records form sequence, then no reason move State cursor.
-				// But need change .k - then minKey of next iteration will equal to .ihK
-				fstl.k = common.CopyBytes(fstl.ihK)
-				return nil
-			}
 
 			if fstl.k, fstl.v, err = c.Seek(dbPrefix); err != nil {
 				return err
@@ -222,6 +213,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				} else {
 					fstl.k = nil
 				}
+			}
+			if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(dbPrefix); err != nil {
+				return err
 			}
 			isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
 			if fixedbytes == 0 {
@@ -300,17 +294,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], fstl.accountValue.Incarnation)
 
-			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
-				if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
-					return err
-				}
-
-				if isIHSequence {
-					fstl.k = common.CopyBytes(fstl.ihK)
-					return nil
-				}
-			}
-
 			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
@@ -320,6 +303,11 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and Seek: %x\n", fstl.k)
 			}
+			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
+				if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	}
@@ -327,6 +315,23 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	// ih part
 	if fstl.trace {
 		fmt.Printf("fstl.ihK %x, fstl.accAddrHashWithInc %x\n", fstl.ihK, fstl.accAddrHashWithInc[:])
+	}
+	if len(fstl.ihK) > common.HashLength && !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
+		if bytes.Compare(fstl.ihK, fstl.accAddrHashWithInc[:]) < 0 {
+			// Skip all the irrelevant storage in the middle
+			if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+				return err
+			}
+		} else {
+			if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
+				if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+					return err
+				}
+			} else {
+				fstl.ihK = nil
+			}
+		}
+		return nil
 	}
 	fstl.itemPresent = true
 	if len(fstl.ihK) > common.HashLength {
@@ -353,15 +358,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 		fmt.Printf("next: %x\n", next)
 	}
 
-	if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(next); err != nil {
-		return err
-	}
-
-	if isIHSequence {
-		fstl.k = common.CopyBytes(fstl.ihK)
-		return nil
-	}
-
 	if fstl.k, fstl.v, err = c.Seek(next); err != nil {
 		return err
 	}
@@ -377,6 +373,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	}
 	if fstl.trace {
 		fmt.Printf("k after next: %x\n", fstl.k)
+	}
+	if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(next); err != nil {
+		return err
 	}
 	return nil
 }
@@ -851,7 +850,8 @@ func IHIsValid(nibbles []byte) bool {
 
 // IHCursor - manage 2 cursors - make it looks as 1
 type IHCursor struct {
-	c *FilterCursor
+	c    *FilterCursor
+	prev []byte
 }
 
 func IH(c *FilterCursor) *IHCursor {
@@ -865,37 +865,50 @@ func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
 	}
 
 	if k != nil {
-		/*
-			Sequence - if between 2 IH records not possible insert any state record - then they form "sequence"
-			Example1:
-				1234
-				1235
-			Example2:
-				12ff
-				13
-			Example3:
-				12ff
-				13000000
-			If 2 IH records form "sequence" then it can be consumed without moving StateCursor
-		*/
-		isSequence := false
-		if bytes.HasPrefix(k, seek) {
-			tail := k[len(seek):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
-			isSequence = true
-			for _, n := range tail {
-				if n != 0 {
-					isSequence = false
-					break
-				}
+		isSequence := isSequence(seek, k)
+		if isSequence {
+			n, _ := dbutils.NextSubtree(c.prev)
+			if !bytes.Equal(n, seek) {
+				panic(1)
+				fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
 			}
 		}
-
+		isSequence = false
 		if isSequence {
 			return k, v, true, nil
 		}
 	}
-
+	c.prev = common.CopyBytes(k)
 	return k, v, false, nil
+}
+
+/*
+	Sequence - if between 2 IH records not possible insert any state record - then they form "sequence"
+	Example1:
+		1234
+		1235
+	Example2:
+		12ff
+		13
+	Example3:
+		12ff
+		13000000
+	If 2 IH records form "sequence" then it can be consumed without moving StateCursor
+*/
+func isSequence(prev []byte, next []byte) bool {
+	isSequence := false
+	if bytes.HasPrefix(next, prev) {
+		tail := next[len(prev):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
+		isSequence = true
+		for _, n := range tail {
+			if n != 0 {
+				isSequence = false
+				break
+			}
+		}
+	}
+
+	return isSequence
 }
 
 func nextAccount(in, out []byte) bool {
@@ -939,7 +952,7 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 	}
 
 	switch bytes.Compare(k1, k2) {
-	case -1, 0:
+	case -1:
 		return true, k1
 	default:
 		return false, k2
