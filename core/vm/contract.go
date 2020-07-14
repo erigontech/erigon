@@ -48,7 +48,6 @@ type Contract struct {
 	CallerAddress common.Address
 	caller        ContractRef
 	self          ContractRef
-
 	analysis []uint64 // Locally cached result of JUMPDEST analysis
 	dests    Cache
 
