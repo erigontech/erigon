@@ -158,7 +158,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	if err != nil {
 		return nil, err
 	}
-	initPm(manager, txpool, engine, config, blockchain, tds, chaindb)
+	initPm(manager, engine, config, blockchain, tds, chaindb)
 
 	return manager, nil
 }
@@ -170,7 +170,7 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
