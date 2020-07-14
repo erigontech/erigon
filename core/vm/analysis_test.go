@@ -17,8 +17,6 @@
 package vm
 
 import (
-	"fmt"
-	"io/ioutil"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -53,39 +51,11 @@ func TestJumpDestAnalysis(t *testing.T) {
 	}
 }
 
-func BenchmarkJumpdestSet8(b *testing.B) {
-	const size = 1000
-	bits := buffPool.Get(size)
-	defer buffPool.Put(bits)
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
-		for i := uint64(0); i < size*8-8; i++ {
-			bits.SetBit8Pos(i)
-		}
-	}
-	b.StopTimer()
-	fmt.Fprint(ioutil.Discard, bits.Len())
-}
-
-func BenchmarkJumpdestSet(b *testing.B) {
-	const size = 1000
-	bits := buffPool.Get(size)
-	defer buffPool.Put(bits)
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
-		for i := uint64(0); i < 8*size; i++ {
-			bits.SetBitPos(i)
-		}
-	}
-	b.StopTimer()
-	fmt.Fprint(ioutil.Discard, bits.Len())
-}
-
 func BenchmarkJumpdestAnalysisEmpty_1200k(bench *testing.B) {
 	// 1.4 ms
 	code := make([]byte, 1200000)
 	bench.ResetTimer()
-	for i := 0; i < bench.N; i++ 
+	for i := 0; i < bench.N; i++ {
 		codeBitmap(code)
 	}
 	bench.StopTimer()
