@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -154,11 +153,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		manager.checkpointHash = checkpoint.SectionHead
 	}
 
-	tds, err := blockchain.GetTrieDbState()
-	if err != nil {
-		return nil, err
-	}
-	initPm(manager, engine, config, blockchain, tds, chaindb)
+	initPm(manager, engine, config, blockchain, chaindb)
 
 	return manager, nil
 }
@@ -170,7 +165,7 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb ethdb.Database) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
