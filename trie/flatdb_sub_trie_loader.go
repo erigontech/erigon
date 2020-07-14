@@ -150,7 +150,7 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
 func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) error {
-	var isIH bool
+	var isIH, isIHSequence bool
 	var minKey []byte
 	var err error
 	if !first {
@@ -200,6 +200,15 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				// Looking for storage sub-tree
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
+			if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(dbPrefix); err != nil {
+				return err
+			}
+			if isIHSequence {
+				// If IH records form sequence, then no reason move State cursor.
+				// But need change .k - then minKey of next iteration will equal to .ihK
+				fstl.k = common.CopyBytes(fstl.ihK)
+				return nil
+			}
 
 			if fstl.k, fstl.v, err = c.Seek(dbPrefix); err != nil {
 				return err
@@ -213,9 +222,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				} else {
 					fstl.k = nil
 				}
-			}
-			if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(dbPrefix); err != nil {
-				return err
 			}
 			isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
 			if fixedbytes == 0 {
@@ -294,6 +300,16 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], fstl.accountValue.Incarnation)
 
+			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
+				if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+					return err
+				}
+
+				if isIHSequence {
+					fstl.k = common.CopyBytes(fstl.ihK)
+					return nil
+				}
+			}
 			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
@@ -302,11 +318,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 			}
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and Seek: %x\n", fstl.k)
-			}
-			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
-				if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
-					return err
-				}
 			}
 		}
 		return nil
@@ -358,6 +369,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 		fmt.Printf("next: %x\n", next)
 	}
 
+	if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(next); err != nil {
+		return err
+	}
+
+	if isIHSequence {
+		fstl.k = common.CopyBytes(fstl.ihK)
+		return nil
+	}
 	if fstl.k, fstl.v, err = c.Seek(next); err != nil {
 		return err
 	}
@@ -373,9 +392,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	}
 	if fstl.trace {
 		fmt.Printf("k after next: %x\n", fstl.k)
-	}
-	if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(next); err != nil {
-		return err
 	}
 	return nil
 }
