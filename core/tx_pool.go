@@ -265,21 +265,20 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 
 	// Create the transaction pool with its initial settings
 	pool := &TxPool{
-		config:          config,
-		chainconfig:     chainconfig,
-		chain:           chain,
-		signer:          types.NewEIP155Signer(chainconfig.ChainID),
-		pending:         make(map[common.Address]*txList),
-		queue:           make(map[common.Address]*txList),
-		beats:           make(map[common.Address]time.Time),
-		all:             newTxLookup(),
-		chainHeadCh:     make(chan ChainHeadEvent, chainHeadChanSize),
-		reqResetCh:      make(chan *txpoolResetRequest),
-		reqPromoteCh:    make(chan *accountSet),
-		queueTxEventCh:  make(chan *types.Transaction),
-		reorgDoneCh:     make(chan chan struct{}),
-		reorgShutdownCh: make(chan struct{}),
-		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
+		config:         config,
+		chainconfig:    chainconfig,
+		chain:          chain,
+		signer:         types.NewEIP155Signer(chainconfig.ChainID),
+		pending:        make(map[common.Address]*txList),
+		queue:          make(map[common.Address]*txList),
+		beats:          make(map[common.Address]time.Time),
+		all:            newTxLookup(),
+		chainHeadCh:    make(chan ChainHeadEvent, chainHeadChanSize),
+		reqResetCh:     make(chan *txpoolResetRequest),
+		reqPromoteCh:   make(chan *accountSet),
+		queueTxEventCh: make(chan *types.Transaction),
+		reorgDoneCh:    make(chan chan struct{}),
+		gasPrice:       new(big.Int).SetUint64(config.PriceLimit),
 	}
 
 	if config.StartOnInit {
@@ -292,6 +291,8 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 }
 
 func (pool *TxPool) Start(chain BlockChainer) error {
+	pool.reorgShutdownCh = make(chan struct{}, 1)
+
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
 		log.Info("Setting new local account", "address", addr)
@@ -358,7 +359,7 @@ func (pool *TxPool) loop() {
 
 		// System shutdown.
 		case <-pool.chainHeadSub.Err():
-			close(pool.reorgShutdownCh)
+			common.SafeClose(pool.reorgShutdownCh)
 			return
 
 		// Handle stats reporting ticks
@@ -1459,6 +1460,10 @@ func (pool *TxPool) RunInit() error {
 		return errors.New("can't init a nil transaction pool")
 	}
 
+	if pool.IsStarted() {
+		return errors.New("transaction pool is already started")
+	}
+
 	var err error
 	for _, fn := range pool.initFns {
 		if err = fn(); err != nil {
@@ -1479,6 +1484,10 @@ func (pool *TxPool) AddStop(fns ...func() error) {
 func (pool *TxPool) RunStop() error {
 	if pool == nil {
 		return errors.New("can't stop a nil transaction pool")
+	}
+
+	if !pool.IsStarted() {
+		return errors.New("transaction pool is already stopped")
 	}
 
 	var err error
