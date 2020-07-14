@@ -1867,8 +1867,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			} else {
 				stAccounts++
 			}
-			if (stStorage + stAccounts) % 100000 == 0 {
-				fmt.Printf("State records: %d\n", stStorage + stAccounts)
+			if (stStorage+stAccounts)%100000 == 0 {
+				fmt.Printf("State records: %d\n", stStorage+stAccounts)
 			}
 		}
 		return e
