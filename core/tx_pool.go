@@ -317,7 +317,7 @@ func (pool *TxPool) Start(chain BlockChainer) error {
 	}
 
 	// Subscribe events from blockchain and start the main event loop.
-	//pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
+	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
 
 	pool.wg.Add(1)
 	go pool.loop()
@@ -357,9 +357,9 @@ func (pool *TxPool) loop() {
 			}
 
 		// System shutdown.
-		//case <-pool.chainHeadSub.Err():
-		//	close(pool.reorgShutdownCh)
-		//	return
+		case <-pool.chainHeadSub.Err():
+			close(pool.reorgShutdownCh)
+			return
 
 		// Handle stats reporting ticks
 		case <-report.C:
