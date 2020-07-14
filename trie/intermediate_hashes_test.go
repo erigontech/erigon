@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -22,21 +21,17 @@ func TestCompressNibbles(t *testing.T) {
 		{in: "", expect: ""},
 	}
 
-	compressBuf := pool.GetBuffer(64)
-	defer pool.PutBuffer(compressBuf)
-	decompressBuf := pool.GetBuffer(64)
-	defer pool.PutBuffer(decompressBuf)
+	compressed := make([]byte, 64)
+	decompressed := make([]byte, 64)
 	for _, tc := range cases {
-		compressBuf.Reset()
-		decompressBuf.Reset()
+		compressed = compressed[:0]
+		decompressed = decompressed[:0]
 
 		in := common.Hex2Bytes(tc.in)
-		CompressNibbles(in, &compressBuf.B)
-		compressed := compressBuf.Bytes()
+		CompressNibbles(in, &compressed)
 		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
 		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
-		DecompressNibbles(compressed, &decompressBuf.B)
-		decompressed := decompressBuf.Bytes()
+		DecompressNibbles(compressed, &decompressed)
 		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
 	}
 }

@@ -249,7 +249,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 	tp.SetBlockNumber(blockNr)
 
 	t.AddObserver(tp)
-	t.AddObserver(NewIntermediateHashes(tds.db, tds.db))
 
 	return tds
 }
@@ -291,7 +290,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	}
 
 	cpy.t.AddObserver(tp)
-	cpy.t.AddObserver(NewIntermediateHashes(cpy.db, cpy.db))
 
 	return &cpy
 }

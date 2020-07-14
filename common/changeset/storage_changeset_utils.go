@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 /**
@@ -37,9 +36,7 @@ numOfUint32Values uint16
 func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 	sort.Sort(s)
 	var err error
-	buf := pool.GetBuffer(1 << 16)
-	buf.Reset()
-	defer pool.PutBuffer(buf)
+	buf := new(bytes.Buffer)
 	uint16Arr := make([]byte, 2)
 	uint32Arr := make([]byte, 4)
 	numOfElements := s.Len()
@@ -179,7 +176,7 @@ func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 		}
 	}
 
-	return common.CopyBytes(buf.Bytes()), nil
+	return buf.Bytes(), nil
 }
 
 // decodeStorage decodes a stream of bytes to a storage changeset using

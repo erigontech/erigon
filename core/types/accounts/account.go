@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sync"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -172,12 +171,27 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 	}
 }
 
+var rlpEncodingBufPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 0, 128)
+		return &buf
+	},
+}
+
 func (a *Account) EncodeRLP(w io.Writer) error {
-	len := a.EncodingLengthForHashing()
-	buffer := pool.GetBuffer(len)
-	a.EncodeForHashing(buffer.Bytes())
-	_, err := w.Write(buffer.Bytes())
-	pool.PutBuffer(buffer)
+	var buf []byte
+	l := a.EncodingLengthForHashing()
+	if l > 128 {
+		buf = make([]byte, l)
+	} else {
+		bp := rlpEncodingBufPool.Get().(*[]byte)
+		defer rlpEncodingBufPool.Put(bp)
+		buf = *bp
+		buf = buf[:l]
+	}
+
+	a.EncodeForHashing(buf)
+	_, err := w.Write(buf)
 	return err
 }
 
