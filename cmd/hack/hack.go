@@ -611,7 +611,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDB.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */)
+	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */, true /* overwrite */)
 	check(err)
 	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	check(err)

@@ -57,7 +57,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	core.UsePlainStateExecution = true
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	blockchain, chainErr := newBlockChain(db)
+	chainConfig, blockchain, chainErr := newBlockChain(db)
 	if chainErr != nil {
 		return chainErr
 	}
@@ -107,7 +107,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			stage := progress(db, stages.Execution)
 			execToBlock := stage.BlockNumber + unwindEvery
 
-			if err := stagedsync.SpawnExecuteBlocksStage(stage, db, blockchain, execToBlock, ch, nil, false, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stage, db, chainConfig, blockchain, execToBlock, ch, nil, false, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 		}
