@@ -157,6 +157,7 @@ func TestStatusMsgErrors64(t *testing.T) {
 }
 
 func TestForkIDSplit(t *testing.T) {
+	t.Skip()
 	dbNoFork := ethdb.NewMemDatabase()
 	defer dbNoFork.Close()
 	dbProFork := ethdb.NewMemDatabase()
