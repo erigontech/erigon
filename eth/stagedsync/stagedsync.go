@@ -146,7 +146,7 @@ func PrepareStagedSync(
 				return spawnTxPool(s, txPoolControl.Start)
 			},
 			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
-				return txPoolControl.Stop()
+				return unwindTxPool(txPoolControl.Stop)
 			},
 		},
 	}

@@ -99,6 +99,7 @@ type Ethereum struct {
 	netRPCService *ethapi.PublicNetAPI
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	txPoolStarted bool
 }
 
 func (s *Ethereum) AddLesServer(ls LesServer) {
@@ -651,15 +652,29 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 }
 
 func (s *Ethereum) StartTxPool() error {
+	if s.txPoolStarted {
+		return errors.New("transaction pool is already started")
+	}
 	if err := s.txPool.Start(s.blockchain); err != nil {
 		return err
 	}
-	return s.protocolManager.StartTxPool()
+	if err := s.protocolManager.StartTxPool(); err != nil {
+		s.txPool.Stop()
+		return err
+	}
+
+	s.txPoolStarted = true
+	return nil
 }
 
 func (s *Ethereum) StopTxPool() error {
+	if !s.txPoolStarted {
+		return errors.New("transaction pool is already stopped")
+	}
 	s.protocolManager.StopTxPool()
 	s.txPool.Stop()
+
+	s.txPoolStarted = false
 	return nil
 }
 
