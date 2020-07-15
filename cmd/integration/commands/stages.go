@@ -345,12 +345,12 @@ func printAllStages(_ context.Context) error {
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
 func newSync(quitCh <-chan struct{}, db ethdb.Database, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
-	bc, err := newBlockChain(db)
+	chainConfig, bc, err := newBlockChain(db)
 	if err != nil {
 		panic(err)
 	}
 
-	st, err := stagedsync.PrepareStagedSync(nil, bc, db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, hook)
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, hook)
 	if err != nil {
 		panic(err)
 	}
