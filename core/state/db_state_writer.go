@@ -17,6 +17,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
+// This type is now used in GenerateChain to generate blockchains for the tests (core/chain_makers.go)
+// Main mode of operation uses PlainDbStateWriter
+
 var _ WriterWithChangeSets = (*DbStateWriter)(nil)
 
 func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
@@ -37,6 +40,10 @@ type DbStateWriter struct {
 	storageCache  *fastcache.Cache
 	codeCache     *fastcache.Cache
 	codeSizeCache *fastcache.Cache
+}
+
+func (dsw *DbStateWriter) ChangeSetWriter() *ChangeSetWriter {
+	return dsw.csw
 }
 
 func (dsw *DbStateWriter) SetAccountCache(accountCache *fastcache.Cache) {
