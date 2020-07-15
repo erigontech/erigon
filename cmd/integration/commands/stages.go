@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -325,15 +325,9 @@ func printAllStages(_ context.Context) error {
 }
 
 func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
-	config := eth.DefaultConfig
-	chainConfig, _, _, err := core.SetupGenesisBlock(db, config.Genesis, config.StorageMode.History, true /* overwrite */)
-	if err != nil {
-		return nil, nil, err
-	}
-	vmConfig, cacheConfig, dests := eth.BlockchainRuntimeConfig(&config)
-	blockchain, err1 := core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, &config.TxLookupLimit, dests)
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1
 	}
-	return chainConfig, blockchain, nil
+	return params.MainnetChainConfig, blockchain, nil
 }
