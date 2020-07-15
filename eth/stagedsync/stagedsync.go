@@ -8,12 +8,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 const prof = false // whether to profile
 
 func PrepareStagedSync(
 	d DownloaderGlue,
+	chainConfig *params.ChainConfig,
 	blockchain BlockChain,
 	stateDB ethdb.Database,
 	pid string,
@@ -65,7 +67,7 @@ func PrepareStagedSync(
 					ReadChLen:       4,
 					Now:             time.Now(),
 				}
-				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
+				return SpawnRecoverSendersStage(cfg, s, stateDB, chainConfig, 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindSendersStage(u, stateDB)
@@ -75,7 +77,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, nil)
+				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, nil)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)

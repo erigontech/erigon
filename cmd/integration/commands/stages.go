@@ -198,7 +198,7 @@ func stage4(ctx context.Context) error {
 		// TODO
 	}
 
-	blockchain, err := newBlockChain(db)
+	chainConfig, blockchain, err := newBlockChain(db)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func stage4(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, blockchain, block, ch, blockchain.DestsCache, false, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, block, ch, blockchain.DestsCache, false, nil)
 }
 
 func stage5(ctx context.Context) error {
@@ -324,12 +324,16 @@ func printAllStages(_ context.Context) error {
 	return printStages(db)
 }
 
-func newBlockChain(db ethdb.Database) (*core.BlockChain, error) {
+func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
 	config := eth.DefaultConfig
-	chainConfig, _, _, err := core.SetupGenesisBlock(db, config.Genesis, config.StorageMode.History)
+	chainConfig, _, _, err := core.SetupGenesisBlock(db, config.Genesis, config.StorageMode.History, true /* overwrite */)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	vmConfig, cacheConfig, dests := eth.BlockchainRuntimeConfig(&config)
-	return core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, &config.TxLookupLimit, dests)
+	blockchain, err1 := core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, &config.TxLookupLimit, dests)
+	if err1 != nil {
+		return nil, nil, err1
+	}
+	return chainConfig, blockchain, nil
 }

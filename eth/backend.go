@@ -141,21 +141,20 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
 	// Assemble the Ethereum object
-	chainDb, err := ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer)
-	if err != nil {
-		return nil, err
-	}
-	var chainKV ethdb.KV
-	if hasKV, ok := chainDb.(ethdb.HasKV); ok {
-		chainKV = hasKV.KV()
+	var chainDb *ethdb.ObjectDatabase
+	var err error
+	if config.EnableDebugProtocol {
+		chainDb = ethdb.NewMemDatabase()
 	} else {
-		return nil, fmt.Errorf("database %T does not implement KV", chainDb)
+		if chainDb, err = ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer); err != nil {
+			return nil, err
+		}
 	}
 	if ctx.Config.RemoteDbListenAddress != "" {
-		remotedbserver.StartDeprecated(chainKV, ctx.Config.RemoteDbListenAddress)
+		remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.RemoteDbListenAddress)
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
@@ -165,7 +164,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	eth := &Ethereum{
 		config:            config,
 		chainDb:           chainDb,
-		chainKV:           chainKV,
+		chainKV:           chainDb.KV(),
 		eventMux:          ctx.EventMux,
 		accountManager:    ctx.AccountManager,
 		engine:            CreateConsensusEngine(ctx, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),

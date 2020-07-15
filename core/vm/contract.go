@@ -48,9 +48,8 @@ type Contract struct {
 	CallerAddress common.Address
 	caller        ContractRef
 	self          ContractRef
-
-	analysis *ByteBuffer // Locally cached result of JUMPDEST analysis
-	dests    Cache
+	analysis      []uint64 // Locally cached result of JUMPDEST analysis
+	dests         Cache
 
 	Code     []byte
 	CodeHash common.Hash
@@ -118,7 +117,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis
-		return c.analysis.CodeSegment(udest)
+		return c.analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
 	}
 	// We don't have the code hash, most likely a piece of initcode not already
 	// in state trie. In that case, we do an analysis, and save it locally, so
@@ -127,7 +126,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	if c.analysis == nil {
 		c.analysis = codeBitmap(c.Code)
 	}
-	return c.analysis.CodeSegment(udest)
+	return c.analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
 }
 
 // AsDelegate sets the contract to be a delegate call and returns the current

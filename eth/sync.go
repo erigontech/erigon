@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -280,8 +281,9 @@ func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, *big.Int) {
 		td := cs.pm.blockchain.GetTdByHash(block.Hash())
 		return downloader.FastSync, td
 	} else {
-		head := cs.pm.blockchain.CurrentHeader()
-		td := cs.pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
+		headHash := rawdb.ReadHeadHeaderHash(cs.pm.chaindb)
+		headNumber := rawdb.ReadHeaderNumber(cs.pm.chaindb, headHash)
+		td := rawdb.ReadTd(cs.pm.chaindb, headHash, *headNumber)
 		return cs.pm.mode, td
 	}
 }
