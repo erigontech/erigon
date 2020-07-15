@@ -395,7 +395,7 @@ func testSyncTransaction(t *testing.T, propagtion bool) {
 	go pmSender.handle(pmSender.newPeer(65, p2p.NewPeer(enode.ID{}, "sender", nil), io2, pmSender.txpool.Get))
 	go pmFetcher.handle(pmFetcher.newPeer(65, p2p.NewPeer(enode.ID{}, "fetcher", nil), io1, pmFetcher.txpool.Get))
 
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 	pmFetcher.doSync(peerToSyncOp(downloader.StagedSync, pmFetcher.peers.BestPeer()))
 	atomic.StoreUint32(&pmFetcher.acceptTxs, 1)
 
