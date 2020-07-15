@@ -308,7 +308,6 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 }
 
 func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index byte, r *Receiver) error {
-	from := s.BlockNumber
 	to := u.UnwindPoint
 	var changeSetBucket []byte
 	if storage {
@@ -316,7 +315,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Unwinding of intermediate hashes", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Unwinding of intermediate hashes", "from", s.BlockNumber, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 

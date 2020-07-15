@@ -118,11 +118,11 @@ func (s *State) findInterruptedUnwindStage(db ethdb.Getter) (*Stage, error) {
 	return nil, nil
 }
 
-func (s *State) RunInterruptedStage(db ethdb.Getter) error {
+func (s *State) RunInterruptedStage(db ethdb.GetterPutter) error {
 	if interruptedStage, err := s.findInterruptedStage(db); err != nil {
 		return err
 	} else if interruptedStage != nil {
-		if err := s.runStage(interruptedStage, db, 0); err != nil {
+		if err := s.runStage(interruptedStage, db); err != nil {
 			return err
 		}
 		// restart from 0 after completing the missing stage
@@ -139,15 +139,7 @@ func (s *State) RunInterruptedStage(db ethdb.Getter) error {
 		if u == nil {
 			return nil
 		}
-		st, err := s.StageState(interruptedStage.ID, db)
-		if err != nil {
-			return err
-		}
-		if err := interruptedStage.UnwindFunc(u, st); err != nil {
-			return err
-		}
-		// restart from 0 after completing the missing stage
-		s.currentStage = 0
+		return s.UnwindStage(u, db)
 	}
 	return nil
 }
@@ -159,33 +151,9 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
-				log.Info("Unwinding...", "stage", unwind.Stage+1)
-				stage, err := s.StageByID(unwind.Stage)
-				if err != nil {
+				if err := s.UnwindStage(unwind, db); err != nil {
 					return err
 				}
-				if stage.UnwindFunc != nil {
-					stageState, err := s.StageState(unwind.Stage, db)
-					if err != nil {
-						return err
-					}
-
-					if stageState.BlockNumber <= unwind.UnwindPoint {
-						if err = unwind.Skip(db); err != nil {
-							return err
-						}
-						continue
-					}
-
-					err = stage.UnwindFunc(unwind, stageState)
-					if err != nil {
-						return err
-					}
-
-					// always restart from stage 1 after unwind
-					s.currentStage = 0
-				}
-				log.Info("Unwinding... DONE!")
 			}
 			return nil
 		}
@@ -207,20 +175,28 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, index); err != nil {
+		if err := s.runStage(stage, db); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *State) runStage(stage *Stage, db ethdb.Getter, index uint) error {
+func (s *State) RunStage(id stages.SyncStage, db ethdb.Getter) error {
+	stage, err := s.StageByID(id)
+	if err != nil {
+		return err
+	}
+	return s.runStage(stage, db)
+}
+
+func (s *State) runStage(stage *Stage, db ethdb.Getter) error {
 	stageState, err := s.StageState(stage.ID, db)
 	if err != nil {
 		return err
 	}
 
-	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
+	message := fmt.Sprintf("Sync stage %d/%d. %v...", stage.ID+1, s.Len(), stage.Description)
 	log.Info(message)
 
 	err = stage.ExecFunc(stageState, s)
@@ -229,5 +205,38 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, index uint) error {
 	}
 
 	log.Info(fmt.Sprintf("%s DONE!", message))
+	return nil
+}
+
+func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
+	log.Info("Unwinding...", "stage", unwind.Stage)
+	stage, err := s.StageByID(unwind.Stage)
+	if err != nil {
+		return err
+	}
+	if stage.UnwindFunc == nil {
+		return nil
+	}
+
+	stageState, err := s.StageState(unwind.Stage, db)
+	if err != nil {
+		return err
+	}
+
+	if stageState.BlockNumber <= unwind.UnwindPoint {
+		if err = unwind.Skip(db); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	err = stage.UnwindFunc(unwind, stageState)
+	if err != nil {
+		return err
+	}
+
+	// always restart from stage 1 after unwind
+	s.currentStage = 0
+	log.Info("Unwinding... DONE!")
 	return nil
 }
