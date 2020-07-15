@@ -213,7 +213,7 @@ func stageExec(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer bc.Stop()
+	defer blockchain.Stop()
 	stage4 := progress(stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()

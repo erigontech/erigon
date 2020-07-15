@@ -198,6 +198,8 @@ func TestForkIDSplit(t *testing.T) {
 	)
 
 	defer func() {
+		ethNoFork.Stop()
+		ethProFork.Stop()
 		chainNoFork.Stop()
 		chainProFork.Stop()
 	}()
