@@ -116,6 +116,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
+	/*
 	if accountCache == nil {
 		accountCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
 	} else {
@@ -136,6 +137,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	} else {
 		codeSizeCache.Reset()
 	}
+	*/
 
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
@@ -185,6 +187,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			stateReader = state.NewDbStateReader(batch)
 			stateWriter = state.NewDbStateWriter(batch, blockNum)
 		}
+		/*
 		stateReader.SetAccountCache(accountCache)
 		stateReader.SetStorageCache(storageCache)
 		stateReader.SetCodeCache(codeCache)
@@ -194,6 +197,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		stateWriter.SetStorageCache(storageCache)
 		stateWriter.SetCodeCache(codeCache)
 		stateWriter.SetCodeSizeCache(codeSizeCache)
+		*/
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
