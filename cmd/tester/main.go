@@ -131,13 +131,13 @@ func tester(cliCtx *cli.Context) error {
 
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
-	blockGen, err := NewBlockGenerator(ctx, "blocks", 5)
+	blockGen, err := NewBlockGenerator(ctx, "blocks", 50000)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
 	}
 	defer blockGen.Close()
 	tp.blockFeeder = blockGen
-	tp.forkBase = 3
+	tp.forkBase = 49998
 	tp.forkHeight = 5
 	tp.forkFeeder, err = NewForkGenerator(ctx, blockGen, "forkblocks", tp.forkBase, tp.forkHeight)
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"reflect"
 	"runtime"
 	"sync"
@@ -144,7 +145,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	var chainDb *ethdb.ObjectDatabase
 	var err error
 	if config.EnableDebugProtocol {
-		chainDb = ethdb.NewMemDatabase()
+		_ = os.Remove("simulator")
+		chainDb = ethdb.MustOpen("simulator")
 	} else {
 		if chainDb, err = ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer); err != nil {
 			return nil, err
