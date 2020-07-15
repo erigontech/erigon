@@ -21,10 +21,11 @@ func PrepareStagedSync(
 	pid string,
 	storageMode ethdb.StorageMode,
 	datadir string,
-	quitCh chan struct{},
+	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
 	txPoolControl *TxPoolStartStopper,
+	changeSetHook ChangeSetHook,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
 
@@ -77,7 +78,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, nil)
+				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)

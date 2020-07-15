@@ -980,10 +980,6 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		//chainConfig, _, _, err := core.SetupGenesisBlock(pm.chaindb, &genesis, true /* history */, true /* overwrite */)
-		//if err != nil {
-		//	return fmt.Errorf("SetupGenesisBlock: %w", err)
-		//}
 		pm.chainConfig = genesis.Config
 		pm.downloader.SetChainConfig(genesis.Config)
 

@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -153,9 +153,12 @@ func init() {
 	rootCmd.AddCommand(cmdStage9)
 }
 
-func stage3(_ context.Context) error {
+func stage3(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+
+	bc, _, progress := newSync(ctx.Done(), db, nil)
+	defer bc.Stop()
 
 	if reset {
 		if err := resetSenders(db); err != nil {
@@ -163,8 +166,8 @@ func stage3(_ context.Context) error {
 		}
 	}
 
-	stage2 := progress(db, stages.Bodies)
-	stage3 := progress(db, stages.Senders)
+	stage2 := progress(stages.Bodies)
+	stage3 := progress(stages.Senders)
 	log.Info("Stage2", "progress", stage2.BlockNumber)
 	log.Info("Stage3", "progress", stage3.BlockNumber)
 	ch := make(chan struct{})
@@ -194,6 +197,9 @@ func stage4(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	bc, _, progress := newSync(ctx.Done(), db, nil)
+	defer bc.Stop()
+
 	if reset { //nolint:staticcheck
 		// TODO
 	}
@@ -202,8 +208,8 @@ func stage4(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer blockchain.Stop()
-	stage4 := progress(db, stages.Execution)
+	defer bc.Stop()
+	stage4 := progress(stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
 	if unwind > 0 {
@@ -219,14 +225,17 @@ func stage5(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	bc, _, progress := newSync(ctx.Done(), db, nil)
+	defer bc.Stop()
+
 	if reset {
 		if err := resetHashState(db); err != nil {
 			return err
 		}
 	}
 
-	stage4 := progress(db, stages.Execution)
-	stage5 := progress(db, stages.IntermediateHashes)
+	stage4 := progress(stages.Execution)
+	stage5 := progress(stages.IntermediateHashes)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	ch := ctx.Done()
@@ -244,13 +253,16 @@ func stage6(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	bc, _, progress := newSync(ctx.Done(), db, nil)
+	defer bc.Stop()
+
 	if reset {
 		if err := resetHashState(db); err != nil {
 			return err
 		}
 	}
-	stage5 := progress(db, stages.IntermediateHashes)
-	stage6 := progress(db, stages.HashState)
+	stage5 := progress(stages.IntermediateHashes)
+	stage6 := progress(stages.HashState)
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	log.Info("Stage6", "progress", stage6.BlockNumber)
 	ch := ctx.Done()
@@ -268,14 +280,17 @@ func stage78(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	bc, _, progress := newSync(ctx.Done(), db, nil)
+	defer bc.Stop()
+
 	if reset {
 		if err := resetHistory(db); err != nil {
 			return err
 		}
 	}
-	execStage := progress(db, stages.Execution)
-	stage7 := progress(db, stages.AccountHistoryIndex)
-	stage8 := progress(db, stages.StorageHistoryIndex)
+	execStage := progress(stages.Execution)
+	stage7 := progress(stages.AccountHistoryIndex)
+	stage8 := progress(stages.StorageHistoryIndex)
 	log.Info("Stage4", "progress", execStage.BlockNumber)
 	log.Info("Stage7", "progress", stage7.BlockNumber)
 	log.Info("Stage8", "progress", stage8.BlockNumber)
@@ -300,18 +315,21 @@ func stage9(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	bc, _, progress := newSync(ctx.Done(), db, nil)
+	defer bc.Stop()
+
 	if reset {
 		if err := resetTxLookup(db); err != nil {
 			return err
 		}
 	}
-	stage9 := progress(db, stages.TxLookup)
+	stage9 := progress(stages.TxLookup)
 	log.Info("Stage9", "progress", stage9.BlockNumber)
 	ch := ctx.Done()
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
-		s := progress(db, stages.TxLookup)
+		s := progress(stages.TxLookup)
 		return stagedsync.UnwindTxLookup(u, s, db, "", ch)
 	}
 
@@ -325,17 +343,35 @@ func printAllStages(_ context.Context) error {
 	return printStages(db)
 }
 
-func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
-	config := eth.DefaultConfig
-	chainConfig, _, _, err := core.SetupGenesisBlock(db, config.Genesis, config.StorageMode.History, true /* overwrite */)
+type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
+
+func newSync(quitCh <-chan struct{}, db ethdb.Database, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
+	chainConfig, bc, err := newBlockChain(db)
 	if err != nil {
-		return nil, nil, err
+		panic(err)
 	}
-	vmConfig, cacheConfig, dests := eth.BlockchainRuntimeConfig(&config)
+
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, hook)
+	if err != nil {
+		panic(err)
+	}
+
+	progress := func(stage stages.SyncStage) *stagedsync.StageState {
+		s, err := st.StageState(stage, db)
+		if err != nil {
+			panic(err)
+		}
+		return s
+	}
+
+	return bc, st, progress
+}
+
+func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err1 := core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, dests, txCacher)
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	if err1 != nil {
 		return nil, nil, err1
 	}
-	return chainConfig, blockchain, nil
+	return params.MainnetChainConfig, blockchain, nil
 }

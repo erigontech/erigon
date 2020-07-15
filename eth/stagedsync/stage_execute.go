@@ -9,8 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/fastcache"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -18,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -55,8 +54,8 @@ func (l *progressLogger) Start(numberRef *uint64) {
 				"currentBlock", now,
 				"speed (blk/second)", speed,
 				"state batch", common.StorageSize(l.batch.BatchSize()),
-				"alloc", int(m.Alloc/1024),
-				"sys", int(m.Sys/1024),
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 
 			prev = now
@@ -84,20 +83,21 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-var (
-	accountCache  *fastcache.Cache
-	storageCache  *fastcache.Cache
-	codeCache     *fastcache.Cache
-	codeSizeCache *fastcache.Cache
-)
-
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
-	if limit > 0 && limit <= s.BlockNumber {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, blockchain BlockChain, toBlock uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
+	prevStageProgress, _, errStart := stages.GetStageProgress(stateDB, stages.Senders)
+	if errStart != nil {
+		return errStart
+	}
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
+	}
+	if to <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
+	log.Info("Blocks execution", "from", s.BlockNumber, "to", to)
 
-	nextBlockNumber := s.BlockNumber
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
 		if err != nil {
@@ -110,49 +110,23 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
+	stageProgress := s.BlockNumber
+
 	batch := stateDB.NewBatch()
 
 	progressLogger := NewProgressLogger(logInterval, batch)
-	progressLogger.Start(&nextBlockNumber)
+	progressLogger.Start(&stageProgress)
 	defer progressLogger.Stop()
-
-	if accountCache == nil {
-		accountCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
-	} else {
-		accountCache.Reset()
-	}
-	if storageCache == nil {
-		storageCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
-	} else {
-		storageCache.Reset()
-	}
-	if codeCache == nil {
-		codeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
-	} else {
-		codeCache.Reset()
-	}
-	if codeSizeCache == nil {
-		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
-	} else {
-		codeSizeCache.Reset()
-	}
 
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	if limit == 0 {
-		log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1)
-	} else {
-		log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1, "to", limit-1)
-	}
-	for {
+
+	for blockNum := atomic.LoadUint64(&stageProgress) + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
 
-		blockNum := atomic.LoadUint64(&nextBlockNumber) + 1
-		if limit > 0 && blockNum >= limit {
-			break
-		}
+		atomic.StoreUint64(&stageProgress, blockNum)
 
 		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
 		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
@@ -161,23 +135,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
-		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
-		type cacheSetter interface {
-			SetAccountCache(cache *fastcache.Cache)
-			SetStorageCache(cache *fastcache.Cache)
-			SetCodeCache(cache *fastcache.Cache)
-			SetCodeSizeCache(cache *fastcache.Cache)
-		}
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
 
-		var stateReader interface {
-			state.StateReader
-			cacheSetter
-		}
-		var stateWriter interface {
-			state.WriterWithChangeSets
-			cacheSetter
-		}
 		if core.UsePlainStateExecution {
 			stateReader = state.NewPlainStateReader(batch)
 			stateWriter = state.NewPlainStateWriter(batch, blockNum)
@@ -185,15 +146,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			stateReader = state.NewDbStateReader(batch)
 			stateWriter = state.NewDbStateWriter(batch, blockNum)
 		}
-		stateReader.SetAccountCache(accountCache)
-		stateReader.SetStorageCache(storageCache)
-		stateReader.SetCodeCache(codeCache)
-		stateReader.SetCodeSizeCache(codeSizeCache)
-
-		stateWriter.SetAccountCache(accountCache)
-		stateWriter.SetStorageCache(storageCache)
-		stateWriter.SetCodeCache(codeCache)
-		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
@@ -239,13 +191,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
+	if err := s.Update(batch, atomic.LoadUint64(&stageProgress)); err != nil {
 		return err
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
-	log.Info("Completed on", "block", atomic.LoadUint64(&nextBlockNumber))
+	log.Info("Completed on", "block", atomic.LoadUint64(&stageProgress))
 	s.Done()
 	return nil
 }
@@ -431,4 +383,11 @@ func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, stor
 		return err
 	}
 	return nil
+}
+
+func min(a, b uint64) uint64 {
+	if a <= b {
+		return a
+	}
+	return b
 }
