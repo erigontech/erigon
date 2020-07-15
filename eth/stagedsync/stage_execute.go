@@ -85,10 +85,10 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 var (
-	accountCache *fastcache.Cache
-	storageCache *fastcache.Cache
-	codeCache    *fastcache.Cache
-	codeSizeCache * fastcache.Cache
+	accountCache  *fastcache.Cache
+	storageCache  *fastcache.Cache
+	codeCache     *fastcache.Cache
+	codeSizeCache *fastcache.Cache
 )
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
@@ -127,7 +127,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		storageCache.Reset()
 	}
 	if codeCache == nil {
-		codeCache = fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
+		codeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
 	} else {
 		codeCache.Reset()
 	}
