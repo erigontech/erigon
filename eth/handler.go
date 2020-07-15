@@ -980,12 +980,12 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		chainConfig, _, _, err := core.SetupGenesisBlock(pm.chaindb, &genesis, true /* history */, true /* overwrite */)
-		if err != nil {
-			return fmt.Errorf("SetupGenesisBlock: %w", err)
-		}
-		pm.chainConfig = chainConfig
-		pm.downloader.SetChainConfig(chainConfig)
+		//chainConfig, _, _, err := core.SetupGenesisBlock(pm.chaindb, &genesis, true /* history */, true /* overwrite */)
+		//if err != nil {
+		//	return fmt.Errorf("SetupGenesisBlock: %w", err)
+		//}
+		pm.chainConfig = genesis.Config
+		pm.downloader.SetChainConfig(genesis.Config)
 
 		// hacks to speedup local sync
 		downloader.MaxHashFetch = 512 * 10
@@ -993,7 +993,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		downloader.MaxHeaderFetch = 192 * 10
 		downloader.MaxReceiptFetch = 256 * 10
 
-		log.Warn("Succeed to set new Genesis")
+		log.Warn("Succeed to set new chainConfig")
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}

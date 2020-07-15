@@ -84,6 +84,13 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
+var (
+	accountCache *fastcache.Cache
+	storageCache *fastcache.Cache
+	codeCache    *fastcache.Cache
+	codeSizeCache * fastcache.Cache
+)
+
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
 	if limit > 0 && limit <= s.BlockNumber {
 		s.Done()
@@ -109,14 +116,34 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
 
-	accountCache := fastcache.New(128 * 1024 * 1024) // 128 Mb
-	storageCache := fastcache.New(128 * 1024 * 1024) // 128 Mb
-	codeCache := fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
-	codeSizeCache := fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
+	if accountCache == nil {
+		accountCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
+	} else {
+		accountCache.Reset()
+	}
+	if storageCache == nil {
+		storageCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
+	} else {
+		storageCache.Reset()
+	}
+	if codeCache == nil {
+		codeCache = fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
+	} else {
+		codeCache.Reset()
+	}
+	if codeSizeCache != nil {
+		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
+	} else {
+		codeSizeCache.Reset()
+	}
 
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1, "to", limit-1)
+	if limit == 0 {
+		log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1)
+	} else {
+		log.Info("Blocks execution", "from", atomic.LoadUint64(&nextBlockNumber)+1, "to", limit-1)
+	}
 	for {
 		if err := common.Stopped(quit); err != nil {
 			return err
