@@ -561,14 +561,14 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 
 	ch := NewStorageChangeSetPlain()
 
-	ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1), val1)
-	ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5), val5)
-	ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key6), val6)
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1), val1))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5), val5))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key6), val6))
 
-	ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key2), val2)
-	ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3), val3)
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key2), val2))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3), val3))
 
-	ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4)
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4))
 
 	encoded, _ := EncodeStoragePlain(ch)
 	fmt.Println(common.ToHex(encoded))
