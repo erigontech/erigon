@@ -207,12 +207,10 @@ func TestForkIDSplit(t *testing.T) {
 	if err := ethNoFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
 	}
-	defer ethNoFork.Stop()
 
 	if err := ethProFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
 	}
-	defer ethProFork.Stop()
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()
