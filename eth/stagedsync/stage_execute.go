@@ -131,7 +131,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	} else {
 		codeCache.Reset()
 	}
-	if codeSizeCache != nil {
+	if codeSizeCache == nil {
 		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
 	} else {
 		codeSizeCache.Reset()
