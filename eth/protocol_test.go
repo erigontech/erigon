@@ -192,8 +192,6 @@ func TestForkIDSplit(t *testing.T) {
 		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
 		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
 	)
-	defer chainNoFork.Stop()
-	defer chainProFork.Stop()
 
 	defer func() {
 		ethNoFork.Stop()
@@ -205,12 +203,10 @@ func TestForkIDSplit(t *testing.T) {
 	if err := ethNoFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
 	}
-	defer ethNoFork.Stop()
 
 	if err := ethProFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
 	}
-	defer ethProFork.Stop()
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()
@@ -258,9 +254,7 @@ func TestForkIDSplit(t *testing.T) {
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	peerNoFork = newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
-	defer p2pNoFork.Close()
 	peerProFork = newPeer(64, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
-	defer p2pProFork.Close()
 
 	errc = make(chan error, 2)
 	go func() { errc <- ethNoFork.handle(peerProFork) }()
