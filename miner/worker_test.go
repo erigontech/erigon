@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 	"math/rand"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,8 +157,9 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 
 	genesis := gspec.MustCommit(db)
 
-	chain, _ := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
-	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, _ := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain, txCacher)
 	if err := txpool.Start(chain); err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +218,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 			uncleBlock: sideBlocks[0],
 		}, func() {
 			chain.Stop()
+			txpool.Stop()
 			chain.ChainDb().Close()
 			db.Close()
 		}

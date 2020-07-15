@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -93,8 +94,10 @@ func accountsReadWrites(blockNum uint64) {
 	defer w.Flush()
 	at := NewAccountsTracer()
 	vmConfig := vm.Config{Tracer: at, Debug: false}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	totalWrites := 0
 	nakedWrites := 0

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -180,8 +181,10 @@ func TestForkIDSplit(t *testing.T) {
 		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork)
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 
-		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil, nil)
-		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil, nil)
+		txCacherNoFork  = core.NewTxSenderCacher(runtime.NumCPU())
+		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil, txCacherNoFork)
+		txCacherProFork = core.NewTxSenderCacher(runtime.NumCPU())
+		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil, txCacherProFork)
 
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false /* intermediateHashes */)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false /* intermediateHashes */)
@@ -189,6 +192,13 @@ func TestForkIDSplit(t *testing.T) {
 		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
 		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
 	)
+
+	defer func() {
+		ethNoFork.Stop()
+		ethProFork.Stop()
+		chainNoFork.Stop()
+		chainProFork.Stop()
+	}()
 
 	if err := ethNoFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
@@ -200,6 +210,11 @@ func TestForkIDSplit(t *testing.T) {
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()
+	defer func() {
+		p2pNoFork.Close()
+		p2pProFork.Close()
+	}()
+
 	peerNoFork := newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
 	peerProFork := newPeer(64, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
 
@@ -411,16 +426,17 @@ func testSyncTransaction(t *testing.T, propagtion bool) {
 	pmSender.txpool.AddRemotes(alltxs)
 
 	var got int
+	const expected = 1024
 loop:
 	for {
 		select {
 		case ev := <-newTxs:
 			got += len(ev.Txs)
-			if got == 1024 {
+			if got == expected {
 				break loop
 			}
 		case <-time.NewTimer(time.Second).C:
-			t.Fatal("Failed to retrieve all transaction")
+			t.Fatalf("Failed to retrieve all transaction. got %d, expected %d", got, expected)
 		}
 	}
 }

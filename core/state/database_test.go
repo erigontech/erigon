@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -73,11 +74,12 @@ func TestCreate2Revive(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -249,11 +251,12 @@ func TestCreate2Polymorth(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -474,11 +477,12 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -584,11 +588,13 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	defer blockchain1.Stop()
+	st = state.New(state.NewDbState(db.KV(), blockchain1.CurrentBlock().NumberU64()))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -621,11 +627,12 @@ func TestReorgOverStateChange(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -721,11 +728,13 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain2, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	defer blockchain2.Stop()
+	st = state.New(state.NewDbState(db.KV(), blockchain2.CurrentBlock().NumberU64()))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -776,11 +785,12 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -942,11 +952,12 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1082,10 +1093,12 @@ func TestEip2200Gas(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer blockchain.Stop()
 
 	blockchain.EnableReceipts(true)
 
@@ -1172,11 +1185,12 @@ func TestWrongIncarnation(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1242,13 +1256,14 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain1.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1301,11 +1316,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)

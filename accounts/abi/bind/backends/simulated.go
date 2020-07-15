@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"sync"
 	"time"
 
@@ -79,7 +80,8 @@ type SimulatedBackend struct {
 
 	events *filters.EventSystem // Event system for filtering log events live
 
-	config *params.ChainConfig
+	config   *params.ChainConfig
+	txCacher *core.TxSenderCacher
 }
 
 // NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
@@ -88,7 +90,8 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err))
 	}
@@ -102,6 +105,7 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 		blockchain:   blockchain,
 		config:       genesis.Config,
 		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
+		txCacher:     txCacher,
 	}
 	backend.emptyPendingBlock()
 	return backend
@@ -114,7 +118,9 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, nil)
+
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		panic(err)
 	}
@@ -127,6 +133,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		blockchain:   blockchain,
 		config:       genesis.Config,
 		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
+		txCacher:     txCacher,
 	}
 	backend.emptyPendingBlock()
 	return backend

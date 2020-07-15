@@ -202,6 +202,7 @@ func stage4(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer blockchain.Stop()
 	stage4 := progress(db, stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
@@ -331,7 +332,8 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 		return nil, nil, err
 	}
 	vmConfig, cacheConfig, dests := eth.BlockchainRuntimeConfig(&config)
-	blockchain, err1 := core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, &config.TxLookupLimit, dests)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err1 := core.NewBlockChain(db, cacheConfig, chainConfig, ethash.NewFaker(), vmConfig, nil, dests, txCacher)
 	if err1 != nil {
 		return nil, nil, err1
 	}

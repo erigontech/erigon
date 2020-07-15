@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -121,8 +122,10 @@ func storageReadWrites(blockNum uint64) {
 	defer w.Flush()
 	st := NewStorageTracer()
 	vmConfig := vm.Config{Tracer: st, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	totalSstores := 0
 	nakedSstores := 0

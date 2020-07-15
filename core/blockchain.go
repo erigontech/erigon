@@ -192,13 +192,14 @@ type BlockChain struct {
 	resolveReads        bool
 	pruner              Pruner
 
-	DestsCache vm.Cache
+	DestsCache   vm.Cache
+	senderCacher *TxSenderCacher
 }
 
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, txLookupLimit *uint64, dests vm.Cache) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, dests vm.Cache, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -235,6 +236,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		enableReceipts:      false,
 		enablePreimages:     true,
 		DestsCache:          dests,
+		senderCacher:        senderCacher,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
@@ -818,6 +820,7 @@ func (bc *BlockChain) Stop() {
 	if bc.pruner != nil {
 		bc.pruner.Stop()
 	}
+	bc.senderCacher.Close()
 	log.Info("Blockchain stopped")
 }
 
@@ -1435,8 +1438,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	if execute {
-		InitTxCacher()
-		senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
+		bc.senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 	}
 
 	// A queued approach to delivering events. This is generally

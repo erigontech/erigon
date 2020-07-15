@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -64,7 +65,8 @@ func NewBlockProviderFromDB(path string, createDBFunc CreateDbFunc) (BlockProvid
 	}
 	chainConfig := params.MainnetChainConfig
 	engine := ethash.NewFullFaker()
-	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		return nil, err
 	}
