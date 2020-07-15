@@ -9,8 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/fastcache"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -84,13 +82,6 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-var (
-	accountCache  *fastcache.Cache
-	storageCache  *fastcache.Cache
-	codeCache     *fastcache.Cache
-	codeSizeCache *fastcache.Cache
-)
-
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
 	if limit > 0 && limit <= s.BlockNumber {
 		s.Done()
@@ -115,29 +106,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	progressLogger := NewProgressLogger(logInterval, batch)
 	progressLogger.Start(&nextBlockNumber)
 	defer progressLogger.Stop()
-
-	/*
-	if accountCache == nil {
-		accountCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
-	} else {
-		accountCache.Reset()
-	}
-	if storageCache == nil {
-		storageCache = fastcache.New(128 * 1024 * 1024) // 128 Mb
-	} else {
-		storageCache.Reset()
-	}
-	if codeCache == nil {
-		codeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
-	} else {
-		codeCache.Reset()
-	}
-	if codeSizeCache == nil {
-		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
-	} else {
-		codeSizeCache.Reset()
-	}
-	*/
 
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
@@ -165,21 +133,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		block.Body().SendersToTxs(senders)
 		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
-		type cacheSetter interface {
-			SetAccountCache(cache *fastcache.Cache)
-			SetStorageCache(cache *fastcache.Cache)
-			SetCodeCache(cache *fastcache.Cache)
-			SetCodeSizeCache(cache *fastcache.Cache)
-		}
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
 
-		var stateReader interface {
-			state.StateReader
-			cacheSetter
-		}
-		var stateWriter interface {
-			state.WriterWithChangeSets
-			cacheSetter
-		}
 		if core.UsePlainStateExecution {
 			stateReader = state.NewPlainStateReader(batch)
 			stateWriter = state.NewPlainStateWriter(batch, blockNum)
@@ -187,17 +143,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			stateReader = state.NewDbStateReader(batch)
 			stateWriter = state.NewDbStateWriter(batch, blockNum)
 		}
-		/*
-		stateReader.SetAccountCache(accountCache)
-		stateReader.SetStorageCache(storageCache)
-		stateReader.SetCodeCache(codeCache)
-		stateReader.SetCodeSizeCache(codeSizeCache)
-
-		stateWriter.SetAccountCache(accountCache)
-		stateWriter.SetStorageCache(storageCache)
-		stateWriter.SetCodeCache(codeCache)
-		stateWriter.SetCodeSizeCache(codeSizeCache)
-		*/
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
