@@ -578,6 +578,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 			fetchers,
 			dests,
 			txPoolControl,
+			nil,
 		)
 		if err != nil {
 			return err
