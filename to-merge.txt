@@ -339,38 +339,3 @@ Date:   Wed Jul 15 10:00:04 2020 +0200
 
     trie: quell linter in commiter.go (#21329)
 
-commit 6c9f040ebeafcc680b0c457e6f4886e2bca32527
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Jul 14 21:42:32 2020 +0200
-
-    core: transaction pool optimizations (#21328)
-    
-    * core: added local tx pool test case
-    
-    * core, crypto: various allocation savings regarding tx handling
-    
-    * core/txlist, txpool: save a reheap operation, avoid some bigint allocs
-    
-    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
-
-commit 5b081ab214d8d6373cbfdd9464f2503934b9bb68
-Author: rene <41963722+renaynay@users.noreply.github.com>
-Date:   Tue Jul 14 10:35:32 2020 +0200
-
-    cmd/clef: change --rpcport to --http.port and update flags in docs (#21318)
-
-commit 6ef4495a8fbda46c888b8f746fa006b0dfcdcc4f
-Author: Felix Lange <fjl@twurst.com>
-Date:   Mon Jul 13 22:25:45 2020 +0200
-
-    p2p/discover: require table nodes to have an IP (#21330)
-    
-    This fixes a corner case in discv5. The issue cannot happen in discv4
-    because it performs IP checks on all incoming node information.
-
-commit 79addac698d4f066b29bb90140885c815be55a07
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Tue Jul 14 02:43:30 2020 +0800
-
-    core/rawdb: better log messages for ancient failure (#21327)
-
