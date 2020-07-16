@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -132,8 +133,10 @@ func dataDependencies(blockNum uint64) {
 	defer w.Flush()
 	dt := NewDepTracer()
 	vmConfig := vm.Config{Tracer: dt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)

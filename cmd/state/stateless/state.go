@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1383,8 +1384,10 @@ func makeCreators(blockNum uint64) {
 	ct := NewCreationTracer(w)
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: ct, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)
@@ -1972,8 +1975,10 @@ func makeSha3Preimages(blockNum uint64) {
 	bucket := []byte("sha3")
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{EnablePreimageRecording: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	tx, err := f.Begin(true)
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"math/big"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -127,7 +128,8 @@ func TestSetupGenesis(t *testing.T) {
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
-				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+				txCacher := NewTxSenderCacher(runtime.NumCPU())
+				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacher)
 				defer bc.Stop()
 
 				blocks, _, err := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)

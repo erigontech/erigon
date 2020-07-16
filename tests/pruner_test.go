@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -69,7 +70,8 @@ func TestBasisAccountPruning(t *testing.T) {
 
 	numBlocks := 10
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,10 +236,12 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		NoHistory:           true,
 		ArchiveSyncInterval: 1,
 	}
-	blockchain, err := core.NewBlockChain(db, &cacheConfig, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, &cacheConfig, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer blockchain.Stop()
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		//Some transactions to generate blocks and history
@@ -386,10 +390,12 @@ func TestStoragePruning(t *testing.T) {
 	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer blockchain.Stop()
 
 	blockchain.EnableReceipts(true)
 
@@ -590,10 +596,12 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 
 	numBlocks := 25
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer blockchain.Stop()
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		var (

@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -323,10 +324,12 @@ func initialState1() error {
 	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		return err
 	}
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	if err = hexPalette(); err != nil {
