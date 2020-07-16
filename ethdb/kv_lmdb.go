@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"time"
 
@@ -93,6 +94,12 @@ func (opts lmdbOpts) Open() (KV, error) {
 		lmdbTxPool:      lmdbpool.NewTxnPool(env),
 		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
 		wg:              &sync.WaitGroup{},
+	}
+
+	if opts.inMem {
+		runtime.SetFinalizer(db, func(v interface{}) {
+			v.(*LmdbKV).Close()
+		})
 	}
 
 	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
@@ -189,6 +196,7 @@ func (db *LmdbKV) staleReadsCheckLoop(ctx context.Context, ticker *time.Ticker) 
 func (db *LmdbKV) Close() {
 	if db.stopStaleReadsCheck != nil {
 		db.stopStaleReadsCheck()
+		db.stopStaleReadsCheck = nil
 	}
 	db.lmdbTxPool.Close()
 	db.wg.Wait()
