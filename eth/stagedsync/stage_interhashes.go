@@ -19,9 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-const BlocksPerDay = 6000
-const MaxBlockForIncrementalUpdate = 17 * BlocksPerDay // >100K
-
 func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
@@ -360,11 +357,10 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	return nil
 }
 
-func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash) error {
-	from := s.BlockNumber
-	p := NewHashPromoter(db, nil)
+func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	r := NewReceiver(nil)
+	r := NewReceiver(quit)
 	if err := p.Promote(s, s.BlockNumber, to, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
@@ -417,7 +413,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		"gen IH", generationIHTook,
 	)
 
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -444,20 +440,13 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash)
+	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit)
 }
 
-func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash) error {
-	if s.BlockNumber-u.UnwindPoint > MaxBlockForIncrementalUpdate {
-		if err := ResetHashState(db); err != nil {
-			return nil
-		}
-		return nil // unwind done
-	}
-
-	p := NewHashPromoter(db, nil)
+func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	r := NewReceiver(nil)
+	r := NewReceiver(quit)
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
@@ -511,7 +500,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		"root hash", subTries.Hashes[0].Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	if err := u.Done(db); err != nil {
