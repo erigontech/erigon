@@ -352,9 +352,9 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 }
 
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	p := NewHashPromoter(db, quit)
+	p := NewHashPromoter(db, nil)
 	p.TempDir = datadir
-	r := NewReceiver(quit)
+	r := NewReceiver(nil)
 	if err := p.Promote(s, from, to, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
