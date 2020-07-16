@@ -14,11 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-var (
-	badgerTxPool     = sync.Pool{New: func() interface{} { return &badgerTx{} }}     // pool of ethdb.badgerTx objects
-	badgerCursorPool = sync.Pool{New: func() interface{} { return &badgerCursor{} }} // pool of ethdb.badgerCursor objects
-)
-
 type badgerOpts struct {
 	Badger badger.Options
 }
@@ -159,12 +154,11 @@ func (db *badgerKV) IdealBatchSize() int {
 }
 
 func (db *badgerKV) Begin(ctx context.Context, writable bool) (Tx, error) {
-	t := badgerTxPool.Get().(*badgerTx)
-	defer badgerTxPool.Put(t)
-	t.ctx = ctx
-	t.db = db
-	t.badger = db.badger.NewTransaction(writable)
-	return t, nil
+	return &badgerTx{
+		db:     db,
+		ctx:    ctx,
+		badger: db.badger.NewTransaction(writable),
+	}, nil
 }
 
 type badgerTx struct {
@@ -172,7 +166,7 @@ type badgerTx struct {
 	db  *badgerKV
 
 	badger  *badger.Txn
-	cursors []*badgerCursor
+	cursors []*badger.Iterator
 }
 
 type badgerBucket struct {
@@ -196,10 +190,7 @@ type badgerCursor struct {
 }
 
 func (db *badgerKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := badgerTxPool.Get().(*badgerTx)
-	defer badgerTxPool.Put(t)
-	t.db = db
-	t.ctx = ctx
+	t := &badgerTx{db: db, ctx: ctx}
 	return db.badger.View(func(tx *badger.Txn) error {
 		defer t.closeCursors()
 		t.badger = tx
@@ -208,10 +199,7 @@ func (db *badgerKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := badgerTxPool.Get().(*badgerTx)
-	defer badgerTxPool.Put(t)
-	t.ctx = ctx
-	t.db = db
+	t := &badgerTx{db: db, ctx: ctx}
 	return db.badger.Update(func(tx *badger.Txn) error {
 		defer t.closeCursors()
 		t.badger = tx
@@ -236,11 +224,10 @@ func (tx *badgerTx) Rollback() {
 }
 
 func (tx *badgerTx) closeCursors() {
-	for _, c := range tx.cursors {
-		if c.badger != nil {
-			c.badger.Close()
+	for _, i := range tx.cursors {
+		if i != nil {
+			i.Close()
 		}
-		badgerCursorPool.Put(c)
 	}
 	tx.cursors = tx.cursors[:0]
 }
@@ -323,21 +310,9 @@ func (b badgerBucket) Clear() error {
 }
 
 func (b badgerBucket) Cursor() Cursor {
-	c := badgerCursorPool.Get().(*badgerCursor)
-	c.bucket = b
-	c.ctx = b.tx.ctx
-	c.badgerOpts = badger.DefaultIteratorOptions
+	c := &badgerCursor{bucket: b, ctx: b.tx.ctx, badgerOpts: badger.DefaultIteratorOptions}
 	c.prefix = append(c.prefix[:0], c.bucket.prefix[:c.bucket.nameLen]...)
 	c.badgerOpts.Prefix = append(c.badgerOpts.Prefix[:0], c.prefix...)
-	c.k = nil
-	c.v = nil
-	c.err = nil
-	c.badger = nil
-	// add to auto-close on end of transactions
-	if b.tx.cursors == nil {
-		b.tx.cursors = make([]*badgerCursor, 0, 1)
-	}
-	b.tx.cursors = append(b.tx.cursors, c)
 	return c
 }
 
@@ -346,7 +321,14 @@ func (c *badgerCursor) initCursor() {
 		return
 	}
 
-	c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
+	tx := c.bucket.tx
+	c.badger = tx.badger.NewIterator(c.badgerOpts)
+
+	// add to auto-cleanup on end of transactions
+	if tx.cursors == nil {
+		tx.cursors = make([]*badger.Iterator, 0, 1)
+	}
+	tx.cursors = append(tx.cursors, c.badger)
 }
 
 func (c *badgerCursor) First() ([]byte, []byte, error) {

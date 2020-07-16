@@ -15,11 +15,6 @@ type KV interface {
 	IdealBatchSize() int
 }
 
-type NativeGet interface {
-	Get(ctx context.Context, bucket, key []byte) ([]byte, error)
-	Has(ctx context.Context, bucket, key []byte) (bool, error)
-}
-
 type Tx interface {
 	Bucket(name []byte) Bucket
 
