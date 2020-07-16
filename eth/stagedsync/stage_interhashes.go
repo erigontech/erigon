@@ -224,7 +224,7 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		}
 		r.accountMap[newKStr] = &a
 	} else {
-		r.accountMap[newKStr] = nil
+		delete(r.accountMap, newKStr)
 	}
 	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
@@ -239,7 +239,7 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
-		r.storageMap[newKStr] = nil
+		delete(r.storageMap, newKStr)
 	}
 	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
@@ -362,14 +362,12 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint
 		return err
 	}
 	for ks, acc := range r.accountMap {
-		if acc != nil {
-			// Fill the code hashes
-			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
-					copy(acc.CodeHash[:], codeHash)
-				} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
-					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
-				}
+		// Fill the code hashes
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 			}
 		}
 	}
@@ -433,16 +431,14 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		return err
 	}
 	for ks, acc := range r.accountMap {
-		if acc != nil {
-			// Fill the code hashes
-			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
-					copy(acc.CodeHash[:], codeHash)
-				} else if errors.Is(err, ethdb.ErrKeyNotFound) {
-					copy(acc.CodeHash[:], trie.EmptyCodeHash[:])
-				} else {
-					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
-				}
+		// Fill the code hashes
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else if errors.Is(err, ethdb.ErrKeyNotFound) {
+				copy(acc.CodeHash[:], trie.EmptyCodeHash[:])
+			} else {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 			}
 		}
 	}
