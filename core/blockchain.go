@@ -938,6 +938,7 @@ func (bc *BlockChain) Rollback(chain []common.Hash) {
 		// last step, however the direction of rollback is from high
 		// to low, so it's safe the update in-memory markers directly.
 		currentHeader := bc.hc.CurrentHeader()
+
 		if currentHeader.Hash() == hash {
 			bc.hc.SetCurrentHeader(bc.db, bc.GetHeader(currentHeader.ParentHash, currentHeader.Number.Uint64()-1))
 		}

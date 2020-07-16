@@ -50,10 +50,11 @@ func (a HeaderNumSets) InsertHeaderNumbers(db ethdb.Database) error {
 			continue
 		}
 		w++
-		if err := batch.Put(dbutils.HeaderNumberPrefix, a[i:i+32], a[i+32:i+40]); err != nil {
+		if err := batch.Put(dbutils.HeaderNumberPrefix, common.CopyBytes(a[i:i+32]), common.CopyBytes(a[i+32:i+40])); err != nil {
 			log.Crit("Failed to store hash to number mapping", "err", err)
+			return err
 		}
-		if i%40000000 == 0 {
+		if batch.BatchSize() >= batch.IdealBatchSize() {
 			log.Info("Committed Headers Number", "progress", w)
 			_, err := batch.Commit()
 			if err != nil {
@@ -128,7 +129,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection *HeaderNumSets, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection HeaderNumSets, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -146,11 +147,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		return false, 0, nil
 	}
 
-	if origin > headers[0].Number.Uint64() && rawdb.ReadHeaderNumber(db, headers[0].ParentHash) == nil {
+	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+	if parentTd == nil {
 		return false, 0, errors.New("unknown parent")
 	}
-
-	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
@@ -185,13 +185,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			return false, 0, err
 		}
 	}
-	headHash := rawdb.ReadHeadHeaderHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	placeholderNumber := headers[0].Number.Uint64() - 1
-	if headNumber == nil {
-		headNumber = &placeholderNumber
+	localTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+	if localTd == nil {
+		return false, 0, errors.New("unknown parent")
 	}
-	localTd := rawdb.ReadTd(db, headHash, *headNumber)
 	lastHeader := headers[len(headers)-1]
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
@@ -199,9 +196,9 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	newCanonical := externTd.Cmp(localTd) > 0
 
 	if !newCanonical && externTd.Cmp(localTd) == 0 {
-		if lastHeader.Number.Uint64() < *headNumber {
+		if lastHeader.Number.Uint64() < *blockNumber {
 			newCanonical = true
-		} else if lastHeader.Number.Uint64() == *headNumber {
+		} else if lastHeader.Number.Uint64() == *blockNumber {
 			newCanonical = mrand.Float64() < 0.5
 		}
 	}
@@ -242,11 +239,8 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		entry := make([]byte, 40)
 		copy(entry, hash[:])
 		copy(entry[32:], encoded)
-		if (number-origin)*40 > uint64(len(*collection)) {
-			*collection = append(*collection, entry...)
-		} else {
-			copy((*collection)[(number-origin)*40:], entry)
-		}
+		copy(collection[(number-origin)*40:], entry)
+
 		// Write the encoded header
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
@@ -268,15 +262,14 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	}
-	reorg := newCanonical && forkBlockNumber < *headNumber
+	reorg := newCanonical && forkBlockNumber < *blockNumber
 	if reorg {
 		// Delete any canonical number assignments above the new head
-		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
+		for i := lastHeader.Number.Uint64() + 1; i <= *blockNumber; i++ {
 			rawdb.DeleteCanonicalHash(batch, i)
 		}
 	}
-	pos := (lastHeader.Number.Uint64() - origin) * 40
-	if newCanonical && !bytes.Equal((*collection)[pos:pos+40], make([]byte, 40)) {
+	if newCanonical {
 		*blockNumber = lastHeader.Number.Uint64()
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}

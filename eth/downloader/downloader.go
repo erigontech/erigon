@@ -560,9 +560,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	}
 	d.headerNumber = origin
 	fetchers := []func() error{
-		func() error { return d.fetchHeaders(p, origin+1, pivot, &d.headerNumber) }, // Headers are always retrieved
+		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
 		func() error {
-			return d.processHeaders(pivot, &d.headerNumber, td, func() (uint64, error) {
+			return d.processHeaders(pivot, origin+1, td, func() (uint64, error) {
 				latest, err := d.fetchHeight(p)
 				if err != nil {
 					return 0, err
@@ -791,6 +791,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
+	fmt.Println(localHeight)
 	p.log.Debug("Looking for common ancestor", "local", localHeight, "remote", remoteHeight)
 
 	// Recap floor value for binary search
@@ -1005,7 +1006,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 // other peers are only accepted if they map cleanly to the skeleton. If no one
 // can fill in the skeleton - not even the origin peer - it's assumed invalid and
 // the origin is dropped.
-func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64, blockNumber *uint64) error {
+func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) error {
 	p.log.Debug("Directing header downloads", "origin", from)
 	defer p.log.Debug("Header download terminated")
 
@@ -1098,7 +1099,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64, 
 					if d.mode == LightSync {
 						head = d.lightchain.CurrentHeader().Number.Uint64()
 					} else if d.mode == StagedSync {
-						head = *blockNumber
+						head = d.headerNumber
 					} else {
 						head = d.blockchain.CurrentFastBlock().NumberU64()
 						if full := d.blockchain.CurrentBlock().NumberU64(); head < full {
@@ -1457,20 +1458,22 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(pivot uint64, blockNumber *uint64, td *big.Int, fetchHeight func() (uint64, error)) error {
+func (d *Downloader) processHeaders(pivot uint64, origin uint64, td *big.Int, fetchHeight func() (uint64, error)) error {
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
 	height, err := fetchHeight()
 	if err != nil {
 		return err
 	}
-	collection := stagedsync.NewHeaderNumSets((height - *blockNumber + 1) * 40)
-	start := *blockNumber
-	origin := *blockNumber
+	collection := stagedsync.NewHeaderNumSets((height - d.headerNumber + 1000000) * 40) // The additional blocks are in case new blocks added exceed length
+	start := d.headerNumber
 	defer func() {
-		err := collection.InsertHeaderNumbers(d.stateDB.NewBatch())
-		if err != nil {
-			log.Error(err.Error())
+		if d.mode == StagedSync {
+			err := collection.InsertHeaderNumbers(d.stateDB)
+			if err != nil {
+				log.Error(err.Error())
+			}
+			return
 		}
 		if len(rollback) > 0 {
 			// Flatten the headers and roll them back
@@ -1584,7 +1587,7 @@ func (d *Downloader) processHeaders(pivot uint64, blockNumber *uint64, td *big.I
 					if d.mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), &collection, blockNumber, start, frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), collection, &d.headerNumber, start, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
@@ -1602,7 +1605,6 @@ func (d *Downloader) processHeaders(pivot uint64, blockNumber *uint64, td *big.I
 					if err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if n > 0 {
-							fmt.Println("n>0")
 							rollback = append(rollback, chunk[:n]...)
 						}
 						log.Error("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
