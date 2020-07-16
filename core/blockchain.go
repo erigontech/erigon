@@ -820,7 +820,9 @@ func (bc *BlockChain) Stop() {
 	if bc.pruner != nil {
 		bc.pruner.Stop()
 	}
-	bc.senderCacher.Close()
+	if bc.senderCacher != nil {
+		bc.senderCacher.Close()
+	}
 	log.Info("Blockchain stopped")
 }
 

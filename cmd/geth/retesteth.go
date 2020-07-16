@@ -283,7 +283,6 @@ func (e *NoRewardEngine) Close() error {
 func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainParams) (bool, error) {
 	// Clean up
 	if api.blockchain != nil {
-		api.txCacher.Close()
 		api.blockchain.Stop()
 	}
 	if api.engine != nil {

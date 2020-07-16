@@ -368,8 +368,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, hook stagedsync.ChangeSe
 }
 
 func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1
 	}
