@@ -215,7 +215,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	chainreader := &fakeChainReader{config: config}
 	dbCopy := db.MemCopy()
 	defer dbCopy.Close()
-	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
+	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader, stateWriter *state.DbStateWriter) (*types.Block, types.Receipts, error) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
@@ -261,6 +261,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			var hashCollector func(keyHex []byte, hash []byte) error
 			var collector *etl.Collector
+			unfurl := trie.NewRetainList(0)
 			if intermediateHashes {
 				collector = etl.NewCollector("", etl.NewSortableBuffer(etl.BufferOptimalSize))
 				hashCollector = func(keyHex []byte, hash []byte) error {
@@ -271,9 +272,24 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					trie.CompressNibbles(keyHex, &k)
 					return collector.Collect(k, common.CopyBytes(hash))
 				}
+				changeSetWriter := stateWriter.ChangeSetWriter()
+				accountChangeSet, err1 := changeSetWriter.GetAccountChanges()
+				if err1 != nil {
+					return nil, nil, err1
+				}
+				for _, accountChange := range accountChangeSet.Changes {
+					unfurl.AddKey(accountChange.Key)
+				}
+				storageChangeSet, err2 := changeSetWriter.GetStorageChanges()
+				if err2 != nil {
+					return nil, nil, err2
+				}
+				for _, storageChange := range storageChangeSet.Changes {
+					unfurl.AddKey(storageChange.Key)
+				}
 			}
 			loader := trie.NewFlatDbSubTrieLoader()
-			if err := loader.Reset(dbCopy, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+			if err := loader.Reset(dbCopy, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if subTries, err := loader.LoadSubTries(); err == nil {

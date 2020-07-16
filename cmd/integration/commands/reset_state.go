@@ -1,4 +1,4 @@
-package main
+package commands
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
-	Short: "Reset StateStages (4,5,6,7,8) and buckets",
+	Short: "Reset StateStages (4,5,6,7,8,9) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		err := resetState(ctx)
@@ -73,7 +73,13 @@ func resetSenders(db *ethdb.ObjectDatabase) error {
 	); err != nil {
 		return err
 	}
-	return stages.SaveStageProgress(db, stages.Senders, 0, nil)
+	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.Senders, 0, nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 func resetExec(db *ethdb.ObjectDatabase) error {
@@ -91,7 +97,13 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 	); err != nil {
 		return err
 	}
-	return stages.SaveStageProgress(db, stages.Execution, 0, nil)
+	if err := stages.SaveStageProgress(db, stages.Execution, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.Execution, 0, nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 func resetHashState(db *ethdb.ObjectDatabase) error {
@@ -106,6 +118,12 @@ func resetHashState(db *ethdb.ObjectDatabase) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.HashState, 0, nil); err != nil {
 		return err
 	}
 	return nil
@@ -124,6 +142,12 @@ func resetHistory(db *ethdb.ObjectDatabase) error {
 	if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
 		return err
 	}
+	if err := stages.SaveStageUnwind(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -135,6 +159,9 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(db, stages.TxLookup, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.TxLookup, 0, nil); err != nil {
 		return err
 	}
 

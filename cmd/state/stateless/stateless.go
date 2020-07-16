@@ -190,7 +190,7 @@ func Stateless(
 	}
 	var preRoot common.Hash
 	if blockNum == 1 {
-		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory)
+		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory, true /* overwrite */)
 		check(err)
 		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
 		check(err1)

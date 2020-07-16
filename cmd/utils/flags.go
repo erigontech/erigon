@@ -1798,10 +1798,10 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 }
 
 // MakeChain creates a chain manager from set command line flags.
-func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chain *core.BlockChain, chainDb ethdb.Database) {
+func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *params.ChainConfig, chain *core.BlockChain, chainDb ethdb.Database) {
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
-	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */)
+	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */, false /* overwrite */)
 	if err != nil {
 		Fatalf("%v", err)
 	}
@@ -1846,7 +1846,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chain *core.B
 	if err != nil {
 		Fatalf("Can't create BlockChain: %v", err)
 	}
-	return chain, chainDb
+	return config, chain, chainDb
 }
 
 // MakeConsolePreloads retrieves the absolute paths for the console JavaScript

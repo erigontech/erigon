@@ -42,7 +42,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	clear := func() {
 		tester.db.Close()
 	}
@@ -67,12 +67,6 @@ func (st *stagedSyncTester) dropPeer(id string) {
 	delete(st.peers, id)
 	//nolint:errcheck
 	st.downloader.UnregisterPeer(id)
-}
-
-// Config is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) Config() *params.ChainConfig {
-	// This needs to match whatever is used in testchain_test.go to generate signatures
-	return params.TestChainConfig
 }
 
 // CurrentBlock is part of the implementation of BlockChain interface defined in downloader.go

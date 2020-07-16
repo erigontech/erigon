@@ -8,21 +8,24 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 const prof = false // whether to profile
 
 func PrepareStagedSync(
 	d DownloaderGlue,
+	chainConfig *params.ChainConfig,
 	blockchain BlockChain,
 	stateDB ethdb.Database,
 	pid string,
 	storageMode ethdb.StorageMode,
 	datadir string,
-	quitCh chan struct{},
+	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
 	txPoolControl *TxPoolStartStopper,
+	changeSetHook ChangeSetHook,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
 
@@ -65,7 +68,7 @@ func PrepareStagedSync(
 					ReadChLen:       4,
 					Now:             time.Now(),
 				}
-				return SpawnRecoverSendersStage(cfg, s, stateDB, blockchain.Config(), 0, datadir, quitCh)
+				return SpawnRecoverSendersStage(cfg, s, stateDB, chainConfig, 0, datadir, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindSendersStage(u, stateDB)
@@ -75,7 +78,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Executing blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, nil)
+				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)
@@ -144,7 +147,7 @@ func PrepareStagedSync(
 				return spawnTxPool(s, txPoolControl.Start)
 			},
 			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
-				return txPoolControl.Stop()
+				return unwindTxPool(txPoolControl.Stop)
 			},
 		},
 	}

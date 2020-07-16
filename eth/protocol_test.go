@@ -50,7 +50,7 @@ var testAccount, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6
 
 // Tests that handshake failures are detected and reported correctly.
 func TestStatusMsgErrors63(t *testing.T) {
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer clear()
 	var (
 		genesis = pm.blockchain.Genesis()
@@ -101,13 +101,13 @@ func TestStatusMsgErrors63(t *testing.T) {
 }
 
 func TestStatusMsgErrors64(t *testing.T) {
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer clear()
 	var (
 		genesis = pm.blockchain.Genesis()
 		head    = pm.blockchain.CurrentHeader()
 		td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
-		forkID  = forkid.NewID(pm.blockchain)
+		forkID  = forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64())
 	)
 
 	tests := []struct {
@@ -186,17 +186,21 @@ func TestForkIDSplit(t *testing.T) {
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false /* intermediateHashes */)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false /* intermediateHashes */)
 
-		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
-		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
+		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
+		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
 	)
+	defer chainNoFork.Stop()
+	defer chainProFork.Stop()
 
 	if err := ethNoFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
 	}
+	defer ethNoFork.Stop()
 
 	if err := ethProFork.Start(1000, true); err != nil {
 		t.Fatalf("error on protocol manager start: %v", err)
 	}
+	defer ethProFork.Stop()
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()
@@ -239,7 +243,9 @@ func TestForkIDSplit(t *testing.T) {
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	peerNoFork = newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
+	defer p2pNoFork.Close()
 	peerProFork = newPeer(64, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
+	defer p2pProFork.Close()
 
 	errc = make(chan error, 2)
 	go func() { errc <- ethNoFork.handle(peerProFork) }()
@@ -262,7 +268,7 @@ func TestRecvTransactions65(t *testing.T) { testRecvTransactions(t, 65) }
 
 func testRecvTransactions(t *testing.T, protocol int) {
 	txAdded := make(chan []*types.Transaction)
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, txAdded)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, txAdded)
 	defer clear()
 	pm.acceptTxs = 1 // mark synced to accept transactions
 	p, _ := newTestPeer("peer", protocol, pm, true)
@@ -290,7 +296,7 @@ func TestSendTransactions64(t *testing.T) { testSendTransactions(t, 64) }
 func TestSendTransactions65(t *testing.T) { testSendTransactions(t, 65) }
 
 func testSendTransactions(t *testing.T, protocol int) {
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer clear()
 
 	// Fill the pool with big transactions (use a subscription to wait until all
@@ -383,9 +389,9 @@ func TestTransactionAnnouncement(t *testing.T) { testSyncTransaction(t, false) }
 
 func testSyncTransaction(t *testing.T, propagtion bool) {
 	// Create a protocol manager for transaction fetcher and sender
-	pmFetcher, fetcherClear := newTestProtocolManagerMust(t, downloader.FullSync, 0, nil, nil)
+	pmFetcher, fetcherClear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer fetcherClear()
-	pmSender, senderClear := newTestProtocolManagerMust(t, downloader.FullSync, 1024, nil, nil)
+	pmSender, senderClear := newTestProtocolManagerMust(t, downloader.StagedSync, 1024, nil, nil)
 	defer senderClear()
 	pmSender.broadcastTxAnnouncesOnly = !propagtion
 
@@ -396,7 +402,7 @@ func testSyncTransaction(t *testing.T, propagtion bool) {
 	go pmFetcher.handle(pmFetcher.newPeer(65, p2p.NewPeer(enode.ID{}, "fetcher", nil), io1, pmFetcher.txpool.Get))
 
 	time.Sleep(250 * time.Millisecond)
-	pmFetcher.doSync(peerToSyncOp(downloader.FullSync, pmFetcher.peers.BestPeer()))
+	pmFetcher.doSync(peerToSyncOp(downloader.StagedSync, pmFetcher.peers.BestPeer()))
 	atomic.StoreUint32(&pmFetcher.acceptTxs, 1)
 
 	newTxs := make(chan core.NewTxsEvent, 1024)

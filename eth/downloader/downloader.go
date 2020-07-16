@@ -121,6 +121,7 @@ type Downloader struct {
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
+	chainConfig *params.ChainConfig
 	lightchain LightChain
 	blockchain BlockChain
 
@@ -226,9 +227,6 @@ type BlockChain interface {
 	// GetBlockByNumber is necessary for staged sync
 	GetBlockByNumber(number uint64) *types.Block
 
-	// Config is necessary for staged sync
-	Config() *params.ChainConfig
-
 	// Engine is necessary for staged sync
 	Engine() consensus.Engine
 
@@ -243,7 +241,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -255,6 +253,7 @@ func New(checkpoint uint64, stateDB ethdb.Database, stateBloom *trie.SyncBloom, 
 		peers:         newPeerSet(),
 		rttEstimate:   uint64(rttMaxEstimate),
 		rttConfidence: uint64(1000000),
+		chainConfig:   chainConfig,
 		blockchain:    chain,
 		lightchain:    lightchain,
 		dropPeer:      dropPeer,
@@ -274,6 +273,10 @@ func New(checkpoint uint64, stateDB ethdb.Database, stateBloom *trie.SyncBloom, 
 // DataDir sets the directory where download is allowed to create temporary files
 func (d *Downloader) SetDataDir(datadir string) {
 	d.datadir = datadir
+}
+
+func (d *Downloader) SetChainConfig(chainConfig *params.ChainConfig) {
+	d.chainConfig = chainConfig
 }
 
 // Progress retrieves the synchronisation boundaries, specifically the origin
@@ -565,6 +568,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	if d.mode == StagedSync {
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
+			d.chainConfig,
 			d.blockchain,
 			d.stateDB,
 			p.id,
@@ -574,6 +578,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 			fetchers,
 			dests,
 			txPoolControl,
+			nil,
 		)
 		if err != nil {
 			return err
@@ -1543,7 +1548,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 					if d.mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.blockchain.Config(), d.blockchain.Engine(), frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {

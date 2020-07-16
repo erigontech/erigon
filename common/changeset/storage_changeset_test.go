@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -535,4 +536,60 @@ func doTestDefaultIncarnationCompress(t *testing.T,
 	if len(b1) >= len(b2) {
 		t.Errorf("first encoding should be shorter than the second, got %d >= %d", len(b1), len(b2))
 	}
+}
+
+func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
+	contractA := common.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
+	contractB := common.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")
+	contractC := common.HexToAddress("0x1cbdd8336800dc3fe27daf5fb5188f0502ac1fc7")
+	contractD := common.HexToAddress("0xd88eba4c93123372a9f67215f80477bc3644e6ab")
+
+	key1 := common.HexToHash("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21efbc")
+	key2 := common.HexToHash("0x0bece5a88f7b038f806dbef77c0b462506e4b566c5be7dd44e8e2fc7b1f6a99c")
+	key3 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	key4 := common.HexToHash("0x4fdf6c1878d2469b49684effe69db8689d88a4f1695055538501ff197bc9e30e")
+	key5 := common.HexToHash("0xaa2703c3ae5d0024b2c3ab77e5200bb2a8eb39a140fad01e89a495d73760297c")
+	key6 := common.HexToHash("0x000000000000000000000000000000000000000000000000000000000000df77")
+	key7 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000")
+
+	val1 := common.FromHex("0x33bf0d0c348a2ef1b3a12b6a535e1e25a56d3624e45603e469626d80fd78c762")
+	val2 := common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000459")
+	val3 := common.FromHex("0x0000000000000000000000000000002506e4b566c5be7dd44e8e2fc7b1f6a99c")
+	val4 := common.FromHex("0x207a386cdf40716455365db189633e822d3a7598558901f2255e64cb5e424714")
+	val5 := common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000")
+	val6 := common.FromHex("0xec89478783348038046b42cc126a3c4e351977b5f4cf5e3c4f4d8385adbf8046")
+
+	ch := NewStorageChangeSetPlain()
+
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1), val1))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5), val5))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key6), val6))
+
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key2), val2))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3), val3))
+
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4))
+
+	encoded, _ := EncodeStoragePlain(ch)
+
+	data1, err1 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1))
+	assert.NoError(t, err1)
+	assert.Equal(t, data1, val1)
+
+	data3, err3 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3))
+	assert.NoError(t, err3)
+	assert.Equal(t, data3, val3)
+
+	data5, err5 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5))
+	assert.NoError(t, err5)
+	assert.Equal(t, data5, val5)
+
+	_, errA := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key1))
+	assert.Error(t, errA)
+
+	_, errB := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractD, 2, key1))
+	assert.Error(t, errB)
+
+	_, errC := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key7))
+	assert.Error(t, errC)
 }

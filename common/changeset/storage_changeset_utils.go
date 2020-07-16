@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 /**
@@ -37,9 +36,7 @@ numOfUint32Values uint16
 func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 	sort.Sort(s)
 	var err error
-	buf := pool.GetBuffer(1 << 16)
-	buf.Reset()
-	defer pool.PutBuffer(buf)
+	buf := new(bytes.Buffer)
 	uint16Arr := make([]byte, 2)
 	uint32Arr := make([]byte, 4)
 	numOfElements := s.Len()
@@ -179,7 +176,7 @@ func encodeStorage(s *ChangeSet, keyPrefixLen uint32) ([]byte, error) {
 		}
 	}
 
-	return common.CopyBytes(buf.Bytes()), nil
+	return buf.Bytes(), nil
 }
 
 // decodeStorage decodes a stream of bytes to a storage changeset using
@@ -411,20 +408,43 @@ func doSearch(
 	if !bytes.Equal(b[4+addrID*(4+keyPrefixLen):4+addrID*(4+keyPrefixLen)+keyPrefixLen], addrBytesToFind) {
 		return nil, ErrNotFound
 	}
-	if incarnation > 0 {
-		// Find incarnation
-		incIndex := sort.Search(numOfNotDefaultIncarnations, func(i int) bool {
-			id := int(binary.BigEndian.Uint32(b[incarnationsStart+12*i:]))
-			return id >= addrID
-		})
-		var foundIncarnation uint64 = DefaultIncarnation
-		if incIndex < numOfNotDefaultIncarnations && int(binary.BigEndian.Uint32(b[incarnationsStart+12*incIndex:])) == addrID {
-			foundIncarnation = binary.BigEndian.Uint64(b[incarnationsStart+12*incIndex+4:])
+
+	numOfIncarnationsForThisAddress := 1
+	for tryAddrID := addrID + 1; tryAddrID < numOfUniqueElements; tryAddrID++ {
+		if !bytes.Equal(b[4+tryAddrID*(4+keyPrefixLen):4+tryAddrID*(4+keyPrefixLen)+keyPrefixLen], addrBytesToFind) {
+			break
+		} else {
+			numOfIncarnationsForThisAddress++
 		}
-		if foundIncarnation != incarnation {
+	}
+
+	if incarnation > 0 {
+		found := false
+
+		for i := 0; i < numOfIncarnationsForThisAddress; i++ {
+			// Find incarnation
+			incIndex := sort.Search(numOfNotDefaultIncarnations, func(i int) bool {
+				id := int(binary.BigEndian.Uint32(b[incarnationsStart+12*i:]))
+				return id >= addrID
+			})
+			var foundIncarnation uint64 = DefaultIncarnation
+			if incIndex < numOfNotDefaultIncarnations && int(binary.BigEndian.Uint32(b[incarnationsStart+12*incIndex:])) == addrID {
+				foundIncarnation = binary.BigEndian.Uint64(b[incarnationsStart+12*incIndex+4:])
+			}
+
+			if foundIncarnation == incarnation {
+				found = true
+				break
+			} else {
+				addrID++
+			}
+		}
+
+		if !found {
 			return nil, ErrNotFound
 		}
 	}
+
 	from := 0
 	if addrID > 0 {
 		from = int(binary.BigEndian.Uint32(b[4+addrID*(keyPrefixLen+4)-4:]))

@@ -24,7 +24,6 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 func (t *Trie) Print(w io.Writer) {
@@ -133,21 +132,19 @@ func (n codeNode) print(w io.Writer) {
 }
 
 func (an accountNode) fstring(ind string) string {
-	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
-	an.EncodeForHashing(encodedAccount.B)
-	defer pool.PutBuffer(encodedAccount)
+	encodedAccount := make([]byte, an.EncodingLengthForHashing())
+	an.EncodeForHashing(encodedAccount)
 	if an.storage == nil {
-		return fmt.Sprintf("%x", encodedAccount.String())
+		return fmt.Sprintf("%x", encodedAccount)
 	}
-	return fmt.Sprintf("%x %v", encodedAccount.String(), an.storage.fstring(ind+" "))
+	return fmt.Sprintf("%x %v", encodedAccount, an.storage.fstring(ind+" "))
 }
 
 func (an accountNode) print(w io.Writer) {
-	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
-	an.EncodeForHashing(encodedAccount.B)
-	defer pool.PutBuffer(encodedAccount)
+	encodedAccount := make([]byte, an.EncodingLengthForHashing())
+	an.EncodeForHashing(encodedAccount)
 
-	fmt.Fprintf(w, "v(%x)", encodedAccount.String())
+	fmt.Fprintf(w, "v(%x)", encodedAccount)
 }
 
 func printDiffSide(n node, w io.Writer, ind string, key string) {

@@ -92,7 +92,7 @@ func newTester() *downloadTester {
 	if err != nil {
 		panic(err)
 	}
-	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 
@@ -280,10 +280,6 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 
 func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (bool, error) {
 	return false, nil
-}
-
-func (dl *downloadTester) Config() *params.ChainConfig {
-	return nil
 }
 
 func (dl *downloadTester) GetVMConfig() *vm.Config {
