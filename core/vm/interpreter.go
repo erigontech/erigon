@@ -255,7 +255,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op = contract.GetOp(pc)
 		operation := &in.jt[op]
 
-		if !operation.valid {
+		if operation == nil {
 			return nil, &ErrInvalidOpCode{opcode: op}
 		}
 		// Validate stack
