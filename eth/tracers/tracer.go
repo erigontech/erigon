@@ -549,7 +549,7 @@ func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Addres
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, rStack *vm.ReturnStack, rdata []byte, contract *vm.Contract, depth int, err error) error {
 	if jst.err == nil {
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
