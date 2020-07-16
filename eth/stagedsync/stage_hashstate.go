@@ -77,7 +77,7 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 	skipCurrentState := false
 	if len(s.StageData) == 1 && s.StageData[0] == byte(0xFF) {
 		skipCurrentState = true
-	} else if len(s.StageData) > 0 {
+	} else if len(s.StageData) > 1 {
 		loadStartKey, err = etl.NextKey(s.StageData[1:])
 		if err != nil {
 			return err
@@ -117,7 +117,7 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 		return append([]byte{0xCD}, k...)
 	}
 
-	if len(s.StageData) > 0 && s.StageData[0] == byte(0xCD) {
+	if len(s.StageData) > 1 && s.StageData[0] == byte(0xCD) {
 		loadStartKey, err = etl.NextKey(s.StageData[1:])
 		if err != nil {
 			return err
