@@ -422,11 +422,20 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 }
 
 func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	fromScratch := s.BlockNumber == 0 || u.WasInterrupted()
+	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
 	if fromScratch {
 		if err := ResetHashState(db); err != nil {
 			return err
 		}
+
+		to, err := s.ExecutionAt(db)
+		if err != nil {
+			return err
+		}
+		if err := promoteHashedStateCleanly(s, db, to, datadir, quit); err != nil {
+			return err
+		}
+		u.Done(db)
 		return nil
 	}
 
