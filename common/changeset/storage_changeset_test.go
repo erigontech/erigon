@@ -571,7 +571,6 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4))
 
 	encoded, _ := EncodeStoragePlain(ch)
-	fmt.Println(common.ToHex(encoded))
 
 	data1, err1 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1))
 	assert.NoError(t, err1)
