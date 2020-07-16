@@ -175,7 +175,7 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 	if err := acc.DecodeForStorage(accData); err != nil {
 		return fmt.Errorf("decoding account %x: %w", addr, err)
 	}
-	binary.BigEndian.PutUint64(s[common.AddressLength:], ^acc.Incarnation)
+	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
 	copy(s[common.AddressLength+common.IncarnationLength:], start)
 	var lastKey common.Hash
 	overrideCounter := 0

@@ -342,7 +342,7 @@ func cleanupContractCodeBucket(
 	}
 	if got {
 		// clean up all the code incarnations original incarnation and the new one
-		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+		for incarnation := original.Incarnation; incarnation < acc.Incarnation && incarnation > 0; incarnation++ {
 			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation))
 			if err != nil {
 				return err
