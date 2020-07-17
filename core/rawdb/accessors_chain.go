@@ -21,8 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math/big"
-	dbg "runtime/debug"
-	"fmt"
 
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -113,9 +111,6 @@ func ReadHeadHeaderHash(db DatabaseReader) common.Hash {
 
 // WriteHeadHeaderHash stores the hash of the current canonical head header.
 func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) {
-	if hash == common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3") {
-		fmt.Printf("Writing genesis hash as head: %s", dbg.Stack())
-	}
 	if err := db.Put(dbutils.HeadHeaderKey, dbutils.HeadHeaderKey, hash.Bytes()); err != nil {
 		log.Crit("Failed to store last header's hash", "err", err)
 	}

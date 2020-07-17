@@ -1769,7 +1769,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(ctx *cli.Context, stack *node.Node) ethdb.Database {
+func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
 	name := "chaindata"
 	if ctx.GlobalString(SyncModeFlag.Name) == "light" {
 		name = "lightchaindata"
@@ -1799,7 +1799,7 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 }
 
 // MakeChain creates a chain manager from set command line flags.
-func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *params.ChainConfig, chain *core.BlockChain, chainDb ethdb.Database) {
+func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *params.ChainConfig, chain *core.BlockChain, chainDb *ethdb.ObjectDatabase) {
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
 	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */, false /* overwrite */)
