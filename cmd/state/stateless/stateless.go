@@ -130,7 +130,7 @@ func starkData(witness *trie.Witness, starkStatsBase string, blockNum uint64) er
 	return nil
 }
 
-type CreateDbFunc func(string) (ethdb.Database, error)
+type CreateDbFunc func(string) (*ethdb.ObjectDatabase, error)
 
 func Stateless(
 	ctx context.Context,
