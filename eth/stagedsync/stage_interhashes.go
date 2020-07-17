@@ -435,8 +435,8 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		if err := promoteHashedStateCleanly(s, db, to, datadir, quit); err != nil {
 			return err
 		}
-		u.Done(db)
-		return nil
+
+		return u.Done(db)
 	}
 
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
