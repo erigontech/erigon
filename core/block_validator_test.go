@@ -39,7 +39,8 @@ func TestHeaderVerification(t *testing.T) {
 		genesis = gspec.MustCommit(testdb)
 	)
 	dests := vm.NewDestsCache(100)
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
+	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, dests, txCacher)
 	defer chain.Stop()
 
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
@@ -95,8 +96,8 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 	testdb := ethdb.NewMemDatabase()
 	defer testdb.Close()
 	var (
-		gspec     = &Genesis{Config: params.TestChainConfig}
-		genesis   = gspec.MustCommit(testdb)
+		gspec          = &Genesis{Config: params.TestChainConfig}
+		genesis        = gspec.MustCommit(testdb)
 		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
 	)
 	if err != nil {
@@ -121,11 +122,13 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 		var results <-chan error
 
 		if valid {
-			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, dests)
+			txCacher := NewTxSenderCacher(runtime.NumCPU())
+			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, dests, txCacher)
 			_, results = chain.engine.VerifyHeaders(chain, headers, seals)
 			chain.Stop()
 		} else {
-			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeFailer(uint64(len(headers)-1)), vm.Config{}, nil, nil, dests)
+			txCacher := NewTxSenderCacher(runtime.NumCPU())
+			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeFailer(uint64(len(headers)-1)), vm.Config{}, nil, dests, txCacher)
 			_, results = chain.engine.VerifyHeaders(chain, headers, seals)
 			chain.Stop()
 		}
@@ -174,8 +177,8 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	defer testdb.Close()
 
 	var (
-		gspec     = &Genesis{Config: params.TestChainConfig}
-		genesis   = gspec.MustCommit(testdb)
+		gspec          = &Genesis{Config: params.TestChainConfig}
+		genesis        = gspec.MustCommit(testdb)
 		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil, false /* intemediateHashes */)
 	)
 	if err != nil {
@@ -194,7 +197,8 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 
 	// Start the verifications and immediately abort
 	dests := vm.NewDestsCache(100)
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, nil, dests)
+	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, dests, txCacher)
 	defer chain.Stop()
 
 	abort, results := chain.engine.VerifyHeaders(chain, headers, seals)

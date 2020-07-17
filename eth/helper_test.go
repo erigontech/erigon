@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"runtime"
 	"sort"
 	"sync"
 	"testing"
@@ -71,7 +72,8 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		return nil, nil, err
 	}

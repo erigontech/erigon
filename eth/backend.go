@@ -222,7 +222,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, dests)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, dests, txCacher)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +252,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
 
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, chainDb)
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, chainDb, txCacher)
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {

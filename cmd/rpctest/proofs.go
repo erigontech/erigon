@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -173,10 +174,12 @@ func fixState(chaindata string, url string) {
 	defer stateDb.Close()
 	engine := ethash.NewFullFaker()
 	chainConfig := params.MainnetChainConfig
-	bc, errOpen := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, errOpen := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil, nil, txCacher)
 	if errOpen != nil {
 		panic(errOpen)
 	}
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	blockNum := currentBlock.NumberU64()
 	blockHash := currentBlock.Hash()

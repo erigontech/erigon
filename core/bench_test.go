@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -173,7 +174,8 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	}
 	genesis := gspec.MustCommit(db)
 
-	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	chainman, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	defer chainman.Stop()
 	chain, _, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, b.N, gen, false /* intermediateHashes */)
 	if err != nil {
@@ -285,7 +287,8 @@ func benchReadChain(b *testing.B, full bool, count uint64) {
 
 	for i := 0; i < b.N; i++ {
 		db := ethdb.MustOpen(dir)
-		chain, err := NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+		txCacher := NewTxSenderCacher(runtime.NumCPU())
+		chain, err := NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 		if err != nil {
 			b.Fatalf("error creating chain: %v", err)
 		}

@@ -71,11 +71,11 @@ type ProtocolManager struct {
 	checkpointNumber uint64      // Block number for the sync progress validator to cross reference
 	checkpointHash   common.Hash // Block hash for the sync progress validator to cross reference
 
-	txpool     txPool
+	txpool      txPool
 	chainConfig *params.ChainConfig
-	blockchain *core.BlockChain
-	chaindb    *ethdb.ObjectDatabase
-	maxPeers   int
+	blockchain  *core.BlockChain
+	chaindb     *ethdb.ObjectDatabase
+	maxPeers    int
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
@@ -109,18 +109,18 @@ type ProtocolManager struct {
 func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	manager := &ProtocolManager{
-		networkID:  networkID,
-		forkFilter: forkid.NewFilter(blockchain),
-		eventMux:   mux,
-		txpool:     txpool,
+		networkID:   networkID,
+		forkFilter:  forkid.NewFilter(blockchain),
+		eventMux:    mux,
+		txpool:      txpool,
 		chainConfig: config,
-		blockchain: blockchain,
-		chaindb:    chaindb,
-		peers:      newPeerSet(),
-		whitelist:  whitelist,
-		mode:       mode,
-		txsyncCh:   make(chan *txsync),
-		quitSync:   make(chan struct{}),
+		blockchain:  blockchain,
+		chaindb:     chaindb,
+		peers:       newPeerSet(),
+		whitelist:   whitelist,
+		mode:        mode,
+		txsyncCh:    make(chan *txsync),
+		quitSync:    make(chan struct{}),
 	}
 
 	if mode == downloader.FullSync {
