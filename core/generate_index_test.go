@@ -175,7 +175,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 		}
 
 		defaultIncarnation := make([]byte, 8)
-		binary.BigEndian.PutUint64(defaultIncarnation, ^uint64(1))
+		binary.BigEndian.PutUint64(defaultIncarnation, uint64(1))
 		for i := range addrs {
 			addrs[i] = append(addrs[i], defaultIncarnation...)
 			addrs[i] = append(addrs[i], keys[i]...)

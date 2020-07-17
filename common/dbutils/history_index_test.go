@@ -1,14 +1,12 @@
 package dbutils
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 )
 
 func TestHistoryIndex_Search1(t *testing.T) {
 	index := NewHistoryIndex().Append(3, false).Append(5, false).Append(8, false)
-	fmt.Println(index.Decode())
 	v, _, _ := index.Search(1)
 	if v != 3 {
 		t.Fatal("must be 3 but", v)

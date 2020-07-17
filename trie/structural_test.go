@@ -188,7 +188,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	var accountAddress = common.Address{3, 4, 5, 6}
 	addrHash := crypto.Keccak256(accountAddress[:])
 	incarnation := make([]byte, 8)
-	binary.BigEndian.PutUint64(incarnation, ^uint64(2))
+	binary.BigEndian.PutUint64(incarnation, uint64(2))
 	var location1 = common.Hash{1}
 	locationKey1 := append(append([]byte{}, addrHash...), crypto.Keccak256(location1[:])...)
 	var location2 = common.Hash{2}

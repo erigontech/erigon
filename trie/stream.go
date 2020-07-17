@@ -186,7 +186,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					fmt.Printf("accountNode %x\n", hex)
 				}
 				if v.storage != nil {
-					binary.BigEndian.PutUint64(bytes8[:], ^v.Incarnation)
+					binary.BigEndian.PutUint64(bytes8[:], v.Incarnation)
 					// Add decompressed incarnation to the hex
 					for i, b := range bytes8[:] {
 						bytes16[i*2] = b / 16
@@ -412,7 +412,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("accountNode %x\n", hex)
 			}
 			if n.storage != nil {
-				binary.BigEndian.PutUint64(bytes8[:], ^n.Incarnation)
+				binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
 				// Add decompressed incarnation to the hex
 				for i, b := range bytes8[:] {
 					bytes16[i*2] = b / 16
