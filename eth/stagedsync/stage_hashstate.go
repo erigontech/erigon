@@ -16,32 +16,56 @@ import (
 )
 
 func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	syncHeadNumber, err := s.ExecutionAt(db)
+	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
 	}
 
-	if s.BlockNumber == syncHeadNumber {
+	if s.BlockNumber == to {
 		// we already did hash check for this block
-		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally
+		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
 		s.Done()
 		return nil
 	}
-	if s.BlockNumber > syncHeadNumber {
-		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, syncHeadNumber)
+	if s.BlockNumber > to {
+		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
+	}
+
+	if s.WasInterrupted() {
+		log.Info("Cleanly promoting plain state", "from", s.BlockNumber, "to", to)
+		if err := ResetHashState(db); err != nil {
+			return err
+		}
+		log.Debug("Clean bucket: done")
+		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
+			return err
+		}
+		return s.DoneAndUpdate(db, to)
 	}
 
 	if s.BlockNumber > 0 { // Initial hashing of the state is performed at the previous stage
-		log.Info("Promoting plain state", "from", s.BlockNumber, "to", syncHeadNumber)
-		if err := promoteHashedStateIncrementally(s, s.BlockNumber, syncHeadNumber, db, datadir, quit); err != nil {
+		log.Info("Promoting plain state", "from", s.BlockNumber, "to", to)
+		if err := promoteHashedStateIncrementally(s, s.BlockNumber, to, db, datadir, quit); err != nil {
 			return err
 		}
 	}
 
-	return s.DoneAndUpdate(db, syncHeadNumber)
+	return s.DoneAndUpdate(db, to)
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
+	if fromScratch {
+		if err := ResetHashState(db); err != nil {
+			return err
+		}
+
+		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
+			return err
+		}
+		// here we are on same block as Exec step
+	}
+
 	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err
 	}
@@ -68,60 +92,34 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 	return nil
 }
 
-func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, datadir string, quit <-chan struct{}) error {
-	var err error
-	if err = common.Stopped(quit); err != nil {
-		return err
-	}
-	var loadStartKey []byte
-	skipCurrentState := false
-	if len(s.StageData) == 1 && s.StageData[0] == byte(0xFF) {
-		skipCurrentState = true
-	} else if len(s.StageData) > 1 {
-		loadStartKey, err = etl.NextKey(s.StageData[1:])
-		if err != nil {
-			return err
-		}
+func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+	toStateStageData := func(k []byte) []byte {
+		return append([]byte{0xFF}, k...)
 	}
 
-	if !skipCurrentState {
-		toStateStageData := func(k []byte) []byte {
-			return append([]byte{0xFF}, k...)
-		}
-
-		err = etl.Transform(
-			db,
-			dbutils.PlainStateBucket,
-			dbutils.CurrentStateBucket,
-			datadir,
-			keyTransformExtractFunc(transformPlainStateKey),
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{
-				Quit:         quit,
-				LoadStartKey: loadStartKey,
-				OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
-					if isDone {
-						return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(nil))
-					}
-					return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(key))
-				},
+	err := etl.Transform(
+		db,
+		dbutils.PlainStateBucket,
+		dbutils.CurrentStateBucket,
+		datadir,
+		keyTransformExtractFunc(transformPlainStateKey),
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
+				if isDone {
+					return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(nil))
+				}
+				return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(key))
 			},
-		)
-
-		if err != nil {
-			return err
-		}
+		},
+	)
+	if err != nil {
+		return err
 	}
 
 	toCodeStageData := func(k []byte) []byte {
 		return append([]byte{0xCD}, k...)
-	}
-
-	if len(s.StageData) > 1 && s.StageData[0] == byte(0xCD) {
-		loadStartKey, err = etl.NextKey(s.StageData[1:])
-		if err != nil {
-			return err
-		}
 	}
 
 	return etl.Transform(
@@ -132,11 +130,10 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, to uint64, data
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
-			Quit:         quit,
-			LoadStartKey: loadStartKey,
+			Quit: quit,
 			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
-					return s.UpdateWithStageData(batch, to, nil)
+					return s.UpdateWithStageData(batch, s.BlockNumber, nil)
 				}
 				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
 			},
@@ -334,28 +331,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	log.Debug("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
-	skip := false
 
-	var loadStartKey []byte
-	if len(s.StageData) != 0 {
-		// we have finished this stage but didn't start the next one
-		if len(s.StageData) == 1 && s.StageData[0] == index {
-			skip = true
-			// we are already at the next stage
-		} else if s.StageData[0] > index {
-			skip = true
-			// if we at the current stage and we have something meaningful at StageData
-		} else if s.StageData[0] == index {
-			var err error
-			loadStartKey, err = etl.NextKey(s.StageData[1:])
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if skip {
-		return nil
-	}
 	var l OldestAppearedLoad
 	var loadBucket []byte
 	if codes {
@@ -379,7 +355,6 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
 					return s.UpdateWithStageData(putter, from, []byte{index})
@@ -405,30 +380,6 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
-	var loadStartKey []byte
-	skip := false
-
-	if len(u.StageData) != 0 {
-		// we have finished this stage but didn't start the next one
-		if len(u.StageData) == 1 && u.StageData[0] == index {
-			skip = true
-			// we are already at the next stage
-		} else if u.StageData[0] > index {
-			skip = true
-			// if we at the current stage and we have something meaningful at StageData
-		} else if u.StageData[0] == index {
-			var err error
-			loadStartKey, err = etl.NextKey(u.StageData[1:])
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	if skip {
-		return nil
-	}
-
 	var l OldestAppearedLoad
 	var loadBucket []byte
 	var extractFunc etl.ExtractFunc
@@ -451,7 +402,6 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
-			LoadStartKey:    loadStartKey,
 			ExtractStartKey: startkey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
