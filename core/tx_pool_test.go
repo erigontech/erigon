@@ -105,7 +105,7 @@ func setupTxPool() (*TxPool, *ecdsa.PrivateKey, func()) {
 
 	key, _ := crypto.GenerateKey()
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, diskdb, txCacher)
 
 	clear := func() {
 		pool.Stop()
@@ -238,7 +238,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	tx1 := transaction(1, 100000, key)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -683,7 +683,7 @@ func TestTransactionPostponing(t *testing.T) {
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -923,7 +923,7 @@ func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	config.GlobalQueue = config.AccountQueue*3 - 1 // reduce the queue limits to shorten test time (-1 to make it non divisible)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1020,7 +1020,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	config.NoLocals = nolocals
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1126,7 +1126,7 @@ func TestTransactionPendingGlobalLimiting(t *testing.T) {
 	config.GlobalSlots = config.AccountSlots * 10
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1234,7 +1234,7 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 	config.GlobalSlots = 8
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1272,7 +1272,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 	config.GlobalSlots = 1
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1323,7 +1323,7 @@ func TestTransactionPoolRepricing(t *testing.T) {
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1450,7 +1450,7 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1523,7 +1523,7 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 	config.GlobalQueue = 2
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1635,7 +1635,7 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 	config.GlobalQueue = 0
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1702,7 +1702,7 @@ func TestTransactionDeduplication(t *testing.T) {
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1774,7 +1774,7 @@ func TestTransactionReplacement(t *testing.T) {
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1880,7 +1880,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	config.Rejournal = time.Second
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -1947,7 +1947,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	blockchain = &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher = NewTxSenderCacher(runtime.NumCPU())
-	pool = NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool = NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 
 	pending, queued = pool.Stats()
 	if queued != 0 {
@@ -1999,7 +1999,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	blockchain = &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher = NewTxSenderCacher(runtime.NumCPU())
-	pool = NewTxPool(config, params.TestChainConfig, blockchain, txCacher)
+	pool = NewTxPool(config, params.TestChainConfig, blockchain, db, txCacher)
 
 	pending, queued = pool.Stats()
 	if pending != 0 {
@@ -2031,7 +2031,7 @@ func TestTransactionStatusCheck(t *testing.T) {
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, txCacher)
+	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, blockchain, db, txCacher)
 	defer func() {
 		txCacher.Close()
 		pool.Stop()

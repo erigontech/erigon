@@ -197,9 +197,6 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		if err := blockWriter.WriteChangeSets(); err != nil {
 			return err
 		}
-		if _, err := blockchain.db.Commit(); err != nil {
-			return err
-		}
 		rawdb.WriteTd(blockchain.db, block.Hash(), block.NumberU64(), new(big.Int).Add(block.Difficulty(), blockchain.GetTdByHash(block.ParentHash())))
 		rawdb.WriteBlock(context.Background(), blockchain.db, block)
 		blockchain.chainmu.Unlock()
@@ -814,7 +811,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 	}
 
 	// makeDb creates a db instance for testing.
-	makeDb := func() (ethdb.Database, func()) {
+	makeDb := func() (*ethdb.ObjectDatabase, func()) {
 		dir, err := ioutil.TempDir("", "")
 		if err != nil {
 			t.Fatalf("failed to create temp freezer dir: %v", err)
@@ -1833,9 +1830,6 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 
 	_, err = blockchain.InsertChain(context.Background(), blocks)
-	assert.NoError(t, err)
-
-	_, err = blockchain.db.Commit()
 	assert.NoError(t, err)
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))

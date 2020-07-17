@@ -525,7 +525,7 @@ func InspectDatabase(db Database) error {
 	return errNotSupported
 }
 
-func NewDatabaseWithFreezer(db Database, dir, suffix string) (Database, error) {
+func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
 	// FIXME: implement freezer in Turbo-Geth
 	return db, nil
 }
