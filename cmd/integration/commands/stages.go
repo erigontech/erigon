@@ -208,6 +208,7 @@ func stage4(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer bc.Stop()
 	stage4 := progress(stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
@@ -228,7 +229,7 @@ func stage5(ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetHashState(db); err != nil {
+		if err := stagedsync.ResetHashState(db); err != nil {
 			return err
 		}
 	}
@@ -256,7 +257,7 @@ func stage6(ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetHashState(db); err != nil {
+		if err := stagedsync.ResetHashState(db); err != nil {
 			return err
 		}
 	}

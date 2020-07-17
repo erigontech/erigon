@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -1837,12 +1838,9 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *
 		cache.TrieDirtyLimit = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheGCFlag.Name) / 100
 	}
 	vmcfg := vm.Config{EnablePreimageRecording: ctx.GlobalBool(VMEnableDebugFlag.Name)}
-	var limit *uint64
-	if ctx.GlobalIsSet(TxLookupLimitFlag.Name) && !readOnly {
-		l := ctx.GlobalUint64(TxLookupLimitFlag.Name)
-		limit = &l
-	}
-	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, limit, vm.NewDestsCache(10000))
+
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, vm.NewDestsCache(10000), txCacher)
 	if err != nil {
 		Fatalf("Can't create BlockChain: %v", err)
 	}

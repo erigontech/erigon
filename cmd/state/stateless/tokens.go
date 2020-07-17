@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"syscall"
 	"time"
@@ -135,7 +136,9 @@ func makeTokens(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	tt := NewTokenTracer()
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	defer bc.Stop()
 	check(err)
 	if blockNum > 1 {
 		tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
@@ -193,8 +196,10 @@ func makeTokenBalances() {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
@@ -412,8 +417,10 @@ func makeTokenAllowances() {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)

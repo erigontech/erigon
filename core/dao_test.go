@@ -19,6 +19,7 @@ package core
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -47,7 +48,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	proConf := *params.TestChainConfig
 	proConf.DAOForkBlock = forkBlock
 	proConf.DAOForkSupport = true
-	proBc, _ := NewBlockChain(proDb, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	proBc, _ := NewBlockChain(proDb, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacher)
 	defer proBc.Stop()
 
 	prefix, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, int(forkBlock.Int64()-1), func(i int, gen *BlockGen) {}, false /* intermediateHashes */)
@@ -63,7 +65,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	conConf.DAOForkBlock = forkBlock
 	conConf.DAOForkSupport = false
 
-	conBc, _ := NewBlockChain(conDb, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+	txCacherConBc := NewTxSenderCacher(runtime.NumCPU())
+	conBc, _ := NewBlockChain(conDb, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacherConBc)
 	defer conBc.Stop()
 
 	if _, err := proBc.InsertChain(context.Background(), prefix); err != nil {
@@ -80,7 +83,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			db = ethdb.NewMemDatabase()
 			defer db.Close()
 			gspec.MustCommit(db)
-			bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+			txCacherSubTest := NewTxSenderCacher(runtime.NumCPU())
+			bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacherSubTest)
 			defer bc.Stop()
 
 			blocks := conBc.GetBlocksFromHash(conBc.CurrentBlock().Hash(), int(conBc.CurrentBlock().NumberU64()))
@@ -111,7 +115,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			defer db.Close()
 
 			gspec.MustCommit(db)
-			bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+			txCacherSubTest = NewTxSenderCacher(runtime.NumCPU())
+			bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacherSubTest)
 			defer bc.Stop()
 
 			blocks = proBc.GetBlocksFromHash(proBc.CurrentBlock().Hash(), int(proBc.CurrentBlock().NumberU64()))
@@ -142,7 +147,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	defer db.Close()
 	gspec.MustCommit(db)
-	bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+	txCacher1 := NewTxSenderCacher(runtime.NumCPU())
+	bc, _ := NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacher1)
 	defer bc.Stop()
 
 	blocks := conBc.GetBlocksFromHash(conBc.CurrentBlock().Hash(), int(conBc.CurrentBlock().NumberU64()))
@@ -163,7 +169,8 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	defer db.Close()
 	gspec.MustCommit(db)
-	bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+	txCacher = NewTxSenderCacher(runtime.NumCPU())
+	bc, _ = NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacher)
 	defer bc.Stop()
 
 	blocks = proBc.GetBlocksFromHash(proBc.CurrentBlock().Hash(), int(proBc.CurrentBlock().NumberU64()))

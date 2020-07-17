@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -697,7 +698,8 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 	genesis := gspec.MustCommit(db)
 	genesisDb := db.MemCopy()
 
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

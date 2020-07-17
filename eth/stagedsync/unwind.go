@@ -31,6 +31,10 @@ func (u *UnwindState) Skip(db ethdb.Putter) error {
 	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
 }
 
+func (u *UnwindState) WasInterrupted() bool {
+	return len(u.StageData) > 0
+}
+
 type PersistentUnwindStack struct {
 	unwindStack []UnwindState
 }

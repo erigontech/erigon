@@ -602,8 +602,10 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
 	blockDb := ethdb.MustOpen(chaindata)
 	defer blockDb.Close()
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bcb.Stop()
 	if fromScratch {
 		os.Remove("statedb")
 	}
@@ -613,8 +615,10 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
 	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */, true /* overwrite */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	bcTxCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, bcTxCacher)
 	check(err)
+	defer bc.Stop()
 	tds, err := bc.GetTrieDbState()
 	check(err)
 
@@ -668,8 +672,10 @@ Loop:
 func extractTrie(block int) {
 	stateDb := ethdb.MustOpen("statedb")
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	rebuiltRoot := tds.LastRoot()
@@ -686,8 +692,10 @@ func extractTrie(block int) {
 func testRewind(chaindata string, block, rewind int) {
 	ethDb := ethdb.MustOpen(chaindata)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	if block == 1 {
@@ -747,8 +755,10 @@ func testStartup() {
 	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)

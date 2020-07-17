@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -45,7 +46,7 @@ func resetState(_ context.Context) error {
 	if err := resetExec(db); err != nil {
 		return err
 	}
-	if err := resetHashState(db); err != nil {
+	if err := stagedsync.ResetHashState(db); err != nil {
 		return err
 	}
 	if err := resetHistory(db); err != nil {
@@ -101,29 +102,6 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		return err
 	}
 	if err := stages.SaveStageUnwind(db, stages.Execution, 0, nil); err != nil {
-		return err
-	}
-	return nil
-}
-
-func resetHashState(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
-		dbutils.CurrentStateBucket,
-		dbutils.ContractCodeBucket,
-		dbutils.IntermediateTrieHashBucket,
-	); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.HashState, 0, nil); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0, nil); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(db, stages.HashState, 0, nil); err != nil {
 		return err
 	}
 	return nil

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 
 	"github.com/holiman/uint256"
 
@@ -59,7 +60,8 @@ func ExampleGenerateChain() {
 	}
 	genesis := gspec.MustCommit(db)
 
-	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	defer blockchain.Stop()
 
 	// This call generates a chain of 5 blocks. The function runs for
