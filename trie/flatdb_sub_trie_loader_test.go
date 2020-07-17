@@ -357,7 +357,7 @@ func TestApiDetails(t *testing.T) {
 	{ // storage loader
 		loader := NewSubTrieLoader(0)
 		rl := NewRetainList(0)
-		binary.BigEndian.PutUint64(bytes8[:], ^uint64(2))
+		binary.BigEndian.PutUint64(bytes8[:], uint64(2))
 		for i, b := range bytes8[:] {
 			bytes16[i*2] = b / 16
 			bytes16[i*2+1] = b % 16
@@ -495,7 +495,7 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	tr := New(common.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
-	binary.BigEndian.PutUint64(kInc, ^uint64(1))
+	binary.BigEndian.PutUint64(kInc, uint64(1))
 	ks1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(12345)
@@ -524,7 +524,7 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	rs.AddKey(concat(concat(kAcc2, kInc...), ks2...))
 	rs.AddKey(concat(concat(kAcc2, kInc...), ks22...))
 	dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
-	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83fffffffffffffffe]", fmt.Sprintf("%x", dbPrefixes))
+	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c830000000000000001 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c830000000000000001]", fmt.Sprintf("%x", dbPrefixes))
 	assert.Equal("[320 320]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000010c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803 000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
 

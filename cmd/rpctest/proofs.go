@@ -214,7 +214,7 @@ func fixState(chaindata string, url string) {
 			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
-			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
+			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation)
 			rl := trie.NewRetainList(0)
 			subTries, err1 := sl.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err1 != nil || subTries.Hashes[0] != account.Root {
@@ -244,7 +244,7 @@ func fixState(chaindata string, url string) {
 				for key, entry := range sm {
 					var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 					copy(cKey[:], addrHash[:])
-					binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
+					binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation)
 					copy(cKey[common.HashLength+common.IncarnationLength:], key[:])
 					dbValue, _ := stateDb.Get(dbutils.CurrentStateBucket, cKey[:])
 					value := bytes.TrimLeft(entry.Value[:], "\x00")
@@ -257,7 +257,7 @@ func fixState(chaindata string, url string) {
 				}
 				var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 				copy(cKey[:], addrHash[:])
-				binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
+				binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation)
 				if err := stateDb.Walk(dbutils.CurrentStateBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
 					var kh common.Hash
 					copy(kh[:], k[common.HashLength+common.IncarnationLength:])
