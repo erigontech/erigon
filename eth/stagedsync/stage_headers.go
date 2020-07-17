@@ -110,7 +110,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 				return false, 0, errors.New("unknown parent")
 			}
 		}
-		externTd = externTd.Add(externTd, header.Difficulty)
+		externTd = new(big.Int).Add(externTd, header.Difficulty)
 	}
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))
@@ -139,12 +139,14 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	}
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	fmt.Printf("headHash: %x, headNumber: %d, db: %p\n", headHash, *headNumber, db)
 	localTd := rawdb.ReadTd(db, headHash, *headNumber)
 	lastHeader := headers[len(headers)-1]
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
 	// Please refer to http://www.cs.cornell.edu/~ie53/publications/btcProcFC.pdf
 	newCanonical := externTd.Cmp(localTd) > 0
+	fmt.Printf("externTd: %d, localTd: %d\n", externTd.Uint64(), localTd.Uint64())
 
 	if !newCanonical && externTd.Cmp(localTd) == 0 {
 		if lastHeader.Number.Uint64() < *headNumber {
@@ -156,6 +158,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
 	if newCanonical && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
+		fmt.Printf("Deep fork\n")
 		deepFork = true
 	}
 	var forkBlockNumber uint64
@@ -176,8 +179,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		hashesMatch := header.Hash() == rawdb.ReadCanonicalHash(batch, number)
 		if newCanonical && !deepFork && forkBlockNumber == 0 && !hashesMatch {
 			forkBlockNumber = number - 1
+			fmt.Printf("1) forkBlockNumber = %d\n", forkBlockNumber)
 		} else if newCanonical && hashesMatch {
 			forkBlockNumber = number
+			fmt.Printf("2) forkBlockNumber = %d\n", forkBlockNumber)
 		}
 		if newCanonical {
 			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
@@ -193,6 +198,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
+			fmt.Printf("3) forkBlockNumber = %d\n", forkBlockNumber)
 			forkHash = forkHeader.ParentHash
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
@@ -205,6 +211,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		}
 	}
 	if newCanonical {
+		fmt.Printf("Writing header hash: %x or block %d\n", lastHeader.Hash(), lastHeader.Number.Uint64())
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {
@@ -220,6 +227,9 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	}
 	if ignored > 0 {
 		ctx = append(ctx, []interface{}{"ignored", ignored}...)
+	}
+	if reorg {
+		ctx = append(ctx, []interface{}{"reorg", reorg, "forkBlockNumber", forkBlockNumber}...)
 	}
 	log.Info("Imported new block headers", ctx...)
 	return reorg, forkBlockNumber, nil

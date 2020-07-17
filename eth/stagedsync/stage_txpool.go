@@ -1,6 +1,8 @@
 package stagedsync
 
-import "github.com/ledgerwatch/turbo-geth/log"
+import (
+	"github.com/ledgerwatch/turbo-geth/log"
+)
 
 type TxPoolStartStopper struct {
 	Start func() error

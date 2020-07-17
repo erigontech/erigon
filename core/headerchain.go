@@ -26,6 +26,7 @@ import (
 	mrand "math/rand"
 	"sync/atomic"
 	"time"
+	"runtime/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -442,6 +443,9 @@ func (hc *HeaderChain) CurrentHeader() *types.Header {
 
 // SetCurrentHeader sets the current head header of the canonical chain.
 func (hc *HeaderChain) SetCurrentHeader(dbw ethdb.Putter, head *types.Header) {
+	if head.Number.Uint64() == 0 {
+		fmt.Printf("SetCurrentHeader = 0: %s\n", debug.Stack())
+	}
 	rawdb.WriteHeadHeaderHash(dbw, head.Hash())
 
 	hc.currentHeader.Store(head)

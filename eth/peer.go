@@ -75,7 +75,7 @@ func max(a, b int) int {
 // about a connected peer.
 type PeerInfo struct {
 	Version    int      `json:"version"`    // Ethereum protocol version negotiated
-	Difficulty *big.Int `json:"difficulty"` // Total difficulty of the peer's blockchain
+	Number     uint64   `json:"difficulty"` // Best block number
 	Head       string   `json:"head"`       // SHA3 hash of the peer's best owned block
 }
 
@@ -94,8 +94,8 @@ type peer struct {
 	version  int         // Protocol version negotiated
 	syncDrop *time.Timer // Timed connection dropper if sync progress isn't validated in time
 
-	head common.Hash
-	td   *big.Int
+	headHash common.Hash
+	headNumber uint64
 	lock sync.RWMutex
 
 	knownBlocks     mapset.Set        // Set of block hashes known to be known by this peer
@@ -282,32 +282,32 @@ func (p *peer) close() {
 
 // Info gathers and returns a collection of metadata known about a peer.
 func (p *peer) Info() *PeerInfo {
-	hash, td := p.Head()
+	hash, number := p.Head()
 
 	return &PeerInfo{
 		Version:    p.version,
-		Difficulty: td,
+		Number:     number,
 		Head:       hash.Hex(),
 	}
 }
 
 // Head retrieves a copy of the current head hash and total difficulty of the
 // peer.
-func (p *peer) Head() (hash common.Hash, td *big.Int) {
+func (p *peer) Head() (hash common.Hash, number uint64) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	copy(hash[:], p.head[:])
-	return hash, new(big.Int).Set(p.td)
+	copy(hash[:], p.headHash[:])
+	return hash, p.headNumber
 }
 
 // SetHead updates the head hash and total difficulty of the peer.
-func (p *peer) SetHead(hash common.Hash, td *big.Int) {
+func (p *peer) SetHead(hash common.Hash, number uint64) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	copy(p.head[:], hash[:])
-	p.td.Set(td)
+	copy(p.headHash[:], hash[:])
+	p.headNumber = number
 }
 
 // MarkBlock marks a block as known for the peer, ensuring that the block will
@@ -616,9 +616,9 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	}
 	switch {
 	case p.version == eth63:
-		p.td, p.head = status63.TD, status63.CurrentBlock
+		p.headHash = status63.CurrentBlock
 	case p.version >= eth64:
-		p.td, p.head = status.TD, status.Head
+		p.headHash = status.Head
 	default:
 		panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
 	}
@@ -797,11 +797,11 @@ func (ps *peerSet) BestPeer() *peer {
 
 	var (
 		bestPeer *peer
-		bestTd   *big.Int
+		bestNumber	uint64
 	)
 	for _, p := range ps.peers {
-		if _, td := p.Head(); bestPeer == nil || td.Cmp(bestTd) > 0 {
-			bestPeer, bestTd = p, td
+		if _, number := p.Head(); bestPeer == nil || number > bestNumber {
+			bestPeer, bestNumber = p, number
 		}
 	}
 	return bestPeer

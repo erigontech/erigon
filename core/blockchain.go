@@ -254,13 +254,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.currentBlock.Store(nilBlock)
 	bc.currentFastBlock.Store(nilBlock)
 
-	if err := bc.loadLastState(); err != nil {
-		return nil, err
-	}
+	//if err := bc.loadLastState(); err != nil {
+	//	return nil, err
+	//}
 	// The first thing the node will do is reconstruct the verification data for
 	// the head block (ethash cache or clique voting snapshot). Might as well do
 	// it in advance.
-	bc.engine.VerifyHeader(bc, bc.CurrentHeader(), true)
+	//bc.engine.VerifyHeader(bc, bc.CurrentHeader(), true)
 
 	if frozen, err := bc.db.Ancients(); err == nil && frozen > 0 {
 		var (
@@ -309,7 +309,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		}
 	}
 	// Take ownership of this particular state
-	go bc.update()
+	//go bc.update()
 	if cacheConfig.Pruning {
 		var innerErr error
 		bc.pruner, innerErr = NewBasicPruner(db, bc, bc.cacheConfig)

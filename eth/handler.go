@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -165,7 +165,7 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
@@ -182,7 +182,9 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return engine.VerifyHeader(blockchain, header, true)
 	}
 	heighter := func() uint64 {
-		return blockchain.CurrentBlock().NumberU64()
+		headHash := rawdb.ReadHeadHeaderHash(chaindb)
+		headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
+		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		// If sync hasn't reached the checkpoint yet, deny importing weird blocks.
@@ -204,11 +206,11 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 			log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
 			return 0, nil
 		}
-		n, err := manager.blockchain.InsertChain(context.Background(), blocks)
+		//n, err := manager.blockchain.InsertChain(context.Background(), blocks)
 		if err == nil {
 			atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		}
-		return n, err
+		return 0, err
 	}
 	if manager.blockFetcher == nil {
 		manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
@@ -433,7 +435,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	if err := pm.downloader.RegisterPeer(p.id, p.version, p); err != nil {
 		return err
 	}
-	pm.chainSync.handlePeerEvent(p)
+	//pm.chainSync.handlePeerEvent(p)
 
 	// Propagate existing transactions. new transactions appearing
 	// after this will be sent via broadcasts.
@@ -463,6 +465,11 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		if err := p.RequestHeadersByNumber(number, 1, 0, false); err != nil {
 			return err
 		}
+	}
+	// Send request for the head header
+	peerHeadHash, _ := p.Head()
+	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+		return err
 	}
 	// Handle incoming messages until the connection is torn down
 	for {
@@ -608,6 +615,17 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				p.Log().Warn("Dropping unsynced node during fast sync", "addr", p.RemoteAddr(), "type", p.Name())
 				return errors.New("unsynced node cannot serve fast sync")
 			}
+		}
+		for _, header := range headers {
+			var (
+				trueHead = header.Hash()
+				trueNumber   = header.Number.Uint64()
+			)
+			// Update the peer's total difficulty if better than the previous
+			if _, number := p.Head(); trueNumber > number {
+				p.SetHead(trueHead, trueNumber)
+				pm.chainSync.handlePeerEvent(p)
+			}			
 		}
 		// Filter out any explicitly requested headers, deliver the rest to the downloader
 		filter := len(headers) == 1
@@ -795,10 +813,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockHashesMsg:
-		if pm.mode == downloader.StagedSync {
-			// Staged sync does not support this yet
-			return nil
-		}
 		var announces newBlockHashesData
 		if err := msg.Decode(&announces); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
@@ -819,10 +833,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockMsg:
-		if pm.mode == downloader.StagedSync {
-			// Staged sync does not support this yet
-			return nil
-		}
 		// Retrieve and decode the propagated block
 		var request newBlockData
 		if err := msg.Decode(&request); err != nil {
@@ -844,19 +854,22 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 		// Mark the peer as owning the block and schedule it for import
 		p.MarkBlock(request.Block.Hash())
-		if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
-			return err
+		if pm.mode != downloader.StagedSync {
+			// Staged sync does not support this yet
+			if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
+				return err
+			}
 		}
 
 		// Assuming the block is importable by the peer, but possibly not yet done so,
 		// calculate the head hash and TD that the peer truly must have.
 		var (
-			trueHead = request.Block.ParentHash()
-			trueTD   = new(big.Int).Sub(request.TD, request.Block.Difficulty())
+			trueHead = request.Block.Hash()
+			trueNumber   = request.Block.NumberU64()
 		)
 		// Update the peer's total difficulty if better than the previous
-		if _, td := p.Head(); trueTD.Cmp(td) > 0 {
-			p.SetHead(trueHead, trueTD)
+		if _, number := p.Head(); trueNumber > number {
+			p.SetHead(trueHead, trueNumber)
 			pm.chainSync.handlePeerEvent(p)
 		}
 

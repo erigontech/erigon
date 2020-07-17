@@ -134,6 +134,8 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	sentBlocks := 0
 	emptyBlocks := 0
 	signaledHead := false
+	lastBlockNumber := int(tp.blockFeeder.LastBlock().NumberU64())
+	fmt.Printf("lastBlockNumber: %d\n", lastBlockNumber)
 	for {
 		select {
 		case <-ctx.Done():
@@ -165,9 +167,9 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 		if signaledHead {
 			break
 		}
-		//if emptyBlocks + sentBlocks >= lastBlockNumber {
-		//	break
-		//}
+		if emptyBlocks + sentBlocks >= lastBlockNumber {
+			break
+		}
 	}
 	log.Info("Peer downloaded all our blocks, entering next phase")
 	tp.announceForkHeaders(rw)
