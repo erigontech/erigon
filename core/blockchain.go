@@ -1513,6 +1513,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 		header := chain[verifyFrom].Header()
 		externTd = externTd.Add(externTd, header.Difficulty)
+		rawdb.WriteTd(bc.db, header.Hash(), header.Number.Uint64(), externTd)
 	}
 
 	if localTd.Cmp(externTd) >= 0 {
