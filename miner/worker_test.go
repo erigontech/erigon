@@ -159,8 +159,8 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	chain, _ := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
-	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain, txCacher)
-	if err := txpool.Start(chain); err != nil {
+	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain, db, txCacher)
+	if err := txpool.Start(); err != nil {
 		t.Fatal(err)
 	}
 
