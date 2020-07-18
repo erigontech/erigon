@@ -662,11 +662,13 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 	p.log.Info("Retrieving remote chain height")
 
 	// Request the advertised remote head block and wait for the response
-	_, headNumber := p.peer.Head()
-	return headNumber, nil
-	/*
+	if d.mode == StagedSync {
+		_, headNumber := p.peer.Head()
+		return headNumber, nil
+	}
+	headHash, _ := p.peer.Head()
 	if err := p.peer.RequestHeadersByHash(headHash, 1, 0, false); err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	ttl := d.requestTTL()
@@ -674,7 +676,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 	for {
 		select {
 		case <-d.cancelCh:
-			return nil, errCanceled
+			return 0, errCanceled
 
 		case packet := <-d.headerCh:
 			// Discard anything not from the origin peer
@@ -686,26 +688,25 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			headers := packet.(*headerPack).headers
 			if len(headers) != 1 {
 				p.log.Info("Multiple headers for single request", "headers", len(headers))
-				return nil, errBadPeer
+				return 0, errBadPeer
 			}
 			head := headers[0]
 			if (d.mode == FastSync || d.mode == LightSync) && head.Number.Uint64() < d.checkpoint {
 				p.log.Warn("Remote head below checkpoint", "number", head.Number, "hash", head.Hash())
-				return nil, errUnsyncedPeer
+				return 0, errUnsyncedPeer
 			}
 			p.log.Info("Remote head header identified", "number", head.Number, "hash", head.Hash())
-			return head, nil
+			return head.Number.Uint64(), nil
 
 		case <-timeout:
 			p.log.Debug("Waiting for head header timed out", "elapsed", ttl)
-			return nil, errTimeout
+			return 0, errTimeout
 
 		case <-d.bodyCh:
 		case <-d.receiptCh:
 			// Out of bounds delivery, ignore
 		}
 	}
-	*/
 }
 
 // calculateRequestSpan calculates what headers to request from a peer when trying to determine the

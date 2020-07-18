@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"runtime"
 	"sort"
 	"sync"
 	"testing"
@@ -72,8 +71,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -231,6 +229,14 @@ func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*te
 			td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
 		)
 		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64()), forkid.NewFilter(pm.blockchain))
+		// Newly connected peer will query the header that was announced during the handshake
+		if err := p2p.ExpectMsg(tp.app, 0x03, &getBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.CurrentBlock().Hash()}, Amount: 1}); err != nil {
+			fmt.Printf("ExpectMsg error: %v\n", err)
+			panic(err)
+		}
+		if err := p2p.Send(tp.app, 0x04, []*types.Header{pm.blockchain.CurrentBlock().Header()}); err != nil {
+			panic(err)
+		}
 	}
 	return tp, errc
 }

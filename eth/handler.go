@@ -423,7 +423,6 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
-
 	// Register the peer locally
 	if err := pm.peers.Register(p); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
@@ -435,12 +434,22 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	if err := pm.downloader.RegisterPeer(p.id, p.version, p); err != nil {
 		return err
 	}
-	//pm.chainSync.handlePeerEvent(p)
+	pm.chainSync.handlePeerEvent(p)
 
 	// Propagate existing transactions. new transactions appearing
 	// after this will be sent via broadcasts.
 	pm.syncTransactions(p)
 
+	// Send request for the head header
+	peerHeadHash, _ := p.Head()
+	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+		return err
+	}
+	// Handle one message
+	if err := pm.handleMsg(p); err != nil {
+		p.Log().Debug("Ethereum message handling failed", "err", err)
+		return err
+	}
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
 	if pm.checkpointHash != (common.Hash{}) {
 		// Request the peer's checkpoint header for chain height/weight validation
@@ -465,11 +474,6 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		if err := p.RequestHeadersByNumber(number, 1, 0, false); err != nil {
 			return err
 		}
-	}
-	// Send request for the head header
-	peerHeadHash, _ := p.Head()
-	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
-		return err
 	}
 	// Handle incoming messages until the connection is torn down
 	for {

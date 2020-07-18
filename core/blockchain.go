@@ -1429,8 +1429,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	if bc.insertStopped() {
 		return 0, nil
 	}
-	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
-	bc.senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
 	// A queued approach to delivering events. This is generally
 	// faster than direct delivery and requires much less mutex
