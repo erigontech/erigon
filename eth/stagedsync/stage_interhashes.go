@@ -32,38 +32,38 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		return nil
 	}
 
+	hash := rawdb.ReadCanonicalHash(db, to)
+	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
+	expectedRootHash := syncHeadHeader.Root
+
 	fromScratch := s.BlockNumber == 0 || s.WasInterrupted()
 	if fromScratch {
 		log.Info("Initial hashing plain state", "to", to)
 		if err := ResetHashState(db); err != nil {
 			return err
 		}
+		log.Debug("Clean bucket: done")
 
-		if err := promoteHashedStateCleanly(s, db, to, datadir, quit); err != nil {
+		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
 			return err
 		}
-	}
 
-	hash := rawdb.ReadCanonicalHash(db, to)
-	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
-	expectedRootHash := syncHeadHeader.Root
-
-	if fromScratch {
-		log.Info("Initial generating intermediate hashes", "to", to)
 		if err := regenerateIntermediateHashes(db, datadir, expectedRootHash, quit); err != nil {
 			return err
 		}
-	} else {
-		log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
-		if err := incrementIntermediateHashes(s, db, to, datadir, expectedRootHash, quit); err != nil {
-			return err
-		}
+		return s.DoneAndUpdate(db, to)
+	}
+
+	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
+	if err := incrementIntermediateHashes(s, db, to, datadir, expectedRootHash, quit); err != nil {
+		return err
 	}
 
 	return s.DoneAndUpdate(db, to)
 }
 
 func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+	log.Info("Regeneration intermediate hashes started")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -420,27 +420,29 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 }
 
 func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
-	if fromScratch {
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-
-		to, err := s.ExecutionAt(db)
-		if err != nil {
-			return err
-		}
-		if err := promoteHashedStateCleanly(s, db, to, datadir, quit); err != nil {
-			return err
-		}
-
-		return u.Done(db)
-	}
-
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit)
+	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
+	if fromScratch {
+		log.Info("Generate intermediate hashes cleanly")
+		if err := ResetHashState(db); err != nil {
+			return err
+		}
+		log.Debug("Clean done")
+		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
+			return err
+		}
+		log.Info("Create hashing state done")
+		// here we are on same block as Exec step
+	}
+	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
+		return err
+	}
+	if err := u.Done(db); err != nil {
+		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
+	}
+	return nil
 }
 
 func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
@@ -503,9 +505,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
-	}
 	return nil
 }
 
@@ -521,10 +520,10 @@ func ResetHashState(db ethdb.Database) error {
 	if err := stages.SaveStageProgress(batch, stages.IntermediateHashes, 0, nil); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(batch, stages.HashState, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0, nil); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.HashState, 0, nil); err != nil {
 		return err
 	}
 	if err := stages.SaveStageUnwind(batch, stages.HashState, 0, nil); err != nil {
@@ -533,5 +532,6 @@ func ResetHashState(db ethdb.Database) error {
 	if _, err := batch.Commit(); err != nil {
 		return err
 	}
+
 	return nil
 }
