@@ -822,7 +822,9 @@ func (c *FilterCursor) _next() (err error) {
 		}
 
 		DecompressNibbles(c.k, &c.kHex)
-		if ok, err := c.filter(c.kHex); err != nil {
+		var ok bool
+		ok, err = c.filter(c.kHex)
+		if err != nil {
 			return err
 		} else if ok {
 			return nil
@@ -866,13 +868,12 @@ func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
 
 	if k != nil {
 		exactMatch := isSequence(seek, k)
-		if exactMatch {
-			n, _ := dbutils.NextSubtree(c.prev)
-			if !bytes.Equal(n, seek) {
-				panic(1)
-				fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
-			}
-		}
+		//if exactMatch {
+		//	n, _ := dbutils.NextSubtree(c.prev)
+		//	if !bytes.Equal(n, seek) {
+		//		//fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
+		//	}
+		//}
 		exactMatch = false
 		if exactMatch {
 			return k, v, true, nil
