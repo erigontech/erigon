@@ -1111,6 +1111,7 @@ func TestHighTDStarvationAttack64Full(t *testing.T) { testHighTDStarvationAttack
 func TestHighTDStarvationAttack64Light(t *testing.T) { testHighTDStarvationAttack(t, 64, LightSync) }
 
 func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
+	t.Skip("we ignore handshake TD")
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()

@@ -659,7 +659,7 @@ func (d *Downloader) Terminate() {
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
 // the total time a pending synchronisation would take.
 func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
-	p.log.Info("Retrieving remote chain height")
+	p.log.Debug("Retrieving remote chain height")
 
 	// Request the advertised remote head block and wait for the response
 	if d.mode == StagedSync {
@@ -695,7 +695,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 				p.log.Warn("Remote head below checkpoint", "number", head.Number, "hash", head.Hash())
 				return 0, errUnsyncedPeer
 			}
-			p.log.Info("Remote head header identified", "number", head.Number, "hash", head.Hash())
+			p.log.Debug("Remote head header identified", "number", head.Number, "hash", head.Hash())
 			return head.Number.Uint64(), nil
 
 		case <-timeout:
