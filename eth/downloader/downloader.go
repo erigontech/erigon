@@ -122,8 +122,8 @@ type Downloader struct {
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
 	chainConfig *params.ChainConfig
-	lightchain LightChain
-	blockchain BlockChain
+	lightchain  LightChain
+	blockchain  BlockChain
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -460,7 +460,7 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.s
-func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash,  blockNumber uint64, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) (err error) {
+func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumber uint64, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -769,8 +769,8 @@ func calculateRequestSpan(remoteHeight, localHeight uint64) (int64, int, int, ui
 func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint64, error) {
 	// Figure out the valid ancestor range to prevent rewrite attacks
 	var (
-		floor        = int64(-1)
-		localHeight  uint64
+		floor       = int64(-1)
+		localHeight uint64
 	)
 	switch d.mode {
 	case FullSync:
@@ -1499,7 +1499,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				// R: Nothing to give
 				if d.mode != LightSync && d.mode != StagedSync {
 					head := d.blockchain.CurrentBlock()
-					if !gotHeaders &&  blockNumber > head.NumberU64() {
+					if !gotHeaders && blockNumber > head.NumberU64() {
 						return errStallingPeer
 					}
 				}

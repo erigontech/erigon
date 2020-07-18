@@ -1666,7 +1666,7 @@ func TestCheckpointEnforcement64Light(t *testing.T) { testCheckpointEnforcement(
 
 func testCheckpointEnforcement(t *testing.T, protocol int, mode SyncMode) {
 	if mode != FullSync {
-//		t.Skip("FastSync is broken")
+		//		t.Skip("FastSync is broken")
 	}
 	// Create a new tester with a particular hard coded checkpoint block
 	tester := newTester()

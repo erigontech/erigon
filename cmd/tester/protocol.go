@@ -167,7 +167,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 		if signaledHead {
 			break
 		}
-		if emptyBlocks + sentBlocks >= lastBlockNumber {
+		if emptyBlocks+sentBlocks >= lastBlockNumber {
 			break
 		}
 	}
