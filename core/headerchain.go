@@ -396,6 +396,9 @@ func (hc *HeaderChain) GetTdByHash(hash common.Hash) *big.Int {
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if hc.chainDb == nil {
+		return nil
+	}
 	header := rawdb.ReadHeader(hc.chainDb, hash, number)
 	if header == nil {
 		return nil
