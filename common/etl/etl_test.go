@@ -252,48 +252,6 @@ func TestTransformExtractStartKey(t *testing.T) {
 	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
 }
 
-func TestTransformLoadStartKey(t *testing.T) {
-	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewMemDatabase()
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 10)
-	err := Transform(
-		db,
-		sourceBucket,
-		destBucket,
-		"", // temp dir
-		testExtractToMapFunc,
-		testLoadFromMapFunc,
-		TransformArgs{LoadStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
-	)
-	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
-}
-
-func TestTransformLoadStartKeyLexicography(t *testing.T) {
-	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewMemDatabase()
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 10)
-
-	//      intentional to make key #5 not to be ignored-------v
-	startKey := append([]byte(fmt.Sprintf("%10d-key-%010d", 5, 4)), 0x00, 0x00, 0x00, 0x00)
-
-	err := Transform(
-		db,
-		sourceBucket,
-		destBucket,
-		"", // temp dir
-		testExtractToMapFunc,
-		testLoadFromMapFunc,
-		TransformArgs{LoadStartKey: startKey},
-	)
-	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
-}
-
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()

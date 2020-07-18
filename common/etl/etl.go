@@ -61,7 +61,6 @@ type TransformArgs struct {
 	FixedBits       int
 	BufferType      int
 	BufferSize      int
-	LoadStartKey    []byte
 	Quit            <-chan struct{}
 	OnLoadCommit    LoadCommitHandler
 	loadBatchSize   int // used in testing

@@ -187,6 +187,7 @@ func (db *LmdbKV) Close() {
 		} else {
 			db.log.Info("database closed (LMDB)")
 		}
+		db.env = nil
 	}
 
 	if db.opts.inMem {
@@ -194,6 +195,7 @@ func (db *LmdbKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
+
 }
 
 func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
@@ -255,6 +257,9 @@ type LmdbCursor struct {
 }
 
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.env == nil {
+		return fmt.Errorf("db closed")
+	}
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
