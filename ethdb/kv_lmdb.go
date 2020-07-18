@@ -10,17 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/exp/lmdbpool"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-)
-
-var (
-	lmdbKvTxPool     = sync.Pool{New: func() interface{} { return &lmdbTx{} }}
-	lmdbKvCursorPool = sync.Pool{New: func() interface{} { return &LmdbCursor{} }}
-	lmdbKvBucketPool = sync.Pool{New: func() interface{} { return &lmdbBucket{} }}
 )
 
 type lmdbOpts struct {
@@ -87,12 +80,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	db := &LmdbKV{
-		opts:            opts,
-		env:             env,
-		log:             logger,
-		lmdbTxPool:      lmdbpool.NewTxnPool(env),
-		lmdbCursorPools: make([]sync.Pool, len(dbutils.Buckets)),
-		wg:              &sync.WaitGroup{},
+		opts: opts,
+		env:  env,
+		log:  logger,
+		wg:   &sync.WaitGroup{},
 	}
 
 	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
@@ -152,8 +143,6 @@ type LmdbKV struct {
 	env                 *lmdb.Env
 	log                 log.Logger
 	buckets             []lmdb.DBI
-	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
-	lmdbCursorPools     []sync.Pool       // pool of lmdb.Cursor objects
 	stopStaleReadsCheck context.CancelFunc
 	wg                  *sync.WaitGroup
 }
@@ -190,7 +179,6 @@ func (db *LmdbKV) Close() {
 	if db.stopStaleReadsCheck != nil {
 		db.stopStaleReadsCheck()
 	}
-	db.lmdbTxPool.Close()
 	db.wg.Wait()
 
 	if db.env != nil {
@@ -227,78 +215,29 @@ func (db *LmdbKV) IdealBatchSize() int {
 	return 50 * 1024 * 1024 // 50 Mb
 }
 
-func (db *LmdbKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
-	err = db.View(ctx, func(tx Tx) error {
-		v, err2 := tx.(*lmdbTx).tx.Get(db.dbi(bucket), key)
-		if err2 != nil {
-			if lmdb.IsNotFound(err2) {
-				return nil
-			}
-			return err2
-		}
-		if v != nil {
-			val = make([]byte, len(v))
-			copy(val, v)
-		}
-		return nil
-	})
+func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	flags := uint(0)
+	if !writable {
+		flags |= lmdb.Readonly
+	}
+	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
 		return nil, err
 	}
-	return val, nil
-}
-
-func (db *LmdbKV) Has(ctx context.Context, bucket, key []byte) (has bool, err error) {
-	err = db.View(ctx, func(tx Tx) error {
-		v, err2 := tx.(*lmdbTx).tx.Get(db.dbi(bucket), key)
-		if err2 != nil {
-			if lmdb.IsNotFound(err2) {
-				return nil
-			}
-			return err2
-		}
-		has = v != nil
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-	return has, nil
-}
-
-func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
-	flags := uint(0)
-	var tx *lmdb.Txn
-	if writable {
-		var err error
-		tx, err = db.env.BeginTxn(nil, flags)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var err error
-		tx, err = db.lmdbTxPool.BeginTxn(flags | lmdb.Readonly)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	tx.RawRead = true
-	tx.Pooled = false
-
-	t := lmdbKvTxPool.Get().(*lmdbTx)
-	t.ctx = ctx
-	t.tx = tx
-	t.db = db
-	return t, nil
+	return &lmdbTx{
+		db:  db,
+		ctx: ctx,
+		tx:  tx,
+	}, nil
 }
 
 type lmdbTx struct {
 	tx      *lmdb.Txn
 	ctx     context.Context
 	db      *LmdbKV
-	cursors []*LmdbCursor
-	buckets []*lmdbBucket
+	cursors []*lmdb.Cursor
 }
 
 type lmdbBucket struct {
@@ -316,23 +255,17 @@ type LmdbCursor struct {
 }
 
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := lmdbKvTxPool.Get().(*lmdbTx)
-	defer lmdbKvTxPool.Put(t)
-	t.ctx = ctx
-	t.db = db
-	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
+	t := &lmdbTx{db: db, ctx: ctx}
+	return db.env.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
-		tx.Pooled, tx.RawRead = true, true
+		tx.RawRead = true
 		t.tx = tx
 		return f(t)
 	})
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := lmdbKvTxPool.Get().(*lmdbTx)
-	defer lmdbKvTxPool.Put(t)
-	t.ctx = ctx
-	t.db = db
+	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
 		tx.RawRead = true
@@ -347,18 +280,7 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
 	}
 
-	b := lmdbKvBucketPool.Get().(*lmdbBucket)
-	b.tx = tx
-	b.id = id
-	b.dbi = tx.db.buckets[id]
-
-	// add to auto-close on end of transactions
-	if b.tx.buckets == nil {
-		b.tx.buckets = make([]*lmdbBucket, 0, 1)
-	}
-	b.tx.buckets = append(b.tx.buckets, b)
-
-	return b
+	return &lmdbBucket{tx: tx, id: id, dbi: tx.db.buckets[id]}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -373,20 +295,11 @@ func (tx *lmdbTx) Rollback() {
 
 func (tx *lmdbTx) closeCursors() {
 	for _, c := range tx.cursors {
-		if c.cursor != nil {
-			if tx.tx.Pooled {
-				tx.db.lmdbCursorPools[c.bucket.id].Put(c.cursor)
-			} else {
-				c.cursor.Close()
-			}
+		if c != nil {
+			c.Close()
 		}
-		lmdbKvCursorPool.Put(c)
 	}
 	tx.cursors = tx.cursors[:0]
-	for _, b := range tx.buckets {
-		lmdbKvBucketPool.Put(b)
-	}
-	tx.buckets = tx.buckets[:0]
 }
 
 func (c *LmdbCursor) Prefix(v []byte) Cursor {
@@ -467,18 +380,7 @@ func (b *lmdbBucket) Clear() error {
 }
 
 func (b *lmdbBucket) Cursor() Cursor {
-	tx := b.tx
-	c := lmdbKvCursorPool.Get().(*LmdbCursor)
-	c.ctx = tx.ctx
-	c.bucket = b
-	c.prefix = nil
-	c.cursor = nil
-	// add to auto-close on end of transactions
-	if tx.cursors == nil {
-		tx.cursors = make([]*LmdbCursor, 0, 1)
-	}
-	tx.cursors = append(tx.cursors, c)
-	return c
+	return &LmdbCursor{bucket: b, ctx: b.tx.ctx}
 }
 
 func (c *LmdbCursor) initCursor() error {
@@ -487,24 +389,17 @@ func (c *LmdbCursor) initCursor() error {
 	}
 	tx := c.bucket.tx
 
-	if tx.tx.Pooled {
-		cur := tx.db.lmdbCursorPools[c.bucket.id].Get()
-		if cur != nil {
-			c.cursor = cur.(*lmdb.Cursor)
-			if err := c.cursor.Renew(tx.tx); err != nil {
-				return err
-			}
-		}
+	var err error
+	c.cursor, err = tx.tx.OpenCursor(c.bucket.dbi)
+	if err != nil {
+		return err
 	}
 
-	if c.cursor == nil {
-		var err error
-		c.cursor, err = tx.tx.OpenCursor(c.bucket.dbi)
-		if err != nil {
-			return err
-		}
+	// add to auto-cleanup on end of transactions
+	if tx.cursors == nil {
+		tx.cursors = make([]*lmdb.Cursor, 0, 1)
 	}
-
+	tx.cursors = append(tx.cursors, c.cursor)
 	return nil
 }
 
