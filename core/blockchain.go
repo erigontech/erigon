@@ -1447,7 +1447,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	for i, block := range chain {
 		err := bc.engine.VerifyHeader(bc, block.Header(), verifySeals)
 		switch {
-		case err == ErrKnownBlock:
+		case errors.Is(err, ErrKnownBlock):
 			// Block and state both already known. However if the current block is below
 			// this number we did a rollback and we should reimport it nonetheless.
 			if bc.CurrentBlock().NumberU64() >= block.NumberU64() {
@@ -1471,7 +1471,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				continue
 			}
 
-		case err == consensus.ErrFutureBlock:
+		case errors.Is(err, consensus.ErrFutureBlock):
 			// Allow up to MaxFuture second in the future blocks. If this limit is exceeded
 			// the chain is discarded and processed at a later time if given.
 			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
@@ -1482,12 +1482,12 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			stats.queued++
 			continue
 
-		case err == consensus.ErrUnknownAncestor && bc.futureBlocks.Contains(block.ParentHash()):
+		case errors.Is(err, consensus.ErrUnknownAncestor) && bc.futureBlocks.Contains(block.ParentHash()):
 			bc.futureBlocks.Add(block.Hash(), block)
 			stats.queued++
 			continue
 
-		case err == consensus.ErrPrunedAncestor:
+		case errors.Is(err, consensus.ErrPrunedAncestor):
 			// Block competing with the canonical chain, store in the db, but don't process
 			// until the competitor TD goes above the canonical TD
 			panic(err)
@@ -1596,7 +1596,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		// Wait for the block's verification to complete
 		var err error
 		ctx, _ = params.GetNoHistoryByBlock(ctx, block.Number())
-		err = bc.Validator().ValidateBody(ctx, block)
+		if err = bc.Validator().ValidateBody(ctx, block); err != nil {
+			return k, err
+		}
 
 		// Create a new statedb using the parent block and report an
 		// error if it fails.
