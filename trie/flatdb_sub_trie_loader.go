@@ -865,16 +865,16 @@ func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
 	}
 
 	if k != nil {
-		isSequence := isSequence(seek, k)
-		if isSequence {
+		exactMatch := isSequence(seek, k)
+		if exactMatch {
 			n, _ := dbutils.NextSubtree(c.prev)
 			if !bytes.Equal(n, seek) {
 				panic(1)
 				fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
 			}
 		}
-		isSequence = false
-		if isSequence {
+		exactMatch = false
+		if exactMatch {
 			return k, v, true, nil
 		}
 	}
