@@ -1421,14 +1421,12 @@ func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int,
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
 func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
-	fmt.Printf("inserting chain, start %d, end %d\n", chain[0].NumberU64(), chain[len(chain)-1].NumberU64())
 	log.Info("Inserting chain",
 		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
 		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
 
 	// If the chain is terminating, don't even bother starting u
 	if bc.insertStopped() {
-		fmt.Printf("1\n")
 		return 0, nil
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
@@ -1497,10 +1495,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			panic(err)
 
 		case err != nil:
-			fmt.Printf("Error: %v\n", err)
 			bc.reportBlock(block, nil, err)
 			return i, err
 		}
+		rawdb.WriteHeader(context.Background(), bc.db, block.Header())
 	}
 
 	externTd := big.NewInt(0)
@@ -1520,7 +1518,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	}
 
 	if localTd.Cmp(externTd) >= 0 {
-		fmt.Printf("ignoring\n")
 		log.Warn("Ignoring the chain segment because of insufficient difficulty",
 			"external", externTd,
 			"local", localTd,
@@ -1547,7 +1544,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	parentHash := chain[0].ParentHash()
 	parent = bc.GetBlock(parentHash, parentNumber)
 	if parent == nil {
-		fmt.Printf("missing parent\n")
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
@@ -1560,6 +1556,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		parentHash = parent.ParentHash()
 		parent = bc.GetBlock(parentHash, parentNumber)
 		if parent == nil {
+			fmt.Printf("missing parent %x\n", parentHash)
 			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 			return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
