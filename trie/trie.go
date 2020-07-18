@@ -502,7 +502,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 		if n.storage == nil {
 			return prefixes, fixedbits, hooks
 		}
-		binary.BigEndian.PutUint64(bytes8[:], ^n.Incarnation)
+		binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
 		dbPrefix = append(dbPrefix, bytes8[:]...)
 		// Add decompressed incarnation to the nibblePath
 		for i, b := range bytes8[:] {

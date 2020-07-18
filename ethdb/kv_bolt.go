@@ -17,11 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
-var (
-	boltTxPool     = sync.Pool{New: func() interface{} { return &boltTx{} }}
-	boltCursorPool = sync.Pool{New: func() interface{} { return &boltCursor{} }}
-)
-
 var valueBytesMetrics []metrics.Gauge
 var keyBytesMetrics []metrics.Gauge
 var totalBytesPutMetrics []metrics.Gauge
@@ -103,10 +98,9 @@ type BoltKV struct {
 }
 
 type boltTx struct {
-	ctx     context.Context
-	db      *BoltKV
-	bolt    *bolt.Tx
-	cursors []*boltCursor
+	ctx  context.Context
+	db   *BoltKV
+	bolt *bolt.Tx
 }
 
 type boltBucket struct {
@@ -246,51 +240,15 @@ func (db *BoltKV) IdealBatchSize() int {
 	return 50 * 1024 * 1024 // 50 Mb
 }
 
-func (db *BoltKV) Get(ctx context.Context, bucket, key []byte) (val []byte, err error) {
-	err = db.bolt.View(func(tx *bolt.Tx) error {
-		v, _ := tx.Bucket(bucket).Get(key)
-		if v != nil {
-			val = make([]byte, len(v))
-			copy(val, v)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return val, nil
-}
-
-func (db *BoltKV) Has(ctx context.Context, bucket, key []byte) (bool, error) {
-	var has bool
-	err := db.bolt.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
-		if b == nil {
-			has = false
-		} else {
-			v, _ := b.Get(key)
-			has = v != nil
-		}
-		return nil
-	})
-	return has, err
-}
-
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
-	t := boltTxPool.Get().(*boltTx)
-	t.ctx = ctx
-	t.db = db
+	t := &boltTx{db: db, ctx: ctx}
 	var err error
 	t.bolt, err = db.bolt.Begin(writable)
 	return t, err
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := boltTxPool.Get().(*boltTx)
-	defer boltTxPool.Put(t)
-	t.ctx = ctx
-	t.db = db
-	defer t.closeCursors()
+	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.View(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -298,11 +256,7 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := boltTxPool.Get().(*boltTx)
-	defer boltTxPool.Put(t)
-	t.ctx = ctx
-	t.db = db
-	defer t.closeCursors()
+	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.Update(func(tx *bolt.Tx) error {
 		t.bolt = tx
 		return f(t)
@@ -310,24 +264,13 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *boltTx) Commit(ctx context.Context) error {
-	defer tx.closeCursors()
-	// could not put tx back to pool, because tx can be used by app code after commit
 	return tx.bolt.Commit()
 }
 
 func (tx *boltTx) Rollback() {
-	defer tx.closeCursors()
-	// could not put tx back to pool, because tx can be used by app code after rollback
 	if err := tx.bolt.Rollback(); err != nil {
 		tx.db.log.Warn("bolt rollback failed", "err", err)
 	}
-}
-
-func (tx *boltTx) closeCursors() {
-	for _, c := range tx.cursors {
-		boltCursorPool.Put(c)
-	}
-	tx.cursors = tx.cursors[:0]
 }
 
 func (tx *boltTx) Yield() {
@@ -406,17 +349,7 @@ func (b boltBucket) Delete(key []byte) error {
 }
 
 func (b boltBucket) Cursor() Cursor {
-	c := boltCursorPool.Get().(*boltCursor)
-	c.ctx = b.tx.ctx
-	c.bucket = b
-	c.prefix = nil
-	c.bolt = b.bolt.Cursor()
-	// add to auto-close on end of transactions
-	if b.tx.cursors == nil {
-		b.tx.cursors = make([]*boltCursor, 0, 1)
-	}
-	b.tx.cursors = append(b.tx.cursors, c)
-	return c
+	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }
 
 func (c *boltCursor) First() (k, v []byte, err error) {
