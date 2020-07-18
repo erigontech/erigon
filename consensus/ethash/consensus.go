@@ -101,6 +101,7 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainReader, header *types.He
 	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
+		fmt.Printf("Could not find parent (hash %x, number %d)\n", header.ParentHash, number-1)
 		return consensus.ErrUnknownAncestor
 	}
 	// Sanity checks passed, do a proper verification

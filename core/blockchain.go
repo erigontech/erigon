@@ -552,7 +552,7 @@ func (bc *BlockChain) GasLimit() uint64 {
 // CurrentBlock retrieves the current head block of the canonical chain. The
 // block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentBlock() *types.Block {
-	headHash := rawdb.ReadHeadHeaderHash(bc.db)
+	headHash := rawdb.ReadHeadBlockHash(bc.db)
 	headNumber := rawdb.ReadHeaderNumber(bc.db, headHash)
 	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
 }
@@ -1191,7 +1191,7 @@ func (bc *BlockChain) TxLookupLimit() uint64 {
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
-func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool, execute bool) (status WriteStatus, err error) {
+func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
 	}
@@ -1200,12 +1200,12 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent, execute)
+	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent)
 }
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool, execute bool) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
@@ -1220,20 +1220,16 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if common.IsCanceled(ctx) {
 		return NonStatTy, ctx.Err()
 	}
-	if execute {
-		rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
-	}
+	rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
 	rawdb.WriteBody(ctx, bc.db, block.Hash(), block.NumberU64(), block.Body())
-	if execute {
-		rawdb.WriteHeader(ctx, bc.db, block.Header())
-	}
+	rawdb.WriteHeader(ctx, bc.db, block.Header())
 
 	if tds != nil {
 		tds.SetBlockNr(block.NumberU64())
 	}
 
 	ctx = bc.WithContext(ctx, block.Number())
-	if stateDb != nil && execute {
+	if stateDb != nil {
 		blockWriter := tds.DbStateWriter()
 		if err := stateDb.CommitBlock(ctx, blockWriter); err != nil {
 			return NonStatTy, err
@@ -1249,7 +1245,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 			}
 		}
 	}
-	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly && execute {
+	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
 
@@ -1274,40 +1270,34 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	//if reorg {
 	// Reorganise the chain if the parent is not the head block
 
-	if execute && block.ParentHash() != currentBlock.Hash() {
+	if block.ParentHash() != currentBlock.Hash() {
 		if err := bc.reorg(currentBlock, block); err != nil {
 			return NonStatTy, err
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
 
-	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly && execute {
+	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
 	status = CanonStatTy
 
 	// Set new head.
-	if execute {
-		bc.writeHeadBlock(block)
-	}
+	bc.writeHeadBlock(block)
 	bc.futureBlocks.Remove(block.Hash())
 
-	if execute {
-		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
-		if len(logs) > 0 {
-			bc.logsFeed.Send(logs)
-		}
-		// In theory we should fire a ChainHeadEvent when we inject
-		// a canonical block, but sometimes we can insert a batch of
-		// canonicial blocks. Avoid firing too much ChainHeadEvents,
-		// we will fire an accumulated ChainHeadEvent and disable fire
-		// event here.
-		if emitHeadEvent {
-			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
-		}
-	} else {
-		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
+	bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
+	if len(logs) > 0 {
+		bc.logsFeed.Send(logs)
+	}
+	// In theory we should fire a ChainHeadEvent when we inject
+	// a canonical block, but sometimes we can insert a batch of
+	// canonicial blocks. Avoid firing too much ChainHeadEvents,
+	// we will fire an accumulated ChainHeadEvent and disable fire
+	// event here.
+	if emitHeadEvent {
+		bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
 	}
 	return status, nil
 }
@@ -1417,7 +1407,7 @@ func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int,
 		bc.chainmu.Unlock()
 		bc.doneJob()
 	}()
-	n, err := bc.insertChain(ctx, chain, true, true /* execute */)
+	n, err := bc.insertChain(ctx, chain, true)
 
 	return n, err
 }
@@ -1430,19 +1420,19 @@ func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int,
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool, execute bool) (int, error) {
+func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
+	fmt.Printf("inserting chain, start %d, end %d\n", chain[0].NumberU64(), chain[len(chain)-1].NumberU64())
 	log.Info("Inserting chain",
 		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
 		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64())
 
 	// If the chain is terminating, don't even bother starting u
 	if bc.insertStopped() {
+		fmt.Printf("1\n")
 		return 0, nil
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
-	if execute {
-		bc.senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
-	}
+	bc.senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
 	// A queued approach to delivering events. This is generally
 	// faster than direct delivery and requires much less mutex
@@ -1452,26 +1442,65 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		lastCanon *types.Block
 	)
 	// Fire a single chain head event if we've progressed the chain
-	if execute {
-		defer func() {
-			if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
-				bc.chainHeadFeed.Send(ChainHeadEvent{lastCanon})
-			}
-		}()
-	}
-	// Start the parallel header verifier
-	headers := make([]*types.Header, len(chain))
-	seals := make([]bool, len(chain))
+	defer func() {
+		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
+			bc.chainHeadFeed.Send(ChainHeadEvent{lastCanon})
+		}
+	}()
 
 	for i, block := range chain {
-		headers[i] = block.Header()
-		seals[i] = verifySeals
-	}
-	var abort chan<- struct{}
-	var results <-chan error
-	if execute {
-		abort, results = bc.engine.VerifyHeaders(bc, headers, seals)
-		defer close(abort)
+		err := bc.engine.VerifyHeader(bc, block.Header(), verifySeals)
+		switch {
+		case err == ErrKnownBlock:
+			// Block and state both already known. However if the current block is below
+			// this number we did a rollback and we should reimport it nonetheless.
+			if bc.CurrentBlock().NumberU64() >= block.NumberU64() {
+				//fmt.Printf("Skipped known block %d\n", block.NumberU64())
+				stats.ignored++
+
+				// Special case. Commit the empty receipt slice if we meet the known
+				// block in the middle. It can only happen in the clique chain. Whenever
+				// we insert blocks via `insertSideChain`, we only commit `td`, `header`
+				// and `body` if it's non-existent. Since we don't have receipts without
+				// reexecution, so nothing to commit. But if the sidechain will be adpoted
+				// as the canonical chain eventually, it needs to be reexecuted for missing
+				// state, but if it's this special case here(skip reexecution) we will lose
+				// the empty receipt entry.
+				if len(block.Transactions()) == 0 {
+					rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
+				} else {
+					log.Error("Please file an issue, skip known block execution without receipt",
+						"hash", block.Hash(), "number", block.NumberU64())
+				}
+				continue
+			}
+
+		case err == consensus.ErrFutureBlock:
+			// Allow up to MaxFuture second in the future blocks. If this limit is exceeded
+			// the chain is discarded and processed at a later time if given.
+			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
+			if block.Time() > max.Uint64() {
+				return i, fmt.Errorf("future block: %v > %v", block.Time(), max)
+			}
+			bc.futureBlocks.Add(block.Hash(), block)
+			stats.queued++
+			continue
+
+		case err == consensus.ErrUnknownAncestor && bc.futureBlocks.Contains(block.ParentHash()):
+			bc.futureBlocks.Add(block.Hash(), block)
+			stats.queued++
+			continue
+
+		case err == consensus.ErrPrunedAncestor:
+			// Block competing with the canonical chain, store in the db, but don't process
+			// until the competitor TD goes above the canonical TD
+			panic(err)
+
+		case err != nil:
+			fmt.Printf("Error: %v\n", err)
+			bc.reportBlock(block, nil, err)
+			return i, err
+		}
 	}
 
 	externTd := big.NewInt(0)
@@ -1487,17 +1516,11 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	var verifyFrom int
 	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 		header := chain[verifyFrom].Header()
-		if execute {
-			err := <-results
-			if err != nil {
-				bc.reportBlock(chain[verifyFrom], nil, err)
-				return 0, err
-			}
-		}
 		externTd = externTd.Add(externTd, header.Difficulty)
 	}
 
-	if execute && localTd.Cmp(externTd) >= 0 {
+	if localTd.Cmp(externTd) >= 0 {
+		fmt.Printf("ignoring\n")
 		log.Warn("Ignoring the chain segment because of insufficient difficulty",
 			"external", externTd,
 			"local", localTd,
@@ -1524,6 +1547,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	parentHash := chain[0].ParentHash()
 	parent = bc.GetBlock(parentHash, parentNumber)
 	if parent == nil {
+		fmt.Printf("missing parent\n")
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
@@ -1576,64 +1600,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		// Wait for the block's verification to complete
 		var err error
-		if i >= offset && k >= verifyFrom && execute {
-			err = <-results
-		}
-		if err == nil {
-			ctx, _ = params.GetNoHistoryByBlock(ctx, block.Number())
-			err = bc.Validator().ValidateBody(ctx, block)
-		}
+		ctx, _ = params.GetNoHistoryByBlock(ctx, block.Number())
+		err = bc.Validator().ValidateBody(ctx, block)
 
-		switch {
-		case err == ErrKnownBlock:
-			// Block and state both already known. However if the current block is below
-			// this number we did a rollback and we should reimport it nonetheless.
-			if bc.CurrentBlock().NumberU64() >= block.NumberU64() {
-				//fmt.Printf("Skipped known block %d\n", block.NumberU64())
-				stats.ignored++
-
-				// Special case. Commit the empty receipt slice if we meet the known
-				// block in the middle. It can only happen in the clique chain. Whenever
-				// we insert blocks via `insertSideChain`, we only commit `td`, `header`
-				// and `body` if it's non-existent. Since we don't have receipts without
-				// reexecution, so nothing to commit. But if the sidechain will be adpoted
-				// as the canonical chain eventually, it needs to be reexecuted for missing
-				// state, but if it's this special case here(skip reexecution) we will lose
-				// the empty receipt entry.
-				if len(block.Transactions()) == 0 {
-					rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
-				} else {
-					log.Error("Please file an issue, skip known block execution without receipt",
-						"hash", block.Hash(), "number", block.NumberU64())
-				}
-				continue
-			}
-
-		case err == consensus.ErrFutureBlock:
-			// Allow up to MaxFuture second in the future blocks. If this limit is exceeded
-			// the chain is discarded and processed at a later time if given.
-			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
-			if block.Time() > max.Uint64() {
-				return k, fmt.Errorf("future block: %v > %v", block.Time(), max)
-			}
-			bc.futureBlocks.Add(block.Hash(), block)
-			stats.queued++
-			continue
-
-		case err == consensus.ErrUnknownAncestor && bc.futureBlocks.Contains(block.ParentHash()):
-			bc.futureBlocks.Add(block.Hash(), block)
-			stats.queued++
-			continue
-
-		case err == consensus.ErrPrunedAncestor:
-			// Block competing with the canonical chain, store in the db, but don't process
-			// until the competitor TD goes above the canonical TD
-			panic(err)
-
-		case err != nil:
-			bc.reportBlock(block, nil, err)
-			return k, err
-		}
 		// Create a new statedb using the parent block and report an
 		// error if it fails.
 		if i > 0 {
@@ -1641,13 +1610,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		readBlockNr := parentNumber
 		var root common.Hash
-		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly && execute {
+		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
 			if _, err = bc.GetTrieDbState(); err != nil {
 				return k, err
 			}
 		}
 
-		if !bc.cacheConfig.DownloadOnly && execute {
+		if !bc.cacheConfig.DownloadOnly {
 			root = bc.trieDbState.LastRoot()
 		}
 
@@ -1656,7 +1625,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			parentRoot = parent.Root()
 		}
 
-		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly && execute {
+		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr,
 				"root", root.String(), "parentRoot", parentRoot.String())
 
@@ -1688,7 +1657,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var receipts types.Receipts
 		var usedGas uint64
 		var logs []*types.Log
-		if !bc.cacheConfig.DownloadOnly && execute {
+		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
 			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig, bc.DestsCache)
@@ -1719,7 +1688,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		proctime := time.Since(start)
 
 		// Write the block to the chain and get the status.
-		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false, execute)
+		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false)
 		if err != nil {
 			bc.setTrieDbState(nil)
 			if bc.committedBlock.Load() != nil {
@@ -1766,7 +1735,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			}
 		}
 	}
-
 	return committedK + 1, nil
 }
 

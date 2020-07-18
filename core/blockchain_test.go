@@ -505,6 +505,7 @@ func testBadHashes(t *testing.T, full bool) {
 
 	// Create a chain, ban a hash and try to import
 	if full {
+		fmt.Printf("Number of current block: %d\n", blockchain.CurrentBlock().NumberU64())
 		blocks := makeBlockChain(blockchain.CurrentBlock(), 3, ethash.NewFaker(), db, 10)
 
 		BadHashes[blocks[2].Header().Hash()] = true
