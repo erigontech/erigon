@@ -622,14 +622,14 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 		for _, header := range headers {
 			var (
-				trueHead = header.Hash()
-				trueNumber   = header.Number.Uint64()
+				trueHead   = header.Hash()
+				trueNumber = header.Number.Uint64()
 			)
 			// Update the peer's total difficulty if better than the previous
 			if _, number := p.Head(); trueNumber > number {
 				p.SetHead(trueHead, trueNumber)
 				pm.chainSync.handlePeerEvent(p)
-			}			
+			}
 		}
 		// Filter out any explicitly requested headers, deliver the rest to the downloader
 		filter := len(headers) == 1
@@ -868,8 +868,8 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		// Assuming the block is importable by the peer, but possibly not yet done so,
 		// calculate the head hash and TD that the peer truly must have.
 		var (
-			trueHead = request.Block.Hash()
-			trueNumber   = request.Block.NumberU64()
+			trueHead   = request.Block.Hash()
+			trueNumber = request.Block.NumberU64()
 		)
 		// Update the peer's total difficulty if better than the previous
 		if _, number := p.Head(); trueNumber > number {

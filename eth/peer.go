@@ -74,9 +74,9 @@ func max(a, b int) int {
 // PeerInfo represents a short summary of the Ethereum sub-protocol metadata known
 // about a connected peer.
 type PeerInfo struct {
-	Version    int      `json:"version"`    // Ethereum protocol version negotiated
-	Number     uint64   `json:"difficulty"` // Best block number
-	Head       string   `json:"head"`       // SHA3 hash of the peer's best owned block
+	Version int    `json:"version"`    // Ethereum protocol version negotiated
+	Number  uint64 `json:"difficulty"` // Best block number
+	Head    string `json:"head"`       // SHA3 hash of the peer's best owned block
 }
 
 // propEvent is a block propagation, waiting for its turn in the broadcast queue.
@@ -94,9 +94,9 @@ type peer struct {
 	version  int         // Protocol version negotiated
 	syncDrop *time.Timer // Timed connection dropper if sync progress isn't validated in time
 
-	headHash common.Hash
+	headHash   common.Hash
 	headNumber uint64
-	lock sync.RWMutex
+	lock       sync.RWMutex
 
 	knownBlocks     mapset.Set        // Set of block hashes known to be known by this peer
 	queuedBlocks    chan *propEvent   // Queue of blocks to broadcast to the peer
@@ -285,9 +285,9 @@ func (p *peer) Info() *PeerInfo {
 	hash, number := p.Head()
 
 	return &PeerInfo{
-		Version:    p.version,
-		Number:     number,
-		Head:       hash.Hex(),
+		Version: p.version,
+		Number:  number,
+		Head:    hash.Hex(),
 	}
 }
 
@@ -796,8 +796,8 @@ func (ps *peerSet) BestPeer() *peer {
 	defer ps.lock.RUnlock()
 
 	var (
-		bestPeer *peer
-		bestNumber	uint64
+		bestPeer   *peer
+		bestNumber uint64
 	)
 	for _, p := range ps.peers {
 		if _, number := p.Head(); bestPeer == nil || number > bestNumber {

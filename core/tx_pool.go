@@ -27,11 +27,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -351,9 +351,9 @@ func (pool *TxPool) loop() {
 		evict   = time.NewTicker(evictionInterval)
 		journal = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
-		headHash = rawdb.ReadHeadHeaderHash(pool.chaindb)
+		headHash   = rawdb.ReadHeadHeaderHash(pool.chaindb)
 		headNumber = rawdb.ReadHeaderNumber(pool.chaindb, headHash)
-		head = rawdb.ReadBlock(pool.chaindb, headHash, *headNumber)
+		head       = rawdb.ReadBlock(pool.chaindb, headHash, *headNumber)
 	)
 	defer report.Stop()
 	defer evict.Stop()
