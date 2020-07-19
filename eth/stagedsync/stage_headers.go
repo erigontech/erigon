@@ -221,6 +221,9 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	if ignored > 0 {
 		ctx = append(ctx, []interface{}{"ignored", ignored}...)
 	}
+	if reorg {
+		ctx = append(ctx, []interface{}{"reorg", reorg, "forkBlockNumber", forkBlockNumber}...)
+	}
 	log.Info("Imported new block headers", ctx...)
 	return reorg, forkBlockNumber, nil
 }

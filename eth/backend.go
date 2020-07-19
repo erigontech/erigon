@@ -79,7 +79,7 @@ type Ethereum struct {
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
-	chainDb ethdb.Database // Block chain database
+	chainDb *ethdb.ObjectDatabase // Block chain database
 	chainKV ethdb.KV       // Same as chainDb, but different interface
 
 	eventMux       *event.TypeMux
@@ -145,7 +145,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	var chainDb *ethdb.ObjectDatabase
 	var err error
 	if config.EnableDebugProtocol {
-		_ = os.Remove("simulator")
+		if err = os.RemoveAll("simulator"); err != nil {
+			return nil, fmt.Errorf("removing simulator db: %w", err)
+		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
 		if chainDb, err = ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer); err != nil {
@@ -250,7 +252,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
 
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, txCacher)
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, chainDb, txCacher)
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
@@ -629,10 +631,14 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 	s.startEthEntryUpdate(srvr.LocalNode())
 
 	// Start the bloom bits servicing goroutines
-	s.startBloomHandlers(params.BloomBitsBlocks)
+	if s.config.SyncMode != downloader.StagedSync {
+		s.startBloomHandlers(params.BloomBitsBlocks)
+	}
 
 	// Start the RPC service
-	s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
+	if s.config.SyncMode != downloader.StagedSync {
+		s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
+	}
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := srvr.MaxPeers
@@ -658,7 +664,7 @@ func (s *Ethereum) StartTxPool() error {
 	if s.txPoolStarted {
 		return errors.New("transaction pool is already started")
 	}
-	if err := s.txPool.Start(s.blockchain); err != nil {
+	if err := s.txPool.Start(); err != nil {
 		return err
 	}
 	if err := s.protocolManager.StartTxPool(); err != nil {

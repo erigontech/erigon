@@ -18,7 +18,7 @@ func ExportFile(filePath, chaindataPath string) error {
 		return err
 	}
 
-	createDb := func(path string) (ethdb.Database, error) {
+	createDb := func(path string) (*ethdb.ObjectDatabase, error) {
 		return ethdb.Open(path)
 	}
 

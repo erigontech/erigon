@@ -122,8 +122,8 @@ type Downloader struct {
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
 	chainConfig *params.ChainConfig
-	lightchain LightChain
-	blockchain BlockChain
+	lightchain  LightChain
+	blockchain  BlockChain
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -351,8 +351,8 @@ func (d *Downloader) UnregisterPeer(id string) error {
 
 // Synchronise tries to sync up our local block chain with a remote peer, both
 // adding various sanity checks as well as wrapping it with various log entries.
-func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
-	err := d.synchronise(id, head, td, mode, dests, txPoolControl)
+func (d *Downloader) Synchronise(id string, head common.Hash, blockNumber uint64, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
+	err := d.synchronise(id, head, blockNumber, mode, dests, txPoolControl)
 
 	switch err {
 	case nil, errBusy, errCanceled:
@@ -392,7 +392,7 @@ func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode 
 // synchronise will select the peer and use it for synchronising. If an empty string is given
 // it will use the best peer possible and synchronize if its TD is higher than our own. If any of the
 // checks fail an error will be returned. This method is synchronous
-func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
+func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
 	// Mock out the synchronisation if testing
 	if d.synchroniseMock != nil {
 		return d.synchroniseMock(id, hash)
@@ -455,12 +455,12 @@ func (d *Downloader) synchronise(id string, hash common.Hash, td *big.Int, mode 
 	if p == nil {
 		return errUnknownPeer
 	}
-	return d.syncWithPeer(p, hash, td, dests, txPoolControl)
+	return d.syncWithPeer(p, hash, blockNumber, dests, txPoolControl)
 }
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
-// specified peer and head hash.
-func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.Int, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) (err error) {
+// specified peer and head hash.s
+func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumber uint64, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -475,19 +475,18 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 		return errTooOld
 	}
 
-	log.Debug("Synchronising with the network", "peer", p.id, "eth", p.version, "head", hash, "td", td, "mode", d.mode)
+	log.Debug("Synchronising with the network", "peer", p.id, "eth", p.version, "head", hash, "blockNumber", blockNumber, "mode", d.mode)
 	defer func(start time.Time) {
 		log.Debug("Synchronisation terminated", "elapsed", common.PrettyDuration(time.Since(start)))
 	}(time.Now())
 
 	// Look up the sync boundaries: the common ancestor and the target block
-	latest, err := d.fetchHeight(p)
+	height, err := d.fetchHeight(p)
 	if err != nil {
 		return err
 	}
-	height := latest.Number.Uint64()
 
-	origin, err := d.findAncestor(p, latest)
+	origin, err := d.findAncestor(p, height)
 	if err != nil {
 		return err
 	}
@@ -561,7 +560,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	}
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
-		func() error { return d.processHeaders(origin+1, pivot, td) },
+		func() error { return d.processHeaders(origin+1, pivot, blockNumber) },
 	}
 
 	// Turbo-Geth's staged sync goes here
@@ -659,19 +658,25 @@ func (d *Downloader) Terminate() {
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
 // the total time a pending synchronisation would take.
-func (d *Downloader) fetchHeight(p *peerConnection) (*types.Header, error) {
+func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 	p.log.Debug("Retrieving remote chain height")
 
 	// Request the advertised remote head block and wait for the response
-	head, _ := p.peer.Head()
-	go p.peer.RequestHeadersByHash(head, 1, 0, false)
+	if d.mode == StagedSync {
+		_, headNumber := p.peer.Head()
+		return headNumber, nil
+	}
+	headHash, _ := p.peer.Head()
+	if err := p.peer.RequestHeadersByHash(headHash, 1, 0, false); err != nil {
+		return 0, err
+	}
 
 	ttl := d.requestTTL()
 	timeout := time.After(ttl)
 	for {
 		select {
 		case <-d.cancelCh:
-			return nil, errCanceled
+			return 0, errCanceled
 
 		case packet := <-d.headerCh:
 			// Discard anything not from the origin peer
@@ -683,19 +688,19 @@ func (d *Downloader) fetchHeight(p *peerConnection) (*types.Header, error) {
 			headers := packet.(*headerPack).headers
 			if len(headers) != 1 {
 				p.log.Debug("Multiple headers for single request", "headers", len(headers))
-				return nil, errBadPeer
+				return 0, errBadPeer
 			}
 			head := headers[0]
 			if (d.mode == FastSync || d.mode == LightSync) && head.Number.Uint64() < d.checkpoint {
 				p.log.Warn("Remote head below checkpoint", "number", head.Number, "hash", head.Hash())
-				return nil, errUnsyncedPeer
+				return 0, errUnsyncedPeer
 			}
 			p.log.Debug("Remote head header identified", "number", head.Number, "hash", head.Hash())
-			return head, nil
+			return head.Number.Uint64(), nil
 
 		case <-timeout:
 			p.log.Debug("Waiting for head header timed out", "elapsed", ttl)
-			return nil, errTimeout
+			return 0, errTimeout
 
 		case <-d.bodyCh:
 		case <-d.receiptCh:
@@ -761,12 +766,11 @@ func calculateRequestSpan(remoteHeight, localHeight uint64) (int64, int, int, ui
 // on the correct chain, checking the top N links should already get us a match.
 // In the rare scenario when we ended up on a long reorganisation (i.e. none of
 // the head links match), we do a binary search to find the common ancestor.
-func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header) (uint64, error) {
+func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint64, error) {
 	// Figure out the valid ancestor range to prevent rewrite attacks
 	var (
-		floor        = int64(-1)
-		localHeight  uint64
-		remoteHeight = remoteHeader.Number.Uint64()
+		floor       = int64(-1)
+		localHeight uint64
 	)
 	switch d.mode {
 	case FullSync:
@@ -1433,7 +1437,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) error {
+func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
 	defer func() {
@@ -1495,7 +1499,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				// R: Nothing to give
 				if d.mode != LightSync && d.mode != StagedSync {
 					head := d.blockchain.CurrentBlock()
-					if !gotHeaders && td.Cmp(d.blockchain.GetTd(head.Hash(), head.NumberU64())) > 0 {
+					if !gotHeaders && blockNumber > head.NumberU64() {
 						return errStallingPeer
 					}
 				}
@@ -1508,7 +1512,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				// peer gave us something useful, we're already happy/progressed (above check).
 				if d.mode == FastSync || d.mode == LightSync {
 					head := d.lightchain.CurrentHeader()
-					if td.Cmp(d.lightchain.GetTd(head.Hash(), head.Number.Uint64())) > 0 {
+					if blockNumber > head.Number.Uint64() {
 						return errStallingPeer
 					}
 				}

@@ -443,7 +443,6 @@ func (hc *HeaderChain) CurrentHeader() *types.Header {
 // SetCurrentHeader sets the current head header of the canonical chain.
 func (hc *HeaderChain) SetCurrentHeader(dbw ethdb.Putter, head *types.Header) {
 	rawdb.WriteHeadHeaderHash(dbw, head.Hash())
-
 	hc.currentHeader.Store(head)
 	hc.currentHeaderHash = head.Hash()
 	headHeaderGauge.Update(head.Number.Int64())

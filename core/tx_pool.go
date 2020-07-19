@@ -27,8 +27,10 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -217,6 +219,7 @@ type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
 	chain        blockChain
+	chaindb      *ethdb.ObjectDatabase
 	gasPrice     *big.Int
 	txFeed       event.Feed
 	scope        event.SubscriptionScope
@@ -260,7 +263,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain, senderCacher *TxSenderCacher) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -269,6 +272,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		config:         config,
 		chainconfig:    chainconfig,
 		chain:          chain,
+		chaindb:        chaindb,
 		signer:         types.NewEIP155Signer(chainconfig.ChainID),
 		pending:        make(map[common.Address]*txList),
 		queue:          make(map[common.Address]*txList),
@@ -284,7 +288,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	}
 
 	if config.StartOnInit {
-		if err := pool.Start(chain); err != nil {
+		if err := pool.Start(); err != nil {
 			log.Error("cannot start transaction pool", "err", err)
 		}
 	}
@@ -292,7 +296,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	return pool
 }
 
-func (pool *TxPool) Start(chain BlockChainer) error {
+func (pool *TxPool) Start() error {
 	pool.reorgShutdownCh = make(chan struct{}, 1)
 
 	pool.locals = newAccountSet(pool.signer)
@@ -301,7 +305,10 @@ func (pool *TxPool) Start(chain BlockChainer) error {
 		pool.locals.add(addr)
 	}
 	pool.priced = newTxPricedList(pool.all)
-	pool.reset(nil, chain.CurrentBlock().Header())
+	headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
+	headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
+	head := rawdb.ReadHeader(pool.chaindb, headHash, *headNumber)
+	pool.reset(nil, head)
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
@@ -344,7 +351,9 @@ func (pool *TxPool) loop() {
 		evict   = time.NewTicker(evictionInterval)
 		journal = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
-		head = pool.chain.CurrentBlock()
+		headHash   = rawdb.ReadHeadHeaderHash(pool.chaindb)
+		headNumber = rawdb.ReadHeaderNumber(pool.chaindb, headHash)
+		head       = rawdb.ReadBlock(pool.chaindb, headHash, *headNumber)
 	)
 	defer report.Stop()
 	defer evict.Stop()
@@ -469,20 +478,12 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	}
 	// Initialize the internal state to the current head
 	if newHead == nil {
-		newHead = pool.chain.CurrentBlock().Header() // Special case during testing
+		headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
+		headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
+		newHead = rawdb.ReadHeader(pool.chaindb, headHash, *headNumber) // Special case during testing
 	}
-	tds, err := pool.chain.GetTrieDbState()
-	if tds != nil {
-		tds = tds.WithNewBuffer()
-		if err != nil {
-			log.Error("Failed to reset txpool state", "err", err)
-			return
-		}
-		statedb := state.New(tds)
-		pool.currentState = statedb
-		pool.currentTds = tds
-		pool.pendingNonces = newTxNoncer(statedb)
-	}
+	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
+	pool.pendingNonces = newTxNoncer(pool.currentState)
 	pool.currentMaxGas = newHead.GasLimit
 
 	// Inject any transactions discarded due to reorgs

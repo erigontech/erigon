@@ -646,7 +646,7 @@ func (n *Node) EventMux() *event.TypeMux {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
+func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 	if n.config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}
