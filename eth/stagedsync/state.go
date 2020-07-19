@@ -155,7 +155,6 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 					return err
 				}
 			}
-			return nil
 		}
 
 		index, stage := s.CurrentStage()
