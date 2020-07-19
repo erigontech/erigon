@@ -2039,6 +2039,9 @@ func main() {
 	//db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	//check(err)
 	//defer db.Close()
+	if *action == "cfg" {
+		_ = testGenCfg()
+	}
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
 	}
