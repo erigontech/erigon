@@ -49,7 +49,30 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 		return nil
 	}
 
-	
+	codeLen := len(prog.Code)
+	var edges []edge
+	if stmt.opcode == JUMP || stmt.opcode == JUMPI {
+		jumpDest := st0.stack[0]
+		if jumpDest.kind == Value {
+			if jumpDest.value.IsUint64() {
+				pc1 := int(jumpDest.value.Uint64())
+				edges = append(edges, edge{pc0, stmt, pc1})
+			} else {
+				panic("Invalid program counter. Cannot resolve jump.")
+
+			}
+		} else if jumpDest.kind == Top {
+			panic("Imprecise jump found. Cannot resolve jump.")
+		}
+	}
+
+	if stmt.opcode != JUMP {
+		if pc0 < codeLen-1 {
+			edges = append(edges, edge{pc0, stmt, pc0 + 1})
+		}
+	}
+
+	return edges
 }
 
 func post(st0 state, stmt stmt) state {
