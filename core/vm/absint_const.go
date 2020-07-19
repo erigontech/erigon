@@ -47,7 +47,7 @@ func resolve(pc int, e state) []edge {
 	return nil
 }
 
-func post(pc0 int, stmt stmt) state {
+func post(st0 state, stmt stmt) state {
 	return botSt()
 }
 
@@ -86,7 +86,7 @@ func AbsIntCfgHarness(contract *Contract) {
 	for len(workList) > 0 {
 		var e edge
 		e, workList = workList[0], workList[1:]
-		post1 := post(e.pc0, e.stmt)
+		post1 := post(D[e.pc0], e.stmt)
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
 			workList = append(workList, resolve(e.pc1, D[e.pc1])...)
