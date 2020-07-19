@@ -687,7 +687,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			// Make sure the peer actually gave something valid
 			headers := packet.(*headerPack).headers
 			if len(headers) != 1 {
-				p.log.Info("Multiple headers for single request", "headers", len(headers))
+				p.log.Debug("Multiple headers for single request", "headers", len(headers))
 				return 0, errBadPeer
 			}
 			head := headers[0]
@@ -924,7 +924,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 				// Make sure the peer actually gave something valid
 				headers := packer.(*headerPack).headers
 				if len(headers) != 1 {
-					p.log.Info("Multiple headers for single request", "headers", len(headers))
+					p.log.Debug("Multiple headers for single request", "headers", len(headers))
 					return 0, errBadPeer
 				}
 				arrived = true
@@ -950,7 +950,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 				}
 				header := d.lightchain.GetHeaderByHash(h) // Independent of sync mode, header surely exists
 				if header.Number.Uint64() != check {
-					p.log.Info("Received non requested header", "number", header.Number, "hash", header.Hash(), "request", check)
+					p.log.Debug("Received non requested header", "number", header.Number, "hash", header.Hash(), "request", check)
 					return 0, errBadPeer
 				}
 				start = check
@@ -1131,7 +1131,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 				break
 			}
 			// Header retrieval timed out, consider the peer bad and drop
-			p.log.Info("Header request timed out", "elapsed", ttl)
+			p.log.Debug("Header request timed out", "elapsed", ttl)
 			headerTimeoutMeter.Mark(1)
 			d.dropPeer(p.id)
 
@@ -1595,7 +1595,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					// Otherwise insert the headers for content retrieval
 					inserts := d.queue.Schedule(chunk, origin)
 					if len(inserts) != len(chunk) {
-						log.Info("Stale headers")
+						log.Debug("Stale headers")
 						return errBadPeer
 					}
 				}

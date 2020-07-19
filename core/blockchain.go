@@ -309,22 +309,6 @@ func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConf
 			}
 		}
 	}
-	// Take ownership of this particular state
-	//go bc.update()
-	if cacheConfig.Pruning {
-		var innerErr error
-		bc.pruner, innerErr = NewBasicPruner(db, bc, bc.cacheConfig)
-		if innerErr != nil {
-			log.Error("Pruner init error", "err", innerErr)
-			return nil, innerErr
-		}
-
-		innerErr = bc.pruner.Start()
-		if innerErr != nil {
-			log.Error("Pruner start error", "err", innerErr)
-			return nil, innerErr
-		}
-	}
 	return bc, nil
 }
 
@@ -896,17 +880,6 @@ func (bc *BlockChain) Rollback(chain []common.Hash) {
 			headBlockGauge.Update(int64(newBlock.NumberU64()))
 		}
 	}
-	//if _, err := bc.db.Commit(); err != nil {
-	//	log.Crit("Failed to rollback chain markers", "err", err)
-	//}
-	// Truncate ancient data which exceeds the current header.
-	//
-	// Notably, it can happen that system crashes without truncating the ancient data
-	// but the head indicator has been updated in the active store. Regarding this issue,
-	// system will self recovery by truncating the extra data during the setup phase.
-	//if err := bc.truncateAncient(bc.hc.CurrentHeader().Number.Uint64()); err != nil {
-	//	log.Crit("Truncate ancientc store failed", "err", err)
-	//}
 }
 
 // truncateAncient rewinds the blockchain to the specified header and deletes all
@@ -1943,9 +1916,6 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		rawdb.DeleteCanonicalHash(bc.db, i)
 	}
 
-	//if _, err := bc.db.Commit(); err != nil {
-	//	return err
-	//}
 	// If any logs need to be fired, do it now. In theory we could avoid creating
 	// this goroutine if there are no events to fire, but realistcally that only
 	// ever happens if we're reorging empty blocks, which will only happen on idle
@@ -2290,7 +2260,7 @@ func InsertBodies(
 	ctx context.Context,
 	procInterrupt *int32,
 	chain types.Blocks,
-	db ethdb.Database,
+	db *ethdb.ObjectDatabase,
 	config *params.ChainConfig,
 	noHistory bool,
 	isNoHistory func(currentBlock *big.Int) bool,

@@ -207,7 +207,7 @@ func (c *testChain) State() (*state.IntraBlockState, error) {
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
@@ -270,7 +270,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 }
 
 func TestInvalidTransactions(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 
@@ -307,7 +307,7 @@ func TestInvalidTransactions(t *testing.T) {
 }
 
 func TestTransactionQueue(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 
@@ -348,7 +348,7 @@ func TestTransactionQueue(t *testing.T) {
 }
 
 func TestTransactionQueue2(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 	tx1 := transaction(0, 100, key)
@@ -383,7 +383,7 @@ func TestTransactionQueue2(t *testing.T) {
 }
 
 func TestTransactionChainFork(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -427,7 +427,7 @@ func TestTransactionChainFork(t *testing.T) {
 }
 
 func TestTransactionDoubleNonce(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -493,7 +493,7 @@ func TestTransactionDoubleNonce(t *testing.T) {
 }
 
 func TestTransactionMissingNonce(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -514,7 +514,7 @@ func TestTransactionMissingNonce(t *testing.T) {
 }
 
 func TestTransactionNonceRecovery(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	const n = 10
 	pool, key, clear := setupTxPool()
 	defer clear()
@@ -560,7 +560,7 @@ func TestTransactionNonceRecovery(t *testing.T) {
 // Tests that if an account runs out of funds, any pending and queued transactions
 // are dropped.
 func TestTransactionDropping(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create a test account and fund it
 	pool, key, clear := setupTxPool()
 	defer clear()
@@ -674,7 +674,7 @@ func TestTransactionDropping(t *testing.T) {
 // of fund), all consecutive (still valid, but not executable) transactions are
 // postponed back into the future queue to prevent broadcasting them.
 func TestTransactionPostponing(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the postponing with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -815,7 +815,7 @@ func TestTransactionPostponing(t *testing.T) {
 // transactions from an origin account, filling the nonce gap moves all queued
 // ones into the pending pool.
 func TestTransactionGapFilling(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create a test account and fund it
 	pool, key, clear := setupTxPool()
 	defer clear()
@@ -867,7 +867,7 @@ func TestTransactionGapFilling(t *testing.T) {
 // Tests that if the transaction count belonging to a single account goes above
 // some threshold, the higher transactions are dropped to prevent DOS attacks.
 func TestTransactionQueueAccountLimiting(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create a test account and fund it
 	pool, key, clear := setupTxPool()
 	defer clear()
@@ -910,7 +910,7 @@ func TestTransactionQueueGlobalLimitingNoLocals(t *testing.T) {
 }
 
 func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1004,7 +1004,7 @@ func TestTransactionQueueTimeLimitingNoLocals(t *testing.T) {
 }
 
 func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Reduce the eviction interval to a testable amount
 	defer func(old time.Duration) { evictionInterval = old }(evictionInterval)
 	evictionInterval = time.Second
@@ -1076,7 +1076,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 // above some threshold, as long as the transactions are executable, they are
 // accepted.
 func TestTransactionPendingLimiting(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create a test account and fund it
 	pool, key, clear := setupTxPool()
 	defer clear()
@@ -1115,7 +1115,7 @@ func TestTransactionPendingLimiting(t *testing.T) {
 // some hard threshold, the higher transactions are dropped to prevent DOS
 // attacks.
 func TestTransactionPendingGlobalLimiting(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1169,7 +1169,7 @@ func TestTransactionPendingGlobalLimiting(t *testing.T) {
 // This test verifies every transaction having allowed size
 // is added to the pool, and longer transactions are rejected.
 func TestTransactionAllowedTxSize(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create a test account and fund it
 	pool, key, clear := setupTxPool()
 	defer clear()
@@ -1221,7 +1221,7 @@ func TestTransactionAllowedTxSize(t *testing.T) {
 
 // Tests that if transactions start being capped, transactions are also removed from 'all'
 func TestTransactionCapClearsFromAll(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1261,7 +1261,7 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 // some hard threshold, if they are under the minimum guaranteed slot count then
 // the transactions are still kept.
 func TestTransactionPendingMinimumAllowance(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1315,7 +1315,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 //
 // Note, local transactions are never allowed to be dropped.
 func TestTransactionPoolRepricing(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1442,7 +1442,7 @@ func TestTransactionPoolRepricing(t *testing.T) {
 // Tests that setting the transaction pool gas price to a higher value does not
 // remove local transactions.
 func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1510,7 +1510,7 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 //
 // Note, local transactions are never allowed to be dropped.
 func TestTransactionPoolUnderpricing(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1623,7 +1623,7 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 // without producing instability by creating gaps that start jumping transactions
 // back and forth between queued/pending.
 func TestTransactionPoolStableUnderpricing(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1694,7 +1694,7 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 
 // Tests that the pool rejects duplicate transactions.
 func TestTransactionDeduplication(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tds := state.NewTrieDbState(common.Hash{}, db, 0)
@@ -1766,7 +1766,7 @@ func TestTransactionDeduplication(t *testing.T) {
 // Tests that the pool rejects replacement transactions that don't meet the minimum
 // price bump required.
 func TestTransactionReplacement(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -1855,7 +1855,7 @@ func TestTransactionJournaling(t *testing.T)         { testTransactionJournaling
 func TestTransactionJournalingNoLocals(t *testing.T) { testTransactionJournaling(t, true) }
 
 func testTransactionJournaling(t *testing.T, nolocals bool) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create a temporary file for the journal
 	file, err := ioutil.TempFile("", "")
 	if err != nil {
@@ -2023,7 +2023,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 // TestTransactionStatusCheck tests that the pool can correctly retrieve the
 // pending status of individual transactions.
 func TestTransactionStatusCheck(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	// Create the pool to test the status retrievals with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -2084,7 +2084,7 @@ func TestTransactionStatusCheck(t *testing.T) {
 
 // Test the transaction slots consumption is computed correctly
 func TestTransactionSlotCount(t *testing.T) {
-	t.Skip("fix when refacting tx pool")
+	t.Skip("fix when refactoring tx pool")
 	key, _ := crypto.GenerateKey()
 
 	// Check that an empty transaction consumes a single slot
