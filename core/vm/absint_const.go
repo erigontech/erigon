@@ -34,6 +34,7 @@ func startSt() state {
 
 type stmt struct {
 	opcode OpCode
+	operation operation
 	value uint256.Int
 }
 
@@ -43,8 +44,12 @@ type edge struct {
 	pc1 int
 }
 
-func resolve(prog *Contract, pc0 int, st0 state) []edge {
-	return nil
+func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
+	if !stmt.operation.valid || stmt.operation.halts {
+		return nil
+	}
+
+	
 }
 
 func post(st0 state, stmt stmt) state {
@@ -82,9 +87,38 @@ func lub(st0 state, st1 state) state {
 	return res
 }
 
-func AbsIntCfgHarness(prog *Contract) {
-	//jt := newIstanbulInstructionSet()
+func getStmts(prog *Contract) []stmt {
+	jt := newIstanbulInstructionSet()
 
+	codeLen := len(prog.Code)
+	stmts := make([]stmt, codeLen)
+	for pc := 0; pc < codeLen; pc++ {
+		stmt := stmt{}
+		stmts = append(stmts, stmt)
+
+		op := prog.GetOp(uint64(pc))
+		stmt.opcode = op
+		stmt.operation = jt[op]
+
+		if op.IsPush() {
+			pushByteSize := GetPushBytes(op)
+			startMin := pc + 1
+			if startMin >= codeLen {
+				startMin = codeLen
+			}
+			endMin := startMin + pushByteSize
+			if startMin+pushByteSize >= codeLen {
+				endMin = codeLen
+			}
+			integer := new(uint256.Int)
+			integer.SetBytes(prog.Code[startMin:endMin])
+			stmt.value = *integer
+		}
+	}
+	return stmts
+}
+
+func AbsIntCfgHarness(prog *Contract) error {
 	startPC := 0
 	codeLen := len(prog.Code)
 	D := make(map[int]state)
@@ -93,21 +127,25 @@ func AbsIntCfgHarness(prog *Contract) {
 	}
 	D[startPC] = startSt()
 
-	workList := resolve(prog, startPC, D[startPC])
+	stmts := getStmts(prog)
+
+	workList := resolve(prog, startPC, D[startPC], stmts[startPC])
 	for len(workList) > 0 {
 		var e edge
 		e, workList = workList[0], workList[1:]
 		post1 := post(D[e.pc0], e.stmt)
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
-			workList = append(workList, resolve(prog, e.pc1, D[e.pc1])...)
+			workList = append(workList, resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])...)
 		}
 	}
 
 	var edges []edge
 	for pc := 0; pc < codeLen; pc++ {
-		edges = append(edges, resolve(prog, pc, D[pc])...)
+		edges = append(edges, resolve(prog, pc, D[pc], stmts[pc])...)
 	}
 	println(edges)
 	println("done")
+
+	return nil
 }
