@@ -19,6 +19,7 @@ package clique
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -57,12 +58,11 @@ func TestReimportMirroredState(t *testing.T) {
 	genesis := genspec.MustCommit(db)
 
 	// Generate a batch of blocks, each properly signed
-	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, txCacher)
 	defer chain.Stop()
 
-	ctx := context.Background()
-
-	blocks, _ := core.GenerateChain(ctx, params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
 		block.SetDifficulty(diffInTurn)
@@ -76,7 +76,10 @@ func TestReimportMirroredState(t *testing.T) {
 			}
 			block.AddTxWithChain(chain, tx)
 		}
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 	for i, block := range blocks {
 		header := block.Header()
 		if i > 0 {
@@ -93,26 +96,28 @@ func TestReimportMirroredState(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	genspec.MustCommit(db)
 
-	chain, _ = core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, nil)
-	defer chain.Stop()
+	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	chain1, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, txCacher1)
+	defer chain1.Stop()
 
-	if _, err := chain.InsertChain(context.Background(), blocks[:2]); err != nil {
+	if _, err := chain1.InsertChain(context.Background(), blocks[:2]); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if head := chain.CurrentBlock().NumberU64(); head != 2 {
+	if head := chain1.CurrentBlock().NumberU64(); head != 2 {
 		t.Fatalf("chain head mismatch: have %d, want %d", head, 2)
 	}
 
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	chain, _ = core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, nil)
-	defer chain.Stop()
+	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
+	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, txCacher2)
+	defer chain2.Stop()
 
-	if _, err := chain.InsertChain(context.Background(), blocks[2:]); err != nil {
+	if _, err := chain2.InsertChain(context.Background(), blocks[2:]); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if head := chain.CurrentBlock().NumberU64(); head != 3 {
+	if head := chain2.CurrentBlock().NumberU64(); head != 3 {
 		t.Fatalf("chain head mismatch: have %d, want %d", head, 3)
 	}
 }

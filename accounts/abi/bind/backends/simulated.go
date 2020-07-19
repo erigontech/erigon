@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"sync"
 	"time"
 
@@ -64,8 +65,8 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database   ethdb.DbWithPendingMutations // In memory database to store our testing data
-	kv         ethdb.KV                     // Same as database, but different interface
+	database   *ethdb.ObjectDatabase // In memory database to store our testing data
+	kv         ethdb.KV              // Same as database, but different interface
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
@@ -79,33 +80,32 @@ type SimulatedBackend struct {
 
 	events *filters.EventSystem // Event system for filtering log events live
 
-	config *params.ChainConfig
+	config   *params.ChainConfig
+	txCacher *core.TxSenderCacher
 }
 
 // NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
 // and uses a simulated blockchain for testing purposes.
-func NewSimulatedBackendWithDatabase(database ethdb.Database, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err))
 	}
 	blockchain.EnableReceipts(true)
 
-	var kv ethdb.KV
-	if hasKV, ok := database.(ethdb.HasKV); ok {
-		kv = hasKV.KV()
-	}
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		database:     database.NewBatch(),
-		kv:           kv,
+		database:     database,
+		kv:           database.KV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
 		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
+		txCacher:     txCacher,
 	}
 	backend.emptyPendingBlock()
 	return backend
@@ -118,19 +118,22 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, nil)
+
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		panic(err)
 	}
 	blockchain.EnableReceipts(true)
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		database:     database.NewBatch(),
+		database:     database,
 		kv:           database.KV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
 		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
+		txCacher:     txCacher,
 	}
 	backend.emptyPendingBlock()
 	return backend
@@ -163,9 +166,6 @@ func (b *SimulatedBackend) Commit() {
 		panic(err)
 	}
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
-	if _, err := b.database.Commit(); err != nil {
-		panic(err)
-	}
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
 }
@@ -175,13 +175,11 @@ func (b *SimulatedBackend) Rollback() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.database.Rollback()
 	b.emptyPendingBlock()
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(int, *core.BlockGen) {})
+	blocks, _, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
@@ -632,13 +630,15 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	ctx = b.blockchain.WithContext(ctx, big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(number int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
 		block.AddTxWithChain(b.blockchain, tx)
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		return err
+	}
 	//fmt.Printf("==== End producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
@@ -745,13 +745,15 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.database.NewBatch(), 1, func(number int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		return err
+	}
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 

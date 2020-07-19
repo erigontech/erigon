@@ -158,14 +158,14 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	stored := rawdb.ReadCanonicalHash(db, 0)
-	if (stored == common.Hash{}) {
+	if overwrite || (stored == common.Hash{}) {
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
 			genesis = DefaultGenesisBlock()
@@ -197,7 +197,7 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*para
 		return newcfg, common.Hash{}, nil, err
 	}
 	storedcfg := rawdb.ReadChainConfig(db, stored)
-	if storedcfg == nil {
+	if overwrite || storedcfg == nil {
 		log.Warn("Found genesis block without chain config")
 		rawdb.WriteChainConfig(db, stored, newcfg)
 		return newcfg, stored, stateDB, nil
@@ -270,7 +270,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		if len(account.Code) == 0 && len(account.Storage) > 0 {
 			// Special case for weird tests - inaccessible storage
 			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], 1)
+			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
 			if err := db.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
 				return nil, nil, nil, err
 			}

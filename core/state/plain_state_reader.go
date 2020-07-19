@@ -3,8 +3,9 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/VictoriaMetrics/fastcache"
+	"errors"
 
+	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -17,16 +18,16 @@ var _ StateReader = (*PlainStateReader)(nil)
 // Data in the plain state is stored using un-hashed account/storage items
 // as opposed to the "normal" state that uses hashes of merkle paths to store items.
 type PlainStateReader struct {
-	db                     ethdb.Getter
-	accountCache           *fastcache.Cache
-	storageCache           *fastcache.Cache
-	codeCache              *fastcache.Cache
-	codeSizeCache          *fastcache.Cache
+	db            ethdb.Getter
+	accountCache  *fastcache.Cache
+	storageCache  *fastcache.Cache
+	codeCache     *fastcache.Cache
+	codeSizeCache *fastcache.Cache
 }
 
 func NewPlainStateReader(db ethdb.Getter) *PlainStateReader {
 	return &PlainStateReader{
-		db:                     db,
+		db: db,
 	}
 }
 
@@ -55,7 +56,7 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 	if !ok {
 		var err error
 		enc, err = r.db.Get(dbutils.PlainStateBucket, address[:])
-		if err != nil && !entryNotFound(err) {
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, err
 		}
 	}
@@ -80,7 +81,7 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 		}
 	}
 	enc, err := r.db.Get(dbutils.PlainStateBucket, compositeKey)
-	if err != nil && !entryNotFound(err) {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
 	if r.storageCache != nil {
@@ -131,13 +132,9 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash 
 func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	if b, err := r.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
 		return binary.BigEndian.Uint64(b), nil
-	} else if entryNotFound(err) {
+	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil
 	} else {
 		return 0, err
 	}
-}
-
-func entryNotFound(err error) bool {
-	return err == ethdb.ErrKeyNotFound
 }

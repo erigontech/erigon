@@ -104,7 +104,7 @@ func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byt
 // AddrHash + incarnation + KeyHash
 // For contract storage
 func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.HashLength+8+common.HashLength)
+	compositeKey := make([]byte, 0, common.HashLength+common.IncarnationLength+common.HashLength)
 	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash[:], incarnation)...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
@@ -121,10 +121,10 @@ func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.
 // AddrHash + incarnation + KeyHash
 // For contract storage (for plain state)
 func PlainGenerateCompositeStorageKey(address common.Address, incarnation uint64, key common.Hash) []byte {
-	compositeKey := make([]byte, common.AddressLength+8+common.HashLength)
+	compositeKey := make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
 	copy(compositeKey, address[:])
-	binary.BigEndian.PutUint64(compositeKey[common.AddressLength:], ^incarnation)
-	copy(compositeKey[common.AddressLength+8:], key[:])
+	binary.BigEndian.PutUint64(compositeKey[common.AddressLength:], incarnation)
+	copy(compositeKey[common.AddressLength+common.IncarnationLength:], key[:])
 	return compositeKey
 }
 
@@ -138,10 +138,10 @@ func PlainParseCompositeStorageKey(compositeKey []byte) (common.Address, uint64,
 
 // AddrHash + incarnation + StorageHashPrefix
 func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, storageHashPrefix []byte) []byte {
-	key := make([]byte, common.HashLength+8+len(storageHashPrefix))
+	key := make([]byte, common.HashLength+common.IncarnationLength+len(storageHashPrefix))
 	copy(key, addressHash)
-	binary.BigEndian.PutUint64(key[common.HashLength:], ^incarnation)
-	copy(key[common.HashLength+8:], storageHashPrefix)
+	binary.BigEndian.PutUint64(key[common.HashLength:], incarnation)
+	copy(key[common.HashLength+common.IncarnationLength:], storageHashPrefix)
 	return key
 }
 
@@ -149,7 +149,7 @@ func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, stor
 func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 	prefix := make([]byte, common.HashLength+8)
 	copy(prefix, addressHash)
-	binary.BigEndian.PutUint64(prefix[common.HashLength:], ^incarnation)
+	binary.BigEndian.PutUint64(prefix[common.HashLength:], incarnation)
 	return prefix
 }
 
@@ -157,42 +157,22 @@ func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
 	prefix := make([]byte, common.AddressLength+8)
 	copy(prefix, address)
-	binary.BigEndian.PutUint64(prefix[common.AddressLength:], ^incarnation)
+	binary.BigEndian.PutUint64(prefix[common.AddressLength:], incarnation)
 	return prefix
 }
 
 func PlainParseStoragePrefix(prefix []byte) (common.Address, uint64) {
 	var addr common.Address
 	copy(addr[:], prefix[:common.AddressLength])
-	inc := ^binary.BigEndian.Uint64(prefix[common.AddressLength : common.AddressLength+common.IncarnationLength])
+	inc := binary.BigEndian.Uint64(prefix[common.AddressLength : common.AddressLength+common.IncarnationLength])
 	return addr, inc
 }
 
 func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {
 	var addrHash common.Hash
 	copy(addrHash[:], prefix[:common.HashLength])
-	inc := ^binary.BigEndian.Uint64(prefix[common.HashLength : common.HashLength+common.IncarnationLength])
+	inc := binary.BigEndian.Uint64(prefix[common.HashLength : common.HashLength+common.IncarnationLength])
 	return addrHash, inc
-}
-
-func DecodeIncarnation(buf []byte) uint64 {
-	incarnation := binary.BigEndian.Uint64(buf)
-	return incarnation ^ ^uint64(0)
-}
-
-func EncodeIncarnation(incarnation uint64, buf []byte) {
-	binary.BigEndian.PutUint64(buf, ^incarnation)
-}
-
-func RemoveIncarnationFromKey(key []byte, out *[]byte) {
-	tmp := (*out)[:0]
-	if len(key) <= common.HashLength {
-		tmp = append(tmp, key...)
-	} else {
-		tmp = append(tmp, key[:common.HashLength]...)
-		tmp = append(tmp, key[common.HashLength+8:]...)
-	}
-	*out = tmp
 }
 
 // Key + blockNum

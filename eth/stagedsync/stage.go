@@ -10,9 +10,9 @@ type UnwindFunc func(*UnwindState, *StageState) error
 
 type Stage struct {
 	ID                  stages.SyncStage
+	Disabled            bool
 	Description         string
 	ExecFunc            ExecFunc
-	Disabled            bool
 	DisabledDescription string
 	UnwindFunc          UnwindFunc
 }
@@ -39,6 +39,10 @@ func (s *StageState) Done() {
 func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
 	execution, _, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
+}
+
+func (s *StageState) WasInterrupted() bool {
+	return len(s.StageData) > 0
 }
 
 func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {

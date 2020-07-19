@@ -17,14 +17,15 @@
 package eth
 
 import (
-	"math/big"
 	"math/rand"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -166,7 +167,7 @@ type chainSyncer struct {
 type chainSyncOp struct {
 	mode downloader.SyncMode
 	peer *peer
-	td   *big.Int
+	number uint64
 	head common.Hash
 }
 
@@ -174,7 +175,7 @@ type chainSyncOp struct {
 func newChainSyncer(pm *ProtocolManager) *chainSyncer {
 	return &chainSyncer{
 		pm:          pm,
-		peerEventCh: make(chan struct{}),
+		peerEventCh: make(chan struct{}, 1),
 	}
 }
 
@@ -187,6 +188,8 @@ func (cs *chainSyncer) handlePeerEvent(p *peer) bool {
 		return true
 	case <-cs.pm.quitSync:
 		return false
+	default:
+		return false
 	}
 }
 
@@ -195,9 +198,13 @@ func (cs *chainSyncer) loop() {
 	defer cs.pm.wg.Done()
 
 	cs.pm.blockFetcher.Start()
-	cs.pm.txFetcher.Start()
 	defer cs.pm.blockFetcher.Stop()
-	defer cs.pm.txFetcher.Stop()
+
+	defer func() {
+		if cs.pm.txFetcher != nil {
+			cs.pm.txFetcher.Stop()
+		}
+	}()
 
 	// The force timer lowers the peer count threshold down to one when it fires.
 	// This ensures we'll always start sync even if there aren't enough peers.
@@ -256,29 +263,23 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	if peer == nil {
 		return nil
 	}
-	mode, ourTD := cs.modeAndLocalHead()
+	mode, ourNumber := cs.modeAndLocalHead()
 	op := peerToSyncOp(mode, peer)
-	if op.td.Cmp(ourTD) <= 0 {
+	if op.number <= ourNumber {
 		return nil // We're in sync.
 	}
 	return op
 }
 
 func peerToSyncOp(mode downloader.SyncMode, p *peer) *chainSyncOp {
-	peerHead, peerTD := p.Head()
-	return &chainSyncOp{mode: mode, peer: p, td: peerTD, head: peerHead}
+	peerHead, peerNumber := p.Head()
+	return &chainSyncOp{mode: mode, peer: p, number: peerNumber, head: peerHead}
 }
 
-func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, *big.Int) {
-	if atomic.LoadUint32(&cs.pm.fastSync) == 1 {
-		block := cs.pm.blockchain.CurrentFastBlock()
-		td := cs.pm.blockchain.GetTdByHash(block.Hash())
-		return downloader.FastSync, td
-	} else {
-		head := cs.pm.blockchain.CurrentHeader()
-		td := cs.pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
-		return cs.pm.mode, td
-	}
+func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, uint64) {
+	headHash := rawdb.ReadHeadHeaderHash(cs.pm.chaindb)
+	headNumber := rawdb.ReadHeaderNumber(cs.pm.chaindb, headHash)
+	return cs.pm.mode, *headNumber
 }
 
 // startSync launches doSync in a new goroutine.
@@ -312,7 +313,7 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 		}
 	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
-	err := pm.downloader.Synchronise(op.peer.id, op.head, op.td, op.mode, pm.blockchain.DestsCache)
+	err := pm.downloader.Synchronise(op.peer.id, op.head, op.number, op.mode, pm.blockchain.DestsCache, &stagedsync.TxPoolStartStopper{Start: pm.txpool.RunInit, Stop: pm.txpool.RunStop})
 	if err != nil {
 		return err
 	}
@@ -323,8 +324,10 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 
 	// If we've successfully finished a sync cycle and passed any required checkpoint,
 	// enable accepting transactions from the network.
-	head := pm.blockchain.CurrentBlock()
-	if head.NumberU64() >= pm.checkpointNumber {
+	headHash := rawdb.ReadHeadHeaderHash(pm.chaindb)
+	headNumber := rawdb.ReadHeaderNumber(pm.chaindb, headHash)
+	head := rawdb.ReadBlock(pm.chaindb, headHash, *headNumber)
+	if *headNumber >= pm.checkpointNumber && head != nil {
 		// Checkpoint passed, sanity check the timestamp to have a fallback mechanism
 		// for non-checkpointed (number = 0) private networks.
 		if head.Time() >= uint64(time.Now().AddDate(0, -1, 0).Unix()) {
@@ -332,7 +335,7 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 		}
 	}
 
-	if head.NumberU64() > 0 {
+	if *headNumber > 0 && head != nil {
 		// We've completed a sync cycle, notify all peers of new state. This path is
 		// essential in star-topology networks where a gateway node needs to notify
 		// all its out-of-date peers of the availability of a new block. This failure

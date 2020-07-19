@@ -130,7 +130,7 @@ func starkData(witness *trie.Witness, starkStatsBase string, blockNum uint64) er
 	return nil
 }
 
-type CreateDbFunc func(string) (ethdb.Database, error)
+type CreateDbFunc func(string) (*ethdb.ObjectDatabase, error)
 
 func Stateless(
 	ctx context.Context,
@@ -190,7 +190,7 @@ func Stateless(
 	}
 	var preRoot common.Hash
 	if blockNum == 1 {
-		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory)
+		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory, true /* overwrite */)
 		check(err)
 		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
 		check(err1)

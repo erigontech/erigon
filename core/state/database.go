@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -248,7 +249,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 	tp.SetBlockNumber(blockNr)
 
 	t.AddObserver(tp)
-	t.AddObserver(NewIntermediateHashes(tds.db, tds.db))
 
 	return tds
 }
@@ -290,7 +290,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	}
 
 	cpy.t.AddObserver(tp)
-	cpy.t.AddObserver(NewIntermediateHashes(cpy.db, cpy.db))
 
 	return &cpy
 }
@@ -412,7 +411,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 		for keyHash := range m {
 			var storageKey common.StorageKey
 			copy(storageKey[:], addrHash[:])
-			binary.BigEndian.PutUint64(storageKey[common.HashLength:], ^tds.aggregateBuffer.storageIncarnation[addrHash])
+			binary.BigEndian.PutUint64(storageKey[common.HashLength:], tds.aggregateBuffer.storageIncarnation[addrHash])
 			copy(storageKey[common.HashLength+common.IncarnationLength:], keyHash[:])
 			storageTouches = append(storageTouches, storageKey)
 		}
@@ -432,7 +431,9 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageKeys) error { //nolint
 	for _, storageKey := range storageTouches {
-		tds.retainListBuilder.AddStorageTouch(storageKey[:])
+		addr, _, hash := dbutils.ParseCompositeStorageKey(storageKey[:])
+		key := dbutils.GenerateCompositeTrieKey(addr, hash)
+		tds.retainListBuilder.AddStorageTouch(key[:])
 	}
 	return nil
 }
@@ -552,7 +553,7 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 			nibbles[i*2] = b / 16
 			nibbles[i*2+1] = b % 16
 		}
-		binary.BigEndian.PutUint64(bytes8[:], ^incarnation)
+		binary.BigEndian.PutUint64(bytes8[:], incarnation)
 		for i, b := range bytes8[:] {
 			nibbles[2*common.HashLength+i*2] = b / 16
 			nibbles[2*common.HashLength+i*2+1] = b % 16
@@ -881,7 +882,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		b.storageIncarnation[addrHash] = ^binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
+		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
 		var storageKey common.StorageKey
 		copy(storageKey[:], []byte(key))
 		b.storageReads[storageKey] = struct{}{}
@@ -1200,7 +1201,7 @@ func (tds *TrieDbState) ReadAccountIncarnation(address common.Address) (uint64, 
 	}
 	if b, err := tds.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
 		return binary.BigEndian.Uint64(b), nil
-	} else if entryNotFound(err) {
+	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil
 	} else {
 		return 0, err
@@ -1298,7 +1299,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	if err != nil {
 		return err
 	}
-
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	tsw.tds.currentBuffer.accountReads[addrHash] = struct{}{}
 	if original != nil {

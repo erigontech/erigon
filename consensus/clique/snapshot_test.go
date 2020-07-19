@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"math/big"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -404,6 +404,7 @@ func TestClique(t *testing.T) {
 		}
 		// Create a pristine blockchain with the genesis injected
 		db := ethdb.NewMemDatabase()
+		defer db.Close()
 		genesis.MustCommit(db)
 
 		// Assemble a chain of headers from the cast votes
@@ -415,15 +416,15 @@ func TestClique(t *testing.T) {
 		engine := New(config.Clique, db)
 		engine.fakeDiff = true
 
-		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil, vm.NewDestsCache(100))
+		txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil, txCacher)
 		if err != nil {
 			t.Errorf("test %d: failed to create test chain: %v", i, err)
 			continue
 		}
 
 		genesisBlock, _, _, _ := genesis.ToBlock(db, false /* history */)
-		ctx := chain.WithContext(context.Background(), big.NewInt(genesisBlock.Number().Int64()+1))
-		blocks, _ := core.GenerateChain(ctx, &config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+		blocks, _, err := core.GenerateChain(&config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block
 			gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 			if tt.votes[j].auth {
@@ -431,7 +432,10 @@ func TestClique(t *testing.T) {
 				copy(nonce[:], nonceAuthVote)
 				gen.SetNonce(nonce)
 			}
-		})
+		}, false /* intemediateHashes */)
+		if err != nil {
+			t.Fatalf("generate blocks: %v", err)
+		}
 		// Iterate through the blocks and seal them individually
 		for j, block := range blocks {
 			// Geth the header and prepare it for signing

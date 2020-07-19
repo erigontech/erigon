@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"syscall"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console/prompt"
@@ -129,14 +128,6 @@ func tester(cliCtx *cli.Context) error {
 	}
 
 	tp := NewTesterProtocol()
-	server := makeP2PServer(ctx, tp, []string{eth.DebugName})
-	// Add protocol
-	if err := server.Start(); err != nil {
-		panic(fmt.Errorf("could not start server: %w", err))
-	}
-	server.AddPeer(nodeToConnect)
-	time.Sleep(time.Second)
-	server.Stop()
 
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
@@ -157,7 +148,7 @@ func tester(cliCtx *cli.Context) error {
 	tp.networkId = 1 // Mainnet
 	tp.genesisBlockHash = tp.forkFeeder.Genesis().Hash()
 
-	server = makeP2PServer(ctx, tp, []string{eth.ProtocolName})
+	server := makeP2PServer(ctx, tp, []string{eth.ProtocolName, eth.DebugName})
 	// Add protocol
 	if err := server.Start(); err != nil {
 		panic(fmt.Errorf("could not start server: %w", err))

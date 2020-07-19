@@ -76,9 +76,11 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, err
 	}
 	blockchain.EnableReceipts(true)
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+	chain, _, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator, false /* intermediateHashes */)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate chain: %w", err)
+	}
 
 	if _, err = blockchain.InsertChain(context.Background(), chain); err != nil {
 		return nil, nil, err
@@ -88,7 +90,9 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	if err != nil {
 		return nil, nil, err
 	}
-	pm.Start(1000)
+	if err = pm.Start(1000, true); err != nil {
+		return nil, nil, fmt.Errorf("error on protocol manager start: %w", err)
+	}
 	return pm, db, nil
 }
 
@@ -172,6 +176,18 @@ func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subs
 	return p.txFeed.Subscribe(ch)
 }
 
+func (p *testTxPool) IsStarted() bool {
+	return true
+}
+
+func (p *testTxPool) RunInit() error {
+	return nil
+}
+
+func (p *testTxPool) RunStop() error {
+	return nil
+}
+
 // newTestTransaction create a new dummy transaction.
 func newTestTransaction(from *ecdsa.PrivateKey, nonce uint64, datasize int) *types.Transaction {
 	tx := types.NewTransaction(nonce, common.Address{}, u256.Num0, 100000, u256.Num0, make([]byte, datasize))
@@ -212,7 +228,15 @@ func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*te
 			head    = pm.blockchain.CurrentHeader()
 			td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
 		)
-		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkid.NewID(pm.blockchain), forkid.NewFilter(pm.blockchain))
+		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64()), forkid.NewFilter(pm.blockchain))
+		// Newly connected peer will query the header that was announced during the handshake
+		if err := p2p.ExpectMsg(tp.app, 0x03, &getBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.CurrentBlock().Hash()}, Amount: 1}); err != nil {
+			fmt.Printf("ExpectMsg error: %v\n", err)
+			panic(err)
+		}
+		if err := p2p.Send(tp.app, 0x04, []*types.Header{pm.blockchain.CurrentBlock().Header()}); err != nil {
+			panic(err)
+		}
 	}
 	return tp, errc
 }

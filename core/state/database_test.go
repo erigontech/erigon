@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -71,15 +72,14 @@ func TestCreate2Revive(t *testing.T) {
 		genesis = gspec.MustCommit(db)
 		signer  = types.HomesteadSigner{}
 	)
-	genesisDb := db.MemCopy()
-	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -98,8 +98,7 @@ func TestCreate2Revive(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -120,7 +119,7 @@ func TestCreate2Revive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(context.Background(), tx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +132,10 @@ func TestCreate2Revive(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -247,15 +249,14 @@ func TestCreate2Polymorth(t *testing.T) {
 		genesis = gspec.MustCommit(db)
 		signer  = types.HomesteadSigner{}
 	)
-	genesisDb := db.MemCopy()
-	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -274,8 +275,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 5, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -297,7 +297,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(context.Background(), tx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,7 +314,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(context.Background(), tx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -330,7 +330,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(context.Background(), tx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -343,7 +343,10 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -474,11 +477,12 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -488,9 +492,8 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 3, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -514,14 +517,17 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 
-	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 4, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -533,7 +539,10 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate long blocks")
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -579,11 +588,13 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	defer blockchain1.Stop()
+	st = state.New(state.NewDbState(db.KV(), blockchain1.CurrentBlock().NumberU64()))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -616,11 +627,12 @@ func TestReorgOverStateChange(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -630,9 +642,8 @@ func TestReorgOverStateChange(t *testing.T) {
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -651,13 +662,16 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 		contractBackend.Commit()
 		fmt.Println("commited i=", i)
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 3, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -669,7 +683,10 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate longer blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -711,11 +728,13 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain2, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	defer blockchain2.Stop()
+	st = state.New(state.NewDbState(db.KV(), blockchain2.CurrentBlock().NumberU64()))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -749,7 +768,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		alloc[v] = core.GenesisAccount{Balance: funds}
 	}
 	var (
-		db    = ethdb.NewRWDecorator(ethdb.NewMemDatabase())
+		db    = ethdb.NewMemDatabase()
 		gspec = &core.Genesis{
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
@@ -766,21 +785,20 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	var selfDestruct = make([]*contracts.Selfdestruct, numOfContracts)
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), numOfBlocks, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, numOfBlocks, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -815,7 +833,10 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatal(err)
@@ -885,7 +906,6 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	spew.Dump(stats)
-	spew.Dump(db.DBCounterStats)
 	spew.Dump(stats.Size())
 }
 
@@ -930,15 +950,14 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		}
 		genesis = gspec.MustCommit(db)
 	)
-	genesisDb := db.MemCopy()
-	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -949,8 +968,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -962,7 +980,10 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -1072,10 +1093,12 @@ func TestEip2200Gas(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer blockchain.Stop()
 
 	blockchain.EnableReceipts(true)
 
@@ -1086,10 +1109,9 @@ func TestEip2200Gas(t *testing.T) {
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 3, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -1108,7 +1130,10 @@ func TestEip2200Gas(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -1160,11 +1185,12 @@ func TestWrongIncarnation(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1174,9 +1200,7 @@ func TestWrongIncarnation(t *testing.T) {
 	var contractAddress common.Address
 	var changer *contracts.Changer
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -1194,7 +1218,10 @@ func TestWrongIncarnation(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -1229,13 +1256,14 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain1.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1288,11 +1316,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer blockchain.Stop()
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1300,11 +1329,8 @@ func TestWrongIncarnation2(t *testing.T) {
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
-	//var changer *contracts.Changer
 
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -1313,7 +1339,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(context.Background(), tx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1326,7 +1352,10 @@ func TestWrongIncarnation2(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 
 	if knownContractAddress != contractAddress {
 		t.Errorf("Expexted contractAddress: %x, got %x", knownContractAddress, contractAddress)
@@ -1336,7 +1365,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.NewBatch(), 3, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -1345,14 +1374,17 @@ func TestWrongIncarnation2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackendLonger.SendTransaction(ctx, tx)
+			err = contractBackendLonger.SendTransaction(context.Background(), tx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	})
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate longer blocks: %v", err)
+	}
 
 	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
@@ -1468,10 +1500,10 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		t.Errorf("error committing block: %w", err)
+		t.Errorf("error committing block: %v", err)
 	}
 
 	if _, err := tds.ResolveStateTrie(false /* extractWitness */, true /* trace */); err != nil {
@@ -1527,10 +1559,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		t.Errorf("error committing block: %w", err)
+		t.Errorf("error committing block: %v", err)
 	}
 	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		assert.NoError(t, err)

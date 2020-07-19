@@ -91,9 +91,7 @@ func Write(w io.Writer, val []byte) error {
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
 func EncodeToBytes(val interface{}) ([]byte, error) {
-	eb := encbufPool.Get().(*encbuf)
-	defer encbufPool.Put(eb)
-	eb.reset()
+	eb := &encbuf{sizebuf: make([]byte, 9)}
 	if err := eb.encode(val); err != nil {
 		return nil, err
 	}

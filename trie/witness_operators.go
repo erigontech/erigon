@@ -108,6 +108,7 @@ type OperatorLeafAccount struct {
 	Balance    *big.Int
 	HasCode    bool
 	HasStorage bool
+	CodeSize   uint64
 }
 
 func (o *OperatorLeafAccount) WriteTo(output *OperatorMarshaller) error {
@@ -145,7 +146,15 @@ func (o *OperatorLeafAccount) WriteTo(output *OperatorMarshaller) error {
 	}
 
 	if o.Balance.Sign() != 0 {
-		return output.WriteByteArrayValue(o.Balance.Bytes())
+		if err := output.WriteByteArrayValue(o.Balance.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	if o.HasCode {
+		if err := output.WriteUint64Value(o.CodeSize); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -185,6 +194,14 @@ func (o *OperatorLeafAccount) LoadFrom(loader *OperatorUnmarshaller) error {
 	}
 
 	o.Balance = balance
+
+	if o.HasCode {
+		if codeSize, err := loader.ReadUInt64(); err == nil {
+			o.CodeSize = codeSize
+		} else {
+			return err
+		}
+	}
 
 	return nil
 }

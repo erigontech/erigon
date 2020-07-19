@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -26,8 +27,10 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -145,7 +148,8 @@ type TxPoolConfig struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+	Lifetime    time.Duration // Maximum amount of time non-executable transaction are queued
+	StartOnInit bool
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -215,12 +219,14 @@ type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
 	chain        blockChain
+	chaindb      *ethdb.ObjectDatabase
 	gasPrice     *big.Int
 	txFeed       event.Feed
 	scope        event.SubscriptionScope
 	chainHeadCh  chan ChainHeadEvent
 	chainHeadSub event.Subscription
 	signer       types.Signer
+	senderCacher *TxSenderCacher
 	mu           sync.RWMutex
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
@@ -246,6 +252,9 @@ type TxPool struct {
 	reorgDoneCh     chan chan struct{}
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
+	isStarted       bool
+	initFns         []func() error
+	stopFns         []func() error
 }
 
 type txpoolResetRequest struct {
@@ -254,43 +263,60 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
 	// Create the transaction pool with its initial settings
 	pool := &TxPool{
-		config:          config,
-		chainconfig:     chainconfig,
-		chain:           chain,
-		signer:          types.NewEIP155Signer(chainconfig.ChainID),
-		pending:         make(map[common.Address]*txList),
-		queue:           make(map[common.Address]*txList),
-		beats:           make(map[common.Address]time.Time),
-		all:             newTxLookup(),
-		chainHeadCh:     make(chan ChainHeadEvent, chainHeadChanSize),
-		reqResetCh:      make(chan *txpoolResetRequest),
-		reqPromoteCh:    make(chan *accountSet),
-		queueTxEventCh:  make(chan *types.Transaction),
-		reorgDoneCh:     make(chan chan struct{}),
-		reorgShutdownCh: make(chan struct{}),
-		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
+		config:         config,
+		chainconfig:    chainconfig,
+		chain:          chain,
+		chaindb:        chaindb,
+		signer:         types.NewEIP155Signer(chainconfig.ChainID),
+		pending:        make(map[common.Address]*txList),
+		queue:          make(map[common.Address]*txList),
+		beats:          make(map[common.Address]time.Time),
+		all:            newTxLookup(),
+		chainHeadCh:    make(chan ChainHeadEvent, chainHeadChanSize),
+		reqResetCh:     make(chan *txpoolResetRequest),
+		reqPromoteCh:   make(chan *accountSet),
+		queueTxEventCh: make(chan *types.Transaction),
+		reorgDoneCh:    make(chan chan struct{}),
+		gasPrice:       new(big.Int).SetUint64(config.PriceLimit),
+		senderCacher:   senderCacher,
 	}
+
+	if config.StartOnInit {
+		if err := pool.Start(); err != nil {
+			log.Error("cannot start transaction pool", "err", err)
+		}
+	}
+
+	return pool
+}
+
+func (pool *TxPool) Start() error {
+	pool.reorgShutdownCh = make(chan struct{}, 1)
+
 	pool.locals = newAccountSet(pool.signer)
-	for _, addr := range config.Locals {
+	for _, addr := range pool.config.Locals {
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 	}
 	pool.priced = newTxPricedList(pool.all)
-	pool.reset(nil, chain.CurrentBlock().Header())
+	headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
+	headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
+	head := rawdb.ReadHeader(pool.chaindb, headHash, *headNumber)
+	pool.reset(nil, head)
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
 	go pool.scheduleReorgLoop()
 
 	// If local transactions and journaling is enabled, load from disk
-	if !config.NoLocals && config.Journal != "" {
-		pool.journal = newTxJournal(config.Journal)
+	if !pool.config.NoLocals && pool.config.Journal != "" {
+		pool.journal = newTxJournal(pool.config.Journal)
 
 		if err := pool.journal.load(pool.AddLocals); err != nil {
 			log.Warn("Failed to load transaction journal", "err", err)
@@ -302,10 +328,14 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 
 	// Subscribe events from blockchain and start the main event loop.
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
+
 	pool.wg.Add(1)
 	go pool.loop()
 
-	return pool
+	pool.isStarted = true
+
+	log.Info("transaction pool started")
+	return nil
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -321,7 +351,9 @@ func (pool *TxPool) loop() {
 		evict   = time.NewTicker(evictionInterval)
 		journal = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
-		head = pool.chain.CurrentBlock()
+		headHash   = rawdb.ReadHeadHeaderHash(pool.chaindb)
+		headNumber = rawdb.ReadHeaderNumber(pool.chaindb, headHash)
+		head       = rawdb.ReadBlock(pool.chaindb, headHash, *headNumber)
 	)
 	defer report.Stop()
 	defer evict.Stop()
@@ -338,7 +370,7 @@ func (pool *TxPool) loop() {
 
 		// System shutdown.
 		case <-pool.chainHeadSub.Err():
-			close(pool.reorgShutdownCh)
+			common.SafeClose(pool.reorgShutdownCh)
 			return
 
 		// Handle stats reporting ticks
@@ -446,25 +478,17 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	}
 	// Initialize the internal state to the current head
 	if newHead == nil {
-		newHead = pool.chain.CurrentBlock().Header() // Special case during testing
+		headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
+		headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
+		newHead = rawdb.ReadHeader(pool.chaindb, headHash, *headNumber) // Special case during testing
 	}
-	tds, err := pool.chain.GetTrieDbState()
-	if tds != nil {
-		tds = tds.WithNewBuffer()
-		if err != nil {
-			log.Error("Failed to reset txpool state", "err", err)
-			return
-		}
-		statedb := state.New(tds)
-		pool.currentState = statedb
-		pool.currentTds = tds
-		pool.pendingNonces = newTxNoncer(statedb)
-	}
+	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
+	pool.pendingNonces = newTxNoncer(pool.currentState)
 	pool.currentMaxGas = newHead.GasLimit
 
 	// Inject any transactions discarded due to reorgs
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))
-	senderCacher.recover(pool.signer, reinject)
+	pool.senderCacher.recover(pool.signer, reinject)
 	pool.addTxsLocked(reinject, false)
 
 	// Update all fork indicator by next pending block number.
@@ -475,7 +499,7 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 // Stop terminates the transaction pool.
 func (pool *TxPool) Stop() {
 	// Unsubscribe all subscriptions registered from txpool
-	if pool == nil {
+	if !pool.IsStarted() {
 		return
 	}
 
@@ -486,13 +510,16 @@ func (pool *TxPool) Stop() {
 	if pool.journal != nil {
 		pool.journal.close()
 	}
+
+	pool.isStarted = false
+
 	log.Info("Transaction pool stopped")
 }
 
 // SubscribeNewTxsEvent registers a subscription of NewTxsEvent and
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription {
-	if pool == nil {
+	if !pool.IsStarted() {
 		return nil
 	}
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
@@ -573,7 +600,7 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 // freely modified by calling code.
 func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
 	pending := make(map[common.Address]types.Transactions)
-	if pool == nil {
+	if !pool.IsStarted() {
 		return pending, nil
 	}
 	pool.mu.Lock()
@@ -1416,6 +1443,66 @@ func (pool *TxPool) demoteUnexecutables() {
 			delete(pool.beats, addr)
 		}
 	}
+}
+
+func (pool *TxPool) IsStarted() bool {
+	if pool == nil {
+		return false
+	}
+
+	return pool.isStarted
+}
+
+func (pool *TxPool) AddInit(fns ...func() error) {
+	if pool == nil {
+		return
+	}
+
+	pool.initFns = append(pool.initFns, fns...)
+}
+
+func (pool *TxPool) RunInit() error {
+	if pool == nil {
+		return errors.New("can't init a nil transaction pool")
+	}
+
+	if pool.IsStarted() {
+		return errors.New("transaction pool is already started")
+	}
+
+	var err error
+	for _, fn := range pool.initFns {
+		if err = fn(); err != nil {
+			return fmt.Errorf("can't init a transaction pool: %w", err)
+		}
+	}
+	return nil
+}
+
+func (pool *TxPool) AddStop(fns ...func() error) {
+	if pool == nil {
+		return
+	}
+
+	pool.stopFns = append(pool.stopFns, fns...)
+}
+
+func (pool *TxPool) RunStop() error {
+	if pool == nil {
+		return errors.New("can't stop a nil transaction pool")
+	}
+
+	if !pool.IsStarted() {
+		return errors.New("transaction pool is already stopped")
+	}
+
+	var err error
+	for _, fn := range pool.stopFns {
+		if err = fn(); err != nil {
+			return fmt.Errorf("can't stop a transaction pool: %w", err)
+		}
+	}
+	return nil
 }
 
 // addressByHeartbeat is an account address tagged with its last activity timestamp.

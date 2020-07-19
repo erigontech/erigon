@@ -246,7 +246,7 @@ func initGenesis(ctx *cli.Context) error {
 		if err != nil {
 			utils.Fatalf("Failed to open database: %v", err)
 		}
-		_, hash, _, err := core.SetupGenesisBlock(chaindb, genesis, false /* history */)
+		_, hash, _, err := core.SetupGenesisBlock(chaindb, genesis, false /* history */, false /* overwrite */)
 		if err != nil {
 			utils.Fatalf("Failed to write genesis block: %v", err)
 		}
@@ -278,7 +278,7 @@ func importChain(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	chain, db := utils.MakeChain(ctx, stack, false)
+	_, chain, db := utils.MakeChain(ctx, stack, false)
 	defer db.Close()
 
 	// Start periodically gathering memory profiles
@@ -332,7 +332,7 @@ func exportChain(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	chain, _ := utils.MakeChain(ctx, stack, true)
+	_, chain, _ := utils.MakeChain(ctx, stack, true)
 	start := time.Now()
 
 	var err error
@@ -408,14 +408,14 @@ func copyDb(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	chain, chainDb := utils.MakeChain(ctx, stack, false)
+	chainConfig, chain, chainDb := utils.MakeChain(ctx, stack, false)
 	syncMode := *utils.GlobalTextMarshaler(ctx, utils.SyncModeFlag.Name).(*downloader.SyncMode)
 
 	var syncBloom *trie.SyncBloom
 	if syncMode == downloader.FastSync {
 		//syncBloom = trie.NewSyncBloom(uint64(ctx.GlobalInt(utils.CacheFlag.Name)/2), chainDb)
 	}
-	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chain, nil, nil, ethdb.DefaultStorageMode)
+	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chainConfig, chain, nil, nil, ethdb.DefaultStorageMode)
 
 	// Create a source peer to satisfy downloader requests from
 	db := ethdb.MustOpen(ctx.Args().First())
@@ -431,7 +431,7 @@ func copyDb(ctx *cli.Context) error {
 	start := time.Now()
 
 	currentHeader := hc.CurrentHeader()
-	if err = dl.Synchronise("local", currentHeader.Hash(), hc.GetTd(nil, currentHeader.Hash(), currentHeader.Number.Uint64()), syncMode, vm.NewDestsCache(10000)); err != nil {
+	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, vm.NewDestsCache(10000), nil); err != nil {
 		return err
 	}
 	for dl.Synchronising() {
@@ -506,7 +506,7 @@ func dump(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	chain, chainDb := utils.MakeChain(ctx, stack, true)
+	_, chain, chainDb := utils.MakeChain(ctx, stack, true)
 	defer chainDb.Close()
 	for _, arg := range ctx.Args() {
 		var block *types.Block
@@ -523,10 +523,7 @@ func dump(ctx *cli.Context) error {
 			excludeCode := ctx.Bool(utils.ExcludeCodeFlag.Name)
 			excludeStorage := ctx.Bool(utils.ExcludeStorageFlag.Name)
 			includeMissing := ctx.Bool(utils.IncludeIncompletesFlag.Name)
-			if hasKV, ok := chainDb.(ethdb.HasKV); ok {
-				fmt.Printf("%s\n", state.NewDumper(hasKV.KV(), block.NumberU64()).Dump(excludeCode, excludeStorage, !includeMissing))
-			}
-			fmt.Printf("database %T does not support AbstracKV\n", chainDb)
+			fmt.Printf("%s\n", state.NewDumper(chainDb.KV(), block.NumberU64()).Dump(excludeCode, excludeStorage, !includeMissing))
 		}
 	}
 	return nil
@@ -536,7 +533,7 @@ func inspect(ctx *cli.Context) error {
 	node, _ := makeConfigNode(ctx)
 	defer node.Close()
 
-	_, chainDb := utils.MakeChain(ctx, node, true)
+	_, _, chainDb := utils.MakeChain(ctx, node, true)
 	defer chainDb.Close()
 
 	return ethdb.InspectDatabase(chainDb)

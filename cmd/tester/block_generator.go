@@ -5,11 +5,9 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
-	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -19,10 +17,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -43,7 +39,6 @@ type BlockGenerator struct {
 	tdByNumber          map[uint64]*big.Int
 	lastBlock           *types.Block
 	totalDifficulty     *big.Int
-	forkId              forkid.ID
 }
 
 func (bg *BlockGenerator) Close() {
@@ -100,10 +95,6 @@ func (bg *BlockGenerator) TotalDifficulty() *big.Int {
 
 func (bg *BlockGenerator) LastBlock() *types.Block {
 	return bg.lastBlock
-}
-
-func (bg *BlockGenerator) ForkID() forkid.ID {
-	return bg.forkId
 }
 
 func randAddress(r *rand.Rand) common.Address {
@@ -288,12 +279,13 @@ func makeGenBlock(db ethdb.Database,
 			if err1 != nil {
 				panic(err1)
 			}
+			//fmt.Printf("AddTx to block %d\n", i)
 			gen.AddTx(signedTx)
 		}
 	}
 }
 
-func (bg *BlockGenerator) blocksToFile(outputFile string, blocks chan *types.Block) error {
+func (bg *BlockGenerator) blocksToFile(outputFile string, blocks []*types.Block) error {
 	outputF, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return err
@@ -305,7 +297,7 @@ func (bg *BlockGenerator) blocksToFile(outputFile string, blocks chan *types.Blo
 	var parent *types.Block
 	var pos uint64
 	td := new(big.Int)
-	for block := range blocks {
+	for _, block := range blocks {
 		buffer, err2 := rlp.EncodeToBytes(block)
 		if err2 != nil {
 			return err2
@@ -331,6 +323,7 @@ func (bg *BlockGenerator) blocksToFile(outputFile string, blocks chan *types.Blo
 }
 
 func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int) (*BlockGenerator, error) {
+	log.Info("Generating blocks...")
 	db, genesis, extra, engine := ethdb.NewMemDatabase(), genesis(), []byte("BlockGenerator"), ethash.NewFullFaker()
 	r := rand.New(rand.NewSource(4589489854))
 
@@ -346,35 +339,10 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		genBlockFunc(coinbase, i, gen)
 	}
 
-	blocks := make(chan *types.Block, 10000)
-	go func() {
-		defer close(blocks)
-		parent := genesisBlock
-		n := 1000
-		//if ReduceComplexity {
-		//	n = 1 // 1 block per transaction
-		//}
-		now := time.Now()
-		for height, stop := n, false; !stop; height += n {
-			if height > initialHeight {
-				n = initialHeight + n - height
-				stop = true
-				if n == 0 {
-					break
-				}
-			}
-
-			// Generate a batch of blocks, each properly signed
-			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
-			parent = blocksSlice[len(blocksSlice)-1]
-			for _, block := range blocksSlice {
-				blocks <- block
-			}
-			if height%10000 == 0 {
-				log.Info(fmt.Sprintf("block gen %dK, %s", height/1000, time.Since(now)))
-			}
-		}
-	}()
+	blocks, _, err := core.GenerateChain(genesis.Config, genesisBlock, engine, db, initialHeight, genBlock, true /* intermediateHashes */)
+	if err != nil {
+		panic(err)
+	}
 
 	bg := &BlockGenerator{
 		genesisBlock:        genesisBlock,
@@ -392,22 +360,18 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		return nil, err
 	}
 
-	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	bg.forkId = forkid.NewID(blockchain)
-
 	bg.input, err = os.Open(outputFile)
 	// Reopen the file for reading
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Blocks generated")
 	return bg, nil
 }
 
 // NewForkGenerator Creates a fork from the existing block generator
 func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile string, forkBase uint64, forkHeight uint64) (*BlockGenerator, error) {
+	log.Info("Generating fork...")
 	db, genesis, extra, engine := ethdb.NewMemDatabase(), genesis(), []byte("BlockGenerator"), ethash.NewFullFaker()
 	r := rand.New(rand.NewSource(4589489854))
 
@@ -429,34 +393,11 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		genBlockFunc(coinbase, i, gen)
 	}
 
-	blocks := make(chan *types.Block, 10000)
-	go func() {
-		defer close(blocks)
-		parent := genesisBlock
-		n := 1000
-		//if ReduceComplexity {
-		//	n = 1 // 1 block per transaction
-		//}
-		for height, stop := n, false; !stop; height += n {
-			if height > int(forkBase+forkHeight) {
-				n = int(forkBase+forkHeight) + n - height
-				stop = true
-				if n == 0 {
-					break
-				}
-			}
-
-			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
-			parent = blocksSlice[len(blocksSlice)-1]
-			for _, block := range blocksSlice {
-				blocks <- block
-			}
-			if height%10000 == 0 {
-				log.Info(fmt.Sprintf("fork gen %dK", (height+1)/1000))
-			}
-		}
-		log.Info(fmt.Sprintf("fork gen %d", forkHeight))
-	}()
+	blocks, _, err1 := core.GenerateChain(genesis.Config, genesisBlock, engine, db, int(forkBase+forkHeight), genBlock, true /* intermediateHashes */)
+	if err1 != nil {
+		panic(err1)
+	}
+	log.Info("fork gen", "height", forkHeight)
 
 	bg := &BlockGenerator{
 		genesisBlock:        genesisBlock,
@@ -474,16 +415,11 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		return nil, err
 	}
 
-	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	bg.forkId = forkid.NewID(blockchain)
-
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Fork generated")
 	return bg, nil
 }
 

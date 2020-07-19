@@ -16,11 +16,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type stagedSyncTester struct {
@@ -41,7 +41,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.downloader = New(uint64(StagedSync), tester.db, trie.NewSyncBloom(1, tester.db), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(StagedSync), tester.db, nil /* syncBloom */, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	clear := func() {
 		tester.db.Close()
 	}
@@ -66,12 +66,6 @@ func (st *stagedSyncTester) dropPeer(id string) {
 	delete(st.peers, id)
 	//nolint:errcheck
 	st.downloader.UnregisterPeer(id)
-}
-
-// Config is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) Config() *params.ChainConfig {
-	// This needs to match whatever is used in testchain_test.go to generate signatures
-	return params.TestChainConfig
 }
 
 // CurrentBlock is part of the implementation of BlockChain interface defined in downloader.go
@@ -191,6 +185,7 @@ func (st *stagedSyncTester) GetVMConfig() *vm.Config {
 func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RLock()
 	hash := st.peers[id].chain.headBlock().Hash()
+	number := st.peers[id].chain.headBlock().NumberU64()
 	// If no particular TD was requested, load from the peer's blockchain
 	if td == nil {
 		td = st.peers[id].chain.td(hash)
@@ -198,7 +193,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise(id, hash, td, StagedSync, vm.NewDestsCache(100))
+	err := st.downloader.synchronise(id, hash, number, StagedSync, vm.NewDestsCache(100), getTestTxPoolControl())
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle
@@ -219,9 +214,9 @@ type stagedSyncTesterPeer struct {
 }
 
 // Head is part of the implementation of Peer interface in peer.go
-func (stp *stagedSyncTesterPeer) Head() (common.Hash, *big.Int) {
+func (stp *stagedSyncTesterPeer) Head() (common.Hash, uint64) {
 	b := stp.chain.headBlock()
-	return b.Hash(), stp.chain.td(b.Hash())
+	return b.Hash(), b.NumberU64()
 }
 
 // RequestHeadersByHash is part of the implementation of Peer interface in peer.go
@@ -306,5 +301,12 @@ func TestUnwind(t *testing.T) {
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
+	}
+}
+
+func getTestTxPoolControl() *stagedsync.TxPoolStartStopper {
+	return &stagedsync.TxPoolStartStopper{
+		Start: func() error { return nil },
+		Stop:  func() error { return nil },
 	}
 }

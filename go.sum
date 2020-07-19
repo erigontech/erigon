@@ -1,6 +1,4 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-github.com/AskAlexSharov/lmdb-go v1.9.0 h1:lXbgv+ERzRsLOiZi53tu2MOLuOZy6vSLFL8qlfSbLWU=
-github.com/AskAlexSharov/lmdb-go v1.9.0/go.mod h1:k7Jo/kN60Hq1MTBwsVSp2JllEs5Tyhd4MZ7tY9smjeA=
 github.com/Azure/azure-pipeline-go v0.2.1 h1:OLBdZJ3yvOn2MezlWvbrBMTEUQC72zAftRZOMdj5HYo=
 github.com/Azure/azure-pipeline-go v0.2.1/go.mod h1:UGSo8XybXnIGZ3epmeBw7Jdz+HiUVpqIlpz/HKHylF4=
 github.com/Azure/azure-pipeline-go v0.2.2 h1:6oiIS9yaG6XCCzhgAgKFfIWyo4LLCiDhZot6ltoThhY=
@@ -197,6 +195,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33 h1:8e99Kuxoi+RnWCO8zD+ftp+rIuh9AYkZDRPmO8Xgp5k=
 github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
+github.com/ledgerwatch/lmdb-go v1.11.0 h1:Ia3vuJ9gxnN7R42doBQJJx+xRYyeavSpMDUC+G/XfHw=
+github.com/ledgerwatch/lmdb-go v1.11.0/go.mod h1:NKRpCxksoTQPyxsUcBiVOe0135uqnJsnf6cElxmOL0o=
 github.com/leodido/go-urn v1.2.0 h1:hpXL4XnriNwQ/ABnpepYM/1vCLWNDfUNts8dX3xTG6Y=
 github.com/leodido/go-urn v1.2.0/go.mod h1:+8+nEpDfqqsY+g338gtMEUOtuK+4dEMhiQEgxpxOKII=
 github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0 h1:2vp6ESimuT8pCuZHThVyV0hlfa9oPL06HnGCL9pbUgc=
@@ -316,8 +316,6 @@ github.com/ugorji/go/codec v1.1.7 h1:2SvQaVZ1ouYrrKKwoSk2pzd4A9evlKJb9oTL+OaLUSs
 github.com/ugorji/go/codec v1.1.7/go.mod h1:Ax+UKWsSmolVDwsd+7N3ZtXu+yMGCf907BLYF3GoBXY=
 github.com/urfave/cli v1.22.1 h1:+mkCCcOFKPnCmVYVcURKps1Xe+3zP90gSYGNfRkjoIY=
 github.com/urfave/cli v1.22.1/go.mod h1:Gos4lmkARVdJ6EkW0WaNv/tZAAMe9V7XWyB60NtXRu0=
-github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
-github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
 github.com/wcharczuk/go-chart v2.0.1+incompatible h1:0pz39ZAycJFF7ju/1mepnk26RLVLBCWz1STcD3doU0A=
 github.com/wcharczuk/go-chart v2.0.1+incompatible/go.mod h1:PF5tmL4EIx/7Wf+hEkpCqYi5He4u90sw+0+6FhrryuE=
 github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208 h1:1cngl9mPEoITZG8s8cVcUy5CeIBYhEESkOB7m6Gmkrk=

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"reflect"
 	"runtime"
 	"sync"
@@ -78,7 +79,7 @@ type Ethereum struct {
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
-	chainDb ethdb.Database // Block chain database
+	chainDb *ethdb.ObjectDatabase // Block chain database
 	chainKV ethdb.KV       // Same as chainDb, but different interface
 
 	eventMux       *event.TypeMux
@@ -99,6 +100,7 @@ type Ethereum struct {
 	netRPCService *ethapi.PublicNetAPI
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	txPoolStarted bool
 }
 
 func (s *Ethereum) AddLesServer(ls LesServer) {
@@ -140,21 +142,23 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
 	// Assemble the Ethereum object
-	chainDb, err := ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer)
-	if err != nil {
-		return nil, err
-	}
-	var chainKV ethdb.KV
-	if hasKV, ok := chainDb.(ethdb.HasKV); ok {
-		chainKV = hasKV.KV()
+	var chainDb *ethdb.ObjectDatabase
+	var err error
+	if config.EnableDebugProtocol {
+		if err = os.RemoveAll("simulator"); err != nil {
+			return nil, fmt.Errorf("removing simulator db: %w", err)
+		}
+		chainDb = ethdb.MustOpen("simulator")
 	} else {
-		return nil, fmt.Errorf("database %T does not implement KV", chainDb)
+		if chainDb, err = ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer); err != nil {
+			return nil, err
+		}
 	}
 	if ctx.Config.RemoteDbListenAddress != "" {
-		remotedbserver.StartDeprecated(chainKV, ctx.Config.RemoteDbListenAddress)
+		remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.RemoteDbListenAddress)
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
@@ -164,7 +168,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	eth := &Ethereum{
 		config:            config,
 		chainDb:           chainDb,
-		chainKV:           chainKV,
+		chainKV:           chainDb.KV(),
 		eventMux:          ctx.EventMux,
 		accountManager:    ctx.AccountManager,
 		engine:            CreateConsensusEngine(ctx, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
@@ -217,29 +221,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	var (
-		vmConfig = vm.Config{
-			EnablePreimageRecording: config.EnablePreimageRecording,
-			EWASMInterpreter:        config.EWASMInterpreter,
-			EVMInterpreter:          config.EVMInterpreter,
-		}
-		cacheConfig = &core.CacheConfig{
-			Pruning:             config.Pruning,
-			BlocksBeforePruning: config.BlocksBeforePruning,
-			BlocksToPrune:       config.BlocksToPrune,
-			PruneTimeout:        config.PruningTimeout,
-			TrieCleanLimit:      config.TrieCleanCache,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieTimeLimit:       config.TrieTimeout,
-			DownloadOnly:        config.DownloadOnly,
-			NoHistory:           !config.StorageMode.History,
-			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
-		}
-	)
-
-	dests := vm.NewDestsCache(50000)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, dests)
+	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, dests, txCacher)
 	if err != nil {
 		return nil, err
 	}
@@ -267,20 +251,26 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
-	if config.SyncMode != downloader.StagedSync {
-		eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
-	}
+
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, chainDb, txCacher)
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-
 	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
-
 	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
+
+	if config.SyncMode != downloader.StagedSync {
+		if err = eth.StartTxPool(); err != nil {
+			return nil, err
+		}
+	} else {
+		eth.txPool.AddInit(eth.StartTxPool)
+		eth.txPool.AddStop(eth.StopTxPool)
+	}
 
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, dests)
@@ -302,6 +292,30 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	return eth, nil
+}
+
+func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig, *vm.DestsCache) {
+	var (
+		vmConfig = vm.Config{
+			EnablePreimageRecording: config.EnablePreimageRecording,
+			EWASMInterpreter:        config.EWASMInterpreter,
+			EVMInterpreter:          config.EVMInterpreter,
+		}
+		cacheConfig = &core.CacheConfig{
+			Pruning:             config.Pruning,
+			BlocksBeforePruning: config.BlocksBeforePruning,
+			BlocksToPrune:       config.BlocksToPrune,
+			PruneTimeout:        config.PruningTimeout,
+			TrieCleanLimit:      config.TrieCleanCache,
+			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieDirtyLimit:      config.TrieDirtyCache,
+			TrieTimeLimit:       config.TrieTimeout,
+			DownloadOnly:        config.DownloadOnly,
+			NoHistory:           !config.StorageMode.History,
+			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
+		}
+	)
+	return vmConfig, cacheConfig, vm.NewDestsCache(50000)
 }
 
 func makeExtraData(extra []byte) []byte {
@@ -617,10 +631,14 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 	s.startEthEntryUpdate(srvr.LocalNode())
 
 	// Start the bloom bits servicing goroutines
-	s.startBloomHandlers(params.BloomBitsBlocks)
+	if s.config.SyncMode != downloader.StagedSync {
+		s.startBloomHandlers(params.BloomBitsBlocks)
+	}
 
 	// Start the RPC service
-	s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
+	if s.config.SyncMode != downloader.StagedSync {
+		s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
+	}
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := srvr.MaxPeers
@@ -630,11 +648,42 @@ func (s *Ethereum) Start(srvr *p2p.Server) error {
 		}
 		maxPeers -= s.config.LightPeers
 	}
+
+	withTxPool := s.config.SyncMode != downloader.StagedSync
 	// Start the networking layer and the light server if requested
-	s.protocolManager.Start(maxPeers)
+	if err := s.protocolManager.Start(maxPeers, withTxPool); err != nil {
+		return err
+	}
 	if s.lesServer != nil {
 		s.lesServer.Start(srvr)
 	}
+	return nil
+}
+
+func (s *Ethereum) StartTxPool() error {
+	if s.txPoolStarted {
+		return errors.New("transaction pool is already started")
+	}
+	if err := s.txPool.Start(); err != nil {
+		return err
+	}
+	if err := s.protocolManager.StartTxPool(); err != nil {
+		s.txPool.Stop()
+		return err
+	}
+
+	s.txPoolStarted = true
+	return nil
+}
+
+func (s *Ethereum) StopTxPool() error {
+	if !s.txPoolStarted {
+		return errors.New("transaction pool is already stopped")
+	}
+	s.protocolManager.StopTxPool()
+	s.txPool.Stop()
+
+	s.txPoolStarted = false
 	return nil
 }
 
@@ -650,7 +699,9 @@ func (s *Ethereum) Stop() error {
 	// Then stop everything else.
 	s.bloomIndexer.Close()
 	close(s.closeBloomHandler)
-	s.txPool.Stop()
+	if err := s.StopTxPool(); err != nil {
+		log.Warn("error while stopping transaction pool", "err", err)
+	}
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()

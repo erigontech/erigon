@@ -6,10 +6,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
-	"sync/atomic"
 	"time"
-
-	"github.com/VictoriaMetrics/fastcache"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -18,67 +15,37 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 const (
 	logInterval = 30 // seconds
 )
 
-type progressLogger struct {
-	timer    *time.Ticker
-	quit     chan struct{}
-	interval int
-	batch    ethdb.DbWithPendingMutations
+type HasChangeSetWriter interface {
+	ChangeSetWriter() *state.ChangeSetWriter
 }
 
-func NewProgressLogger(intervalInSeconds int, batch ethdb.DbWithPendingMutations) *progressLogger {
-	return &progressLogger{
-		timer:    time.NewTicker(time.Duration(intervalInSeconds) * time.Second),
-		quit:     make(chan struct{}),
-		interval: intervalInSeconds,
-		batch:    batch,
+type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
+
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, blockchain BlockChain, toBlock uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
+	prevStageProgress, _, errStart := stages.GetStageProgress(stateDB, stages.Senders)
+	if errStart != nil {
+		return errStart
 	}
-}
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
+	}
+	if to <= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+	log.Info("Blocks execution", "from", s.BlockNumber, "to", to)
 
-func (l *progressLogger) Start(numberRef *uint64) {
-	go func() {
-		prev := atomic.LoadUint64(numberRef)
-		printFunc := func() {
-			now := atomic.LoadUint64(numberRef)
-			speed := float64(now-prev) / float64(l.interval)
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Executed blocks:",
-				"currentBlock", now,
-				"speed (blk/second)", speed,
-				"state batch", common.StorageSize(l.batch.BatchSize()),
-				"alloc", int(m.Alloc/1024),
-				"sys", int(m.Sys/1024),
-				"numGC", int(m.NumGC))
-
-			prev = now
-		}
-		for {
-			select {
-			case <-l.timer.C:
-				printFunc()
-			case <-l.quit:
-				printFunc()
-				return
-			}
-		}
-	}()
-}
-
-func (l *progressLogger) Stop() {
-	l.timer.Stop()
-	close(l.quit)
-}
-
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain BlockChain, limit uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool) error {
-	nextBlockNumber := s.BlockNumber
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
 		if err != nil {
@@ -93,28 +60,18 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 
 	batch := stateDB.NewBatch()
 
-	progressLogger := NewProgressLogger(logInterval, batch)
-	progressLogger.Start(&nextBlockNumber)
-	defer progressLogger.Stop()
-
-	accountCache := fastcache.New(128 * 1024 * 1024) // 128 Mb
-	storageCache := fastcache.New(128 * 1024 * 1024) // 128 Mb
-	codeCache := fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
-	codeSizeCache := fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
-
-	chainConfig := blockchain.Config()
 	engine := blockchain.Engine()
 	vmConfig := blockchain.GetVMConfig()
-	log.Info("Attempting to start execution from", "block", atomic.LoadUint64(&nextBlockNumber)+1)
-	for {
+
+	stageProgress := s.BlockNumber
+	logTime, logBlock := time.Now(), stageProgress
+
+	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
 
-		blockNum := atomic.LoadUint64(&nextBlockNumber) + 1
-		if limit > 0 && blockNum >= limit {
-			break
-		}
+		stageProgress = blockNum
 
 		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
 		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
@@ -123,23 +80,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 		}
 		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
-		atomic.StoreUint64(&nextBlockNumber, blockNum)
 
-		type cacheSetter interface {
-			SetAccountCache(cache *fastcache.Cache)
-			SetStorageCache(cache *fastcache.Cache)
-			SetCodeCache(cache *fastcache.Cache)
-			SetCodeSizeCache(cache *fastcache.Cache)
-		}
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
 
-		var stateReader interface {
-			state.StateReader
-			cacheSetter
-		}
-		var stateWriter interface {
-			state.WriterWithChangeSets
-			cacheSetter
-		}
 		if core.UsePlainStateExecution {
 			stateReader = state.NewPlainStateReader(batch)
 			stateWriter = state.NewPlainStateWriter(batch, blockNum)
@@ -147,15 +91,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 			stateReader = state.NewDbStateReader(batch)
 			stateWriter = state.NewDbStateWriter(batch, blockNum)
 		}
-		stateReader.SetAccountCache(accountCache)
-		stateReader.SetStorageCache(storageCache)
-		stateReader.SetCodeCache(codeCache)
-		stateReader.SetCodeSizeCache(codeSizeCache)
-
-		stateWriter.SetAccountCache(accountCache)
-		stateWriter.SetStorageCache(storageCache)
-		stateWriter.SetCodeCache(codeCache)
-		stateWriter.SetCodeSizeCache(codeSizeCache)
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
@@ -193,20 +128,52 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, blockchain B
 				}
 			}
 		}
+
+		if changeSetHook != nil {
+			if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+				changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+			}
+		}
+
+		logTime, logBlock = logProgress(logTime, logBlock, blockNum, batch)
 	}
 
-	if err := s.Update(batch, atomic.LoadUint64(&nextBlockNumber)); err != nil {
+	if err := s.Update(batch, stageProgress); err != nil {
 		return err
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
-	log.Info("Completed on", "block", atomic.LoadUint64(&nextBlockNumber))
+	log.Info("Completed on", "block", stageProgress)
 	s.Done()
 	return nil
 }
 
+func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPendingMutations) (time.Time, uint64) {
+	if now%64 != 0 || time.Since(lastLogTime).Seconds() < logInterval {
+		return lastLogTime, prev // return old values because no logging happened
+	}
+
+	speed := float64(now-prev) / float64(logInterval)
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("Executed blocks:",
+		"currentBlock", now,
+		"speed (blk/second)", speed,
+		"state batch", common.StorageSize(batch.BatchSize()),
+		"alloc", common.StorageSize(m.Alloc),
+		"sys", common.StorageSize(m.Sys),
+		"numGC", int(m.NumGC))
+
+	return time.Now(), now
+}
+
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+	if u.UnwindPoint >= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 
@@ -382,4 +349,11 @@ func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, stor
 		return err
 	}
 	return nil
+}
+
+func min(a, b uint64) uint64 {
+	if a <= b {
+		return a
+	}
+	return b
 }

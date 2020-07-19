@@ -82,8 +82,6 @@ type Database interface {
 
 	Keys() ([][]byte, error)
 
-	// MemCopy creates a copy of the database in memory.
-	MemCopy() Database
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)
@@ -115,6 +113,10 @@ type HasKV interface {
 
 type HasNetInterface interface {
 	DB() Database
+}
+
+type NonTransactional interface {
+	ClearBuckets(buckets ...[]byte) error
 }
 
 var errNotSupported = errors.New("not supported")

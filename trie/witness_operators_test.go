@@ -60,6 +60,7 @@ func TestAccountBigBalance(t *testing.T) {
 		balance,
 		false,
 		false,
+		0,
 	}
 
 	var buff bytes.Buffer
@@ -97,6 +98,7 @@ func TestAccountCompactWriteTo(t *testing.T) {
 		big.NewInt(0),
 		false,
 		false,
+		0,
 	}
 
 	var buff bytes.Buffer
@@ -125,6 +127,7 @@ func TestAccountFullWriteTo(t *testing.T) {
 		big.NewInt(10),
 		true,
 		true,
+		0,
 	}
 
 	var buff bytes.Buffer
@@ -165,6 +168,7 @@ func TestAccountPartialNoNonceWriteTo(t *testing.T) {
 		big.NewInt(10),
 		true,
 		true,
+		0,
 	}
 
 	var buff bytes.Buffer
@@ -204,6 +208,7 @@ func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 		big.NewInt(0),
 		true,
 		true,
+		0,
 	}
 
 	var buff bytes.Buffer

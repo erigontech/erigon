@@ -2,6 +2,7 @@ package generate
 
 import (
 	"errors"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"os"
 	"os/signal"
 	"time"
@@ -29,7 +30,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 
 	ig := core.NewIndexGenerator(db, quitCh)
-	cs, ok := core.CSMapper[string(csBucket)]
+	cs, ok := changeset.Mapper[string(csBucket)]
 	if !ok {
 		return errors.New("unknown changeset")
 	}

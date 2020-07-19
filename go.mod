@@ -3,7 +3,6 @@ module github.com/ledgerwatch/turbo-geth
 go 1.13
 
 require (
-	github.com/AskAlexSharov/lmdb-go v1.9.0
 	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
@@ -45,6 +44,7 @@ require (
 	github.com/karalabe/usb v0.0.0-20190919080040-51dc0efba356
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
+	github.com/ledgerwatch/lmdb-go v1.11.0
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12
@@ -67,7 +67,6 @@ require (
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.22.1
-	github.com/valyala/bytebufferpool v1.0.0
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4

@@ -209,7 +209,10 @@ func generateTestChain() (*core.Genesis, []*types.Block) {
 	}
 	gblock := genesis.MustCommit(db)
 	engine := ethash.NewFaker()
-	blocks, _ := core.GenerateChain(context.Background(), config, gblock, engine, db, 1, generate)
+	blocks, _, err := core.GenerateChain(config, gblock, engine, db, 1, generate, false /* intermediateHashes */)
+	if err != nil {
+		panic(err)
+	}
 	blocks = append([]*types.Block{gblock}, blocks...)
 	return genesis, blocks
 }

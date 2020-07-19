@@ -17,8 +17,6 @@
 package downloader
 
 import (
-	"math/big"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -58,9 +56,9 @@ func NewFakePeer(id string, db rawdb.DatabaseReader, hc HeaderChain, dl *Downloa
 
 // Head implements downloader.Peer, returning the current head hash and number
 // of the best known header.
-func (p *FakePeer) Head() (common.Hash, *big.Int) {
+func (p *FakePeer) Head() (common.Hash, uint64) {
 	header := p.hc.CurrentHeader()
-	return header.Hash(), header.Number
+	return header.Hash(), header.Number.Uint64()
 }
 
 // RequestHeadersByHash implements downloader.Peer, returning a batch of headers

@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"time"
 
@@ -117,6 +118,7 @@ type RetestethAPI struct {
 	genesisHash   common.Hash
 	engine        *NoRewardEngine
 	blockchain    *core.BlockChain
+	txCacher      *core.TxSenderCacher
 	txMap         map[common.Address]map[uint64]*types.Transaction // Sender -> Nonce -> Transaction
 	txSenders     map[common.Address]struct{}                      // Set of transaction senders
 	blockInterval uint64
@@ -381,7 +383,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 		ParentHash: chainParams.Genesis.ParentHash,
 		Alloc:      accounts,
 	}
-	chainConfig, genesisHash, _, err := core.SetupGenesisBlock(ethDb, genesis, false /* history */)
+	chainConfig, genesisHash, _, err := core.SetupGenesisBlock(ethDb, genesis, false /* history */, false /* overwrite */)
 	if err != nil {
 		return false, err
 	}
@@ -405,8 +407,8 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 		return false, fmt.Errorf("unrecognised seal engine: %s", chainParams.SealEngine)
 	}
 	engine := &NoRewardEngine{inner: inner, rewardsOn: chainParams.SealEngine != "NoReward"}
-
-	blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, api.blockchain.DestsCache)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, api.blockchain.DestsCache, txCacher)
 	if err != nil {
 		return false, err
 	}
@@ -424,6 +426,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	//api.db = state.NewDatabase(api.ethDb)
 	api.txMap = make(map[common.Address]map[uint64]*types.Transaction)
 	api.txSenders = make(map[common.Address]struct{})
+	api.txCacher = txCacher
 	api.blockInterval = 0
 	return true, nil
 }

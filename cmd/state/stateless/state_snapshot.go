@@ -291,7 +291,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
-			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
+			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation)
 			rl := trie.NewRetainList(0)
 			subTries, err := sl.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err != nil {

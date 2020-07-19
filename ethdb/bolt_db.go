@@ -240,17 +240,6 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func Get(db KV, bucket, key []byte) ([]byte, error) {
-	if getter, ok := db.(NativeGet); ok {
-		dat, err := getter.Get(context.Background(), bucket, key)
-		if err != nil {
-			return nil, err
-		}
-		if dat == nil {
-			return nil, ErrKeyNotFound
-		}
-		return dat, nil
-	}
-
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.View(context.Background(), func(tx Tx) error {
@@ -525,7 +514,7 @@ func InspectDatabase(db Database) error {
 	return errNotSupported
 }
 
-func NewDatabaseWithFreezer(db Database, dir, suffix string) (Database, error) {
+func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
 	// FIXME: implement freezer in Turbo-Geth
 	return db, nil
 }

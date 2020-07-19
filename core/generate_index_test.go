@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"os"
 	"reflect"
 	"sort"
@@ -25,7 +26,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			defer db.Close()
 			ig := NewIndexGenerator(db, make(chan struct{}))
-			csInfo, ok := CSMapper[string(csBucket)]
+			csInfo, ok := changeset.Mapper[string(csBucket)]
 			if !ok {
 				t.Fatal("incorrect cs bucket")
 			}
@@ -65,7 +66,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
 		hashes, expected := generateTestData(t, db, csbucket, 2100)
-		mp := CSMapper[string(csbucket)]
+		mp := changeset.Mapper[string(csbucket)]
 		indexBucket := mp.IndexBucket
 		ig := NewIndexGenerator(db, make(chan struct{}))
 		err := ig.GenerateIndex(0, uint64(2100), csbucket)
@@ -155,7 +156,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 }
 
 func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
-	csInfo, ok := CSMapper[string(csBucket)]
+	csInfo, ok := changeset.Mapper[string(csBucket)]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}
@@ -174,7 +175,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 		}
 
 		defaultIncarnation := make([]byte, 8)
-		binary.BigEndian.PutUint64(defaultIncarnation, ^uint64(1))
+		binary.BigEndian.PutUint64(defaultIncarnation, uint64(1))
 		for i := range addrs {
 			addrs[i] = append(addrs[i], defaultIncarnation...)
 			addrs[i] = append(addrs[i], keys[i]...)
