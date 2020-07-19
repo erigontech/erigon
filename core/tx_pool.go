@@ -130,7 +130,6 @@ type blockChain interface {
 	CurrentBlock() *types.Block
 	GetBlock(hash common.Hash, number uint64) *types.Block
 	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
-	GetTrieDbState() (*state.TrieDbState, error)
 }
 
 // TxPoolConfig are the configuration parameters of the transaction pool.
