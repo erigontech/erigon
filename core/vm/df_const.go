@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"github.com/holiman/uint256"
 	"strconv"
 )
 
@@ -50,14 +51,18 @@ func (d AbsConstValueType) String() string {
 
 type AbsConst struct {
 	kind AbsConstValueType
-	value uint64
+	value uint256.Int
 }
 
 func (c0 AbsConst) String() string {
 	if c0.kind == Bot || c0.kind == Top {
 		return c0.kind.String()
 	} else {
-		return strconv.FormatUint(c0.value, 10)
+		if c0.value.IsUint64() {
+			return strconv.FormatUint(c0.value.Uint64(), 10)
+		} else {
+			return "256bit"
+		}
 	}
 }
 
@@ -91,16 +96,19 @@ func ConstLeq(c0 AbsConst, c1 AbsConst) bool {
 	}
 }
 
+func zero() uint256.Int {
+	return *uint256.NewInt().SetUint64(0)
+}
 
 func ConstTop() AbsConst {
-	return AbsConst{Top, 0}
+	return AbsConst{Top, zero()}
 }
 
 func ConstBot() AbsConst {
-	return AbsConst{Bot, 0}
+	return AbsConst{Bot, zero()}
 }
 
-func ConstValue(value uint64) AbsConst {
+func ConstValue(value uint256.Int) AbsConst {
 	return AbsConst{Value, value}
 }
 

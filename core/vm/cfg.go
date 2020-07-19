@@ -92,11 +92,7 @@ func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
 			}
 			integer := new(uint256.Int)
 			integer.SetBytes(contract.Code[startMin:endMin])
-			if integer.IsUint64() {
-				node.opValue = &AbsConst{Value, integer.Uint64()}
-			} else {
-				node.opValue = &AbsConst{Top, 0}
-			}
+			node.opValue = &AbsConst{Value, *integer}
 			opLength += pushByteSize
 		} else if op == JUMP {
 			jumps = append(jumps, node)

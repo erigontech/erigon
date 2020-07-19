@@ -43,12 +43,23 @@ type edge struct {
 	pc1 int
 }
 
-func resolve(pc int, e state) []edge {
+func resolve(prog *Contract, pc0 int, st0 state) []edge {
 	return nil
 }
 
 func post(st0 state, stmt stmt) state {
-	return botSt()
+	st1 := st0
+
+	if stmt.opcode.IsPush() {
+		st1.stack = append(st1.stack, AbsConst{value,stmt.value})
+	} else {
+		switch stmt.opcode {
+		case JUMP, JUMPI:
+			st1.stack = st1.stack[1:]
+		}
+	}
+
+	return st1
 }
 
 func leq(st0 state, st1 state) bool {
@@ -71,31 +82,31 @@ func lub(st0 state, st1 state) state {
 	return res
 }
 
-func AbsIntCfgHarness(contract *Contract) {
+func AbsIntCfgHarness(prog *Contract) {
 	//jt := newIstanbulInstructionSet()
 
 	startPC := 0
-	codeLen := len(contract.Code)
+	codeLen := len(prog.Code)
 	D := make(map[int]state)
 	for pc := 0; pc < codeLen; pc++ {
 		D[pc] = botSt()
 	}
 	D[startPC] = startSt()
 
-	workList := resolve(startPC, D[startPC])
+	workList := resolve(prog, startPC, D[startPC])
 	for len(workList) > 0 {
 		var e edge
 		e, workList = workList[0], workList[1:]
 		post1 := post(D[e.pc0], e.stmt)
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
-			workList = append(workList, resolve(e.pc1, D[e.pc1])...)
+			workList = append(workList, resolve(prog, e.pc1, D[e.pc1])...)
 		}
 	}
 
 	var edges []edge
 	for pc := 0; pc < codeLen; pc++ {
-		edges = append(edges, resolve(pc, D[pc])...)
+		edges = append(edges, resolve(prog, pc, D[pc])...)
 	}
 	println(edges)
 	println("done")
