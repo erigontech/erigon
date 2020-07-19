@@ -61,7 +61,7 @@ func (c0 AbsConst) String() string {
 	}
 }
 
-func (c0 *AbsConst) Lub(c1 AbsConst) AbsConst {
+func ConstLub(c0 AbsConst, c1 AbsConst) AbsConst {
 	if c0.kind == Value && c1.kind == Value {
 		if c0.value != c1.value {
 			return ConstTop()
@@ -80,6 +80,17 @@ func (c0 *AbsConst) Lub(c1 AbsConst) AbsConst {
 		panic("Missing condition")
 	}
 }
+
+func ConstLeq(c0 AbsConst, c1 AbsConst) bool {
+	if c0.kind == Bot || c1.kind == Top {
+		return true
+	} else if c0.kind == value && c1.kind == value && c0.value == c1.value {
+		return true
+	} else {
+		return false
+	}
+}
+
 
 func ConstTop() AbsConst {
 	return AbsConst{Top, 0}
@@ -151,7 +162,7 @@ func (spec UnbSpec) Lub (astate0 AbsState, astate1 AbsState) AbsState {
 	}
 
 	for i := 0; i < len(state0.stack); i++ {
-		lub := state0.stack[i].Lub(state1.stack[i])
+		lub := ConstLub(state0.stack[i], state1.stack[i])
 		res.stack = append(res.stack, lub)
 	}
 
@@ -259,7 +270,7 @@ func (spec BndSpec) Lub (astate0 AbsState, astate1 AbsState) AbsState {
 	state1 := astate1.(BndState)
 
 	for i := 0; i < spec.k; i++ {
-		lub := state0.stack[i].Lub(state1.stack[i])
+		lub := ConstLub(state0.stack[i], state1.stack[i])
 		res.stack = append(res.stack, lub)
 	}
 

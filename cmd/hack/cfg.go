@@ -13,7 +13,8 @@ func testGenCfg() error {
 	//cfg0Test1()
 	//dfTest1()
 	//dfTest2()
-	dfTest3()
+	//dfTest3()
+	absIntTest1()
 	return nil
 }
 
@@ -51,6 +52,12 @@ func dfTest3() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
 	vm.SimpleConstPropHarness(contract)
+}
+
+func absIntTest1() {
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
+	vm.AbsIntCfgHarness(contract)
 }
 
 /////////////////////////////////////////////////////
