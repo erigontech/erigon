@@ -20,21 +20,32 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases()
 	defer closeAll()
 
+	bucketID := 0
+	bucket1 := dbutils.Buckets[bucketID]
+	bucket2 := dbutils.Buckets[bucketID+1]
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
 		db := db
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
-			b := tx.Bucket(dbutils.Buckets[0])
-			b1 := tx.Bucket(dbutils.Buckets[1])
-			for i := uint8(0); i < 10; i++ {
-				require.NoError(t, b.Put([]byte{i}, []byte{1}))
-				require.NoError(t, b1.Put([]byte{i}, []byte{1}))
+			b := tx.Bucket(bucket1)
+			b1 := tx.Bucket(bucket2)
+			c := b.Cursor()
+			c1 := b1.Cursor()
+			require.NoError(t, c.Append([]byte{0}, []byte{1}))
+			require.NoError(t, c1.Append([]byte{0}, []byte{1}))
+			require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
+			require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1}))
+			require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
+			require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
+			require.NoError(t, c.Append([]byte{0, 0, 1}, []byte{1}))
+			require.NoError(t, c1.Append([]byte{0, 0, 1}, []byte{1}))
+			for i := uint8(1); i < 10; i++ {
+				require.NoError(t, c.Append([]byte{i}, []byte{1}))
+				require.NoError(t, c1.Append([]byte{i}, []byte{1}))
 			}
-			require.NoError(t, b.Put([]byte{0, 1}, []byte{1}))
-			require.NoError(t, b1.Put([]byte{0, 1}, []byte{1}))
-			require.NoError(t, b.Put([]byte{0, 0, 1}, []byte{1}))
-			require.NoError(t, b1.Put([]byte{0, 0, 1}, []byte{1}))
+			require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+			require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 			return nil
 		}); err != nil {
 			require.NoError(t, err)
@@ -46,17 +57,17 @@ func TestManagedTx(t *testing.T) {
 		msg := fmt.Sprintf("%T", db)
 
 		t.Run("NoValues iterator "+msg, func(t *testing.T) {
-			testNoValuesIterator(t, db)
+			testNoValuesIterator(t, db, bucket1)
 		})
 		t.Run("ctx cancel "+msg, func(t *testing.T) {
 			t.Skip("probably need enable after go 1.4")
-			testCtxCancel(t, db)
+			testCtxCancel(t, db, bucket1)
 		})
 		t.Run("filter "+msg, func(t *testing.T) {
-			testPrefixFilter(t, db)
+			testPrefixFilter(t, db, bucket1)
 		})
 		t.Run("multiple cursors "+msg, func(t *testing.T) {
-			testMultiCursor(t, db)
+			testMultiCursor(t, db, bucket1, bucket2)
 		})
 	}
 }
@@ -101,11 +112,11 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	}
 }
 
-func testPrefixFilter(t *testing.T, db ethdb.KV) {
+func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 []byte) {
 	assert := assert.New(t)
 
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.Buckets[0])
+		b := tx.Bucket(bucket1)
 		c := b.Cursor().Prefix([]byte{2})
 		counter := 0
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
@@ -137,7 +148,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 			}
 			counter++
 		}
-		assert.Equal(12, counter)
+		assert.Equal(13, counter)
 
 		counter = 0
 		if err := c.Walk(func(_, _ []byte) (bool, error) {
@@ -146,7 +157,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		}); err != nil {
 			return err
 		}
-		assert.Equal(12, counter)
+		assert.Equal(13, counter)
 
 		k2, _, err2 = c.Seek([]byte{2})
 		assert.NoError(err2)
@@ -157,13 +168,13 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 	}
 
 }
-func testCtxCancel(t *testing.T, db ethdb.KV) {
+func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 []byte) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.Buckets[0]).Cursor()
+		c := tx.Bucket(bucket1).Cursor()
 		for {
 			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -176,11 +187,11 @@ func testCtxCancel(t *testing.T, db ethdb.KV) {
 	}
 }
 
-func testNoValuesIterator(t *testing.T, db ethdb.KV) {
+func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 []byte) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.Buckets[0])
+		b := tx.Bucket(bucket1)
 		c := b.Cursor()
 
 		k, _, err := c.First()
@@ -188,16 +199,19 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 		assert.Equal([]byte{0}, k)
 		k, _, err = c.Next()
 		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 1}, k)
+		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
 		k, _, err = c.Next()
 		assert.NoError(err)
-		assert.Equal([]byte{0, 1}, k)
+		assert.Equal([]byte{0, 0, 0, 0, 0, 2}, k)
+		k, _, err = c.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{0, 0, 1}, k)
 		k, _, err = c.Next()
 		assert.NoError(err)
 		assert.Equal([]byte{1}, k)
 		k, _, err = c.Seek([]byte{0, 1})
 		assert.NoError(err)
-		assert.Equal([]byte{0, 1}, k)
+		assert.Equal([]byte{1}, k)
 		k, _, err = c.Seek([]byte{2})
 		assert.NoError(err)
 		assert.Equal([]byte{2}, k)
@@ -208,9 +222,9 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 		k, _, err = c.First()
 		assert.NoError(err)
 		assert.Equal([]byte{0}, k)
-		k, _, err = c.SeekTo([]byte{0, 1})
+		k, _, err = c.SeekTo([]byte{0, 0, 0, 0})
 		assert.NoError(err)
-		assert.Equal([]byte{0, 1}, k)
+		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
 		k, _, err = c.SeekTo([]byte{2})
 		assert.NoError(err)
 		assert.Equal([]byte{2}, k)
@@ -224,16 +238,19 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 		assert.Equal([]byte{0}, k)
 		k, _, err = c2.Next()
 		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 1}, k)
+		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
 		k, _, err = c2.Next()
 		assert.NoError(err)
-		assert.Equal([]byte{0, 1}, k)
+		assert.Equal([]byte{0, 0, 0, 0, 0, 2}, k)
+		k, _, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{0, 0, 1}, k)
 		k, _, err = c2.Next()
 		assert.NoError(err)
 		assert.Equal([]byte{1}, k)
 		k, _, err = c2.Seek([]byte{0, 1})
 		assert.NoError(err)
-		assert.Equal([]byte{0, 1}, k)
+		assert.Equal([]byte{1}, k)
 		k, _, err = c2.Seek([]byte{0})
 		assert.NoError(err)
 		assert.Equal([]byte{0}, k)
@@ -250,12 +267,12 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db ethdb.KV) {
+func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 []byte) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		c1 := tx.Bucket(dbutils.Buckets[0]).Cursor()
-		c2 := tx.Bucket(dbutils.Buckets[1]).Cursor()
+		c1 := tx.Bucket(bucket1).Cursor()
+		c2 := tx.Bucket(bucket2).Cursor()
 
 		k1, v1, err := c1.First()
 		assert.NoError(err)
@@ -271,6 +288,33 @@ func testMultiCursor(t *testing.T, db ethdb.KV) {
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
+		k1, v1, err = c1.Seek([]byte{0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0, 0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0, 0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Next()
+		assert.NoError(err)
+		k2, v2, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
 		k1, v1, err = c1.Seek([]byte{2})
 		assert.NoError(err)
 		k2, v2, err = c2.Seek([]byte{2})
@@ -303,7 +347,16 @@ func TestMultipleBuckets(t *testing.T) {
 				for i := uint8(0); i < 12; i++ {
 					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
 				}
-				return b.Delete([]byte{5}) // delete from first bucket key 5, then will seek on it and expect to see key 6
+				// delete from first bucket key 5, then will seek on it and expect to see key 6
+				if err := b.Delete([]byte{5}); err != nil {
+					return err
+				}
+				// delete non-existing key
+				if err := b.Delete([]byte{6, 1}); err != nil {
+					return err
+				}
+
+				return nil
 			}); err != nil {
 				require.NoError(t, err)
 			}
