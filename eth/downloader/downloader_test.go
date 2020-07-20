@@ -45,6 +45,7 @@ const OwerwriteMaxForkAncestry = 5000
 func init() {
 	maxForkAncestry = OwerwriteMaxForkAncestry
 	blockCacheItems = OwerwriteBlockCacheItems
+	fsHeaderSafetyNet = 256
 	fsHeaderContCheck = 500 * time.Millisecond
 }
 
