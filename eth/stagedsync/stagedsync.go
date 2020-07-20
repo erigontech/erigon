@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-const prof = false // whether to profile
+const prof = true // whether to profile
 
 func PrepareStagedSync(
 	d DownloaderGlue,

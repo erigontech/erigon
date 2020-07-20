@@ -337,6 +337,17 @@ func (pool *TxPool) Start() error {
 	return nil
 }
 
+// AddBlocks modifies the transaction pool based on the newly mined blocks
+// All transactions that are inside the blocks, need to be removed from the pool
+func (pool *TxPool) AddBlocks(from, to uint64) {
+}
+
+// UnwindBlocks modifies the transaction pool based on unwound blocks
+// All transactions that were inside the unwound blocks, need to be returned to the pool
+func (pool *TxPool) UnwindBlocks(from, to uint64) {
+
+}
+
 // loop is the transaction pool's main event loop, waiting for and reacting to
 // outside blockchain events as well as for various reporting and transaction
 // eviction events.
