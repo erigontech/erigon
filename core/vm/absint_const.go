@@ -24,6 +24,18 @@ type state struct {
 	stack []AbsConst
 }
 
+func (state * state) Push(value AbsConst) {
+	rest := state.stack[0:absStackLen-1]
+	state.stack = []AbsConst{value}
+	state.stack = append(state.stack, rest...)
+}
+
+func (state * state) Pop() AbsConst {
+	res := state.stack[0]
+	state.stack = append(state.stack[1:], ConstTop())
+	return res
+}
+
 func botSt() state {
 	st := state{value, make([]AbsConst, absStackLen)}
 	for i := range st.stack {
@@ -110,15 +122,30 @@ func post(st0 state, stmt stmt) state {
 	st1 := st0
 
 	if stmt.opcode.IsPush() {
-		pushConst := ConstValue(stmt.value)
-		//st1.stack = append([]AbsConst{}, st1.stack[1:absStackLen]...)
-		st1.stack = []AbsConst{pushConst}
-		fmt.Printf("push %v %v", pushConst, st1.stack)
+		st1.Push(ConstValue(stmt.value))
+	} else if stmt.opcode == MLOAD {
+		st1.Pop()
+		st1.Push(ConstTop())
+	} else if stmt.opcode == LT {
+		lhs := st1.Pop()
+		rhs := st1.Pop()
+		if lhs.kind == Value && rhs.kind == Value {
+			res := lhs.value.Lt(&rhs.value)
+			resi := uint256.NewInt()
+			if res {
+				resi.SetOne()
+			} else {
+				resi.Clear()
+			}
+			st1.Push(ConstValue(*resi))
+		} else {
+			st1.Push(ConstTop())
+		}
 	} else {
 		switch stmt.opcode {
 		case JUMP, JUMPI:
 			//Popping off causes a top to be pulled into the abstract stack
-			st1.stack = append(st1.stack[1:], ConstTop())
+			st1.Pop()
 		}
 	}
 
@@ -210,16 +237,19 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	workList := resolve(prog, startPC, D[startPC], stmts[startPC])
 	for len(workList) > 0 {
+		print("\n\n")
 		fmt.Println("worklist:")
 		printEdges(workList)
 
 		var e edge
 		e, workList = workList[0], workList[1:]
+		fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0])
 		post1 := post(D[e.pc0], e.stmt)
-		fmt.Printf("post: %v\n", post1)
-		fmt.Printf("D: %v\n", D[e.pc1])
+		fmt.Printf("post\t\t%v\n", post1)
+		fmt.Printf("D\t\t%v\n", D[e.pc1])
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
+			fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1])
 			workList = append(workList, resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])...)
 		}
 	}
