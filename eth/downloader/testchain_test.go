@@ -43,13 +43,13 @@ var (
 )
 
 // The common prefix of all test chains:
-var testChainBase = newTestChain(OwerwriteBlockCacheItems+64, testDb, testGenesis)
+var testChainBase = newTestChain(OwerwriteBlockCacheItems+200, testDb, testGenesis)
 
 // Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
 
 func TestMain(m *testing.M) {
-	var forkLen = int(maxForkAncestry/5 + 50)
+	var forkLen = OwerwriteMaxForkAncestry + 50
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { testChainForkLightA = testChainBase.makeFork(forkLen, false, 1); wg.Done() }()

@@ -38,11 +38,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-const OwerwriteBlockCacheItems = 128
+const OwerwriteBlockCacheItems = 512
+const OwerwriteMaxForkAncestry = 5000
 
 // Reduce some of the parameters to make the tester faster.
 func init() {
-	maxForkAncestry = 10000
+	maxForkAncestry = OwerwriteMaxForkAncestry
 	blockCacheItems = OwerwriteBlockCacheItems
 	fsHeaderContCheck = 500 * time.Millisecond
 }
@@ -632,8 +633,8 @@ func testForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 	defer tester.peerDb.Close()
 
-	chainA := testChainForkLightA.shorten(testChainBase.len() + 32)
-	chainB := testChainForkLightB.shorten(testChainBase.len() + 32)
+	chainA := testChainForkLightA.shorten(testChainBase.len() + 80)
+	chainB := testChainForkLightB.shorten(testChainBase.len() + 80)
 	tester.newPeer("fork A", protocol, chainA)
 	tester.newPeer("fork B", protocol, chainB)
 
@@ -666,8 +667,8 @@ func testHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 	defer tester.peerDb.Close()
 
-	chainA := testChainForkLightA.shorten(testChainBase.len() + 32)
-	chainB := testChainForkHeavy.shorten(testChainBase.len() + 32)
+	chainA := testChainForkLightA.shorten(testChainBase.len() + 80)
+	chainB := testChainForkHeavy.shorten(testChainBase.len() + 80)
 	tester.newPeer("light", protocol, chainA)
 	tester.newPeer("heavy", protocol, chainB)
 
