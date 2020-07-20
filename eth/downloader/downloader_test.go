@@ -38,7 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-const OwerwriteBlockCacheItems = 512
+const OwerwriteBlockCacheItems = 1024
 const OwerwriteMaxForkAncestry = 5000
 
 // Reduce some of the parameters to make the tester faster.
