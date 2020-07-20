@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"github.com/holiman/uint256"
+	"strings"
 )
 
 //////////////////////////////////////////////////
@@ -40,6 +41,14 @@ type stmt struct {
 	operation operation
 	value uint256.Int
 	numBytes int
+}
+
+func (state state) String() string {
+	var strs []string
+	for _, c := range state.stack {
+		strs = append(strs, c.String())
+	}
+	return strings.Join(strs, " ")
 }
 
 func (stmt stmt) String() string {
@@ -93,7 +102,6 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 
 	fmt.Printf("\nResolve: %v %v\n", pc0, stmt)
 	printEdges(edges)
-	print("\n")
 
 	return edges
 }
@@ -204,16 +212,20 @@ func AbsIntCfgHarness(prog *Contract) error {
 		var e edge
 		e, workList = workList[0], workList[1:]
 		post1 := post(D[e.pc0], e.stmt)
+		fmt.Printf("post: %v\n", post1)
+		fmt.Printf("D: %v\n", D[e.pc1])
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
 			workList = append(workList, resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])...)
 		}
 	}
 
+	print("\nFinal resolve....")
 	var edges []edge
 	for pc := 0; pc < codeLen; pc++ {
 		edges = append(edges, resolve(prog, pc, D[pc], stmts[pc])...)
 	}
+	//need to run a DFS from the entry point to pick only reachable stmts
 
 	fmt.Printf("\n# of edges: %v\n", len(edges))
 	printEdges(edges)
