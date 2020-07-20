@@ -38,10 +38,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
+const OwerwriteBlockCacheItems = 256
+
 // Reduce some of the parameters to make the tester faster.
 func init() {
 	maxForkAncestry = 10000
-	blockCacheItems = 1024
+	blockCacheItems = OwerwriteBlockCacheItems
 	fsHeaderContCheck = 500 * time.Millisecond
 }
 

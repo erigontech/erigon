@@ -42,14 +42,8 @@ var (
 	testGenesis = core.GenesisBlockForTesting(testDb, testAddress, big.NewInt(1000000000))
 )
 
-const OwerwriteBlockCacheItems = 256
-
-func init() {
-	blockCacheItems = OwerwriteBlockCacheItems
-}
-
 // The common prefix of all test chains:
-var testChainBase = newTestChain(blockCacheItems+200, testDb, testGenesis)
+var testChainBase = newTestChain(OwerwriteBlockCacheItems+200, testDb, testGenesis)
 
 // Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
