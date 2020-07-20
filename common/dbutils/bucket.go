@@ -205,6 +205,44 @@ var Buckets = [][]byte{
 
 var BucketsIndex = map[string]int{}
 
+type dupSortConfigEntry struct {
+	Bucket  []byte
+	ID      int
+	FromLen int
+	ToLen   int
+}
+
+var DupSortConfig = []dupSortConfigEntry{
+	{
+		Bucket:  CurrentStateBucket,
+		ToLen:   40,
+		FromLen: 72,
+	},
+	{
+		Bucket:  PlainStateBucket,
+		ToLen:   28,
+		FromLen: 60,
+	},
+	// just lazy to re-generate Senders now, but no problems with it
+	//{
+	//	Bucket:  Senders,
+	//	ToLen:   8,
+	//	FromLen: 40,
+	//},
+
+	// Here I found problem. LMDB has limitation of keys size and 2nd key of DupFixed bucket has same restrictions... need find solution
+	//{
+	//	Bucket:  AccountsHistoryBucket,
+	//	ToLen:   20,
+	//	FromLen: 28,
+	//},
+	//{
+	//	Bucket:  StorageHistoryBucket,
+	//	ToLen:   20,
+	//	FromLen: 60,
+	//},
+}
+
 func init() {
 	sort.SliceStable(Buckets, func(i, j int) bool {
 		return bytes.Compare(Buckets[i], Buckets[j]) < 0
@@ -213,4 +251,9 @@ func init() {
 	for i := range Buckets {
 		BucketsIndex[string(Buckets[i])] = i
 	}
+
+	for i := range DupSortConfig {
+		DupSortConfig[i].ID = BucketsIndex[string(DupSortConfig[i].Bucket)]
+	}
+
 }

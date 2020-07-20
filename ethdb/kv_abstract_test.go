@@ -21,6 +21,16 @@ func TestManagedTx(t *testing.T) {
 	defer closeAll()
 
 	bucketID := 0
+	if len(dbutils.DupSortConfig) > 0 {
+		defaultConfig := dbutils.DupSortConfig[0]
+		defer func() {
+			dbutils.DupSortConfig[0] = defaultConfig
+		}()
+
+		dbutils.DupSortConfig[0].ToLen = 4
+		dbutils.DupSortConfig[0].FromLen = 6
+		bucketID = dbutils.DupSortConfig[0].ID
+	}
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
 	ctx := context.Background()
@@ -315,6 +325,34 @@ func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 []byte) {
 		assert.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0, 0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0, 0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Next()
+		assert.NoError(err)
+		k2, v2, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
 		k1, v1, err = c1.Seek([]byte{2})
 		assert.NoError(err)
 		k2, v2, err = c2.Seek([]byte{2})
@@ -347,6 +385,7 @@ func TestMultipleBuckets(t *testing.T) {
 				for i := uint8(0); i < 12; i++ {
 					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
 				}
+
 				// delete from first bucket key 5, then will seek on it and expect to see key 6
 				if err := b.Delete([]byte{5}); err != nil {
 					return err
