@@ -65,8 +65,6 @@ func (e edge) String() string {
 }
 
 func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
-	//fmt.Printf("RESOLVE: %v %v %v %v\n", pc0, stmt.opcode, stmt.operation.halts, stmt.operation.valid)
-
 	if !stmt.operation.valid || stmt.operation.halts {
 		return nil
 	}
@@ -81,7 +79,6 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 				edges = append(edges, edge{pc0, stmt, pc1})
 			} else {
 				panic("Invalid program counter. Cannot resolve jump.")
-
 			}
 		} else if jumpDest.kind == Top {
 			panic("Imprecise jump found. Cannot resolve jump.")
@@ -93,6 +90,10 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 			edges = append(edges, edge{pc0, stmt, pc0 + stmt.numBytes})
 		}
 	}
+
+	fmt.Printf("\nResolve: %v %v\n", pc0, stmt)
+	printEdges(edges)
+	print("\n")
 
 	return edges
 }
