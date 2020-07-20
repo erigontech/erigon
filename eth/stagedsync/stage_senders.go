@@ -37,10 +37,20 @@ type Stage3Config struct {
 	Now             time.Time
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh chan struct{}) error {
-	if toBlock > 0 && toBlock <= s.BlockNumber {
+func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh <-chan struct{}) error {
+	prevStageProgress, _, errStart := stages.GetStageProgress(db, stages.Bodies)
+	if errStart != nil {
+		return errStart
+	}
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
+	}
+	if to <= s.BlockNumber {
+		s.Done()
 		return nil
 	}
+	log.Info("Senders recovery", "from", s.BlockNumber, "to", to)
 
 	if cfg.StartTrace {
 		filePath := fmt.Sprintf("trace_%d_%d_%d.out", cfg.Now.Day(), cfg.Now.Hour(), cfg.Now.Minute())
@@ -69,21 +79,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return err
 		}
 	}
-	if err := common.Stopped(quitCh); err != nil {
-		return err
-	}
-	bodiesStageProgress, _, errStart := stages.GetStageProgress(db, stages.Bodies)
-	if errStart != nil {
-		return errStart
-	}
 
-	var toBlockNumber = bodiesStageProgress
-	if toBlock > 0 && toBlock < bodiesStageProgress {
-		toBlockNumber = toBlock
-	}
-	log.Info("Senders recovery", "from", s.BlockNumber+1, "to", toBlockNumber)
-
-	canonical := make([]common.Hash, toBlockNumber-s.BlockNumber+1)
+	canonical := make([]common.Hash, to-s.BlockNumber+1)
 	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
@@ -96,7 +93,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return true, nil
 		}
 
-		if currentHeaderIdx > toBlockNumber-s.BlockNumber { // if header stage is ehead of body stage
+		if currentHeaderIdx > to-s.BlockNumber { // if header stage is ehead of body stage
 			return false, nil
 		}
 
@@ -118,7 +115,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
-			if blockNumber > toBlockNumber {
+			if blockNumber > to {
 				return false, nil
 			}
 
@@ -134,7 +131,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 				if blockNumber == uint64(cfg.ToProcess) {
 					// Flush the profiler
 					pprof.StopCPUProfile()
-					common.SafeClose(quitCh)
+					//common.SafeClose(quitCh)
 					return false, nil
 				}
 			}
@@ -189,7 +186,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
-	return s.DoneAndUpdate(db, toBlockNumber)
+	return s.DoneAndUpdate(db, to)
 }
 
 type senderRecoveryJob struct {

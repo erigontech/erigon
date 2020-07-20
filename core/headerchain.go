@@ -27,8 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -66,10 +64,6 @@ type HeaderChain struct {
 	currentHeader     atomic.Value // Current head of the header chain (may be above the block chain!)
 	currentHeaderHash common.Hash  // Hash of the current head of the header chain (prevent recomputing all the time)
 
-	headerCache *lru.Cache // Cache for the most recent block headers
-	tdCache     *lru.Cache // Cache for the most recent block total difficulties
-	numberCache *lru.Cache // Cache for the most recent block numbers
-
 	procInterrupt func() bool
 
 	rand   *mrand.Rand
@@ -79,9 +73,6 @@ type HeaderChain struct {
 // NewHeaderChain creates a new HeaderChain structure. ProcInterrupt points
 // to the parent's interrupt semaphore.
 func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine, procInterrupt func() bool) (*HeaderChain, error) {
-	headerCache, _ := lru.New(headerCacheLimit)
-	tdCache, _ := lru.New(tdCacheLimit)
-	numberCache, _ := lru.New(numberCacheLimit)
 
 	// Seed a fast but crypto originating random generator
 	seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
@@ -92,9 +83,6 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 	hc := &HeaderChain{
 		config:        config,
 		chainDb:       chainDb,
-		headerCache:   headerCache,
-		tdCache:       tdCache,
-		numberCache:   numberCache,
 		procInterrupt: procInterrupt,
 		rand:          mrand.New(mrand.NewSource(seed.Int64())),
 		engine:        engine,
@@ -120,14 +108,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 // GetBlockNumber retrieves the block number belonging to the given hash
 // from the cache or database
 func (hc *HeaderChain) GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash) *uint64 {
-	if cached, ok := hc.numberCache.Get(hash); ok {
-		number := cached.(uint64)
-		return &number
-	}
 	number := rawdb.ReadHeaderNumber(dbr, hash)
-	if number != nil {
-		hc.numberCache.Add(hash, *number)
-	}
 	return number
 }
 
@@ -217,9 +198,6 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 	} else {
 		status = SideStatTy
 	}
-	hc.tdCache.Add(hash, externTd)
-	hc.headerCache.Add(hash, header)
-	hc.numberCache.Add(hash, number)
 	return
 }
 
@@ -398,16 +376,10 @@ func (hc *HeaderChain) GetAncestor(hash common.Hash, number, ancestor uint64, ma
 // GetTd retrieves a block's total difficulty in the canonical chain from the
 // database by hash and number, caching it if found.
 func (hc *HeaderChain) GetTd(dbr ethdb.Getter, hash common.Hash, number uint64) *big.Int {
-	// Short circuit if the td's already in the cache, retrieve otherwise
-	if cached, ok := hc.tdCache.Get(hash); ok {
-		return cached.(*big.Int)
-	}
 	td := rawdb.ReadTd(dbr, hash, number)
 	if td == nil {
 		return nil
 	}
-	// Cache the found body for next time and return
-	hc.tdCache.Add(hash, td)
 	return td
 }
 
@@ -424,16 +396,10 @@ func (hc *HeaderChain) GetTdByHash(hash common.Hash) *big.Int {
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header {
-	// Short circuit if the header's already in the cache, retrieve otherwise
-	if header, ok := hc.headerCache.Get(hash); ok {
-		return header.(*types.Header)
-	}
 	header := rawdb.ReadHeader(hc.chainDb, hash, number)
 	if header == nil {
 		return nil
 	}
-	// Cache the found header for next time and return
-	hc.headerCache.Add(hash, header)
 	return header
 }
 
@@ -451,9 +417,6 @@ func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
 // In theory, if header is present in the database, all relative components
 // like td and hash->number should be present too.
 func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
-	if hc.numberCache.Contains(hash) || hc.headerCache.Contains(hash) {
-		return true
-	}
 	return rawdb.HasHeader(hc.chainDb, hash, number)
 }
 
@@ -480,7 +443,6 @@ func (hc *HeaderChain) CurrentHeader() *types.Header {
 // SetCurrentHeader sets the current head header of the canonical chain.
 func (hc *HeaderChain) SetCurrentHeader(dbw ethdb.Putter, head *types.Header) {
 	rawdb.WriteHeadHeaderHash(dbw, head.Hash())
-
 	hc.currentHeader.Store(head)
 	hc.currentHeaderHash = head.Hash()
 	headHeaderGauge.Update(head.Number.Int64())
@@ -544,11 +506,6 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 	if _, err := batch.Commit(); err != nil {
 		panic(err)
 	}
-
-	// Clear out any stale content from the caches
-	hc.headerCache.Purge()
-	hc.tdCache.Purge()
-	hc.numberCache.Purge()
 }
 
 // SetGenesis sets a new genesis block header for the chain

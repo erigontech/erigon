@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -172,8 +173,10 @@ func speculativeExecution(blockNum uint64) {
 	vmConfig1 := vm.Config{Tracer: ct1, Debug: true}
 	vmConfig2 := vm.Config{Tracer: ct2, Debug: true}
 	vmConfig3 := vm.Config{Tracer: ct3, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig1, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig1, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)

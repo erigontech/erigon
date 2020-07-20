@@ -272,6 +272,12 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	if newCanonical {
 		*blockNumber = lastHeader.Number.Uint64()
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
+		currentPos := (lastHeader.Number.Uint64() - origin) * 40
+		hash := collection[currentPos:currentPos+32]
+		encoded := collection[currentPos+32:currentPos+40]
+		if err := batch.Put(dbutils.HeaderNumberPrefix, common.CopyBytes(hash), common.CopyBytes(encoded); err != nil {
+			log.Crit("Failed to store header", "err", err)
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return false, 0, fmt.Errorf("write header markers into disk: %w", err)
@@ -286,6 +292,9 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	}
 	if ignored > 0 {
 		ctx = append(ctx, []interface{}{"ignored", ignored}...)
+	}
+	if reorg {
+		ctx = append(ctx, []interface{}{"reorg", reorg, "forkBlockNumber", forkBlockNumber}...)
 	}
 	log.Info("Imported new block headers", ctx...)
 	return reorg, forkBlockNumber, nil

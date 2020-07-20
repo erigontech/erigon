@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -47,10 +48,12 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, nil, txCacher)
 	if err != nil {
 		return err
 	}
+	defer bc.Stop()
 
 	noOpWriter := state.NewNoopWriter()
 

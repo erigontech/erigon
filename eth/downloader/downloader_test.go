@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // Reduce some of the parameters to make the tester faster.
@@ -92,7 +91,7 @@ func newTester() *downloadTester {
 	if err != nil {
 		panic(err)
 	}
-	tester.downloader = New(uint64(FullSync), tester.stateDb, trie.NewSyncBloom(1, tester.stateDb), new(event.TypeMux), tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, nil /* syncBloom */, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 
@@ -107,6 +106,7 @@ func (dl *downloadTester) terminate() {
 func (dl *downloadTester) sync(id string, td *big.Int, mode SyncMode) error {
 	dl.lock.RLock()
 	hash := dl.peers[id].chain.headBlock().Hash()
+	number := dl.peers[id].chain.headBlock().NumberU64()
 	// If no particular TD was requested, load from the peer's blockchain
 	if td == nil {
 		td = dl.peers[id].chain.td(hash)
@@ -114,7 +114,7 @@ func (dl *downloadTester) sync(id string, td *big.Int, mode SyncMode) error {
 	dl.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := dl.downloader.synchronise(id, hash, td, mode, vm.NewDestsCache(100), getTestTxPoolControl())
+	err := dl.downloader.synchronise(id, hash, number, mode, vm.NewDestsCache(100), getTestTxPoolControl())
 	select {
 	case <-dl.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle
@@ -282,10 +282,6 @@ func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks
 	return false, nil
 }
 
-func (dl *downloadTester) Config() *params.ChainConfig {
-	return nil
-}
-
 func (dl *downloadTester) GetVMConfig() *vm.Config {
 	return nil
 }
@@ -413,9 +409,9 @@ type downloadTesterPeer struct {
 
 // Head constructs a function to retrieve a peer's current head hash
 // and total difficulty.
-func (dlp *downloadTesterPeer) Head() (common.Hash, *big.Int) {
+func (dlp *downloadTesterPeer) Head() (common.Hash, uint64) {
 	b := dlp.chain.headBlock()
-	return b.Hash(), dlp.chain.td(b.Hash())
+	return b.Hash(), b.NumberU64()
 }
 
 // RequestHeadersByHash constructs a GetBlockHeaders function based on a hashed
@@ -1115,6 +1111,7 @@ func TestHighTDStarvationAttack64Full(t *testing.T) { testHighTDStarvationAttack
 func TestHighTDStarvationAttack64Light(t *testing.T) { testHighTDStarvationAttack(t, 64, LightSync) }
 
 func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
+	t.Skip("we ignore handshake TD")
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1172,7 +1169,7 @@ func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 		// Simulate a synchronisation and check the required result
 		tester.downloader.synchroniseMock = func(string, common.Hash) error { return tt.result }
 
-		_ = tester.downloader.Synchronise(id, tester.genesis.Hash(), big.NewInt(1000), FullSync, dests, getTestTxPoolControl())
+		_ = tester.downloader.Synchronise(id, tester.genesis.Hash(), tester.genesis.NumberU64(), FullSync, dests, getTestTxPoolControl())
 		if _, ok := tester.peers[id]; !ok != tt.drop {
 			t.Errorf("test %d: peer drop mismatch for %v: have %v, want %v", i, tt.result, !ok, tt.drop)
 		}
@@ -1541,7 +1538,7 @@ type floodingTestPeer struct {
 	tester *downloadTester
 }
 
-func (ftp *floodingTestPeer) Head() (common.Hash, *big.Int) { return ftp.peer.Head() }
+func (ftp *floodingTestPeer) Head() (common.Hash, uint64) { return ftp.peer.Head() }
 func (ftp *floodingTestPeer) RequestHeadersByHash(hash common.Hash, count int, skip int, reverse bool) error {
 	return ftp.peer.RequestHeadersByHash(hash, count, skip, reverse)
 }

@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -120,7 +121,8 @@ func (t *BlockTest) Run(_ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
-	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		return err
 	}

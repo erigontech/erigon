@@ -67,7 +67,6 @@ require (
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.22.1
-	github.com/valyala/bytebufferpool v1.0.0
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4

@@ -20,44 +20,50 @@ import (
 )
 
 func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	syncHeadNumber, _, err := stages.GetStageProgress(db, stages.Execution)
+	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
 	}
 
-	if s.BlockNumber == syncHeadNumber {
+	if s.BlockNumber == to {
 		// we already did hash check for this block
-		// we don't do the obvious `if s.BlockNumber > syncHeadNumber` to support reorgs more naturally
+		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
 		s.Done()
 		return nil
 	}
 
-	if s.BlockNumber == 0 {
-		// Special case - if this is the first cycle, we need to produce hashed state first
-		log.Info("Initial hashing plain state", "to", syncHeadNumber)
-		if err := promoteHashedStateCleanly(s, db, syncHeadNumber, datadir, quit); err != nil {
-			return err
-		}
-	}
-	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", syncHeadNumber)
-
-	if err := updateIntermediateHashes(s, db, s.BlockNumber, syncHeadNumber, datadir, quit); err != nil {
-		return err
-	}
-	return s.DoneAndUpdate(db, syncHeadNumber)
-}
-
-func updateIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, quit <-chan struct{}) error {
 	hash := rawdb.ReadCanonicalHash(db, to)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	if s.BlockNumber == 0 {
-		return regenerateIntermediateHashes(db, datadir, expectedRootHash, quit)
+
+	fromScratch := s.BlockNumber == 0 || s.WasInterrupted()
+	if fromScratch {
+		log.Info("Initial hashing plain state", "to", to)
+		if err := ResetHashState(db); err != nil {
+			return err
+		}
+		log.Debug("Clean bucket: done")
+
+		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
+			return err
+		}
+
+		if err := regenerateIntermediateHashes(db, datadir, expectedRootHash, quit); err != nil {
+			return err
+		}
+		return s.DoneAndUpdate(db, to)
 	}
-	return incrementIntermediateHashes(s, db, from, to, datadir, expectedRootHash, quit)
+
+	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
+	if err := incrementIntermediateHashes(s, db, to, datadir, expectedRootHash, quit); err != nil {
+		return err
+	}
+
+	return s.DoneAndUpdate(db, to)
 }
 
 func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+	log.Info("Regeneration intermediate hashes started")
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -224,7 +230,7 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		}
 		r.accountMap[newKStr] = &a
 	} else {
-		r.accountMap[newKStr] = nil
+		delete(r.accountMap, newKStr)
 	}
 	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
@@ -239,7 +245,7 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
-		r.storageMap[newKStr] = nil
+		delete(r.storageMap, newKStr)
 	}
 	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
@@ -270,29 +276,10 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 	}
 	log.Debug("Incremental state promotion of intermediate hashes", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
-	startkey := dbutils.EncodeTimestamp(from + 1)
-	skip := false
+	// Can't skip stage even if it was done before interruptoin because need to fill non-persistent data structure: Receiver
 
-	var loadStartKey []byte
-	if len(s.StageData) != 0 {
-		// we have finished this stage but didn't start the next one
-		if len(s.StageData) == 1 && s.StageData[0] == index {
-			skip = true
-			// we are already at the next stage
-		} else if s.StageData[0] > index {
-			skip = true
-			// if we at the current stage and we have something meaningful at StageData
-		} else if s.StageData[0] == index {
-			var err error
-			loadStartKey, err = etl.NextKey(s.StageData[1:])
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if skip {
-		return nil
-	}
+	startkey := dbutils.EncodeTimestamp(from + 1)
+
 	var l OldestAppearedLoad
 	if storage {
 		l.innerLoadFunc = r.storageLoad
@@ -312,7 +299,6 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
 					return s.UpdateWithStageData(putter, from, []byte{index})
@@ -328,7 +314,6 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 }
 
 func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index byte, r *Receiver) error {
-	from := s.BlockNumber
 	to := u.UnwindPoint
 	var changeSetBucket []byte
 	if storage {
@@ -336,31 +321,12 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Unwinding of intermediate hashes", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Unwinding of intermediate hashes", "from", s.BlockNumber, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
-	var loadStartKey []byte
-	skip := false
-	if len(u.StageData) != 0 {
-		// we have finished this stage but didn't start the next one
-		if len(u.StageData) == 1 && u.StageData[0] == index {
-			skip = true
-			// we are already at the next stage
-		} else if u.StageData[0] > index {
-			skip = true
-			// if we at the current stage and we have something meaningful at StageData
-		} else if u.StageData[0] == index {
-			var err error
-			loadStartKey, err = etl.NextKey(u.StageData[1:])
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if skip {
-		return nil
-	}
+	// Can't skip stage even if it was done before interruptoin because need to fill non-persistent data structure: Receiver
+
 	var l OldestAppearedLoad
 	if storage {
 		l.innerLoadFunc = r.storageLoad
@@ -377,7 +343,6 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			LoadStartKey:    loadStartKey,
 			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
 				if isDone {
 					return u.UpdateWithStageData(putter, []byte{index})
@@ -392,25 +357,23 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 	return nil
 }
 
-func incrementIntermediateHashes(s *StageState, db ethdb.Database, from, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver(quit)
-	if err := p.Promote(s, from, to, false /* storage */, 0x01, r); err != nil {
+	if err := p.Promote(s, s.BlockNumber, to, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
-	if err := p.Promote(s, from, to, true /* storage */, 0x02, r); err != nil {
+	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, 0x02, r); err != nil {
 		return err
 	}
 	for ks, acc := range r.accountMap {
-		if acc != nil {
-			// Fill the code hashes
-			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
-					copy(acc.CodeHash[:], codeHash)
-				} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
-					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
-				}
+		// Fill the code hashes
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 			}
 		}
 	}
@@ -460,7 +423,26 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	return unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit)
+	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
+	if fromScratch {
+		log.Info("Generate intermediate hashes cleanly")
+		if err := ResetHashState(db); err != nil {
+			return err
+		}
+		log.Debug("Clean done")
+		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
+			return err
+		}
+		log.Info("Create hashing state done")
+		// here we are on same block as Exec step
+	}
+	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
+		return err
+	}
+	if err := u.Done(db); err != nil {
+		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
+	}
+	return nil
 }
 
 func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
@@ -474,16 +456,14 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		return err
 	}
 	for ks, acc := range r.accountMap {
-		if acc != nil {
-			// Fill the code hashes
-			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
-					copy(acc.CodeHash[:], codeHash)
-				} else if errors.Is(err, ethdb.ErrKeyNotFound) {
-					copy(acc.CodeHash[:], trie.EmptyCodeHash[:])
-				} else {
-					return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
-				}
+		// Fill the code hashes
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else if errors.Is(err, ethdb.ErrKeyNotFound) {
+				copy(acc.CodeHash[:], trie.EmptyCodeHash[:])
+			} else {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
 			}
 		}
 	}
@@ -525,8 +505,33 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
+	return nil
+}
+
+func ResetHashState(db ethdb.Database) error {
+	if err := db.(ethdb.NonTransactional).ClearBuckets(
+		dbutils.CurrentStateBucket,
+		dbutils.ContractCodeBucket,
+		dbutils.IntermediateTrieHashBucket,
+	); err != nil {
+		return err
 	}
+	batch := db.NewBatch()
+	if err := stages.SaveStageProgress(batch, stages.IntermediateHashes, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(batch, stages.HashState, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(batch, stages.HashState, 0, nil); err != nil {
+		return err
+	}
+	if _, err := batch.Commit(); err != nil {
+		return err
+	}
+
 	return nil
 }

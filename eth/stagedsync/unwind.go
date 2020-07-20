@@ -31,6 +31,10 @@ func (u *UnwindState) Skip(db ethdb.Putter) error {
 	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
 }
 
+func (u *UnwindState) WasInterrupted() bool {
+	return len(u.StageData) > 0
+}
+
 type PersistentUnwindStack struct {
 	unwindStack []UnwindState
 }
@@ -39,16 +43,28 @@ func NewPersistentUnwindStack() *PersistentUnwindStack {
 	return &PersistentUnwindStack{make([]UnwindState, 0)}
 }
 
-func (s *PersistentUnwindStack) LoadFromDB(db ethdb.Getter, stageID stages.SyncStage) error {
-	unwindPoint, stageData, err := stages.GetStageUnwind(db, stageID)
+func (s *PersistentUnwindStack) AddFromDB(db ethdb.Getter, stageID stages.SyncStage) error {
+	u, err := s.LoadFromDB(db, stageID)
 	if err != nil {
 		return err
 	}
-	if unwindPoint > 0 {
-		u := UnwindState{stageID, unwindPoint, stageData}
-		s.unwindStack = append(s.unwindStack, u)
+	if u == nil {
+		return nil
 	}
+
+	s.unwindStack = append(s.unwindStack, *u)
 	return nil
+}
+
+func (s *PersistentUnwindStack) LoadFromDB(db ethdb.Getter, stageID stages.SyncStage) (*UnwindState, error) {
+	unwindPoint, stageData, err := stages.GetStageUnwind(db, stageID)
+	if err != nil {
+		return nil, err
+	}
+	if unwindPoint > 0 {
+		return &UnwindState{stageID, unwindPoint, stageData}, nil
+	}
+	return nil, nil
 }
 
 func (s *PersistentUnwindStack) Empty() bool {

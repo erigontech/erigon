@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -39,8 +40,10 @@ func feemarket(blockNum uint64) {
 	defer w.Flush()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
-	bcb, openErr := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bcb, openErr := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil, nil, txCacher)
 	check(openErr)
+	defer bcb.Stop()
 	interrupt := false
 	txCount := 0
 	MinFeeMaxChangeDenominator := big.NewInt(8)

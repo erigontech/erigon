@@ -20,6 +20,7 @@ import (
 	"context"
 	"math/big"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -71,7 +72,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				return SetupGenesisBlock(db, new(Genesis), true /* history */)
+				return SetupGenesisBlock(db, new(Genesis), true /* history */, false /* overwrite */)
 			},
 			wantErr:    errGenesisNoConfig,
 			wantConfig: params.AllEthashProtocolChanges,
@@ -79,7 +80,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "no block in DB, genesis == nil",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				return SetupGenesisBlock(db, nil, true /* history */)
+				return SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -87,7 +88,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				return SetupGenesisBlock(db, nil, true /* history */)
+				return SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -96,7 +97,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == nil",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				customg.MustCommit(db)
-				return SetupGenesisBlock(db, nil, true /* history */)
+				return SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -105,7 +106,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == ropsten",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				customg.MustCommit(db)
-				return SetupGenesisBlock(db, DefaultRopstenGenesisBlock(), true /* history */)
+				return SetupGenesisBlock(db, DefaultRopstenGenesisBlock(), true /* history */, false /* overwrite */)
 			},
 			wantErr:    &GenesisMismatchError{Stored: customghash, New: params.RopstenGenesisHash},
 			wantHash:   params.RopstenGenesisHash,
@@ -115,7 +116,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "compatible config in DB",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				oldcustomg.MustCommit(db)
-				return SetupGenesisBlock(db, &customg, true /* history */)
+				return SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -127,7 +128,8 @@ func TestSetupGenesis(t *testing.T) {
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
-				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, nil, vm.NewDestsCache(100))
+				txCacher := NewTxSenderCacher(runtime.NumCPU())
+				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacher)
 				defer bc.Stop()
 
 				blocks, _, err := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
@@ -137,7 +139,7 @@ func TestSetupGenesis(t *testing.T) {
 				_, _ = bc.InsertChain(context.Background(), blocks)
 				bc.CurrentBlock()
 				// This should return a compatibility error.
-				return SetupGenesisBlock(db, &customg, true /* history */)
+				return SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,

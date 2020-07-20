@@ -115,4 +115,8 @@ type HasNetInterface interface {
 	DB() Database
 }
 
+type NonTransactional interface {
+	ClearBuckets(buckets ...[]byte) error
+}
+
 var errNotSupported = errors.New("not supported")

@@ -40,6 +40,17 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 	w := bufio.NewWriterSize(bufferFile, BufIOSize)
 	defer w.Flush() //nolint:errcheck
 
+	defer func() {
+		b.Reset() // run it after buf.flush and file.sync
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		log.Info(
+			"Flushed buffer file",
+			"current key", makeCurrentKeyStr(currentKey),
+			"name", bufferFile.Name(),
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	}()
+
 	encoder.Reset(w)
 	for _, entry := range b.GetEntries() {
 		err = writeToDisk(encoder, entry.key, entry.value)
@@ -47,14 +58,6 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 			return nil, fmt.Errorf("error writing entries to disk: %v", err)
 		}
 	}
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info(
-		"Flushed buffer file",
-		"current key", makeCurrentKeyStr(currentKey),
-		"name", bufferFile.Name(),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	b.Reset()
 
 	return &fileDataProvider{bufferFile, nil}, nil
 }

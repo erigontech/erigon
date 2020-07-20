@@ -24,7 +24,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
@@ -273,13 +272,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 
 	case *accountNode:
 		// we don't do double RLP here, so `accountNodeToBuffer` is not applicable
-		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
-
-		n.EncodeForHashing(encodedAccount.B)
-		pos += copy(buffer[pos:], encodedAccount.Bytes())
-
-		pool.PutBuffer(encodedAccount)
-
+		n.EncodeForHashing(buffer[pos:])
 		return buffer[rlpPrefixLength:pos], nil
 
 	case hashNode:
@@ -307,12 +300,8 @@ func (h *hasher) valueNodeToBuffer(vn valueNode, buffer []byte, pos int) (int, e
 }
 
 func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (int, error) {
-	encodedAccount := pool.GetBuffer(ac.EncodingLengthForHashing())
-	defer pool.PutBuffer(encodedAccount)
-
-	ac.EncodeForHashing(encodedAccount.B)
-	acRlp := encodedAccount.Bytes()
-
+	acRlp := make([]byte, ac.EncodingLengthForHashing())
+	ac.EncodeForHashing(acRlp)
 	enc := rlphacks.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)
 

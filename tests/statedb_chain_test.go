@@ -19,6 +19,7 @@ package tests
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -65,10 +66,12 @@ func TestSelfDestructReceive(t *testing.T) {
 	defer genesisDB.Close()
 
 	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer txCacher.Close()
 
 	blockchain.EnableReceipts(true)
 
@@ -122,22 +125,24 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
-	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer blockchain1.Stop()
 
-	blockchain.EnableReceipts(true)
+	blockchain1.EnableReceipts(true)
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain1.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
 	// and that means that the state of the accounts written in the first block was correct.
 	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbState(db.KV(), blockchain1.CurrentBlock().NumberU64()))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}

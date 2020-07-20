@@ -17,13 +17,11 @@
 package eth
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,14 +30,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -75,10 +71,11 @@ type ProtocolManager struct {
 	checkpointNumber uint64      // Block number for the sync progress validator to cross reference
 	checkpointHash   common.Hash // Block hash for the sync progress validator to cross reference
 
-	txpool     txPool
-	blockchain *core.BlockChain
-	chaindb    ethdb.Database
-	maxPeers   int
+	txpool      txPool
+	chainConfig *params.ChainConfig
+	blockchain  *core.BlockChain
+	chaindb     *ethdb.ObjectDatabase
+	maxPeers    int
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
@@ -109,20 +106,21 @@ type ProtocolManager struct {
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
 // with the Ethereum network.
-func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
+func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	manager := &ProtocolManager{
-		networkID:  networkID,
-		forkFilter: forkid.NewFilter(blockchain),
-		eventMux:   mux,
-		txpool:     txpool,
-		blockchain: blockchain,
-		chaindb:    chaindb,
-		peers:      newPeerSet(),
-		whitelist:  whitelist,
-		mode:       mode,
-		txsyncCh:   make(chan *txsync),
-		quitSync:   make(chan struct{}),
+		networkID:   networkID,
+		forkFilter:  forkid.NewFilter(blockchain),
+		eventMux:    mux,
+		txpool:      txpool,
+		chainConfig: config,
+		blockchain:  blockchain,
+		chaindb:     chaindb,
+		peers:       newPeerSet(),
+		whitelist:   whitelist,
+		mode:        mode,
+		txsyncCh:    make(chan *txsync),
+		quitSync:    make(chan struct{}),
 	}
 
 	if mode == downloader.FullSync {
@@ -155,11 +153,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		manager.checkpointHash = checkpoint.SectionHead
 	}
 
-	tds, err := blockchain.GetTrieDbState()
-	if err != nil {
-		return nil, err
-	}
-	initPm(manager, txpool, engine, blockchain, tds, chaindb)
+	initPm(manager, engine, config, blockchain, chaindb)
 
 	return manager, nil
 }
@@ -171,13 +165,16 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, tds *state.TrieDbState, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
 	// Construct the different synchronisation mechanisms
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer, sm)
+	if manager.downloader != nil {
+		manager.downloader.Cancel()
+	}
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
 
 	// Construct the fetcher (short sync)
@@ -185,7 +182,9 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 		return engine.VerifyHeader(blockchain, header, true)
 	}
 	heighter := func() uint64 {
-		return blockchain.CurrentBlock().NumberU64()
+		headHash := rawdb.ReadHeadHeaderHash(chaindb)
+		headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
+		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		// If sync hasn't reached the checkpoint yet, deny importing weird blocks.
@@ -207,15 +206,19 @@ func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, bl
 			log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
 			return 0, nil
 		}
-		n, err := manager.blockchain.InsertChain(context.Background(), blocks)
+		//n, err := manager.blockchain.InsertChain(context.Background(), blocks)
 		if err == nil {
 			atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		}
-		return n, err
+		return 0, err
 	}
-	manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+	if manager.blockFetcher == nil {
+		manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+	}
 
-	manager.chainSync = newChainSyncer(manager)
+	if manager.chainSync == nil {
+		manager.chainSync = newChainSyncer(manager)
+	}
 }
 
 func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
@@ -416,11 +419,10 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		number  = head.Number.Uint64()
 		td      = pm.blockchain.GetTd(hash, number)
 	)
-	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.blockchain), pm.forkFilter); err != nil {
+	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
-
 	// Register the peer locally
 	if err := pm.peers.Register(p); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
@@ -438,6 +440,16 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// after this will be sent via broadcasts.
 	pm.syncTransactions(p)
 
+	// Send request for the head header
+	peerHeadHash, _ := p.Head()
+	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+		return err
+	}
+	// Handle one message
+	if err := pm.handleMsg(p); err != nil {
+		p.Log().Debug("Ethereum message handling failed", "err", err)
+		return err
+	}
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
 	if pm.checkpointHash != (common.Hash{}) {
 		// Request the peer's checkpoint header for chain height/weight validation
@@ -606,6 +618,17 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			if atomic.LoadUint32(&pm.fastSync) == 1 {
 				p.Log().Warn("Dropping unsynced node during fast sync", "addr", p.RemoteAddr(), "type", p.Name())
 				return errors.New("unsynced node cannot serve fast sync")
+			}
+		}
+		for _, header := range headers {
+			var (
+				trueHead   = header.Hash()
+				trueNumber = header.Number.Uint64()
+			)
+			// Update the peer's total difficulty if better than the previous
+			if _, number := p.Head(); trueNumber > number {
+				p.SetHead(trueHead, trueNumber)
+				pm.chainSync.handlePeerEvent(p)
 			}
 		}
 		// Filter out any explicitly requested headers, deliver the rest to the downloader
@@ -794,10 +817,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockHashesMsg:
-		if pm.mode == downloader.StagedSync {
-			// Staged sync does not support this yet
-			return nil
-		}
 		var announces newBlockHashesData
 		if err := msg.Decode(&announces); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
@@ -818,10 +837,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockMsg:
-		if pm.mode == downloader.StagedSync {
-			// Staged sync does not support this yet
-			return nil
-		}
 		// Retrieve and decode the propagated block
 		var request newBlockData
 		if err := msg.Decode(&request); err != nil {
@@ -843,19 +858,22 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 		// Mark the peer as owning the block and schedule it for import
 		p.MarkBlock(request.Block.Hash())
-		if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
-			return err
+		if pm.mode != downloader.StagedSync {
+			// Staged sync does not support this yet
+			if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
+				return err
+			}
 		}
 
 		// Assuming the block is importable by the peer, but possibly not yet done so,
 		// calculate the head hash and TD that the peer truly must have.
 		var (
-			trueHead = request.Block.ParentHash()
-			trueTD   = new(big.Int).Sub(request.TD, request.Block.Difficulty())
+			trueHead   = request.Block.Hash()
+			trueNumber = request.Block.NumberU64()
 		)
 		// Update the peer's total difficulty if better than the previous
-		if _, td := p.Head(); trueTD.Cmp(td) > 0 {
-			p.SetHead(trueHead, trueTD)
+		if _, number := p.Head(); trueNumber > number {
+			p.SetHead(trueHead, trueNumber)
 			pm.chainSync.handlePeerEvent(p)
 		}
 
@@ -974,39 +992,13 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("msgStream.Decode: %w", err)
 		}
 
-		genesis := core.DefaultGenesisBlock()
-		if err := json.Unmarshal(msgAsJson, genesis); err != nil {
+		var genesis core.Genesis
+		if err := json.Unmarshal(msgAsJson, &genesis); err != nil {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		_ = os.Remove("simulator")
-		ethDb := ethdb.MustOpen("simulator")
-		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis, true /* history */)
-		if err != nil {
-			return fmt.Errorf("SetupGenesisBlock: %w", err)
-		}
-
-		// Clean up: reuse engine... probably we can
-		time.Sleep(100 * time.Millisecond) // wait for pm.syncer finish
-
-		engine := pm.blockchain.Engine()
-		pm.blockchain.ChainDb().Close()
-		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, nil, vm.NewDestsCache(10))
-		if err != nil {
-			return fmt.Errorf("fail in NewBlockChain: %w", err)
-		}
-		pm.blockchain.Stop()
-		pm.blockchain = blockchain
-		pm.forkFilter = forkid.NewFilter(pm.blockchain)
-
-		tds, err := pm.blockchain.GetTrieDbState()
-		if err != nil {
-			return fmt.Errorf("fail in GetTrieDbState: %w", err)
-		}
-		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, tds, pm.blockchain.ChainDb())
-		pm.quitSync = make(chan struct{})
-
-		remotedbserver.StartDeprecated(ethDb.KV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
+		pm.chainConfig = genesis.Config
+		pm.downloader.SetChainConfig(genesis.Config)
 
 		// hacks to speedup local sync
 		downloader.MaxHashFetch = 512 * 10
@@ -1014,7 +1006,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		downloader.MaxHeaderFetch = 192 * 10
 		downloader.MaxReceiptFetch = 256 * 10
 
-		log.Warn("Succeed to set new Genesis")
+		log.Warn("Succeed to set new chainConfig")
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
@@ -1150,7 +1142,7 @@ func (pm *ProtocolManager) NodeInfo() *NodeInfo {
 		Network:    pm.networkID,
 		Difficulty: pm.blockchain.GetTd(currentBlock.Hash(), currentBlock.NumberU64()),
 		Genesis:    pm.blockchain.Genesis().Hash(),
-		Config:     pm.blockchain.Config(),
+		Config:     pm.chainConfig,
 		Head:       currentBlock.Hash(),
 	}
 }

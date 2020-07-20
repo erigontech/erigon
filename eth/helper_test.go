@@ -228,7 +228,15 @@ func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*te
 			head    = pm.blockchain.CurrentHeader()
 			td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
 		)
-		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkid.NewID(pm.blockchain), forkid.NewFilter(pm.blockchain))
+		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64()), forkid.NewFilter(pm.blockchain))
+		// Newly connected peer will query the header that was announced during the handshake
+		if err := p2p.ExpectMsg(tp.app, 0x03, &getBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.CurrentBlock().Hash()}, Amount: 1}); err != nil {
+			fmt.Printf("ExpectMsg error: %v\n", err)
+			panic(err)
+		}
+		if err := p2p.Send(tp.app, 0x04, []*types.Header{pm.blockchain.CurrentBlock().Header()}); err != nil {
+			panic(err)
+		}
 	}
 	return tp, errc
 }

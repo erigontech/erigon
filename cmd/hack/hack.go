@@ -602,8 +602,10 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	state.MaxTrieCacheSize = 100 * 1024
 	blockDb := ethdb.MustOpen(chaindata)
 	defer blockDb.Close()
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bcb.Stop()
 	if fromScratch {
 		os.Remove("statedb")
 	}
@@ -611,10 +613,12 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDB.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */)
+	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */, true /* overwrite */)
 	check(err)
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	bcTxCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, bcTxCacher)
 	check(err)
+	defer bc.Stop()
 	tds, err := bc.GetTrieDbState()
 	check(err)
 
@@ -668,8 +672,10 @@ Loop:
 func extractTrie(block int) {
 	stateDb := ethdb.MustOpen("statedb")
 	defer stateDb.Close()
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	rebuiltRoot := tds.LastRoot()
@@ -686,8 +692,10 @@ func extractTrie(block int) {
 func testRewind(chaindata string, block, rewind int) {
 	ethDb := ethdb.MustOpen(chaindata)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	if block == 1 {
@@ -747,8 +755,10 @@ func testStartup() {
 	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
@@ -1066,7 +1076,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		if v != nil {
 			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
-					incarnation := ^binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
+					incarnation := binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
 					if !printed {
 						fmt.Printf("Changes for block %d\n", timestamp)
 						printed = true
@@ -1113,7 +1123,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 		return
 	}
 	if found {
-		fmt.Printf("Incarnation: %d\n", (^binary.BigEndian.Uint64(incarnationBytes[:]))+1)
+		fmt.Printf("Incarnation: %d\n", (binary.BigEndian.Uint64(incarnationBytes[:]))+1)
 		return
 	}
 	fmt.Printf("Incarnation(f): %d\n", state.FirstContractIncarnation)
@@ -1852,9 +1862,31 @@ func fixStages(chaindata string) error {
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
-	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	fmt.Printf("State stats\n")
+	stAccounts := 0
+	stStorage := 0
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		st := tx.Bucket(dbutils.PlainStateBucket)
+		c := st.Cursor()
+		k, _, e := c.First()
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			if len(k) > 28 {
+				stStorage++
+			} else {
+				stAccounts++
+			}
+			if (stStorage+stAccounts)%100000 == 0 {
+				fmt.Printf("State records: %d\n", stStorage+stAccounts)
+			}
+		}
+		return e
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
+	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	accounts := make(map[string]struct{})
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
@@ -1868,7 +1900,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			if timestamp >= block2 {
 				break
 			}
-			if timestamp%100000 == 0 {
+			if (timestamp-block1)%100000 == 0 {
 				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
 			}
 			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
@@ -1895,7 +1927,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			if timestamp >= block2 {
 				break
 			}
-			if timestamp%100000 == 0 {
+			if (timestamp-block1)%100000 == 0 {
 				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
 			}
 			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {

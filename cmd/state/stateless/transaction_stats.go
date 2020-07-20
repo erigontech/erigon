@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -194,8 +195,10 @@ func transactionStats(blockNum uint64) {
 	tt := NewTxTracer()
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, nil)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
 	check(err)
+	defer bc.Stop()
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)

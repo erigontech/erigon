@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -67,7 +68,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		log.Error("Error decoding account", "error", err)
 		return err
 	}
-	binary.BigEndian.PutUint64(s[common.AddressLength:], ^acc.Incarnation)
+	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
 	copy(s[common.AddressLength+common.IncarnationLength:], start)
 	var lastKey common.Hash
 	overrideCounter := 0
@@ -263,8 +264,8 @@ func (dbs *PlainDBState) CreateContract(address common.Address) error {
 func (dbs *PlainDBState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
-	// TODO: [Issue 99] Support incarnations
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(1))
+
+	binary.BigEndian.PutUint64(startkey[common.HashLength:], changeset.DefaultIncarnation)
 	copy(startkey[common.HashLength+common.IncarnationLength:], prefix.Data)
 
 	fixedbits := (common.HashLength + common.IncarnationLength + len(prefix.Data)) * 8

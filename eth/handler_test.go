@@ -183,7 +183,7 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		i := i
 		tt := tt
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			peer, _ := newTestPeer("peer", protocol, pm, true)
+			peer, _ := newTestPeer("peer", protocol, pm, true /* handshake */)
 			defer peer.close()
 			// Collect the headers to expect in the response
 			headers := []*types.Header{}
@@ -476,6 +476,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
+	defer blockchain.Stop()
 	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, ethash.NewFaker(), blockchain, db, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
@@ -581,7 +582,6 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	for i := 0; i < totalPeers; i++ {
 		peer, _ := newTestPeer(fmt.Sprintf("peer %d", i), eth63, pm, true)
 		defer peer.close()
-
 		peers = append(peers, peer)
 	}
 	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
@@ -1351,6 +1351,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
+	defer blockchain.Stop()
 	pm, err := NewProtocolManager(config, nil, downloader.FullSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), engine, blockchain, db, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
