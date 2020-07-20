@@ -124,14 +124,6 @@ const (
 	TxStatusIncluded
 )
 
-// blockChain provides the state of blockchain and current gas limit to do
-// some pre checks in tx pool and event subscribers.
-type blockChain interface {
-	CurrentBlock() *types.Block
-	GetBlock(hash common.Hash, number uint64) *types.Block
-	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
-}
-
 // TxPoolConfig are the configuration parameters of the transaction pool.
 type TxPoolConfig struct {
 	Locals    []common.Address // Addresses that should be treated by default as local
@@ -217,7 +209,6 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
-	chain        blockChain
 	chaindb      *ethdb.ObjectDatabase
 	gasPrice     *big.Int
 	txFeed       event.Feed
@@ -233,7 +224,6 @@ type TxPool struct {
 	pendingNonces *txNoncer // Pending state tracking virtual nonces
 
 	currentState  *state.IntraBlockState // Current state in the blockchain head
-	currentTds    *state.TrieDbState
 	currentMaxGas uint64 // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
@@ -262,7 +252,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -270,7 +260,6 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	pool := &TxPool{
 		config:         config,
 		chainconfig:    chainconfig,
-		chain:          chain,
 		chaindb:        chaindb,
 		signer:         types.NewEIP155Signer(chainconfig.ChainID),
 		pending:        make(map[common.Address]*txList),
@@ -325,9 +314,6 @@ func (pool *TxPool) Start() error {
 		}
 	}
 
-	// Subscribe events from blockchain and start the main event loop.
-	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
-
 	pool.wg.Add(1)
 	go pool.loop()
 
@@ -335,17 +321,6 @@ func (pool *TxPool) Start() error {
 
 	log.Info("transaction pool started")
 	return nil
-}
-
-// AddBlocks modifies the transaction pool based on the newly mined blocks
-// All transactions that are inside the blocks, need to be removed from the pool
-func (pool *TxPool) AddBlocks(from, to uint64) {
-}
-
-// UnwindBlocks modifies the transaction pool based on unwound blocks
-// All transactions that were inside the unwound blocks, need to be returned to the pool
-func (pool *TxPool) UnwindBlocks(from, to uint64) {
-
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -406,7 +381,7 @@ func (pool *TxPool) loop() {
 				// Any non-locals old enough should be removed
 				if time.Since(pool.beats[addr]) > pool.config.Lifetime {
 					for _, tx := range pool.queue[addr].Flatten() {
-						pool.removeTx(tx.Hash(), true)
+						pool.RemoveTx(tx.Hash(), true)
 					}
 				}
 			}
@@ -452,32 +427,32 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 			var discarded, included types.Transactions
 
 			var (
-				rem = pool.chain.GetBlock(oldHead.Hash(), oldHead.Number.Uint64())
-				add = pool.chain.GetBlock(newHead.Hash(), newHead.Number.Uint64())
+				rem = rawdb.ReadBlock(pool.chaindb, oldHead.Hash(), oldHead.Number.Uint64())
+				add = rawdb.ReadBlock(pool.chaindb, newHead.Hash(), newHead.Number.Uint64())
 			)
 			if rem != nil && add != nil {
 				for rem.NumberU64() > add.NumberU64() {
 					discarded = append(discarded, rem.Transactions()...)
-					if rem = pool.chain.GetBlock(rem.ParentHash(), rem.NumberU64()-1); rem == nil {
+					if rem = rawdb.ReadBlock(pool.chaindb, rem.ParentHash(), rem.NumberU64()-1); rem == nil {
 						log.Error("Unrooted old chain seen by tx pool", "block", oldHead.Number, "hash", oldHead.Hash())
 						return
 					}
 				}
 				for add.NumberU64() > rem.NumberU64() {
 					included = append(included, add.Transactions()...)
-					if add = pool.chain.GetBlock(add.ParentHash(), add.NumberU64()-1); add == nil {
+					if add = rawdb.ReadBlock(pool.chaindb, add.ParentHash(), add.NumberU64()-1); add == nil {
 						log.Error("Unrooted new chain seen by tx pool", "block", newHead.Number, "hash", newHead.Hash())
 						return
 					}
 				}
 				for rem.Hash() != add.Hash() {
 					discarded = append(discarded, rem.Transactions()...)
-					if rem = pool.chain.GetBlock(rem.ParentHash(), rem.NumberU64()-1); rem == nil {
+					if rem = rawdb.ReadBlock(pool.chaindb, rem.ParentHash(), rem.NumberU64()-1); rem == nil {
 						log.Error("Unrooted old chain seen by tx pool", "block", oldHead.Number, "hash", oldHead.Hash())
 						return
 					}
 					included = append(included, add.Transactions()...)
-					if add = pool.chain.GetBlock(add.ParentHash(), add.NumberU64()-1); add == nil {
+					if add = rawdb.ReadBlock(pool.chaindb, add.ParentHash(), add.NumberU64()-1); add == nil {
 						log.Error("Unrooted new chain seen by tx pool", "block", newHead.Number, "hash", newHead.Hash())
 						return
 					}
@@ -551,7 +526,7 @@ func (pool *TxPool) SetGasPrice(price *big.Int) {
 
 	pool.gasPrice = price
 	for _, tx := range pool.priced.Cap(price, pool.locals) {
-		pool.removeTx(tx.Hash(), false)
+		pool.RemoveTx(tx.Hash(), false)
 	}
 	log.Info("Transaction pool price threshold updated", "price", price)
 }
@@ -722,7 +697,7 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		for _, tx := range drop {
 			log.Trace("Discarding freshly underpriced transaction", "hash", tx.Hash(), "price", tx.GasPrice())
 			underpricedTxMeter.Mark(1)
-			pool.removeTx(tx.Hash(), false)
+			pool.RemoveTx(tx.Hash(), false)
 		}
 	}
 	// Try to replace an existing transaction in the pending pool
@@ -994,7 +969,7 @@ func (pool *TxPool) Has(hash common.Hash) bool {
 
 // removeTx removes a single transaction from the queue, moving all subsequent
 // transactions back to the future queue.
-func (pool *TxPool) removeTx(hash common.Hash, outofbound bool) {
+func (pool *TxPool) RemoveTx(hash common.Hash, outofbound bool) {
 	// Fetch the transaction we wish to delete
 	tx := pool.all.Get(hash)
 	if tx == nil {
@@ -1387,7 +1362,7 @@ func (pool *TxPool) truncateQueue() {
 		// Drop all transactions if they are less than the overflow
 		if size := uint64(list.Len()); size <= drop {
 			for _, tx := range list.Flatten() {
-				pool.removeTx(tx.Hash(), true)
+				pool.RemoveTx(tx.Hash(), true)
 			}
 			drop -= size
 			queuedRateLimitMeter.Mark(int64(size))
@@ -1396,7 +1371,7 @@ func (pool *TxPool) truncateQueue() {
 		// Otherwise drop only last few transactions
 		txs := list.Flatten()
 		for i := len(txs) - 1; i >= 0 && drop > 0; i-- {
-			pool.removeTx(txs[i].Hash(), true)
+			pool.RemoveTx(txs[i].Hash(), true)
 			drop--
 			queuedRateLimitMeter.Mark(1)
 		}

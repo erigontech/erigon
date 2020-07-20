@@ -252,7 +252,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
 
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, chainDb, txCacher)
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {

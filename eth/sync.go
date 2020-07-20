@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -313,7 +313,7 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 		}
 	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
-	err := pm.downloader.Synchronise(op.peer.id, op.head, op.number, op.mode, pm.blockchain.DestsCache, &stagedsync.TxPoolStartStopper{Start: pm.txpool.RunInit, Stop: pm.txpool.RunStop})
+	err := pm.downloader.Synchronise(op.peer.id, op.head, op.number, op.mode, pm.blockchain.DestsCache, pm.txpool.(*core.TxPool))
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -11,20 +12,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-const prof = true // whether to profile
+const prof = false // whether to profile
 
 func PrepareStagedSync(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
 	blockchain BlockChain,
-	stateDB ethdb.Database,
+	stateDB *ethdb.ObjectDatabase,
 	pid string,
 	storageMode ethdb.StorageMode,
 	datadir string,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	dests vm.Cache,
-	txPoolControl *TxPoolStartStopper,
+	txPool *core.TxPool,
 	changeSetHook ChangeSetHook,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
@@ -144,10 +145,10 @@ func PrepareStagedSync(
 			ID:          stages.TxPool,
 			Description: "Starts the transaction pool",
 			ExecFunc: func(s *StageState, _ Unwinder) error {
-				return spawnTxPool(s, txPoolControl.Start)
+				return spawnTxPool(s, stateDB, txPool, quitCh)
 			},
 			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
-				return unwindTxPool(txPoolControl.Stop)
+				return unwindTxPool()
 			},
 		},
 	}
