@@ -42,6 +42,18 @@ type stmt struct {
 	numBytes int
 }
 
+func (stmt stmt) String() string {
+	halts := ""
+	if stmt.operation.halts {
+		halts = "halts"
+	}
+	valid := ""
+	if stmt.operation.valid {
+		valid = "valid"
+	}
+	return fmt.Sprintf("%v %v %v", stmt.opcode, halts, valid)
+}
+
 type edge struct {
 	pc0 int
 	stmt stmt
@@ -166,8 +178,8 @@ func printEdges(edges []edge) {
 }
 
 func printStmts(stmts []stmt) {
-	for _, stmt := range stmts {
-		fmt.Printf("%v\n", stmt)
+	for i, stmt := range stmts {
+		fmt.Printf("%v %v\n", i, stmt)
 	}
 }
 
