@@ -165,6 +165,12 @@ func printEdges(edges []edge) {
 	}
 }
 
+func printStmts(stmts []stmt) {
+	for _, stmt := range stmts {
+		fmt.Printf("%v\n", stmt)
+	}
+}
+
 func AbsIntCfgHarness(prog *Contract) error {
 	startPC := 0
 	codeLen := len(prog.Code)
@@ -175,9 +181,11 @@ func AbsIntCfgHarness(prog *Contract) error {
 	D[startPC] = startSt()
 
 	stmts := getStmts(prog)
+	printStmts(stmts)
 
 	workList := resolve(prog, startPC, D[startPC], stmts[startPC])
 	for len(workList) > 0 {
+		fmt.Println("worklist:")
 		printEdges(workList)
 
 		var e edge
