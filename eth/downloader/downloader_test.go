@@ -39,14 +39,14 @@ import (
 )
 
 const OwerwriteBlockCacheItems = 1024
-const OwerwriteMaxForkAncestry = 5000
+const OwerwriteMaxForkAncestry = 3000
 
 // Reduce some of the parameters to make the tester faster.
 func init() {
 	maxForkAncestry = OwerwriteMaxForkAncestry
 	blockCacheItems = OwerwriteBlockCacheItems
 	fsHeaderSafetyNet = 256
-	fsHeaderContCheck = 500 * time.Millisecond
+	fsHeaderContCheck = 50 * time.Millisecond
 }
 
 // downloadTester is a test simulator for mocking out local block chain.
@@ -1024,7 +1024,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.peerDb.Close()
 
 	// Create a small enough block chain to download
-	targetBlocks := 3*fsHeaderSafetyNet + 256 + fsMinFullBlocks
+	targetBlocks := 2*fsHeaderSafetyNet + 256 + fsMinFullBlocks
 	chain := testChainBase.shorten(targetBlocks)
 
 	// Attempt to sync with an attacker that feeds junk during the fast sync phase.
@@ -1044,7 +1044,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
 	// Attempt to sync with an attacker that feeds junk during the block import phase.
 	// This should result in both the last fsHeaderSafetyNet number of headers being
 	// rolled back, and also the pivot point being reverted to a non-block status.
-	missing = 3*fsHeaderSafetyNet + MaxHeaderFetch + 1
+	missing = 2*fsHeaderSafetyNet + MaxHeaderFetch + 1
 	blockAttackChain := chain.shorten(chain.len())
 	delete(fastAttackChain.headerm, fastAttackChain.chain[missing]) // Make sure the fast-attacker doesn't fill in
 	delete(blockAttackChain.headerm, blockAttackChain.chain[missing])
