@@ -1,6 +1,9 @@
 package vm
 
-import "github.com/holiman/uint256"
+import (
+	"fmt"
+	"github.com/holiman/uint256"
+)
 
 //////////////////////////////////////////////////
 const (
@@ -36,6 +39,7 @@ type stmt struct {
 	opcode OpCode
 	operation operation
 	value uint256.Int
+	numBytes int
 }
 
 type edge struct {
@@ -44,7 +48,13 @@ type edge struct {
 	pc1 int
 }
 
+func (e edge) String() string {
+	return fmt.Sprintf("%v %v %v", e.pc0, e.pc1, e.stmt.opcode)
+}
+
 func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
+	//fmt.Printf("RESOLVE: %v %v %v %v\n", pc0, stmt.opcode, stmt.operation.halts, stmt.operation.valid)
+
 	if !stmt.operation.valid || stmt.operation.halts {
 		return nil
 	}
@@ -67,8 +77,8 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 	}
 
 	if stmt.opcode != JUMP {
-		if pc0 < codeLen-1 {
-			edges = append(edges, edge{pc0, stmt, pc0 + 1})
+		if pc0 < codeLen-stmt.numBytes {
+			edges = append(edges, edge{pc0, stmt, pc0 + stmt.numBytes})
 		}
 	}
 
@@ -114,14 +124,14 @@ func getStmts(prog *Contract) []stmt {
 	jt := newIstanbulInstructionSet()
 
 	codeLen := len(prog.Code)
-	stmts := make([]stmt, codeLen)
+	var stmts []stmt
 	for pc := 0; pc < codeLen; pc++ {
 		stmt := stmt{}
-		stmts = append(stmts, stmt)
 
 		op := prog.GetOp(uint64(pc))
 		stmt.opcode = op
 		stmt.operation = jt[op]
+		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {
 			pushByteSize := GetPushBytes(op)
@@ -136,9 +146,23 @@ func getStmts(prog *Contract) []stmt {
 			integer := new(uint256.Int)
 			integer.SetBytes(prog.Code[startMin:endMin])
 			stmt.value = *integer
+			stmt.numBytes = pushByteSize + 1
+		} else {
+			stmt.numBytes = 1
+		}
+
+		stmts = append(stmts, stmt)
+		if pc != len(stmts) - 1 {
+			panic("Invalid length")
 		}
 	}
 	return stmts
+}
+
+func printEdges(edges []edge) {
+	for _, edge := range edges {
+		fmt.Printf("%v\n", edge)
+	}
 }
 
 func AbsIntCfgHarness(prog *Contract) error {
@@ -154,6 +178,8 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	workList := resolve(prog, startPC, D[startPC], stmts[startPC])
 	for len(workList) > 0 {
+		printEdges(workList)
+
 		var e edge
 		e, workList = workList[0], workList[1:]
 		post1 := post(D[e.pc0], e.stmt)
@@ -167,7 +193,10 @@ func AbsIntCfgHarness(prog *Contract) error {
 	for pc := 0; pc < codeLen; pc++ {
 		edges = append(edges, resolve(prog, pc, D[pc], stmts[pc])...)
 	}
-	println(edges)
+
+	fmt.Printf("\n# of edges: %v\n", len(edges))
+	printEdges(edges)
+
 	println("done")
 
 	return nil
