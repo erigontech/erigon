@@ -110,11 +110,15 @@ func post(st0 state, stmt stmt) state {
 	st1 := st0
 
 	if stmt.opcode.IsPush() {
-		st1.stack = append(st1.stack, AbsConst{value,stmt.value})
+		pushConst := ConstValue(stmt.value)
+		//st1.stack = append([]AbsConst{}, st1.stack[1:absStackLen]...)
+		st1.stack = []AbsConst{pushConst}
+		fmt.Printf("push %v %v", pushConst, st1.stack)
 	} else {
 		switch stmt.opcode {
 		case JUMP, JUMPI:
-			st1.stack = st1.stack[1:]
+			//Popping off causes a top to be pulled into the abstract stack
+			st1.stack = append(st1.stack[1:], ConstTop())
 		}
 	}
 
