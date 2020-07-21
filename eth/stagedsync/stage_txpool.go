@@ -22,7 +22,7 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 	if to < s.BlockNumber {
 		return fmt.Errorf("txPoolUpdate to (%d) < from (%d)", to, s.BlockNumber)
 	}
-	if to - s.BlockNumber <= 1 {
+	if to-s.BlockNumber <= 1 {
 		if pool != nil && !pool.IsStarted() {
 			log.Info("Starting tx pool since block numbers converged", "from", s.BlockNumber, "to", to)
 			if err := pool.Start(); err != nil {
@@ -55,7 +55,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 			return true, nil
 		}
 
-		if currentHeaderIdx > to-from{ // if header stage is ehead of body stage
+		if currentHeaderIdx > to-from { // if header stage is ehead of body stage
 			return false, nil
 		}
 
@@ -130,7 +130,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return true, nil
 		}
 
-		if currentHeaderIdx > to-from{ // if header stage is ehead of body stage
+		if currentHeaderIdx > to-from { // if header stage is ehead of body stage
 			return false, nil
 		}
 

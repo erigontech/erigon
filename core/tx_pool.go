@@ -223,7 +223,7 @@ type TxPool struct {
 	pendingNonces *txNoncer // Pending state tracking virtual nonces
 
 	currentState  *state.IntraBlockState // Current state in the blockchain head
-	currentMaxGas uint64 // Current gas limit for transaction caps
+	currentMaxGas uint64                 // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
@@ -395,7 +395,7 @@ func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
 	pool.pendingNonces = newTxNoncer(pool.currentState)
 	pool.currentMaxGas = blockGasLimit
-	pool.istanbul = pool.chainconfig.IsIstanbul(big.NewInt(int64(blockNumber+1)))
+	pool.istanbul = pool.chainconfig.IsIstanbul(big.NewInt(int64(blockNumber + 1)))
 }
 
 // Stop terminates the transaction pool.

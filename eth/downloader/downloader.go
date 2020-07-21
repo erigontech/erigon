@@ -114,8 +114,8 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB    *ethdb.ObjectDatabase  // Database to state sync into (and deduplicate via)
-	stateBloom *trie.SyncBloom // Bloom filter for fast trie node existence checks
+	stateDB    *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
+	stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
 
 	// Statistics
 	syncStatsChainOrigin uint64       // Origin block number where syncing started at
