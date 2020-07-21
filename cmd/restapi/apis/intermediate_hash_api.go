@@ -17,7 +17,7 @@ func RegisterIntermediateHashAPI(router *gin.RouterGroup, e *Env) error {
 }
 
 func (e *Env) FindIntermediateHash(c *gin.Context) {
-	results, err := findIntermediateHashByPrefix(c.Query("prefix"), e.DB)
+	results, err := findIntermediateHashByPrefix(c.Query("prefix"), e.KV)
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return

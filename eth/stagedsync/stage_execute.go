@@ -121,11 +121,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 				// And the memory profiler
 				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
-				defer f.Close()
 				runtime.GC()
 				if err = pprof.WriteHeapProfile(f); err != nil {
 					log.Error("could not save memory profile", "error", err)
 				}
+				f.Close()
 			}
 		}
 

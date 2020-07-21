@@ -17,7 +17,7 @@ func RegisterAccountAPI(router *gin.RouterGroup, e *Env) error {
 }
 
 func (e *Env) GetAccount(c *gin.Context) {
-	account, err := findAccountByID(c.Param("accountID"), e.DB)
+	account, err := findAccountByID(c.Param("accountID"), e.KV)
 	if err == ErrEntityNotFound {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
 		return

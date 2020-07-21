@@ -13,11 +13,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -27,7 +27,7 @@ func RegisterRetraceAPI(router *gin.RouterGroup, e *Env) error {
 }
 
 func (e *Env) GetWritesReads(c *gin.Context) {
-	results, err := Retrace(c.Param("number"), c.Param("chain"), e.DB)
+	results, err := Retrace(c.Param("number"), c.Param("chain"), e.KV, e.DB)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
 		return
@@ -48,8 +48,8 @@ type RetraceResponse struct {
 	Account AccountWritesReads `json:"accounts"`
 }
 
-func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, error) {
-	chainConfig, err := ReadChainConfig(remoteDB, chain)
+func Retrace(blockNumber, chain string, kv ethdb.KV, db ethdb.Getter) (RetraceResponse, error) {
+	chainConfig, err := ReadChainConfig(kv, chain)
 	if err != nil {
 		return RetraceResponse{}, err
 	}
@@ -58,13 +58,10 @@ func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, err
 	if err != nil {
 		return RetraceResponse{}, err
 	}
-	block, err := GetBlockByNumber(remoteDB, uint64(bn))
-	chainCtx := NewRemoteContext(remoteDB)
-	if err != nil {
-		return RetraceResponse{}, err
-	}
+	block := rawdb.ReadBlockByNumber(db, uint64(bn))
+	chainCtx := NewRemoteContext(kv, db)
 	writer := state.NewChangeSetWriterPlain(uint64(bn - 1))
-	reader := NewRemoteReader(remoteDB, uint64(bn))
+	reader := NewRemoteReader(kv, uint64(bn))
 	intraBlockState := state.New(reader)
 
 	if err = runBlock(intraBlockState, noOpWriter, writer, chainConfig, chainCtx, block); err != nil {
@@ -130,19 +127,6 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 		return fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 	}
 	return nil
-}
-
-func GetBlockByNumber(db ethdb.KV, number uint64) (*types.Block, error) {
-	var block *types.Block
-	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b, err := remotechain.GetBlockByNumber(tx, number)
-		block = b
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return block, nil
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.

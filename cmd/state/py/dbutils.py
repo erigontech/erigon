@@ -43,13 +43,14 @@ StorageModeIntermediateTrieHash = "smIntermediateTrieHash".encode()
 SyncStageProgress = "SSP".encode()
 SyncStageUnwind = "SSU".encode()
 CliqueBucket = "clique-".encode()
+Senders = "txSenders".encode()
 
 # cat common/dbutils/bucket.go| grep '=' | grep byte | sed 's/\[\]byte(//' | sed 's/)//' | awk '{print $3}' | grep -v '//' | grep -v '='  | tr '\n' ','
 buckets = ["PLAIN-CST", "PLAIN-contractCode", "PLAIN-ACS", "PLAIN-SCS", "CST", "hAT", "hST", "CODE", "contractCode",
            "incarnationMap", "ACS", "SCS", "iTh", "iws", "DBINFO", "DatabaseVersion", "LastHeader", "LastBlock",
            "LastFast", "TrieSync", "h", "t", "n", "H", "b", "r", "l", "B", "secure-key-", "ethereum-config-", "iB",
            "iBshead", "LastPrunedBlock", "lastAppliedMigration", "smHistory",
-           "SSP", "SSU", "clique-", ]
+           "SSP", "SSU", "clique-", "txSenders",]
 
 
 def isHeaderHashKey(k):
