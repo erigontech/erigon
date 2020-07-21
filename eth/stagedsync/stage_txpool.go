@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -39,7 +40,9 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 }
 
 func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
-	// TODO: Set instanbul flag on the pool
+	headHash := rawdb.ReadCanonicalHash(db, to)
+	headHeader := rawdb.ReadHeader(db, headHash, to)
+	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from+1)
 	currentHeaderIdx := uint64(0)
 
@@ -112,6 +115,9 @@ func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool 
 }
 
 func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+	headHash := rawdb.ReadCanonicalHash(db, from)
+	headHeader := rawdb.ReadHeader(db, headHash, from)
+	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from+1)
 	currentHeaderIdx := uint64(0)
 
@@ -164,6 +170,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 		log.Error("TxPoolUpdate: walking over sender", "error", err)
 		return err
 	}
+	var txsToInject []*types.Transaction
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
@@ -186,14 +193,16 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 		}
 		body.SendersToTxs(senders[blockNumber-from-1])
 		for _, tx := range body.Transactions {
-			if _, err := pool.Add(tx, false /* local */); err != nil {
-				return false, fmt.Errorf("unwind TxPoolUpdate: adding tx back into the pool: %w", err)
-			}
+			txsToInject = append(txsToInject, tx)
 		}
 		return true, nil
 	}); err != nil {
 		log.Error("unwind TxPoolUpdate: walking over the block bodies", "error", err)
 		return err
 	}
+	//nolint:errcheck
+	log.Info("unwind TxPoolUpdate: injecting txs into the pool", "number", len(txsToInject))
+	pool.AddRemotesSync(txsToInject)
+	log.Info("Injection complete")
 	return nil
 }
