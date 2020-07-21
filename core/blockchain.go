@@ -145,8 +145,8 @@ type BlockChain struct {
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
 	db            *ethdb.ObjectDatabase // Low level persistent database to store final content in
-	triegc        *prque.Prque                 // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration                // Accumulates canonical block processing for trie dumping
+	triegc        *prque.Prque          // Priority queue mapping block numbers to tries to gc
+	gcproc        time.Duration         // Accumulates canonical block processing for trie dumping
 	txLookupLimit uint64
 
 	hc            *HeaderChain
@@ -2212,6 +2212,8 @@ func ExecuteBlockEphemerally(
 	stateWriter state.WriterWithChangeSets,
 	dests vm.Cache,
 ) (types.Receipts, error) {
+	defer blockExecutionTimer.UpdateSince(time.Now())
+
 	ibs := state.New(stateReader)
 	header := block.Header()
 	var receipts types.Receipts
