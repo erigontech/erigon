@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
@@ -38,6 +39,7 @@ type EthAPI interface {
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -87,6 +89,110 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	}
 
 	return hexutil.Uint64(blockNumber), nil
+}
+
+func getReceiptsByReApplyingTransactions(db ethdb.Getter, chainConfig *params.ChainConfig, block *types.Block, number uint64) (types.Receipts, error) {
+	dbstate := state.NewDbState(db.(ethdb.HasKV).KV(), number-1)
+	statedb := state.New(dbstate)
+	header := block.Header()
+	var receipts types.Receipts
+	var usedGas = new(uint64)
+	var gp = new(core.GasPool).AddGas(block.GasLimit())
+
+	vmConfig := vm.Config{}
+	for i, tx := range block.Transactions() {
+		statedb.Prepare(tx.Hash(), block.Hash(), i)
+
+		receipt, err := core.ApplyTransaction(chainConfig, &chainContext{db: db}, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig, nil)
+		if err != nil {
+			return nil, fmt.Errorf("core.ApplyTransaction failed: %w", err)
+		}
+
+		receipts = append(receipts, receipt)
+	}
+
+	return receipts, nil
+}
+
+func GetReceipts(db ethdb.Getter, ctx context.Context, hash common.Hash) (types.Receipts, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+
+	chainConfig, _, err := core.ReadChainConfig(db, nil)
+	if err != nil {
+		return nil, err
+	}
+	block := rawdb.ReadBlock(db, hash, *number)
+
+	// try from db
+	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64(), chainConfig); cached != nil {
+		return cached, nil
+	}
+	return getReceiptsByReApplyingTransactions(db, chainConfig, block, *number)
+}
+
+func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(api.dbReader, hash)
+	if tx == nil {
+		return nil, nil
+	}
+	receipts, err := GetReceipts(api.dbReader, ctx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if len(receipts) <= int(index) {
+		return nil, nil
+	}
+	receipt := receipts[index]
+
+	var signer types.Signer = types.FrontierSigner{}
+	if tx.Protected() {
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
+	}
+	from, _ := types.Sender(signer, tx)
+
+	// Fill in the derived information in the logs
+	if receipt.Logs != nil {
+		for i, log := range receipt.Logs {
+			log.BlockNumber = blockNumber
+			log.TxHash = hash
+			log.TxIndex = uint(index)
+			log.BlockHash = blockHash
+			log.Index = uint(i)
+		}
+	}
+	// Now reconstruct the bloom filter
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	fields := map[string]interface{}{
+		"blockHash":         blockHash,
+		"blockNumber":       hexutil.Uint64(blockNumber),
+		"transactionHash":   hash,
+		"transactionIndex":  hexutil.Uint64(index),
+		"from":              from,
+		"to":                tx.To(),
+		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
+		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
+		"contractAddress":   nil,
+		"logs":              receipt.Logs,
+		"logsBloom":         receipt.Bloom,
+	}
+
+	// Assign receipt status or post state.
+	if len(receipt.PostState) > 0 {
+		fields["root"] = hexutil.Bytes(receipt.PostState)
+	} else {
+		fields["status"] = hexutil.Uint(receipt.Status)
+	}
+	if receipt.Logs == nil {
+		fields["logs"] = [][]*types.Log{}
+	}
+	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
+	if receipt.ContractAddress != (common.Address{}) {
+		fields["contractAddress"] = receipt.ContractAddress
+	}
+	return fields, nil
 }
 
 type blockGetter struct {
@@ -248,7 +354,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 
 	var rpcAPI = []rpc.API{}
 
-	dbReader := ethdb.NewRemoteBoltDatabase(db)
+	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
 	apiImpl := NewAPI(db, dbReader, chainContext)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)

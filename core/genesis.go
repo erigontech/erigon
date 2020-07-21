@@ -223,6 +223,51 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	return newcfg, stored, stateDB, nil
 }
 
+func ReadChainConfig(db ethdb.Getter, genesis *Genesis) (*params.ChainConfig, common.Hash, error) {
+	if genesis != nil && genesis.Config == nil {
+		return params.AllEthashProtocolChanges, common.Hash{}, errGenesisNoConfig
+	}
+	// Just commit the new block if there is no stored genesis block.
+	stored := rawdb.ReadCanonicalHash(db, 0)
+	if (stored == common.Hash{}) {
+		fmt.Printf("1\n")
+		return params.AllEthashProtocolChanges, common.Hash{}, errGenesisNoConfig
+	}
+
+	// Get the existing chain configuration.
+	newcfg := genesis.configOrDefault(stored)
+	if err := newcfg.CheckConfigForkOrder(); err != nil {
+		return newcfg, common.Hash{}, err
+	}
+	storedcfg := rawdb.ReadChainConfig(db, stored)
+	if storedcfg == nil {
+		fmt.Printf("2\n")
+		return newcfg, stored, errGenesisNoConfig
+	}
+
+	// Special case: don't change the existing config of a non-mainnet chain if no new
+	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
+	// if we just continued here.
+	if genesis == nil && stored != params.MainnetGenesisHash {
+		fmt.Printf("3\n")
+		return storedcfg, stored, nil
+	}
+
+	// Check config compatibility and write the config. Compatibility errors
+	// are returned to the caller unless we're already at block zero.
+	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
+	if height == nil {
+		fmt.Printf("4\n")
+		return newcfg, stored, fmt.Errorf("missing block number for head header hash")
+	}
+	compatErr := storedcfg.CheckCompatible(newcfg, *height)
+	if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
+		return newcfg, stored, compatErr
+	}
+	fmt.Printf("5\n")
+	return newcfg, stored, nil
+}
+
 func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 	switch {
 	case g != nil:
