@@ -21,11 +21,18 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+)
+
+var (
+	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
+	dbPutTimer = metrics.NewRegisteredTimer("db/put", nil)
 )
 
 // ObjectDatabase - is an object-style interface of DB accessing
@@ -77,6 +84,10 @@ func Open(path string) (*ObjectDatabase, error) {
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket, key []byte, value []byte) error {
+	if metrics.Enabled {
+		defer dbPutTimer.UpdateSince(time.Now())
+	}
+
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Bucket(bucket).Put(key, value)
 	})
@@ -163,6 +174,10 @@ func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.St
 
 // Get returns the value for a given key if it's present.
 func (db *ObjectDatabase) Get(bucket, key []byte) (dat []byte, err error) {
+	if metrics.Enabled {
+		defer dbGetTimer.UpdateSince(time.Now())
+	}
+
 	err = db.kv.View(context.Background(), func(tx Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)
 		if v != nil {

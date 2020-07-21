@@ -31,16 +31,18 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 		}
 	})
 
-	var db ethdb.KV
+	var kv ethdb.KV
+	var db ethdb.Database
 	var err error
 	if remoteDBAddress != "" {
-		db, err = ethdb.NewRemote().Path(remoteDBAddress).Open()
+		kv, err = ethdb.NewRemote().Path(remoteDBAddress).Open()
+		db = ethdb.NewObjectDatabase(kv)
 	} else if chaindata != "" {
 		database, errOpen := ethdb.Open(chaindata)
 		if errOpen != nil {
 			return errOpen
 		}
-		db = database.KV()
+		kv = database.KV()
 	} else {
 		err = fmt.Errorf("either remote db or bolt db must be specified")
 	}
@@ -49,6 +51,7 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 	}
 	defer db.Close()
 	e := &apis.Env{
+		KV:              kv,
 		DB:              db,
 		RemoteDBAddress: remoteDBAddress,
 		Chaindata:       chaindata,

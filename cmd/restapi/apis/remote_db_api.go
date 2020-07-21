@@ -26,14 +26,17 @@ func (e *Env) GetDB(c *gin.Context) {
 
 func (e *Env) PostDB(c *gin.Context) {
 	newAddr := c.Query("host") + ":" + c.Query("port")
-	remoteDB, err := ethdb.NewRemote().Path(newAddr).Open()
+	kv, err := ethdb.NewRemote().Path(newAddr).Open()
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return
 	}
 	e.RemoteDBAddress = newAddr
 
-	e.DB.Close()
-	e.DB = remoteDB
+	e.KV.Close()
+
+	e.KV = kv
+	db := ethdb.NewObjectDatabase(kv)
+	e.DB = db
 	c.Status(http.StatusOK)
 }
