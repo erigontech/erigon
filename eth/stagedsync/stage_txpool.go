@@ -25,7 +25,9 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 	if to-s.BlockNumber <= 1 {
 		if pool != nil && !pool.IsStarted() {
 			log.Info("Starting tx pool since block numbers converged", "from", s.BlockNumber, "to", to)
-			if err := pool.Start(); err != nil {
+			headHash := rawdb.ReadCanonicalHash(db, to)
+			headHeader := rawdb.ReadHeader(db, headHash, to)
+			if err := pool.Start(headHeader.GasLimit, to); err != nil {
 				return fmt.Errorf("txPoolUpdate start pool: %w", err)
 			}
 		}
@@ -41,7 +43,7 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
-	pool.ResetHead(headHeader.GasLimit, from)
+	pool.ResetHead(headHeader.GasLimit, to)
 	canonical := make([]common.Hash, to-from+1)
 	currentHeaderIdx := uint64(0)
 

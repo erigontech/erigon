@@ -160,7 +160,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	chain, _ := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, db, txCacher)
-	if err := txpool.Start(); err != nil {
+	if err := txpool.Start(genesis.Header().GasLimit, 0); err != nil {
 		t.Fatal(err)
 	}
 

@@ -169,12 +169,11 @@ type testChain struct {
 	trigger *bool
 }
 
-/*
 // This test simulates a scenario where a new block is imported during a
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
+/*
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
-	t.Skip()
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (

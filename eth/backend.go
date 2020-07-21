@@ -267,9 +267,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		if err = eth.StartTxPool(); err != nil {
 			return nil, err
 		}
-	} else {
-		eth.txPool.AddInit(eth.StartTxPool)
-		eth.txPool.AddStop(eth.StopTxPool)
 	}
 
 	if config.SyncMode != downloader.StagedSync {
@@ -664,7 +661,10 @@ func (s *Ethereum) StartTxPool() error {
 	if s.txPoolStarted {
 		return errors.New("transaction pool is already started")
 	}
-	if err := s.txPool.Start(); err != nil {
+	headHash := rawdb.ReadHeadHeaderHash(s.chainDb)
+	headNumber := rawdb.ReadHeaderNumber(s.chainDb, headHash)
+	head := rawdb.ReadHeader(s.chainDb, headHash, *headNumber)
+	if err := s.txPool.Start(head.GasLimit, *headNumber); err != nil {
 		return err
 	}
 	if err := s.protocolManager.StartTxPool(); err != nil {

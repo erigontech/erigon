@@ -26,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -275,16 +274,10 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *et
 		stopCh:         make(chan struct{}),
 	}
 
-	if config.StartOnInit {
-		if err := pool.Start(); err != nil {
-			log.Error("cannot start transaction pool", "err", err)
-		}
-	}
-
 	return pool
 }
 
-func (pool *TxPool) Start() error {
+func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	pool.reorgShutdownCh = make(chan struct{}, 1)
 
 	pool.locals = newAccountSet(pool.signer)
@@ -293,10 +286,7 @@ func (pool *TxPool) Start() error {
 		pool.locals.add(addr)
 	}
 	pool.priced = newTxPricedList(pool.all)
-	headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
-	headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
-	head := rawdb.ReadHeader(pool.chaindb, headHash, *headNumber)
-	pool.ResetHead(head.GasLimit, *headNumber)
+	pool.ResetHead(gasLimit, headNumber)
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
