@@ -171,20 +171,20 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	additionalFields := make(map[string]interface{})
 
 	block := rawdb.ReadBlockByNumber(api.dbReader, uint64(number.Int64()))
-	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
-
-	if block != nil {
-		response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
-
-		if err == nil && number == rpc.PendingBlockNumber {
-			// Pending blocks need to nil out a few fields
-			for _, field := range []string{"hash", "nonce", "miner"} {
-				response[field] = nil
-			}
-		}
-		return response, err
+	if block == nil {
+		return nil, nil
 	}
-	return nil, nil
+
+	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
+	response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
+
+	if err == nil && number == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+	return response, err
 }
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
