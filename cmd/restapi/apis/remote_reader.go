@@ -7,12 +7,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"golang.org/x/net/context"
@@ -28,7 +28,8 @@ type RemoteReader struct {
 }
 
 type RemoteContext struct {
-	db ethdb.KV
+	kv ethdb.KV
+	db ethdb.Getter
 }
 
 type powEngine struct {
@@ -186,8 +187,9 @@ func (r *RemoteReader) ReadAccountIncarnation(address common.Address) (uint64, e
 	return 0, nil
 }
 
-func NewRemoteContext(db ethdb.KV) *RemoteContext {
+func NewRemoteContext(kv ethdb.KV, db ethdb.Getter) *RemoteContext {
 	return &RemoteContext{
+		kv: kv,
 		db: db,
 	}
 }
@@ -197,11 +199,5 @@ func (e *RemoteContext) Engine() consensus.Engine {
 }
 
 func (e *RemoteContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	var header *types.Header
-	_ = e.db.View(context.Background(), func(tx ethdb.Tx) error {
-		h, _ := remotechain.ReadHeader(tx, hash, number)
-		header = h
-		return nil
-	})
-	return header
+	return rawdb.ReadHeader(e.db, hash, number)
 }

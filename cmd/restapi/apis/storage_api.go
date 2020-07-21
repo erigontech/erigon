@@ -17,7 +17,7 @@ func RegisterStorageAPI(router *gin.RouterGroup, e *Env) error {
 }
 
 func (e *Env) FindStorage(c *gin.Context) {
-	results, err := findStorageByPrefix(c.Query("prefix"), e.DB)
+	results, err := findStorageByPrefix(c.Query("prefix"), e.KV)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
 		return
