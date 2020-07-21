@@ -191,9 +191,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return false, fmt.Errorf("unwind TxPoolUpdate: invalid block body RLP: %w", err)
 		}
 		body.SendersToTxs(senders[blockNumber-from-1])
-		for _, tx := range body.Transactions {
-			txsToInject = append(txsToInject, tx)
-		}
+		txsToInject = append(txsToInject, body.Transactions...)
 		return true, nil
 	}); err != nil {
 		log.Error("unwind TxPoolUpdate: walking over the block bodies", "error", err)
