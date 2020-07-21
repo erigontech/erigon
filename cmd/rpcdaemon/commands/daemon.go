@@ -91,61 +91,72 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	return hexutil.Uint64(blockNumber), nil
 }
 
-func getReceiptsByReApplyingTransactions(db ethdb.Getter, chainConfig *params.ChainConfig, block *types.Block, number uint64) (types.Receipts, error) {
-	dbstate := state.NewDbState(db.(ethdb.HasKV).KV(), number-1)
-	statedb := state.New(dbstate)
-	header := block.Header()
+func getReceiptsByReApplyingTransactions(db ethdb.Database, chainConfig *params.ChainConfig, block *types.Block, number uint64) (types.Receipts, error) {
 	var receipts types.Receipts
-	var usedGas = new(uint64)
-	var gp = new(core.GasPool).AddGas(block.GasLimit())
+	batch := db.NewBatch()
+	defer batch.Rollback()
+	core.UsePlainStateExecution = true
+	stateReader := state.NewPlainStateReader(batch)
+	stateWriter := state.NewPlainStateWriter(batch, block.NumberU64())
 
-	vmConfig := vm.Config{}
-	for i, tx := range block.Transactions() {
-		statedb.Prepare(tx.Hash(), block.Hash(), i)
-
-		receipt, err := core.ApplyTransaction(chainConfig, &chainContext{db: db}, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig, nil)
-		if err != nil {
-			return nil, fmt.Errorf("core.ApplyTransaction failed: %w", err)
-		}
-
-		receipts = append(receipts, receipt)
+	bc := &chainContext{db: db}
+	// where the magic happens
+	receipts, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, bc, bc.Engine(), block, stateReader, stateWriter, nil)
+	if err != nil {
+		return nil, err
 	}
-
 	return receipts, nil
 }
 
-func GetReceipts(db ethdb.Getter, ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	number := rawdb.ReadHeaderNumber(db, hash)
-	if number == nil {
-		return nil, nil
-	}
-
-	chainConfig, _, err := core.ReadChainConfig(db, nil)
-	if err != nil {
-		return nil, err
-	}
-	block := rawdb.ReadBlock(db, hash, *number)
-
-	// try from db
-	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64(), chainConfig); cached != nil {
-		return cached, nil
-	}
-	return getReceiptsByReApplyingTransactions(db, chainConfig, block, *number)
-}
-
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
-	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(api.dbReader, hash)
+	// Retrieve the transaction and assemble its EVM context
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
 	if tx == nil {
-		return nil, nil
+		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	receipts, err := GetReceipts(api.dbReader, ctx, blockHash)
+
+	bc := &blockGetter{api.dbReader}
+	msg, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
 	if err != nil {
 		return nil, err
 	}
-	if len(receipts) <= int(index) {
-		return nil, nil
+
+	//vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{}, nil)
+	gp := new(core.GasPool).AddGas(msg.Gas())
+	//result, err := core.ApplyMessage(vmenv, msg, gp)
+	//if err == nil {
+	//	return nil, err
+	//}
+	//if result == nil {
+	//	return nil, nil
+	//}
+	//// Update the state with pending changes
+	//if err = ibs.FinalizeTx(ctx, dbstate); err != nil {
+	//	return nil, err
+	//}
+	//
+	var usedGas = new(uint64)
+	//*usedGas += result.UsedGas
+	//
+	//// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
+	//// based on the eip phase, we're passing whether the root touch-delete accounts.
+	//receipt := types.NewReceipt(result.Failed(), *usedGas)
+	//receipt.TxHash = tx.Hash()
+	//receipt.GasUsed = result.UsedGas
+	//// if the transaction created a contract, store the creation address in the receipt.
+	//if msg.To() == nil {
+	//	receipt.ContractAddress = crypto.CreateAddress(vmenv.Context.Origin, tx.Nonce())
+	//}
+	//// Set the receipt logs and create a bloom for filtering
+	//receipt.Logs = ibs.GetLogs(tx.Hash())
+	//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+
+	cc := &chainContext{api.dbReader}
+	header := rawdb.ReadHeader(api.dbReader, blockHash, blockNumber)
+	receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{}, nil)
+	if err != nil {
+		return nil, err
 	}
-	receipt := receipts[index]
 
 	var signer types.Signer = types.FrontierSigner{}
 	if tx.Protected() {
@@ -158,7 +169,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		for i, log := range receipt.Logs {
 			log.BlockNumber = blockNumber
 			log.TxHash = hash
-			log.TxIndex = uint(index)
+			log.TxIndex = uint(txIndex)
 			log.BlockHash = blockHash
 			log.Index = uint(i)
 		}
@@ -169,7 +180,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		"blockHash":         blockHash,
 		"blockNumber":       hexutil.Uint64(blockNumber),
 		"transactionHash":   hash,
-		"transactionIndex":  hexutil.Uint64(index),
+		"transactionIndex":  hexutil.Uint64(txIndex),
 		"from":              from,
 		"to":                tx.To(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
