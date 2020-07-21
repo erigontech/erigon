@@ -17,11 +17,11 @@
 package core
 
 import (
-	//"context"
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	//"io/ioutil"
-	//"math/big"
+	"math/big"
 	"math/rand"
 	//"os"
 	"runtime"
@@ -32,7 +32,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
-	//"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -93,6 +93,8 @@ func setupTxPool() (*TxPool, *ecdsa.PrivateKey, func()) {
 	key, _ := crypto.GenerateKey()
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
 	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, diskdb, txCacher)
+	//nolint:errcheck
+	pool.Start(1000000000, 0)
 
 	clear := func() {
 		pool.Stop()
@@ -172,7 +174,6 @@ type testChain struct {
 // This test simulates a scenario where a new block is imported during a
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
-/*
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -195,6 +196,9 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
 	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	if err := pool.Start(1000000000, 0); err != nil {
+		t.Fatalf("start tx pool: %v", err)
+	}
 	defer func() {
 		txCacher.Close()
 		pool.Stop()
@@ -213,7 +217,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	}
 
 	// trigger state change in the background
-	<-pool.requestReset(nil, nil)
+	//<-pool.requestReset(nil, nil)
 
 	if _, err := pool.Pending(); err != nil {
 		t.Fatalf("Could not fetch pending transactions: %v", err)
@@ -223,11 +227,8 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 		t.Fatalf("Invalid nonce, want 2, got %d", nonce)
 	}
 }
-*/
 
-/*
 func TestInvalidTransactions(t *testing.T) {
-	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 
@@ -262,25 +263,14 @@ func TestInvalidTransactions(t *testing.T) {
 		t.Error("expected", nil, "got", err)
 	}
 }
-*/
 
-/*
 func TestTransactionQueue(t *testing.T) {
-	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 
 	tx := transaction(0, 100, key)
 	from, _ := deriveSender(tx)
 	pool.currentState.AddBalance(from, uint256.NewInt().SetUint64(1000))
-	ctx := context.Background()
-	if err := pool.currentState.FinalizeTx(ctx, pool.currentTds.TrieStateWriter()); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
-		t.Fatal(err)
-	}
-	<-pool.requestReset(nil, nil)
 
 	pool.enqueueTx(tx.Hash(), tx)
 	<-pool.requestPromoteExecutables(newAccountSet(pool.signer, from))
@@ -301,30 +291,15 @@ func TestTransactionQueue(t *testing.T) {
 		t.Error("expected transaction queue to be empty. is", len(pool.queue))
 	}
 }
-*/
 
-/*
 func TestTransactionQueue2(t *testing.T) {
-	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 	tx1 := transaction(0, 100, key)
 	tx2 := transaction(10, 100, key)
 	tx3 := transaction(11, 100, key)
 	from, _ := deriveSender(tx1)
-	pool.currentTds.StartNewBuffer()
 	pool.currentState.AddBalance(from, uint256.NewInt().SetUint64(1000))
-	ctx := context.Background()
-	if err := pool.currentState.FinalizeTx(ctx, pool.currentTds.TrieStateWriter()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
-		t.Fatal(err)
-	}
-	pool.reset(nil, nil)
 
 	pool.enqueueTx(tx1.Hash(), tx1)
 	pool.enqueueTx(tx2.Hash(), tx2)
@@ -338,7 +313,6 @@ func TestTransactionQueue2(t *testing.T) {
 		t.Error("expected len(queue) == 2, got", pool.queue[from].Len())
 	}
 }
-*/
 
 /*
 func TestTransactionChainFork(t *testing.T) {
