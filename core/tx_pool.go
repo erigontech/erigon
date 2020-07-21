@@ -243,6 +243,7 @@ type TxPool struct {
 	isStarted       bool
 	initFns         []func() error
 	stopFns         []func() error
+	stopCh          chan struct{}
 }
 
 type txpoolResetRequest struct {
@@ -271,7 +272,8 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *et
 		queueTxEventCh: make(chan *types.Transaction),
 		reorgDoneCh:    make(chan chan struct{}),
 		gasPrice:       new(big.Int).SetUint64(config.PriceLimit),
-		senderCacher:   senderCacher,
+		stopCh:         make(chan struct{}),
+
 	}
 
 	if config.StartOnInit {
@@ -343,7 +345,7 @@ func (pool *TxPool) loop() {
 		select {
 
 		// System shutdown.
-		case <-pool.chainHeadSub.Err():
+		case <-pool.stopCh:
 			common.SafeClose(pool.reorgShutdownCh)
 			return
 
@@ -404,9 +406,9 @@ func (pool *TxPool) Stop() {
 	if !pool.IsStarted() {
 		return
 	}
+	close(pool.stopCh)
 
 	// Unsubscribe subscriptions registered from blockchain
-	pool.chainHeadSub.Unsubscribe()
 	pool.wg.Wait()
 
 	if pool.journal != nil {

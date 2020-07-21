@@ -707,5 +707,8 @@ func (s *Ethereum) Stop() error {
 	s.engine.Close()
 	s.chainDb.Close()
 	s.eventMux.Stop()
+	if s.txPool != nil {
+		s.txPool.Stop()
+	}
 	return nil
 }
