@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
