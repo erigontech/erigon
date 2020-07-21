@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -79,16 +78,8 @@ func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.Ch
 }
 
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	var blockNumber uint64
-
-	if err := api.db.View(ctx, func(tx ethdb.Tx) error {
-		var err error
-		blockNumber, err = remotechain.ReadLastBlockNumber(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	blockNumber, err := rawdb.ReadLastBlockNumber(api.dbReader)
+	if err != nil {
 		return 0, err
 	}
 
@@ -114,7 +105,7 @@ type chainContext struct {
 
 func NewChainContext(db rawdb.DatabaseReader) *chainContext {
 	return &chainContext{
-		db:          db,
+		db: db,
 	}
 
 }
@@ -177,37 +168,23 @@ func (c *chainContext) Engine() consensus.Engine {
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	var err error
-	var block *types.Block
 	additionalFields := make(map[string]interface{})
 
-	err = api.db.View(ctx, func(tx ethdb.Tx) error {
-		block, err = remotechain.GetBlockByNumber(tx, uint64(number.Int64()))
-		if err != nil {
-			return err
-		}
-		additionalFields["totalDifficulty"], err = remotechain.ReadTd(tx, block.Hash(), uint64(number.Int64()))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	block := rawdb.ReadBlockByNumber(api.dbReader, uint64(number.Int64()))
+	if block == nil {
+		return nil, nil
 	}
 
-	if block != nil {
-		response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
+	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
+	response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
 
-		if err == nil && number == rpc.PendingBlockNumber {
-			// Pending blocks need to nil out a few fields
-			for _, field := range []string{"hash", "nonce", "miner"} {
-				response[field] = nil
-			}
+	if err == nil && number == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
 		}
-		return response, err
 	}
-	return nil, nil
+	return response, err
 }
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
