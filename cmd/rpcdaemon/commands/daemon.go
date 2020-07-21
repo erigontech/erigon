@@ -121,67 +121,22 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, err
 	}
 
-	//vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{}, nil)
-	gp := new(core.GasPool).AddGas(msg.Gas())
-	//result, err := core.ApplyMessage(vmenv, msg, gp)
-	//if err == nil {
-	//	return nil, err
-	//}
-	//if result == nil {
-	//	return nil, nil
-	//}
-	//// Update the state with pending changes
-	//if err = ibs.FinalizeTx(ctx, dbstate); err != nil {
-	//	return nil, err
-	//}
-	//
-	var usedGas = new(uint64)
-	//*usedGas += result.UsedGas
-	//
-	//// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
-	//// based on the eip phase, we're passing whether the root touch-delete accounts.
-	//receipt := types.NewReceipt(result.Failed(), *usedGas)
-	//receipt.TxHash = tx.Hash()
-	//receipt.GasUsed = result.UsedGas
-	//// if the transaction created a contract, store the creation address in the receipt.
-	//if msg.To() == nil {
-	//	receipt.ContractAddress = crypto.CreateAddress(vmenv.Context.Origin, tx.Nonce())
-	//}
-	//// Set the receipt logs and create a bloom for filtering
-	//receipt.Logs = ibs.GetLogs(tx.Hash())
-	//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-
 	cc := &chainContext{api.dbReader}
+	gp := new(core.GasPool).AddGas(msg.Gas())
+	var usedGas = new(uint64)
 	header := rawdb.ReadHeader(api.dbReader, blockHash, blockNumber)
 	receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{}, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var signer types.Signer = types.FrontierSigner{}
-	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
-	}
-	from, _ := types.Sender(signer, tx)
-
-	// Fill in the derived information in the logs
-	if receipt.Logs != nil {
-		for i, log := range receipt.Logs {
-			log.BlockNumber = blockNumber
-			log.TxHash = hash
-			log.TxIndex = uint(txIndex)
-			log.BlockHash = blockHash
-			log.Index = uint(i)
-		}
-	}
 	// Now reconstruct the bloom filter
-	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	fields := map[string]interface{}{
 		"blockHash":         blockHash,
 		"blockNumber":       hexutil.Uint64(blockNumber),
 		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(txIndex),
-		"from":              from,
+		"from":              msg.From(),
 		"to":                tx.To(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
