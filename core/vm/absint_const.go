@@ -123,29 +123,31 @@ func post(st0 state, stmt stmt) state {
 
 	if stmt.opcode.IsPush() {
 		st1.Push(ConstValue(stmt.value))
-	} else if stmt.opcode == MLOAD {
-		st1.Pop()
-		st1.Push(ConstTop())
-	} else if stmt.opcode == LT {
-		lhs := st1.Pop()
-		rhs := st1.Pop()
-		if lhs.kind == Value && rhs.kind == Value {
-			res := lhs.value.Lt(&rhs.value)
-			resi := uint256.NewInt()
-			if res {
-				resi.SetOne()
-			} else {
-				resi.Clear()
-			}
-			st1.Push(ConstValue(*resi))
-		} else {
-			st1.Push(ConstTop())
-		}
 	} else {
 		switch stmt.opcode {
-		case JUMP, JUMPI:
-			//Popping off causes a top to be pulled into the abstract stack
+		case JUMP:
 			st1.Pop()
+		case JUMPI:
+			st1.Pop()
+			st1.Pop()
+		case MLOAD:
+			st1.Pop()
+			st1.Push(ConstTop())
+		case LT:
+			lhs := st1.Pop()
+			rhs := st1.Pop()
+			if lhs.kind == Value && rhs.kind == Value {
+				res := lhs.value.Lt(&rhs.value)
+				resi := uint256.NewInt()
+				if res {
+					resi.SetOne()
+				} else {
+					resi.Clear()
+				}
+				st1.Push(ConstValue(*resi))
+			} else {
+				st1.Push(ConstTop())
+			}
 		}
 	}
 
