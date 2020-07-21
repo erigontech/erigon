@@ -147,8 +147,8 @@ func PrepareStagedSync(
 			ExecFunc: func(s *StageState, _ Unwinder) error {
 				return spawnTxPool(s, stateDB, txPool, quitCh)
 			},
-			UnwindFunc: func(_ *UnwindState, _ *StageState) error {
-				return unwindTxPool()
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return unwindTxPool(u, s, stateDB, txPool, quitCh)
 			},
 		},
 	}
