@@ -91,21 +91,59 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	return hexutil.Uint64(blockNumber), nil
 }
 
-func getReceiptsByReApplyingTransactions(db ethdb.Database, chainConfig *params.ChainConfig, block *types.Block, number uint64) (types.Receipts, error) {
-	var receipts types.Receipts
-	batch := db.NewBatch()
-	defer batch.Rollback()
-	core.UsePlainStateExecution = true
-	stateReader := state.NewPlainStateReader(batch)
-	stateWriter := state.NewPlainStateWriter(batch, block.NumberU64())
+func GetReceipts(ctx context.Context, db ethdb.Getter, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
 
-	bc := &chainContext{db: db}
-	// where the magic happens
-	receipts, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, bc, bc.Engine(), block, stateReader, stateWriter, nil)
+	block := rawdb.ReadBlock(db, hash, *number)
+	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64(), cfg); cached != nil {
+		return cached, nil
+	}
+
+	bc := &blockGetter{db}
+	_, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0, nil)
 	if err != nil {
 		return nil, err
 	}
+
+	var receipts types.Receipts
+	cc := &chainContext{db}
+	gp := new(core.GasPool).AddGas(block.GasLimit())
+	var usedGas = new(uint64)
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+
+		header := rawdb.ReadHeader(db, hash, *number)
+		receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{}, nil)
+		if err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, receipt)
+	}
+
 	return receipts, nil
+}
+
+func (api *APIImpl) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
+	number := rawdb.ReadHeaderNumber(api.dbReader, hash)
+	if number == nil {
+		return nil, nil
+	}
+
+	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, hash)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipt error: %v", err)
+	}
+	if receipts == nil {
+		return nil, nil
+	}
+	logs := make([][]*types.Log, len(receipts))
+	for i, receipt := range receipts {
+		logs[i] = receipt.Logs
+	}
+	return logs, nil
 }
 
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
@@ -115,19 +153,30 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	bc := &blockGetter{api.dbReader}
-	msg, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
+	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, blockHash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
+	if len(receipts) <= int(txIndex) {
+		return nil, nil
+	}
+	receipt := receipts[txIndex]
 
-	cc := &chainContext{api.dbReader}
-	gp := new(core.GasPool).AddGas(msg.Gas())
-	var usedGas = new(uint64)
-	header := rawdb.ReadHeader(api.dbReader, blockHash, blockNumber)
-	receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{}, nil)
-	if err != nil {
-		return nil, err
+	var signer types.Signer = types.FrontierSigner{}
+	if tx.Protected() {
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
+	}
+	from, _ := types.Sender(signer, tx)
+
+	// Fill in the derived information in the logs
+	if receipt.Logs != nil {
+		for i, log := range receipt.Logs {
+			log.BlockNumber = blockNumber
+			log.TxHash = hash
+			log.TxIndex = uint(txIndex)
+			log.BlockHash = blockHash
+			log.Index = uint(i)
+		}
 	}
 
 	// Now reconstruct the bloom filter
@@ -136,7 +185,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		"blockNumber":       hexutil.Uint64(blockNumber),
 		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(txIndex),
-		"from":              msg.From(),
+		"from":              from,
 		"to":                tx.To(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
