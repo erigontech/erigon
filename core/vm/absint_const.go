@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"github.com/holiman/uint256"
+	"sort"
 	"strings"
 )
 
@@ -214,6 +215,10 @@ func getStmts(prog *Contract) []stmt {
 }
 
 func printEdges(edges []edge) {
+	sort.SliceStable(edges, func(i, j int) bool {
+		return edges[i].pc0 < edges[j].pc0
+	})
+
 	for _, edge := range edges {
 		fmt.Printf("%v\n", edge)
 	}
@@ -224,6 +229,39 @@ func printStmts(stmts []stmt) {
 		fmt.Printf("%v %v\n", i, stmt)
 	}
 }
+
+func getEntryReachableEdges(entry int, edges []edge) []edge {
+	pc2edges := make(map[int][]edge)
+	for _, e := range edges {
+		l := pc2edges[e.pc0]
+		l = append(l, e)
+		pc2edges[e.pc0] = l
+	}
+
+	workList := []int{entry}
+	visited := make(map[int]bool)
+	visited[entry] = true
+	for len(workList) > 0 {
+		var pc int
+		pc, workList = workList[0], workList[1:]
+
+		for _, edge := range pc2edges[pc] {
+			if !visited[edge.pc1] {
+				visited[edge.pc1] = true
+				workList = append(workList, edge.pc1)
+			}
+		}
+	}
+
+	var reachable []edge
+	for pc, exists := range visited {
+		if exists {
+			reachable = append(reachable, pc2edges[pc]...)
+		}
+	}
+	return reachable
+}
+
 
 func AbsIntCfgHarness(prog *Contract) error {
 	startPC := 0
@@ -262,6 +300,10 @@ func AbsIntCfgHarness(prog *Contract) error {
 		edges = append(edges, resolve(prog, pc, D[pc], stmts[pc])...)
 	}
 	//need to run a DFS from the entry point to pick only reachable stmts
+
+	if edges != nil {
+		edges = getEntryReachableEdges(0, edges)
+	}
 
 	fmt.Printf("\n# of edges: %v\n", len(edges))
 	printEdges(edges)

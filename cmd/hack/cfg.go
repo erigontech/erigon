@@ -14,8 +14,8 @@ func testGenCfg() error {
 	//dfTest1()
 	//dfTest2()
 	//dfTest3()
-	absIntTest1()
-	//absIntTest3()
+	//absIntTest1()
+	absIntTest3()
 	return nil
 }
 
