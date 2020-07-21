@@ -23,14 +23,14 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 		return fmt.Errorf("TxPoolUpdate to (%d) < from (%d)", to, s.BlockNumber)
 	}
 	if to - s.BlockNumber <= 1 {
-		if !pool.IsStarted() {
+		if pool != nil && !pool.IsStarted() {
 			log.Info("Starting tx pool since block numbers converged", "from", s.BlockNumber, "to", to)
 			if err := pool.Start(); err != nil {
 				return fmt.Errorf("TxPoolUpdate start pool: %w", err)
 			}
 		}
 	}
-	if pool.IsStarted() && s.BlockNumber > 0 {
+	if pool != nil && pool.IsStarted() && s.BlockNumber > 0 {
 		if err := incrementalTxPoolUpdate(s.BlockNumber, to, pool, db, quitCh); err != nil {
 			return err
 		}
@@ -103,7 +103,7 @@ func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool 
 		s.Done()
 		return nil
 	}
-	if pool.IsStarted() {
+	if pool != nil && pool.IsStarted() {
 		if err := unwindTxPoolUpdate(u.UnwindPoint, s.BlockNumber, pool, db, quitCh); err != nil {
 			return err
 		}
