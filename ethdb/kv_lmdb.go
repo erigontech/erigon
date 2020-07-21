@@ -736,6 +736,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		if err != nil {
 			return err
 		}
+		return c.cursor.Put(key, newValue, 0)
 	}
 
 	return c.cursor.Put(key, newValue, 0)
