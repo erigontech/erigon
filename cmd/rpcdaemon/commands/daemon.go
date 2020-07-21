@@ -40,6 +40,7 @@ type EthAPI interface {
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -91,7 +92,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	return hexutil.Uint64(blockNumber), nil
 }
 
-func GetReceipts(ctx context.Context, db ethdb.Getter, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
+func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil
