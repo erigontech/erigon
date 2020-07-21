@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -24,6 +25,10 @@ func (api *APIImpl) GetBalance(_ context.Context, address common.Address, blockN
 			return nil, fmt.Errorf("block %x not found", hash)
 		}
 		blockNumber = block.NumberU64()
+
+		if blockNrOrHash.RequireCanonical && rawdb.ReadCanonicalHash(api.dbReader, blockNumber) != hash {
+			return nil, fmt.Errorf("hash %q is not currently canonical", hash.String())
+		}
 	}
 
 	acc, err := GetAccount(api.db, blockNumber, address)
