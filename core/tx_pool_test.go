@@ -314,34 +314,19 @@ func TestTransactionQueue2(t *testing.T) {
 	}
 }
 
-/*
 func TestTransactionChainFork(t *testing.T) {
-	t.Skip("fix when refactoring tx pool")
 	pool, key, clear := setupTxPool()
 	defer clear()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	resetState := func() {
-		db := ethdb.NewMemDatabase()
-		tds := state.NewTrieDbState(common.Hash{}, db, 0)
-		statedb := state.New(tds)
-		tds.StartNewBuffer()
-		statedb.AddBalance(addr, uint256.NewInt().SetUint64(100000000000000))
+		stateWriter := state.NewPlainStateWriter(pool.chaindb, 1)
+		ibs := state.New(state.NewPlainStateReader(pool.chaindb))
+		ibs.AddBalance(addr, uint256.NewInt().SetUint64(100000000000000))
 		ctx := context.Background()
-		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tds.ComputeTrieRoots(); err != nil {
-			t.Fatal(err)
-		}
-		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-			t.Fatal(err)
-		}
-
-		pool.lockedReset(nil, nil)
-		clear = func() {
-			pool.Stop()
-			db.Close()
-		}
+		pool.ResetHead(1000000000, 1)
 	}
 	resetState()
 
@@ -349,7 +334,7 @@ func TestTransactionChainFork(t *testing.T) {
 	if _, err := pool.add(tx, false); err != nil {
 		t.Error("didn't expect error", err)
 	}
-	pool.removeTx(tx.Hash(), true)
+	pool.RemoveTx(tx.Hash(), true)
 
 	// reset the pool's internal state
 	resetState()
@@ -357,7 +342,6 @@ func TestTransactionChainFork(t *testing.T) {
 		t.Error("didn't expect error", err)
 	}
 }
-*/
 
 /*
 func TestTransactionDoubleNonce(t *testing.T) {
