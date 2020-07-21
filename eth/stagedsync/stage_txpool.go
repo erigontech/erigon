@@ -20,13 +20,13 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 		return err
 	}
 	if to < s.BlockNumber {
-		return fmt.Errorf("TxPoolUpdate to (%d) < from (%d)", to, s.BlockNumber)
+		return fmt.Errorf("txPoolUpdate to (%d) < from (%d)", to, s.BlockNumber)
 	}
 	if to - s.BlockNumber <= 1 {
 		if pool != nil && !pool.IsStarted() {
 			log.Info("Starting tx pool since block numbers converged", "from", s.BlockNumber, "to", to)
 			if err := pool.Start(); err != nil {
-				return fmt.Errorf("TxPoolUpdate start pool: %w", err)
+				return fmt.Errorf("txPoolUpdate start pool: %w", err)
 			}
 		}
 	}
@@ -35,8 +35,7 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 			return err
 		}
 	}
-	s.DoneAndUpdate(db, to)
-	return nil
+	return s.DoneAndUpdate(db, to)
 }
 
 func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
@@ -85,7 +84,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 
 		body := new(types.Body)
 		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
-			return false, fmt.Errorf("TxPoolUpdate: invalid block body RLP: %w", err)
+			return false, fmt.Errorf("txPoolUpdate: invalid block body RLP: %w", err)
 		}
 		for _, tx := range body.Transactions {
 			pool.RemoveTx(tx.Hash(), true /* outofbound */)
