@@ -37,6 +37,7 @@ func splitAndTrim(input string) []string {
 type EthAPI interface {
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
+	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
