@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -137,6 +138,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		for i := 0; i < 25; i++ {
 			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt().SetUint64(100), 100, uint256.NewInt().SetUint64(uint64(start+i)), nil), signer, key)
+			tx.SetReceivedTime(time.Unix(0, int64(start)))
 			groups[addr] = append(groups[addr], tx)
 		}
 	}
@@ -169,6 +171,11 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 			fromNext, _ := Sender(signer, next)
 			if fromi != fromNext && txi.GasPrice().Cmp(next.GasPrice()) < 0 {
 				t.Errorf("invalid gasprice ordering: tx #%d (A=%x P=%v) < tx #%d (A=%x P=%v)", i, fromi[:4], txi.GasPrice(), i+1, fromNext[:4], next.GasPrice())
+			}
+
+			// Make sure receivedTime order is ascending if the txs have the same gas price
+			if txi.GasPrice().Cmp(next.GasPrice()) == 0 && fromi != fromNext && txi.receivedTime.UnixNano() > next.receivedTime.UnixNano() {
+				t.Errorf("invalid received time ordering: tx #%d (A=%x T=%d) > tx #%d (A=%x T=%d)", i, fromi[:4], txi.receivedTime.UnixNano(), i+1, fromNext[:4], next.receivedTime.UnixNano())
 			}
 		}
 	}
