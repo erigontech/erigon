@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package remotedbserver;
+
+option go_package = "ethdb/remote";
+option java_multiple_files = true;
+option java_package = "io.turbo-geth.db";
+option java_outer_classname = "KV";
+
+service Kv {
+  rpc Begin(BeginRequest) returns (BeginReply); // request starting a new transaction (read-only)
+  rpc Rollback(RollbackRequest) returns (RollbackReply); // request the end of the transaction (rollback)
+  rpc Bucket(BucketRequest) returns (BucketReply); // requests opening a bucket with given name. It returns bucket's handle (uint64)
+  rpc Get(GetRequest) returns (GetReply); // requests opening a bucket with given name. It returns bucket's handle (uint64)
+  rpc Cursor(CursorRequest) returns (CursorReply); // request creating a cursor for the given bucket. It returns cursor's handle (uint64)
+  rpc Seek(SeekRequest) returns (SeekReply); // Moves given cursor to the seekKey, or to the next key after seekKey
+  rpc First(FirstRequest) returns (stream FirstReply); // Moves cursor to bucket start and streams back the (key, value) pairs. key == nil signifies the end of the stream
+  rpc Next(NextRequest) returns (stream NextReply); // Moves given cursor over the next given number of keys and streams back the (key, value) pairs
+  rpc SeekKey(SeekKeyRequest) returns (SeekKeyReply); // Same as Seek but instead of value returns valueSize
+  rpc FirstKey(FirstKeyRequest) returns (FirstKeyReply); // Same as Seek but instead of value returns valueSize
+  rpc NextKey(NextKeyRequest) returns (NextKeyReply); // Same as Seek but instead of value returns valueSize
+}
+
+message BeginRequest {}
+message BeginReply {}
+
+message RollbackRequest {}
+message RollbackReply {}
+
+message BucketRequest {
+  bytes name = 1;
+}
+message BucketReply {
+  uint64 handle = 1;
+}
+
+message GetRequest {
+  uint64 bucketHandle = 1;
+  bytes key = 2;
+}
+message GetReply {
+  bytes value = 1;
+}
+
+message CursorRequest {
+  uint64 bucketHandle = 1;
+}
+message CursorReply {
+  uint64 cursorHandle = 1;
+}
+
+message SeekRequest {
+  uint64 cursorHandle = 1;
+  bytes seek = 2;
+}
+message SeekReply {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message FirstRequest {
+  uint64 cursorHandle = 1;
+  uint32 numKeys = 2;
+}
+message FirstReply {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message NextRequest {
+  uint64 cursorHandle = 1;
+  uint32 numKeys = 2;
+}
+message NextReply {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+
+message SeekKeyRequest {
+  uint64 cursorHandle = 1;
+}
+message SeekKeyReply {
+  bytes key = 1;
+  uint64 vSize = 2;
+}
+
+message FirstKeyRequest {
+  uint64 cursorHandle = 1;
+  uint32 numKeys = 2;
+}
+message FirstKeyReply {
+  bytes key = 1;
+  uint64 vSize = 2;
+}
+
+
+message NextKeyRequest {
+  uint64 cursorHandle = 1;
+  uint32 numKeys = 2;
+}
+message NextKeyReply {
+  bytes key = 1;
+  uint64 vSize = 2;
+}
+

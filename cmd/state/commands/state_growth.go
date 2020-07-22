@@ -24,7 +24,7 @@ func init() {
 				panic(err)
 			}
 
-			remoteDB, err := ethdb.NewRemote().Path(remoteDbAddress).Open()
+			remoteDB, err := ethdb.NewRemote().Path(privateRpcAddr).Open()
 			if err != nil {
 				return err
 			}
@@ -36,7 +36,7 @@ func init() {
 		},
 	}
 
-	withRemoteDb(stateGrowthCmd)
+	withPrivateRpc(stateGrowthCmd)
 	rootCmd.AddCommand(stateGrowthCmd)
 }
 

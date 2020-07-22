@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ugorji/go/codec"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -38,7 +39,7 @@ var (
 
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
 // this constant needs to be increased
-const Version uint64 = 2
+const Version uint32 = 2
 
 // Command is the type of command in the boltdb remote protocol
 type Command uint8
@@ -195,6 +196,7 @@ type DB struct {
 	doPing            <-chan time.Time
 	cancelConnections context.CancelFunc
 	wg                *sync.WaitGroup
+	client            KvClient
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -252,7 +254,7 @@ func (db *DB) ping(ctx context.Context) (err error) {
 		return decodeErr(decoder, responseCode)
 	}
 
-	var v uint64
+	var v uint32
 	if err := decoder.Decode(&v); err != nil {
 		return err
 	}
@@ -275,6 +277,22 @@ func (closer notifyOnClose) Close() error {
 	}
 
 	return closer.internal.Close()
+}
+
+func Open2(opts DbOpts) (*DB, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), opts.PingTimeout)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, opts.DialAddress, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		return nil, err
+	}
+
+	db := &DB{opts: opts, client: NewKvClient(conn)}
+	db.cancelConnections = func() {
+		conn.Close()
+	}
+
+	return db, nil
 }
 
 func Open(opts DbOpts) (*DB, error) {
@@ -366,12 +384,20 @@ func (db *DB) Close() error {
 
 // Tx mimicks the interface of bolt.Tx
 type Tx struct {
+	db  *DB
 	ctx context.Context
 	in  io.Reader
 	out io.Writer
 }
 
 func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.Decoder) error {
+	if db.client != nil {
+		_, err := db.client.Rollback(ctx, &RollbackRequest{})
+		if err != nil {
+			return err
+		}
+		return nil
+	}
 	_ = ctx
 	var responseCode ResponseCode
 
@@ -396,6 +422,22 @@ func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	var opErr error
 	var endTxErr error
+
+	if db.client != nil {
+		_, err := db.client.Begin(ctx, &BeginRequest{})
+		if err != nil {
+			return err
+		}
+		tx := &Tx{ctx: ctx, db: db}
+		opErr = f(tx)
+
+		endTxErr = db.endTx(ctx, nil, nil)
+		if endTxErr != nil {
+			logger.Warn("could not finish tx", "err", err)
+		}
+
+		return opErr
+	}
 
 	var responseCode ResponseCode
 
@@ -431,7 +473,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 		return decodeErr(decoder, responseCode)
 	}
 
-	tx := &Tx{ctx: ctx, in: in, out: out}
+	tx := &Tx{ctx: ctx, in: in, out: out, db: db}
 	opErr = f(tx)
 
 	endTxErr = db.endTx(ctx, encoder, decoder)
@@ -584,6 +626,19 @@ func (tx *Tx) Bucket(name []byte) *Bucket {
 }
 
 func (b *Bucket) init() error {
+	if b.tx.db.client != nil {
+		reply, err := b.tx.db.client.Bucket(b.ctx, &BucketRequest{Name: b.name})
+		if err != nil {
+			return err
+		}
+		if reply.Handle == 0 {
+			return fmt.Errorf("unexpected bucketHandle: 0")
+		}
+
+		b.bucketHandle = reply.Handle
+		return nil
+	}
+
 	decoder := codecpool.Decoder(b.in)
 	defer codecpool.Return(decoder)
 	encoder := codecpool.Encoder(b.out)
@@ -622,16 +677,25 @@ func (b *Bucket) init() error {
 // Get reads a value corresponding to the given key, from the bucket
 // return nil if they key is not present
 func (b *Bucket) Get(key []byte) ([]byte, error) {
+	if b.tx.db.client != nil {
+		if !b.initialized {
+			if err := b.init(); err != nil {
+				return nil, err
+			}
+		}
+
+		reply, err := b.tx.db.client.Get(b.ctx, &GetRequest{BucketHandle: b.bucketHandle, Key: key})
+		if err != nil {
+			return nil, err
+		}
+
+		return reply.Value, nil
+	}
+
 	select {
 	default:
 	case <-b.ctx.Done():
 		return nil, b.ctx.Err()
-	}
-
-	if !b.initialized {
-		if err := b.init(); err != nil {
-			return nil, err
-		}
 	}
 
 	decoder := codecpool.Decoder(b.in)
@@ -829,19 +893,26 @@ func (c *Cursor) SeekKey(seek []byte) (key []byte, vSize uint32, err error) {
 }
 
 func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	default:
-	}
-
 	if !c.initialized {
 		if err := c.init(); err != nil {
 			return nil, nil, err
 		}
 	}
-
 	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+
+	if c.bucket.tx.db.client != nil {
+		reply, err := c.bucket.tx.db.client.Seek(c.ctx, &SeekRequest{CursorHandle: c.cursorHandle, Seek: seek})
+		if err != nil {
+			return nil, nil, err
+		}
+		return reply.Key, reply.Value, nil
+	}
+
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
 
 	select {
 	default:
@@ -887,51 +958,7 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 }
 
 func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
-	if !c.initialized {
-		if err := c.init(); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
-
-	select {
-	default:
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	}
-
-	decoder := codecpool.Decoder(c.in)
-	defer codecpool.Return(decoder)
-	encoder := codecpool.Encoder(c.out)
-	defer codecpool.Return(encoder)
-
-	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
-		return nil, nil, fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
-	}
-	if err := encoder.Encode(c.cursorHandle); err != nil {
-		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
-	}
-	if err := encoder.Encode(&seek); err != nil {
-		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
-	}
-
-	var responseCode ResponseCode
-	if err := decoder.Decode(&responseCode); err != nil {
-		return nil, nil, fmt.Errorf("could not decode ResponseCode for CmdCursorSeekTo: %w", err)
-	}
-
-	if responseCode != ResponseOk {
-		if err := decodeErr(decoder, responseCode); err != nil {
-			return nil, nil, fmt.Errorf("could not decode errorMessage for CmdCursorSeekTo: %w", err)
-		}
-	}
-
-	if err := decodeKeyValue(decoder, &key, &value); err != nil {
-		return nil, nil, fmt.Errorf("could not decode (key, value) for CmdCursorSeekTo: %w", err)
-	}
-
-	return key, value, nil
+	return c.Seek(seek)
 }
 
 func (c *Cursor) needFetchNextPage() bool {
@@ -987,6 +1014,89 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		c.cacheKeys = make([][]byte, c.prefetchSize)
 		c.cacheValues = make([][]byte, c.prefetchSize)
 		c.cacheValueSize = make([]uint32, c.prefetchSize)
+	}
+
+	if c.bucket.tx.db.client != nil {
+		switch cmd {
+		case CmdCursorFirst:
+			reply, err := c.bucket.tx.db.client.First(c.ctx, &FirstRequest{CursorHandle: c.cursorHandle})
+			if err != nil {
+				return err
+			}
+
+			for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
+				r, err := reply.Recv()
+				if err != nil {
+					return err
+				}
+
+				c.cacheKeys[c.cacheLastIdx] = r.Key
+				c.cacheValues[c.cacheLastIdx] = r.Value
+
+				if c.cacheKeys[c.cacheLastIdx] == nil {
+					break
+				}
+			}
+		case CmdCursorNext:
+			reply, err := c.bucket.tx.db.client.Next(c.ctx, &NextRequest{CursorHandle: c.cursorHandle})
+			if err != nil {
+				return err
+			}
+
+			for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
+				r, err := reply.Recv()
+				if err != nil {
+					return err
+				}
+
+				c.cacheKeys[c.cacheLastIdx] = r.Key
+				c.cacheValues[c.cacheLastIdx] = r.Value
+
+				if c.cacheKeys[c.cacheLastIdx] == nil {
+					break
+				}
+			}
+			//case CmdCursorFirstKey:
+			//	reply, err := c.bucket.tx.db.client.FirstKey(c.ctx, &FirstKeyRequest{CursorHandle: c.cursorHandle})
+			//	if err != nil {
+			//		return err
+			//	}
+			//
+			//	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
+			//		r, err := reply.Recv()
+			//		if err != nil {
+			//			return err
+			//		}
+			//
+			//		c.cacheKeys[c.cacheLastIdx] = r.Key
+			//		c.cacheValueSize[c.cacheLastIdx] = r.Value
+			//
+			//		if c.cacheKeys[c.cacheLastIdx] == nil {
+			//			break
+			//		}
+			//	}
+			//case CmdCursorNextKey:
+			//	reply, err := c.bucket.tx.db.client.NextKey(c.ctx, &FirstKeyRequest{CursorHandle: c.cursorHandle})
+			//	if err != nil {
+			//		return err
+			//	}
+			//
+			//	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
+			//		r, err := reply.Recv()
+			//		if err != nil {
+			//			return err
+			//		}
+			//
+			//		c.cacheKeys[c.cacheLastIdx] = r.Key
+			//		c.cacheValueSize[c.cacheLastIdx] = r.Value
+			//
+			//		if c.cacheKeys[c.cacheLastIdx] == nil {
+			//			break
+			//		}
+			//	}
+		}
+
+		return nil
 	}
 
 	decoder := codecpool.Decoder(c.in)

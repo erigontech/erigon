@@ -30,9 +30,8 @@ require (
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
-	github.com/golang/protobuf v1.3.3
+	github.com/golang/protobuf v1.4.2
 	github.com/golang/snappy v0.0.1
-	github.com/google/go-cmp v0.3.1 // indirect
 	github.com/gorilla/websocket v1.4.1
 	github.com/graph-gophers/graphql-go v0.0.0-20191115155744-f33e81362277
 	github.com/hashicorp/golang-lru v0.5.4
@@ -63,7 +62,7 @@ require (
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
 	github.com/steakknife/bloomfilter v0.0.0-20180922174646-6819c0d2a570
 	github.com/steakknife/hamming v0.0.0-20180906055917-c99c65617cd3 // indirect
-	github.com/stretchr/testify v1.5.1
+	github.com/stretchr/testify v1.6.1
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.22.1
@@ -71,10 +70,12 @@ require (
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
 	golang.org/x/net v0.0.0-20200425230154-ff2c4b7c35a0
-	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	golang.org/x/sys v0.0.0-20200523222454-059865788121
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
+	google.golang.org/grpc v1.30.0
+	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200603215123-a4a8cb9d2cbc

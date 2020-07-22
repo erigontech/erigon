@@ -9,7 +9,7 @@ var (
 	chaindata       string
 	statsfile       string
 	block           uint64
-	remoteDbAddress string
+	privateRpcAddr  string
 	changeSetBucket string
 	indexBucket     string
 )
@@ -34,8 +34,8 @@ func withStatsfile(cmd *cobra.Command) {
 	must(cmd.MarkFlagFilename("statsfile", "csv"))
 }
 
-func withRemoteDb(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&remoteDbAddress, "remote-db-addr", "", "remote db rpc address")
+func withPrivateRpc(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&privateRpcAddr, "private.rpc.addr", "", "remote db rpc address")
 }
 
 func withCSBucket(cmd *cobra.Command) {
