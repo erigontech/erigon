@@ -129,6 +129,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		case <-ctx.Done():
 			return nil, vm.Context{}, nil, nil, ctx.Err()
 		}
+		statedb.Prepare(tx.Hash(), blockHash, idx)
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
