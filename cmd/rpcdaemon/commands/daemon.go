@@ -95,7 +95,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
-		return nil, nil
+		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
 	block := rawdb.ReadBlock(db, hash, *number)
@@ -130,15 +130,12 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 func (api *APIImpl) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
 	number := rawdb.ReadHeaderNumber(api.dbReader, hash)
 	if number == nil {
-		return nil, nil
+		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
 	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %v", err)
-	}
-	if receipts == nil {
-		return nil, nil
 	}
 	logs := make([][]*types.Log, len(receipts))
 	for i, receipt := range receipts {
@@ -159,7 +156,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
 	if len(receipts) <= int(txIndex) {
-		return nil, nil
+		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
 	}
 	receipt := receipts[txIndex]
 
@@ -297,7 +294,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 
 	block := rawdb.ReadBlockByNumber(api.dbReader, uint64(number.Int64()))
 	if block == nil {
-		return nil, nil
+		return nil, fmt.Errorf("block not found: %d", number.Int64())
 	}
 
 	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
