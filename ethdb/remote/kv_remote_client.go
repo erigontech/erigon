@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ugorji/go/codec"
-	"google.golang.org/grpc"
 )
 
 var (
@@ -196,7 +195,6 @@ type DB struct {
 	doPing            <-chan time.Time
 	cancelConnections context.CancelFunc
 	wg                *sync.WaitGroup
-	client            KvClient
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -277,22 +275,6 @@ func (closer notifyOnClose) Close() error {
 	}
 
 	return closer.internal.Close()
-}
-
-func Open2(opts DbOpts) (*DB, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), opts.PingTimeout)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx, opts.DialAddress, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		return nil, err
-	}
-
-	db := &DB{opts: opts, client: NewKvClient(conn)}
-	db.cancelConnections = func() {
-		conn.Close()
-	}
-
-	return db, nil
 }
 
 func Open(opts DbOpts) (*DB, error) {
@@ -391,13 +373,6 @@ type Tx struct {
 }
 
 func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.Decoder) error {
-	if db.client != nil {
-		_, err := db.client.Rollback(ctx, &RollbackRequest{})
-		if err != nil {
-			return err
-		}
-		return nil
-	}
 	_ = ctx
 	var responseCode ResponseCode
 
@@ -422,22 +397,6 @@ func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	var opErr error
 	var endTxErr error
-
-	if db.client != nil {
-		_, err := db.client.Begin(ctx, &BeginRequest{})
-		if err != nil {
-			return err
-		}
-		tx := &Tx{ctx: ctx, db: db}
-		opErr = f(tx)
-
-		endTxErr = db.endTx(ctx, nil, nil)
-		if endTxErr != nil {
-			logger.Warn("could not finish tx", "err", err)
-		}
-
-		return opErr
-	}
 
 	var responseCode ResponseCode
 
@@ -590,7 +549,7 @@ type Cursor struct {
 	prefetchValues bool
 	initialized    bool
 	cursorHandle   uint64
-	prefetchSize   uint
+	prefetchSize   uint32
 	cacheLastIdx   uint
 	cacheIdx       uint
 	prefix         []byte
@@ -611,7 +570,7 @@ func (c *Cursor) Prefix(v []byte) *Cursor {
 }
 
 func (c *Cursor) Prefetch(v uint) *Cursor {
-	c.prefetchSize = v
+	c.prefetchSize = uint32(v)
 	return c
 }
 
@@ -626,19 +585,6 @@ func (tx *Tx) Bucket(name []byte) *Bucket {
 }
 
 func (b *Bucket) init() error {
-	if b.tx.db.client != nil {
-		reply, err := b.tx.db.client.Bucket(b.ctx, &BucketRequest{Name: b.name})
-		if err != nil {
-			return err
-		}
-		if reply.Handle == 0 {
-			return fmt.Errorf("unexpected bucketHandle: 0")
-		}
-
-		b.bucketHandle = reply.Handle
-		return nil
-	}
-
 	decoder := codecpool.Decoder(b.in)
 	defer codecpool.Return(decoder)
 	encoder := codecpool.Encoder(b.out)
@@ -677,21 +623,6 @@ func (b *Bucket) init() error {
 // Get reads a value corresponding to the given key, from the bucket
 // return nil if they key is not present
 func (b *Bucket) Get(key []byte) ([]byte, error) {
-	if b.tx.db.client != nil {
-		if !b.initialized {
-			if err := b.init(); err != nil {
-				return nil, err
-			}
-		}
-
-		reply, err := b.tx.db.client.Get(b.ctx, &GetRequest{BucketHandle: b.bucketHandle, Key: key})
-		if err != nil {
-			return nil, err
-		}
-
-		return reply.Value, nil
-	}
-
 	select {
 	default:
 	case <-b.ctx.Done():
@@ -739,7 +670,7 @@ func (b *Bucket) Cursor() *Cursor {
 		in:     b.in,
 		out:    b.out,
 
-		prefetchSize:   DefaultCursorBatchSize,
+		prefetchSize:   uint32(DefaultCursorBatchSize),
 		prefetchValues: false,
 	}
 }
@@ -900,14 +831,6 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 	}
 	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
 
-	if c.bucket.tx.db.client != nil {
-		reply, err := c.bucket.tx.db.client.Seek(c.ctx, &SeekRequest{CursorHandle: c.cursorHandle, Seek: seek})
-		if err != nil {
-			return nil, nil, err
-		}
-		return reply.Key, reply.Value, nil
-	}
-
 	select {
 	case <-c.ctx.Done():
 		return nil, nil, c.ctx.Err()
@@ -1016,89 +939,6 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		c.cacheValueSize = make([]uint32, c.prefetchSize)
 	}
 
-	if c.bucket.tx.db.client != nil {
-		switch cmd {
-		case CmdCursorFirst:
-			reply, err := c.bucket.tx.db.client.First(c.ctx, &FirstRequest{CursorHandle: c.cursorHandle})
-			if err != nil {
-				return err
-			}
-
-			for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
-				r, err := reply.Recv()
-				if err != nil {
-					return err
-				}
-
-				c.cacheKeys[c.cacheLastIdx] = r.Key
-				c.cacheValues[c.cacheLastIdx] = r.Value
-
-				if c.cacheKeys[c.cacheLastIdx] == nil {
-					break
-				}
-			}
-		case CmdCursorNext:
-			reply, err := c.bucket.tx.db.client.Next(c.ctx, &NextRequest{CursorHandle: c.cursorHandle})
-			if err != nil {
-				return err
-			}
-
-			for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
-				r, err := reply.Recv()
-				if err != nil {
-					return err
-				}
-
-				c.cacheKeys[c.cacheLastIdx] = r.Key
-				c.cacheValues[c.cacheLastIdx] = r.Value
-
-				if c.cacheKeys[c.cacheLastIdx] == nil {
-					break
-				}
-			}
-			//case CmdCursorFirstKey:
-			//	reply, err := c.bucket.tx.db.client.FirstKey(c.ctx, &FirstKeyRequest{CursorHandle: c.cursorHandle})
-			//	if err != nil {
-			//		return err
-			//	}
-			//
-			//	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
-			//		r, err := reply.Recv()
-			//		if err != nil {
-			//			return err
-			//		}
-			//
-			//		c.cacheKeys[c.cacheLastIdx] = r.Key
-			//		c.cacheValueSize[c.cacheLastIdx] = r.Value
-			//
-			//		if c.cacheKeys[c.cacheLastIdx] == nil {
-			//			break
-			//		}
-			//	}
-			//case CmdCursorNextKey:
-			//	reply, err := c.bucket.tx.db.client.NextKey(c.ctx, &FirstKeyRequest{CursorHandle: c.cursorHandle})
-			//	if err != nil {
-			//		return err
-			//	}
-			//
-			//	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
-			//		r, err := reply.Recv()
-			//		if err != nil {
-			//			return err
-			//		}
-			//
-			//		c.cacheKeys[c.cacheLastIdx] = r.Key
-			//		c.cacheValueSize[c.cacheLastIdx] = r.Value
-			//
-			//		if c.cacheKeys[c.cacheLastIdx] == nil {
-			//			break
-			//		}
-			//	}
-		}
-
-		return nil
-	}
-
 	decoder := codecpool.Decoder(c.in)
 	defer codecpool.Return(decoder)
 	encoder := codecpool.Encoder(c.out)
@@ -1126,7 +966,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		}
 	}
 
-	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
+	for c.cacheLastIdx = uint(0); c.cacheLastIdx < uint(c.prefetchSize); c.cacheLastIdx++ {
 		select {
 		default:
 		case <-c.ctx.Done():

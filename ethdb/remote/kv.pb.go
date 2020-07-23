@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.25.0-devel
 // 	protoc        v3.12.3
-// source: ethdb/remote/kv.proto
+// source: remote/kv.proto
 
 package remote
 
@@ -25,29 +25,29 @@ const (
 // of the legacy proto package is being used.
 const _ = proto.ProtoPackageIsVersion4
 
-type BeginRequest struct {
+type ViewRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *BeginRequest) Reset() {
-	*x = BeginRequest{}
+func (x *ViewRequest) Reset() {
+	*x = ViewRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[0]
+		mi := &file_remote_kv_proto_msgTypes[0]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
 }
 
-func (x *BeginRequest) String() string {
+func (x *ViewRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*BeginRequest) ProtoMessage() {}
+func (*ViewRequest) ProtoMessage() {}
 
-func (x *BeginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[0]
+func (x *ViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[0]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,34 +58,36 @@ func (x *BeginRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use BeginRequest.ProtoReflect.Descriptor instead.
-func (*BeginRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{0}
+// Deprecated: Use ViewRequest.ProtoReflect.Descriptor instead.
+func (*ViewRequest) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{0}
 }
 
-type BeginReply struct {
+type ViewReply struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
+
+	TxHandle uint64 `protobuf:"varint,1,opt,name=txHandle,proto3" json:"txHandle,omitempty"`
 }
 
-func (x *BeginReply) Reset() {
-	*x = BeginReply{}
+func (x *ViewReply) Reset() {
+	*x = ViewReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[1]
+		mi := &file_remote_kv_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
 }
 
-func (x *BeginReply) String() string {
+func (x *ViewReply) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*BeginReply) ProtoMessage() {}
+func (*ViewReply) ProtoMessage() {}
 
-func (x *BeginReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[1]
+func (x *ViewReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -96,85 +98,16 @@ func (x *BeginReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use BeginReply.ProtoReflect.Descriptor instead.
-func (*BeginReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{1}
+// Deprecated: Use ViewReply.ProtoReflect.Descriptor instead.
+func (*ViewReply) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{1}
 }
 
-type RollbackRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *RollbackRequest) Reset() {
-	*x = RollbackRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
+func (x *ViewReply) GetTxHandle() uint64 {
+	if x != nil {
+		return x.TxHandle
 	}
-}
-
-func (x *RollbackRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RollbackRequest) ProtoMessage() {}
-
-func (x *RollbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RollbackRequest.ProtoReflect.Descriptor instead.
-func (*RollbackRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{2}
-}
-
-type RollbackReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *RollbackReply) Reset() {
-	*x = RollbackReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[3]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *RollbackReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RollbackReply) ProtoMessage() {}
-
-func (x *RollbackReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[3]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RollbackReply.ProtoReflect.Descriptor instead.
-func (*RollbackReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{3}
+	return 0
 }
 
 type BucketRequest struct {
@@ -182,13 +115,14 @@ type BucketRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Name []byte `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	TxHandle uint64 `protobuf:"varint,1,opt,name=txHandle,proto3" json:"txHandle,omitempty"`
+	Name     []byte `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 }
 
 func (x *BucketRequest) Reset() {
 	*x = BucketRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[4]
+		mi := &file_remote_kv_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -201,7 +135,7 @@ func (x *BucketRequest) String() string {
 func (*BucketRequest) ProtoMessage() {}
 
 func (x *BucketRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[4]
+	mi := &file_remote_kv_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -214,7 +148,14 @@ func (x *BucketRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BucketRequest.ProtoReflect.Descriptor instead.
 func (*BucketRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{4}
+	return file_remote_kv_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BucketRequest) GetTxHandle() uint64 {
+	if x != nil {
+		return x.TxHandle
+	}
+	return 0
 }
 
 func (x *BucketRequest) GetName() []byte {
@@ -229,13 +170,13 @@ type BucketReply struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Handle uint64 `protobuf:"varint,1,opt,name=handle,proto3" json:"handle,omitempty"`
+	BucketHandle uint64 `protobuf:"varint,1,opt,name=bucketHandle,proto3" json:"bucketHandle,omitempty"`
 }
 
 func (x *BucketReply) Reset() {
 	*x = BucketReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[5]
+		mi := &file_remote_kv_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -248,7 +189,7 @@ func (x *BucketReply) String() string {
 func (*BucketReply) ProtoMessage() {}
 
 func (x *BucketReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[5]
+	mi := &file_remote_kv_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -261,12 +202,287 @@ func (x *BucketReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BucketReply.ProtoReflect.Descriptor instead.
 func (*BucketReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{5}
+	return file_remote_kv_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *BucketReply) GetHandle() uint64 {
+func (x *BucketReply) GetBucketHandle() uint64 {
 	if x != nil {
-		return x.Handle
+		return x.BucketHandle
+	}
+	return 0
+}
+
+type CursorRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	BucketHandle uint64 `protobuf:"varint,1,opt,name=bucketHandle,proto3" json:"bucketHandle,omitempty"`
+	Prefix       []byte `protobuf:"bytes,2,opt,name=prefix,proto3" json:"prefix,omitempty"`
+}
+
+func (x *CursorRequest) Reset() {
+	*x = CursorRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_kv_proto_msgTypes[4]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CursorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CursorRequest) ProtoMessage() {}
+
+func (x *CursorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[4]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CursorRequest.ProtoReflect.Descriptor instead.
+func (*CursorRequest) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CursorRequest) GetBucketHandle() uint64 {
+	if x != nil {
+		return x.BucketHandle
+	}
+	return 0
+}
+
+func (x *CursorRequest) GetPrefix() []byte {
+	if x != nil {
+		return x.Prefix
+	}
+	return nil
+}
+
+type CursorReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
+}
+
+func (x *CursorReply) Reset() {
+	*x = CursorReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_kv_proto_msgTypes[5]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CursorReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CursorReply) ProtoMessage() {}
+
+func (x *CursorReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[5]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CursorReply.ProtoReflect.Descriptor instead.
+func (*CursorReply) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CursorReply) GetCursorHandle() uint64 {
+	if x != nil {
+		return x.CursorHandle
+	}
+	return 0
+}
+
+type SeekRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	CursorHandle  uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
+	SeekKey       []byte `protobuf:"bytes,3,opt,name=seekKey,proto3" json:"seekKey,omitempty"`
+	StartSreaming bool   `protobuf:"varint,4,opt,name=startSreaming,proto3" json:"startSreaming,omitempty"`
+}
+
+func (x *SeekRequest) Reset() {
+	*x = SeekRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_kv_proto_msgTypes[6]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SeekRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SeekRequest) ProtoMessage() {}
+
+func (x *SeekRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[6]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SeekRequest.ProtoReflect.Descriptor instead.
+func (*SeekRequest) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SeekRequest) GetCursorHandle() uint64 {
+	if x != nil {
+		return x.CursorHandle
+	}
+	return 0
+}
+
+func (x *SeekRequest) GetSeekKey() []byte {
+	if x != nil {
+		return x.SeekKey
+	}
+	return nil
+}
+
+func (x *SeekRequest) GetStartSreaming() bool {
+	if x != nil {
+		return x.StartSreaming
+	}
+	return false
+}
+
+type Pair struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+}
+
+func (x *Pair) Reset() {
+	*x = Pair{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_kv_proto_msgTypes[7]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *Pair) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Pair) ProtoMessage() {}
+
+func (x *Pair) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[7]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Pair.ProtoReflect.Descriptor instead.
+func (*Pair) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *Pair) GetKey() []byte {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *Pair) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+type PairKey struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	VSize uint64 `protobuf:"varint,2,opt,name=vSize,proto3" json:"vSize,omitempty"`
+}
+
+func (x *PairKey) Reset() {
+	*x = PairKey{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_kv_proto_msgTypes[8]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PairKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PairKey) ProtoMessage() {}
+
+func (x *PairKey) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[8]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PairKey.ProtoReflect.Descriptor instead.
+func (*PairKey) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PairKey) GetKey() []byte {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *PairKey) GetVSize() uint64 {
+	if x != nil {
+		return x.VSize
 	}
 	return 0
 }
@@ -283,7 +499,7 @@ type GetRequest struct {
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[6]
+		mi := &file_remote_kv_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -296,7 +512,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[6]
+	mi := &file_remote_kv_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -309,7 +525,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{6}
+	return file_remote_kv_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetRequest) GetBucketHandle() uint64 {
@@ -337,7 +553,7 @@ type GetReply struct {
 func (x *GetReply) Reset() {
 	*x = GetReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[7]
+		mi := &file_remote_kv_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -350,7 +566,7 @@ func (x *GetReply) String() string {
 func (*GetReply) ProtoMessage() {}
 
 func (x *GetReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[7]
+	mi := &file_remote_kv_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -363,7 +579,7 @@ func (x *GetReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReply.ProtoReflect.Descriptor instead.
 func (*GetReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{7}
+	return file_remote_kv_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetReply) GetValue() []byte {
@@ -373,956 +589,122 @@ func (x *GetReply) GetValue() []byte {
 	return nil
 }
 
-type CursorRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	BucketHandle uint64 `protobuf:"varint,1,opt,name=bucketHandle,proto3" json:"bucketHandle,omitempty"`
-}
-
-func (x *CursorRequest) Reset() {
-	*x = CursorRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[8]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *CursorRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CursorRequest) ProtoMessage() {}
-
-func (x *CursorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[8]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CursorRequest.ProtoReflect.Descriptor instead.
-func (*CursorRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *CursorRequest) GetBucketHandle() uint64 {
-	if x != nil {
-		return x.BucketHandle
-	}
-	return 0
-}
-
-type CursorReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-}
-
-func (x *CursorReply) Reset() {
-	*x = CursorReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[9]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *CursorReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CursorReply) ProtoMessage() {}
-
-func (x *CursorReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[9]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CursorReply.ProtoReflect.Descriptor instead.
-func (*CursorReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *CursorReply) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-type SeekRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-	Seek         []byte `protobuf:"bytes,2,opt,name=seek,proto3" json:"seek,omitempty"`
-}
-
-func (x *SeekRequest) Reset() {
-	*x = SeekRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[10]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *SeekRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SeekRequest) ProtoMessage() {}
-
-func (x *SeekRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[10]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SeekRequest.ProtoReflect.Descriptor instead.
-func (*SeekRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *SeekRequest) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-func (x *SeekRequest) GetSeek() []byte {
-	if x != nil {
-		return x.Seek
-	}
-	return nil
-}
-
-type SeekReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-}
-
-func (x *SeekReply) Reset() {
-	*x = SeekReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[11]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *SeekReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SeekReply) ProtoMessage() {}
-
-func (x *SeekReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[11]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SeekReply.ProtoReflect.Descriptor instead.
-func (*SeekReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *SeekReply) GetKey() []byte {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *SeekReply) GetValue() []byte {
-	if x != nil {
-		return x.Value
-	}
-	return nil
-}
-
-type FirstRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-	NumKeys      uint32 `protobuf:"varint,2,opt,name=numKeys,proto3" json:"numKeys,omitempty"`
-}
-
-func (x *FirstRequest) Reset() {
-	*x = FirstRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[12]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *FirstRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FirstRequest) ProtoMessage() {}
-
-func (x *FirstRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[12]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FirstRequest.ProtoReflect.Descriptor instead.
-func (*FirstRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *FirstRequest) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-func (x *FirstRequest) GetNumKeys() uint32 {
-	if x != nil {
-		return x.NumKeys
-	}
-	return 0
-}
-
-type FirstReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-}
-
-func (x *FirstReply) Reset() {
-	*x = FirstReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[13]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *FirstReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FirstReply) ProtoMessage() {}
-
-func (x *FirstReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[13]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FirstReply.ProtoReflect.Descriptor instead.
-func (*FirstReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *FirstReply) GetKey() []byte {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *FirstReply) GetValue() []byte {
-	if x != nil {
-		return x.Value
-	}
-	return nil
-}
-
-type NextRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-	NumKeys      uint32 `protobuf:"varint,2,opt,name=numKeys,proto3" json:"numKeys,omitempty"`
-}
-
-func (x *NextRequest) Reset() {
-	*x = NextRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[14]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *NextRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NextRequest) ProtoMessage() {}
-
-func (x *NextRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[14]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NextRequest.ProtoReflect.Descriptor instead.
-func (*NextRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *NextRequest) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-func (x *NextRequest) GetNumKeys() uint32 {
-	if x != nil {
-		return x.NumKeys
-	}
-	return 0
-}
-
-type NextReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-}
-
-func (x *NextReply) Reset() {
-	*x = NextReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[15]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *NextReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NextReply) ProtoMessage() {}
-
-func (x *NextReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[15]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NextReply.ProtoReflect.Descriptor instead.
-func (*NextReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *NextReply) GetKey() []byte {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *NextReply) GetValue() []byte {
-	if x != nil {
-		return x.Value
-	}
-	return nil
-}
-
-type SeekKeyRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-}
-
-func (x *SeekKeyRequest) Reset() {
-	*x = SeekKeyRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[16]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *SeekKeyRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SeekKeyRequest) ProtoMessage() {}
-
-func (x *SeekKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[16]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SeekKeyRequest.ProtoReflect.Descriptor instead.
-func (*SeekKeyRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *SeekKeyRequest) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-type SeekKeyReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	VSize uint64 `protobuf:"varint,2,opt,name=vSize,proto3" json:"vSize,omitempty"`
-}
-
-func (x *SeekKeyReply) Reset() {
-	*x = SeekKeyReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[17]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *SeekKeyReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SeekKeyReply) ProtoMessage() {}
-
-func (x *SeekKeyReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[17]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SeekKeyReply.ProtoReflect.Descriptor instead.
-func (*SeekKeyReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *SeekKeyReply) GetKey() []byte {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *SeekKeyReply) GetVSize() uint64 {
-	if x != nil {
-		return x.VSize
-	}
-	return 0
-}
-
-type FirstKeyRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-	NumKeys      uint32 `protobuf:"varint,2,opt,name=numKeys,proto3" json:"numKeys,omitempty"`
-}
-
-func (x *FirstKeyRequest) Reset() {
-	*x = FirstKeyRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[18]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *FirstKeyRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FirstKeyRequest) ProtoMessage() {}
-
-func (x *FirstKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[18]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FirstKeyRequest.ProtoReflect.Descriptor instead.
-func (*FirstKeyRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *FirstKeyRequest) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-func (x *FirstKeyRequest) GetNumKeys() uint32 {
-	if x != nil {
-		return x.NumKeys
-	}
-	return 0
-}
-
-type FirstKeyReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	VSize uint64 `protobuf:"varint,2,opt,name=vSize,proto3" json:"vSize,omitempty"`
-}
-
-func (x *FirstKeyReply) Reset() {
-	*x = FirstKeyReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[19]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *FirstKeyReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FirstKeyReply) ProtoMessage() {}
-
-func (x *FirstKeyReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[19]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FirstKeyReply.ProtoReflect.Descriptor instead.
-func (*FirstKeyReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *FirstKeyReply) GetKey() []byte {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *FirstKeyReply) GetVSize() uint64 {
-	if x != nil {
-		return x.VSize
-	}
-	return 0
-}
-
-type NextKeyRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	CursorHandle uint64 `protobuf:"varint,1,opt,name=cursorHandle,proto3" json:"cursorHandle,omitempty"`
-	NumKeys      uint32 `protobuf:"varint,2,opt,name=numKeys,proto3" json:"numKeys,omitempty"`
-}
-
-func (x *NextKeyRequest) Reset() {
-	*x = NextKeyRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[20]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *NextKeyRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NextKeyRequest) ProtoMessage() {}
-
-func (x *NextKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[20]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NextKeyRequest.ProtoReflect.Descriptor instead.
-func (*NextKeyRequest) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *NextKeyRequest) GetCursorHandle() uint64 {
-	if x != nil {
-		return x.CursorHandle
-	}
-	return 0
-}
-
-func (x *NextKeyRequest) GetNumKeys() uint32 {
-	if x != nil {
-		return x.NumKeys
-	}
-	return 0
-}
-
-type NextKeyReply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	VSize uint64 `protobuf:"varint,2,opt,name=vSize,proto3" json:"vSize,omitempty"`
-}
-
-func (x *NextKeyReply) Reset() {
-	*x = NextKeyReply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_ethdb_remote_kv_proto_msgTypes[21]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *NextKeyReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NextKeyReply) ProtoMessage() {}
-
-func (x *NextKeyReply) ProtoReflect() protoreflect.Message {
-	mi := &file_ethdb_remote_kv_proto_msgTypes[21]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NextKeyReply.ProtoReflect.Descriptor instead.
-func (*NextKeyReply) Descriptor() ([]byte, []int) {
-	return file_ethdb_remote_kv_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *NextKeyReply) GetKey() []byte {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *NextKeyReply) GetVSize() uint64 {
-	if x != nil {
-		return x.VSize
-	}
-	return 0
-}
-
-var File_ethdb_remote_kv_proto protoreflect.FileDescriptor
-
-var file_ethdb_remote_kv_proto_rawDesc = []byte{
-	0x0a, 0x15, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2f, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2f, 0x6b,
-	0x76, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x0e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64,
-	0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x22, 0x0e, 0x0a, 0x0c, 0x42, 0x65, 0x67, 0x69, 0x6e,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x0c, 0x0a, 0x0a, 0x42, 0x65, 0x67, 0x69, 0x6e,
-	0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x11, 0x0a, 0x0f, 0x52, 0x6f, 0x6c, 0x6c, 0x62, 0x61, 0x63,
-	0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x0f, 0x0a, 0x0d, 0x52, 0x6f, 0x6c, 0x6c,
-	0x62, 0x61, 0x63, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x23, 0x0a, 0x0d, 0x42, 0x75, 0x63,
-	0x6b, 0x65, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61,
-	0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x25,
-	0x0a, 0x0b, 0x42, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x16, 0x0a,
-	0x06, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x06, 0x68,
-	0x61, 0x6e, 0x64, 0x6c, 0x65, 0x22, 0x42, 0x0a, 0x0a, 0x47, 0x65, 0x74, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x61, 0x6e,
-	0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x62, 0x75, 0x63, 0x6b, 0x65,
-	0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x22, 0x20, 0x0a, 0x08, 0x47, 0x65, 0x74,
-	0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x33, 0x0a, 0x0d, 0x43,
-	0x75, 0x72, 0x73, 0x6f, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c,
-	0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x04, 0x52, 0x0c, 0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65,
-	0x22, 0x31, 0x0a, 0x0b, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12,
-	0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e,
-	0x64, 0x6c, 0x65, 0x22, 0x45, 0x0a, 0x0b, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64,
-	0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72,
-	0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x73, 0x65, 0x65, 0x6b, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x73, 0x65, 0x65, 0x6b, 0x22, 0x33, 0x0a, 0x09, 0x53, 0x65,
-	0x65, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c,
-	0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22,
-	0x4c, 0x0a, 0x0c, 0x46, 0x69, 0x72, 0x73, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
-	0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e,
-	0x64, 0x6c, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x6e, 0x75, 0x6d, 0x4b, 0x65, 0x79, 0x73, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x0d, 0x52, 0x07, 0x6e, 0x75, 0x6d, 0x4b, 0x65, 0x79, 0x73, 0x22, 0x34, 0x0a,
-	0x0a, 0x46, 0x69, 0x72, 0x73, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b,
-	0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a,
-	0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61,
-	0x6c, 0x75, 0x65, 0x22, 0x4b, 0x0a, 0x0b, 0x4e, 0x65, 0x78, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64,
-	0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72,
-	0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x6e, 0x75, 0x6d, 0x4b, 0x65, 0x79,
-	0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0d, 0x52, 0x07, 0x6e, 0x75, 0x6d, 0x4b, 0x65, 0x79, 0x73,
-	0x22, 0x33, 0x0a, 0x09, 0x4e, 0x65, 0x78, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x10, 0x0a,
-	0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12,
-	0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05,
-	0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x34, 0x0a, 0x0e, 0x53, 0x65, 0x65, 0x6b, 0x4b, 0x65, 0x79,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f,
-	0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63,
-	0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x22, 0x36, 0x0a, 0x0c, 0x53,
-	0x65, 0x65, 0x6b, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b,
-	0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a,
-	0x05, 0x76, 0x53, 0x69, 0x7a, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52, 0x05, 0x76, 0x53,
-	0x69, 0x7a, 0x65, 0x22, 0x4f, 0x0a, 0x0f, 0x46, 0x69, 0x72, 0x73, 0x74, 0x4b, 0x65, 0x79, 0x52,
-	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72,
-	0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75,
-	0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x6e, 0x75,
-	0x6d, 0x4b, 0x65, 0x79, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0d, 0x52, 0x07, 0x6e, 0x75, 0x6d,
-	0x4b, 0x65, 0x79, 0x73, 0x22, 0x37, 0x0a, 0x0d, 0x46, 0x69, 0x72, 0x73, 0x74, 0x4b, 0x65, 0x79,
-	0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x53, 0x69, 0x7a, 0x65,
-	0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52, 0x05, 0x76, 0x53, 0x69, 0x7a, 0x65, 0x22, 0x4e, 0x0a,
-	0x0e, 0x4e, 0x65, 0x78, 0x74, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
-	0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e,
-	0x64, 0x6c, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x6e, 0x75, 0x6d, 0x4b, 0x65, 0x79, 0x73, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x0d, 0x52, 0x07, 0x6e, 0x75, 0x6d, 0x4b, 0x65, 0x79, 0x73, 0x22, 0x36, 0x0a,
-	0x0c, 0x4e, 0x65, 0x78, 0x74, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x10, 0x0a,
-	0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12,
-	0x14, 0x0a, 0x05, 0x76, 0x53, 0x69, 0x7a, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52, 0x05,
-	0x76, 0x53, 0x69, 0x7a, 0x65, 0x32, 0x81, 0x06, 0x0a, 0x02, 0x4b, 0x76, 0x12, 0x41, 0x0a, 0x05,
-	0x42, 0x65, 0x67, 0x69, 0x6e, 0x12, 0x1c, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62,
-	0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x42, 0x65, 0x67, 0x69, 0x6e, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x1a, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65,
-	0x72, 0x76, 0x65, 0x72, 0x2e, 0x42, 0x65, 0x67, 0x69, 0x6e, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12,
-	0x4a, 0x0a, 0x08, 0x52, 0x6f, 0x6c, 0x6c, 0x62, 0x61, 0x63, 0x6b, 0x12, 0x1f, 0x2e, 0x72, 0x65,
-	0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x52, 0x6f, 0x6c,
-	0x6c, 0x62, 0x61, 0x63, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1d, 0x2e, 0x72,
-	0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x52, 0x6f,
-	0x6c, 0x6c, 0x62, 0x61, 0x63, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x44, 0x0a, 0x06, 0x42,
-	0x75, 0x63, 0x6b, 0x65, 0x74, 0x12, 0x1d, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62,
-	0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x42, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x52, 0x65, 0x71,
-	0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73,
-	0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x42, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c,
-	0x79, 0x12, 0x3b, 0x0a, 0x03, 0x47, 0x65, 0x74, 0x12, 0x1a, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74,
-	0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x71,
-	0x75, 0x65, 0x73, 0x74, 0x1a, 0x18, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73,
-	0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x44,
-	0x0a, 0x06, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x12, 0x1d, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74,
-	0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65,
-	0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x52,
-	0x65, 0x70, 0x6c, 0x79, 0x12, 0x3e, 0x0a, 0x04, 0x53, 0x65, 0x65, 0x6b, 0x12, 0x1b, 0x2e, 0x72,
-	0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x53, 0x65,
-	0x65, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x19, 0x2e, 0x72, 0x65, 0x6d, 0x6f,
-	0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x53, 0x65, 0x65, 0x6b, 0x52,
-	0x65, 0x70, 0x6c, 0x79, 0x12, 0x43, 0x0a, 0x05, 0x46, 0x69, 0x72, 0x73, 0x74, 0x12, 0x1c, 0x2e,
-	0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x46,
-	0x69, 0x72, 0x73, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1a, 0x2e, 0x72, 0x65,
-	0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x46, 0x69, 0x72,
-	0x73, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x30, 0x01, 0x12, 0x40, 0x0a, 0x04, 0x4e, 0x65, 0x78,
-	0x74, 0x12, 0x1b, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76,
-	0x65, 0x72, 0x2e, 0x4e, 0x65, 0x78, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x19,
-	0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e,
-	0x4e, 0x65, 0x78, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x30, 0x01, 0x12, 0x47, 0x0a, 0x07, 0x53,
-	0x65, 0x65, 0x6b, 0x4b, 0x65, 0x79, 0x12, 0x1e, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64,
-	0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x53, 0x65, 0x65, 0x6b, 0x4b, 0x65, 0x79, 0x52,
-	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1c, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64,
-	0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x53, 0x65, 0x65, 0x6b, 0x4b, 0x65, 0x79, 0x52,
-	0x65, 0x70, 0x6c, 0x79, 0x12, 0x4a, 0x0a, 0x08, 0x46, 0x69, 0x72, 0x73, 0x74, 0x4b, 0x65, 0x79,
-	0x12, 0x1f, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65,
-	0x72, 0x2e, 0x46, 0x69, 0x72, 0x73, 0x74, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x1d, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76,
-	0x65, 0x72, 0x2e, 0x46, 0x69, 0x72, 0x73, 0x74, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x70, 0x6c, 0x79,
-	0x12, 0x47, 0x0a, 0x07, 0x4e, 0x65, 0x78, 0x74, 0x4b, 0x65, 0x79, 0x12, 0x1e, 0x2e, 0x72, 0x65,
-	0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x4e, 0x65, 0x78,
-	0x74, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1c, 0x2e, 0x72, 0x65,
-	0x6d, 0x6f, 0x74, 0x65, 0x64, 0x62, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2e, 0x4e, 0x65, 0x78,
-	0x74, 0x4b, 0x65, 0x79, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x42, 0x26, 0x0a, 0x10, 0x69, 0x6f, 0x2e,
+var File_remote_kv_proto protoreflect.FileDescriptor
+
+var file_remote_kv_proto_rawDesc = []byte{
+	0x0a, 0x0f, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2f, 0x6b, 0x76, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x12, 0x05, 0x65, 0x74, 0x68, 0x64, 0x62, 0x22, 0x0d, 0x0a, 0x0b, 0x56, 0x69, 0x65, 0x77,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x27, 0x0a, 0x09, 0x56, 0x69, 0x65, 0x77, 0x52,
+	0x65, 0x70, 0x6c, 0x79, 0x12, 0x1a, 0x0a, 0x08, 0x74, 0x78, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x74, 0x78, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65,
+	0x22, 0x3f, 0x0a, 0x0d, 0x42, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x12, 0x1a, 0x0a, 0x08, 0x74, 0x78, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x04, 0x52, 0x08, 0x74, 0x78, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x12, 0x0a,
+	0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x6e, 0x61, 0x6d,
+	0x65, 0x22, 0x31, 0x0a, 0x0b, 0x42, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79,
+	0x12, 0x22, 0x0a, 0x0c, 0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x61,
+	0x6e, 0x64, 0x6c, 0x65, 0x22, 0x4b, 0x0a, 0x0d, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48,
+	0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x62, 0x75, 0x63,
+	0x6b, 0x65, 0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x70, 0x72, 0x65,
+	0x66, 0x69, 0x78, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x06, 0x70, 0x72, 0x65, 0x66, 0x69,
+	0x78, 0x22, 0x31, 0x0a, 0x0b, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x52, 0x65, 0x70, 0x6c, 0x79,
+	0x12, 0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61,
+	0x6e, 0x64, 0x6c, 0x65, 0x22, 0x71, 0x0a, 0x0b, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x48, 0x61, 0x6e,
+	0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x63, 0x75, 0x72, 0x73, 0x6f,
+	0x72, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x73, 0x65, 0x65, 0x6b, 0x4b,
+	0x65, 0x79, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x07, 0x73, 0x65, 0x65, 0x6b, 0x4b, 0x65,
+	0x79, 0x12, 0x24, 0x0a, 0x0d, 0x73, 0x74, 0x61, 0x72, 0x74, 0x53, 0x72, 0x65, 0x61, 0x6d, 0x69,
+	0x6e, 0x67, 0x18, 0x04, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x73, 0x74, 0x61, 0x72, 0x74, 0x53,
+	0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x22, 0x2e, 0x0a, 0x04, 0x50, 0x61, 0x69, 0x72, 0x12,
+	0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65,
+	0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c,
+	0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x31, 0x0a, 0x07, 0x50, 0x61, 0x69, 0x72, 0x4b,
+	0x65, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52,
+	0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x53, 0x69, 0x7a, 0x65, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x04, 0x52, 0x05, 0x76, 0x53, 0x69, 0x7a, 0x65, 0x22, 0x42, 0x0a, 0x0a, 0x47, 0x65,
+	0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x22, 0x0a, 0x0c, 0x62, 0x75, 0x63, 0x6b,
+	0x65, 0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c,
+	0x62, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x12, 0x10, 0x0a, 0x03,
+	0x6b, 0x65, 0x79, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x22, 0x20,
+	0x0a, 0x08, 0x47, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61,
+	0x6c, 0x75, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65,
+	0x32, 0xf6, 0x01, 0x0a, 0x02, 0x4b, 0x76, 0x12, 0x30, 0x0a, 0x04, 0x56, 0x69, 0x65, 0x77, 0x12,
+	0x12, 0x2e, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x10, 0x2e, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2e, 0x56, 0x69, 0x65, 0x77,
+	0x52, 0x65, 0x70, 0x6c, 0x79, 0x28, 0x01, 0x30, 0x01, 0x12, 0x32, 0x0a, 0x06, 0x42, 0x75, 0x63,
+	0x6b, 0x65, 0x74, 0x12, 0x14, 0x2e, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2e, 0x42, 0x75, 0x63, 0x6b,
+	0x65, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x12, 0x2e, 0x65, 0x74, 0x68, 0x64,
+	0x62, 0x2e, 0x42, 0x75, 0x63, 0x6b, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x32, 0x0a,
+	0x06, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x12, 0x14, 0x2e, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2e,
+	0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x12, 0x2e,
+	0x65, 0x74, 0x68, 0x64, 0x62, 0x2e, 0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x52, 0x65, 0x70, 0x6c,
+	0x79, 0x12, 0x2b, 0x0a, 0x04, 0x53, 0x65, 0x65, 0x6b, 0x12, 0x12, 0x2e, 0x65, 0x74, 0x68, 0x64,
+	0x62, 0x2e, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0b, 0x2e,
+	0x65, 0x74, 0x68, 0x64, 0x62, 0x2e, 0x50, 0x61, 0x69, 0x72, 0x28, 0x01, 0x30, 0x01, 0x12, 0x29,
+	0x0a, 0x03, 0x47, 0x65, 0x74, 0x12, 0x11, 0x2e, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2e, 0x47, 0x65,
+	0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0f, 0x2e, 0x65, 0x74, 0x68, 0x64, 0x62,
+	0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x42, 0x29, 0x0a, 0x10, 0x69, 0x6f, 0x2e,
 	0x74, 0x75, 0x72, 0x62, 0x6f, 0x2d, 0x67, 0x65, 0x74, 0x68, 0x2e, 0x64, 0x62, 0x42, 0x02, 0x4b,
-	0x56, 0x50, 0x01, 0x5a, 0x0c, 0x65, 0x74, 0x68, 0x64, 0x62, 0x2f, 0x72, 0x65, 0x6d, 0x6f, 0x74,
-	0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x56, 0x50, 0x01, 0x5a, 0x0f, 0x2e, 0x2f, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x3b, 0x72, 0x65,
+	0x6d, 0x6f, 0x74, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
-	file_ethdb_remote_kv_proto_rawDescOnce sync.Once
-	file_ethdb_remote_kv_proto_rawDescData = file_ethdb_remote_kv_proto_rawDesc
+	file_remote_kv_proto_rawDescOnce sync.Once
+	file_remote_kv_proto_rawDescData = file_remote_kv_proto_rawDesc
 )
 
-func file_ethdb_remote_kv_proto_rawDescGZIP() []byte {
-	file_ethdb_remote_kv_proto_rawDescOnce.Do(func() {
-		file_ethdb_remote_kv_proto_rawDescData = protoimpl.X.CompressGZIP(file_ethdb_remote_kv_proto_rawDescData)
+func file_remote_kv_proto_rawDescGZIP() []byte {
+	file_remote_kv_proto_rawDescOnce.Do(func() {
+		file_remote_kv_proto_rawDescData = protoimpl.X.CompressGZIP(file_remote_kv_proto_rawDescData)
 	})
-	return file_ethdb_remote_kv_proto_rawDescData
+	return file_remote_kv_proto_rawDescData
 }
 
-var file_ethdb_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
-var file_ethdb_remote_kv_proto_goTypes = []interface{}{
-	(*BeginRequest)(nil),    // 0: remotedbserver.BeginRequest
-	(*BeginReply)(nil),      // 1: remotedbserver.BeginReply
-	(*RollbackRequest)(nil), // 2: remotedbserver.RollbackRequest
-	(*RollbackReply)(nil),   // 3: remotedbserver.RollbackReply
-	(*BucketRequest)(nil),   // 4: remotedbserver.BucketRequest
-	(*BucketReply)(nil),     // 5: remotedbserver.BucketReply
-	(*GetRequest)(nil),      // 6: remotedbserver.GetRequest
-	(*GetReply)(nil),        // 7: remotedbserver.GetReply
-	(*CursorRequest)(nil),   // 8: remotedbserver.CursorRequest
-	(*CursorReply)(nil),     // 9: remotedbserver.CursorReply
-	(*SeekRequest)(nil),     // 10: remotedbserver.SeekRequest
-	(*SeekReply)(nil),       // 11: remotedbserver.SeekReply
-	(*FirstRequest)(nil),    // 12: remotedbserver.FirstRequest
-	(*FirstReply)(nil),      // 13: remotedbserver.FirstReply
-	(*NextRequest)(nil),     // 14: remotedbserver.NextRequest
-	(*NextReply)(nil),       // 15: remotedbserver.NextReply
-	(*SeekKeyRequest)(nil),  // 16: remotedbserver.SeekKeyRequest
-	(*SeekKeyReply)(nil),    // 17: remotedbserver.SeekKeyReply
-	(*FirstKeyRequest)(nil), // 18: remotedbserver.FirstKeyRequest
-	(*FirstKeyReply)(nil),   // 19: remotedbserver.FirstKeyReply
-	(*NextKeyRequest)(nil),  // 20: remotedbserver.NextKeyRequest
-	(*NextKeyReply)(nil),    // 21: remotedbserver.NextKeyReply
+var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_remote_kv_proto_goTypes = []interface{}{
+	(*ViewRequest)(nil),   // 0: ethdb.ViewRequest
+	(*ViewReply)(nil),     // 1: ethdb.ViewReply
+	(*BucketRequest)(nil), // 2: ethdb.BucketRequest
+	(*BucketReply)(nil),   // 3: ethdb.BucketReply
+	(*CursorRequest)(nil), // 4: ethdb.CursorRequest
+	(*CursorReply)(nil),   // 5: ethdb.CursorReply
+	(*SeekRequest)(nil),   // 6: ethdb.SeekRequest
+	(*Pair)(nil),          // 7: ethdb.Pair
+	(*PairKey)(nil),       // 8: ethdb.PairKey
+	(*GetRequest)(nil),    // 9: ethdb.GetRequest
+	(*GetReply)(nil),      // 10: ethdb.GetReply
 }
-var file_ethdb_remote_kv_proto_depIdxs = []int32{
-	0,  // 0: remotedbserver.Kv.Begin:input_type -> remotedbserver.BeginRequest
-	2,  // 1: remotedbserver.Kv.Rollback:input_type -> remotedbserver.RollbackRequest
-	4,  // 2: remotedbserver.Kv.Bucket:input_type -> remotedbserver.BucketRequest
-	6,  // 3: remotedbserver.Kv.Get:input_type -> remotedbserver.GetRequest
-	8,  // 4: remotedbserver.Kv.Cursor:input_type -> remotedbserver.CursorRequest
-	10, // 5: remotedbserver.Kv.Seek:input_type -> remotedbserver.SeekRequest
-	12, // 6: remotedbserver.Kv.First:input_type -> remotedbserver.FirstRequest
-	14, // 7: remotedbserver.Kv.Next:input_type -> remotedbserver.NextRequest
-	16, // 8: remotedbserver.Kv.SeekKey:input_type -> remotedbserver.SeekKeyRequest
-	18, // 9: remotedbserver.Kv.FirstKey:input_type -> remotedbserver.FirstKeyRequest
-	20, // 10: remotedbserver.Kv.NextKey:input_type -> remotedbserver.NextKeyRequest
-	1,  // 11: remotedbserver.Kv.Begin:output_type -> remotedbserver.BeginReply
-	3,  // 12: remotedbserver.Kv.Rollback:output_type -> remotedbserver.RollbackReply
-	5,  // 13: remotedbserver.Kv.Bucket:output_type -> remotedbserver.BucketReply
-	7,  // 14: remotedbserver.Kv.Get:output_type -> remotedbserver.GetReply
-	9,  // 15: remotedbserver.Kv.Cursor:output_type -> remotedbserver.CursorReply
-	11, // 16: remotedbserver.Kv.Seek:output_type -> remotedbserver.SeekReply
-	13, // 17: remotedbserver.Kv.First:output_type -> remotedbserver.FirstReply
-	15, // 18: remotedbserver.Kv.Next:output_type -> remotedbserver.NextReply
-	17, // 19: remotedbserver.Kv.SeekKey:output_type -> remotedbserver.SeekKeyReply
-	19, // 20: remotedbserver.Kv.FirstKey:output_type -> remotedbserver.FirstKeyReply
-	21, // 21: remotedbserver.Kv.NextKey:output_type -> remotedbserver.NextKeyReply
-	11, // [11:22] is the sub-list for method output_type
-	0,  // [0:11] is the sub-list for method input_type
+var file_remote_kv_proto_depIdxs = []int32{
+	0,  // 0: ethdb.Kv.View:input_type -> ethdb.ViewRequest
+	2,  // 1: ethdb.Kv.Bucket:input_type -> ethdb.BucketRequest
+	4,  // 2: ethdb.Kv.Cursor:input_type -> ethdb.CursorRequest
+	6,  // 3: ethdb.Kv.Seek:input_type -> ethdb.SeekRequest
+	9,  // 4: ethdb.Kv.Get:input_type -> ethdb.GetRequest
+	1,  // 5: ethdb.Kv.View:output_type -> ethdb.ViewReply
+	3,  // 6: ethdb.Kv.Bucket:output_type -> ethdb.BucketReply
+	5,  // 7: ethdb.Kv.Cursor:output_type -> ethdb.CursorReply
+	7,  // 8: ethdb.Kv.Seek:output_type -> ethdb.Pair
+	10, // 9: ethdb.Kv.Get:output_type -> ethdb.GetReply
+	5,  // [5:10] is the sub-list for method output_type
+	0,  // [0:5] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_ethdb_remote_kv_proto_init() }
-func file_ethdb_remote_kv_proto_init() {
-	if File_ethdb_remote_kv_proto != nil {
+func init() { file_remote_kv_proto_init() }
+func file_remote_kv_proto_init() {
+	if File_remote_kv_proto != nil {
 		return
 	}
 	if !protoimpl.UnsafeEnabled {
-		file_ethdb_remote_kv_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BeginRequest); i {
+		file_remote_kv_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ViewRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1333,8 +715,8 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BeginReply); i {
+		file_remote_kv_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ViewReply); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1345,31 +727,7 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RollbackRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RollbackReply); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+		file_remote_kv_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*BucketRequest); i {
 			case 0:
 				return &v.state
@@ -1381,7 +739,7 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
+		file_remote_kv_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*BucketReply); i {
 			case 0:
 				return &v.state
@@ -1393,31 +751,7 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetReply); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
+		file_remote_kv_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*CursorRequest); i {
 			case 0:
 				return &v.state
@@ -1429,7 +763,7 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+		file_remote_kv_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*CursorReply); i {
 			case 0:
 				return &v.state
@@ -1441,7 +775,7 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+		file_remote_kv_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SeekRequest); i {
 			case 0:
 				return &v.state
@@ -1453,8 +787,8 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SeekReply); i {
+		file_remote_kv_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*Pair); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1465,8 +799,8 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FirstRequest); i {
+		file_remote_kv_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PairKey); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1477,8 +811,8 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FirstReply); i {
+		file_remote_kv_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1489,92 +823,8 @@ func file_ethdb_remote_kv_proto_init() {
 				return nil
 			}
 		}
-		file_ethdb_remote_kv_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NextRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NextReply); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SeekKeyRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SeekKeyReply); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FirstKeyRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FirstKeyReply); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NextKeyRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_ethdb_remote_kv_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NextKeyReply); i {
+		file_remote_kv_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetReply); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1590,18 +840,18 @@ func file_ethdb_remote_kv_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_ethdb_remote_kv_proto_rawDesc,
+			RawDescriptor: file_remote_kv_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_ethdb_remote_kv_proto_goTypes,
-		DependencyIndexes: file_ethdb_remote_kv_proto_depIdxs,
-		MessageInfos:      file_ethdb_remote_kv_proto_msgTypes,
+		GoTypes:           file_remote_kv_proto_goTypes,
+		DependencyIndexes: file_remote_kv_proto_depIdxs,
+		MessageInfos:      file_remote_kv_proto_msgTypes,
 	}.Build()
-	File_ethdb_remote_kv_proto = out.File
-	file_ethdb_remote_kv_proto_rawDesc = nil
-	file_ethdb_remote_kv_proto_goTypes = nil
-	file_ethdb_remote_kv_proto_depIdxs = nil
+	File_remote_kv_proto = out.File
+	file_remote_kv_proto_rawDesc = nil
+	file_remote_kv_proto_goTypes = nil
+	file_remote_kv_proto_depIdxs = nil
 }

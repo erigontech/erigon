@@ -82,7 +82,7 @@ func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
 }
 
 func (opts remoteOpts) Open() (KV, error) {
-	remoteDB, err := remote.Open2(opts.Remote)
+	remoteDB, err := remote.Open(opts.Remote)
 	if err != nil {
 		return nil, err
 	}

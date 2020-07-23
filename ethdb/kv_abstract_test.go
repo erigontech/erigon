@@ -11,9 +11,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func TestManagedTx(t *testing.T) {
@@ -75,24 +79,34 @@ func TestManagedTx(t *testing.T) {
 func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(),
-		ethdb.NewBolt().InMem().MustOpen(), // for remote db
+		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
 		ethdb.NewBadger().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(),
+		ethdb.NewLMDB().InMem().MustOpen(), // for remote2 db
 	}
 
 	serverIn, clientOut := io.Pipe()
 	clientIn, serverOut := io.Pipe()
+	conn := bufconn.Listen(1024 * 1024)
 
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(),
 		writeDBs[2],
 		writeDBs[3],
+		ethdb.NewRemote2().InMem(conn).MustOpen(),
 	}
 
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	go func() {
 		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
+	}()
+	go func() {
+		grpcServer := grpc.NewServer()
+		remote.RegisterKvServer(grpcServer, remotedbserver.NewServer2(writeDBs[4]))
+		if err := grpcServer.Serve(conn); err != nil {
+			log.Error("private RPC server fail", "err", err)
+		}
 	}()
 
 	return writeDBs, readDBs, func() {
@@ -107,6 +121,7 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 		serverOut.Close()
 		clientIn.Close()
 		clientOut.Close()
+		conn.Close()
 
 		serverCancel()
 	}

@@ -333,7 +333,7 @@ func (tx *lmdbTx) closeCursors() {
 			c.Close()
 		}
 	}
-	tx.cursors = tx.cursors[:0]
+	tx.cursors = []*lmdb.Cursor{}
 }
 
 func (c *LmdbCursor) Prefix(v []byte) Cursor {
@@ -575,6 +575,13 @@ func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 		if !ok {
 			return nil
 		}
+	}
+	return nil
+}
+
+func (c *LmdbCursor) Close() error {
+	if c.cursor != nil {
+		c.cursor.Close()
 	}
 	return nil
 }

@@ -247,9 +247,7 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
-
-	protoc --go_out=. 	   "./ethdb/remote/kv.proto" # generate the messages
-	protoc --go-grpc_out=. "./ethdb/remote/kv.proto" # generate the services
+	go generate ./ethdb
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
