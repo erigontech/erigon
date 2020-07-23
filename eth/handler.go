@@ -187,6 +187,12 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
+		// FIXME: Workaround for staged sync, just do no-op
+		if manager.blockchain == nil || manager.blockchain.CurrentBlock() == nil {
+			log.Info("Workaround for staged sync: IIIAAAIII")
+			return 0, err
+		}
+
 		// If sync hasn't reached the checkpoint yet, deny importing weird blocks.
 		//
 		// Ideally we would also compare the head block's timestamp and similarly reject
