@@ -619,17 +619,17 @@ type changesetSearchDecorator struct {
 	cerr              error
 }
 
-func HcNext(oldAddr, oldKey []byte, cursor historyCursor, timestamp uint64) ([]byte,[]byte,[]byte,[]byte,error)  {
+func HcNext(oldAddr, oldKey []byte, cursor historyCursor, timestamp uint64) ([]byte, []byte, []byte, []byte, error) {
 	hAddrHash, hKeyHash, tsEnc, hV, err2 := cursor.Next()
-	for bytes.Equal(hAddrHash,oldAddr) && bytes.Equal(hKeyHash,oldKey) {
+	for bytes.Equal(hAddrHash, oldAddr) && bytes.Equal(hKeyHash, oldKey) {
 		hAddrHash, hKeyHash, tsEnc, hV, err2 = cursor.Next()
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
 		}
 	}
-	hAddrHash0 :=hAddrHash
+	hAddrHash0 := hAddrHash
 	hKeyHash0 := hKeyHash
-	for  bytes.Equal(hAddrHash, hAddrHash0) && bytes.Equal(hKeyHash, hKeyHash0) && tsEnc!=nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
+	for bytes.Equal(hAddrHash, hAddrHash0) && bytes.Equal(hKeyHash, hKeyHash0) && tsEnc != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
 		hAddrHash, hKeyHash, tsEnc, hV, err2 = cursor.Next()
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
@@ -663,17 +663,17 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		return nil, nil, nil, nil, err2
 	}
 
-	hAddrHash0:=hAddrHash
-	hKeyHash0:=hKeyHash
+	hAddrHash0 := hAddrHash
+	hKeyHash0 := hKeyHash
 	//find first chunk after timestamp
-	for hAddrHash != nil && tsEnc!=nil &&bytes.Equal(hAddrHash, hAddrHash0)&&bytes.Equal(hKeyHash, hKeyHash0) && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
+	for hAddrHash != nil && tsEnc != nil && bytes.Equal(hAddrHash, hAddrHash0) && bytes.Equal(hKeyHash, hKeyHash0) && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
 		hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
 		}
 	}
 
-	if len(hAddrHash) > 0 && len(tsEnc)>0 {
+	if len(hAddrHash) > 0 && len(tsEnc) > 0 {
 		hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 		copy(hK[:len(hAddrHash)], hAddrHash)
 		copy(hK[len(hAddrHash):], hKeyHash)
@@ -757,7 +757,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		//		return nil, nil, nil, nil, err2
 		//	}
 		//}
-		hAddrHash, hKeyHash, tsEnc, hV, err2:=HcNext(csd.kc1,csd.kc2,csd.historyCursor,csd.timestamp)
+		hAddrHash, hKeyHash, tsEnc, hV, err2 := HcNext(csd.kc1, csd.kc2, csd.historyCursor, csd.timestamp)
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
 		}
@@ -836,7 +836,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 
 	//shift history cursor
 	if cmp >= 0 {
-		hAddrHash, hKeyHash, tsEnc, hV, err2:=HcNext(csd.kc1,csd.kc2,csd.historyCursor,csd.timestamp)
+		hAddrHash, hKeyHash, tsEnc, hV, err2 := HcNext(csd.kc1, csd.kc2, csd.historyCursor, csd.timestamp)
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
 		}

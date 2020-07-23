@@ -1966,18 +1966,17 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		addrHashes[i] = addrHash
 	}
 
+	addr1Old := emptyValAcc.SelfCopy()
+	addr1Old.Initialised = true
+	addr1Old.Nonce = 1
+	addr2Old := emptyValAcc.SelfCopy()
+	addr2Old.Initialised = true
+	addr2Old.Nonce = 1
+	addr3Old := emptyValAcc.SelfCopy()
+	addr3Old.Initialised = true
+	addr3Old.Nonce = 1
 
-	addr1Old:=emptyValAcc.SelfCopy()
-	addr1Old.Initialised=true
-	addr1Old.Nonce=1
-	addr2Old:=emptyValAcc.SelfCopy()
-	addr2Old.Initialised=true
-	addr2Old.Nonce=1
-	addr3Old:=emptyValAcc.SelfCopy()
-	addr3Old.Initialised=true
-	addr3Old.Nonce=1
-
-	var addr1New,addr2New,addr3New *accounts.Account
+	var addr1New, addr2New, addr3New *accounts.Account
 
 	writeBlockData(t, tds, 1, []accData{
 		{
@@ -1997,13 +1996,13 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
-	for i:=2;i<1100;i++ {
+	for i := 2; i < 1100; i++ {
 		addr1New = addr1Old.SelfCopy()
-		addr1New.Nonce=uint64(i)
+		addr1New.Nonce = uint64(i)
 		addr2New = addr2Old.SelfCopy()
-		addr2New.Nonce=uint64(i)
+		addr2New.Nonce = uint64(i)
 		addr3New = addr3Old.SelfCopy()
-		addr3New.Nonce=uint64(i)
+		addr3New.Nonce = uint64(i)
 		writeBlockData(t, tds, uint64(i), []accData{
 			{
 				addrs[0],
@@ -2021,18 +2020,17 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 				addr3New,
 			},
 		}, true, true)
-		addr1Old=addr1New.SelfCopy()
-		addr2Old=addr2New.SelfCopy()
-		addr3Old=addr3New.SelfCopy()
+		addr1Old = addr1New.SelfCopy()
+		addr2Old = addr2New.SelfCopy()
+		addr3Old = addr3New.SelfCopy()
 	}
 
 	addr1New = addr1Old.SelfCopy()
-	addr1New.Nonce=1100
+	addr1New.Nonce = 1100
 	addr2New = addr2Old.SelfCopy()
-	addr2New.Nonce=1100
+	addr2New.Nonce = 1100
 	addr3New = addr3Old.SelfCopy()
-	addr3New.Nonce=1100
-
+	addr3New.Nonce = 1100
 
 	writeBlockData(t, tds, 1100, []accData{
 		{
@@ -2052,8 +2050,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
-
-	for _,blockNum:=range []uint64{ 5, 100, 1000, 1050} {
+	for _, blockNum := range []uint64{5, 100, 1000, 1050} {
 		obtained := &changeset.ChangeSet{
 			Changes: make([]changeset.Change, 0),
 		}
@@ -2070,22 +2067,22 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		acc :=addr1Old.SelfCopy()
-		acc.Nonce=blockNum-1
-		accBytes:=make([]byte, acc.EncodingLengthForStorage())
+		acc := addr1Old.SelfCopy()
+		acc.Nonce = blockNum - 1
+		accBytes := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(accBytes)
 		expected := &changeset.ChangeSet{
 			Changes: []changeset.Change{
 				{
-					Key: addrs[0].Bytes(),
+					Key:   addrs[0].Bytes(),
 					Value: accBytes,
 				},
 				{
-					Key: addrs[1].Bytes(),
+					Key:   addrs[1].Bytes(),
 					Value: accBytes,
 				},
 				{
-					Key: addrs[2].Bytes(),
+					Key:   addrs[2].Bytes(),
 					Value: accBytes,
 				},
 			},
@@ -2099,7 +2096,6 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 
-
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)
 	addrHashes := make([]common.Hash, numOfAccounts)
@@ -2108,10 +2104,10 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
-	key:=common.Hash{123}
+	key := common.Hash{123}
 	emptyVal := uint256.NewInt()
 
-	val:=uint256.NewInt().SetBytes([]byte("block 1"))
+	val := uint256.NewInt().SetBytes([]byte("block 1"))
 	writeStorageBlockData(t, tds, 1, []storageData{
 		{
 			addrs[0],
@@ -2136,9 +2132,9 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
-	prev:=val
-	for i:=2;i<1100;i++ {
-		val=uint256.NewInt().SetBytes([]byte("block "+strconv.Itoa(i)))
+	prev := val
+	for i := 2; i < 1100; i++ {
+		val = uint256.NewInt().SetBytes([]byte("block " + strconv.Itoa(i)))
 		writeStorageBlockData(t, tds, uint64(i), []storageData{
 			{
 				addrs[0],
@@ -2162,10 +2158,10 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 				val,
 			},
 		}, true, true)
-		prev=val
+		prev = val
 	}
 
-	val=uint256.NewInt().SetBytes([]byte("block 1100"))
+	val = uint256.NewInt().SetBytes([]byte("block 1100"))
 
 	writeStorageBlockData(t, tds, 1100, []storageData{
 		{
@@ -2191,8 +2187,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
-
-	for _,blockNum:=range []uint64{ 5, 100, 1000, 1050} {
+	for _, blockNum := range []uint64{5, 100, 1000, 1050} {
 		obtained := &changeset.ChangeSet{
 			Changes: make([]changeset.Change, 0),
 		}
@@ -2208,19 +2203,19 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		valBytes:=uint256.NewInt().SetBytes([]byte("block "+strconv.FormatUint(blockNum-1,10))).Bytes()
+		valBytes := uint256.NewInt().SetBytes([]byte("block " + strconv.FormatUint(blockNum-1, 10))).Bytes()
 		expected := &changeset.ChangeSet{
 			Changes: []changeset.Change{
 				{
-					Key: append(addrs[0].Bytes(), key.Bytes()...),
+					Key:   append(addrs[0].Bytes(), key.Bytes()...),
 					Value: valBytes,
 				},
 				{
-					Key: append(addrs[1].Bytes(), key.Bytes()...),
+					Key:   append(addrs[1].Bytes(), key.Bytes()...),
 					Value: valBytes,
 				},
 				{
-					Key: append(addrs[2].Bytes(), key.Bytes()...),
+					Key:   append(addrs[2].Bytes(), key.Bytes()...),
 					Value: valBytes,
 				},
 			},
@@ -2228,7 +2223,6 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		assertChangesEquals(t, obtained, expected)
 	}
 }
-
 
 type accData struct {
 	addr   common.Address
