@@ -391,7 +391,7 @@ func (pool *TxPool) resetHead(blockGasLimit uint64, blockNumber uint64) {
 
 func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.resetHead(blockGasLimit, blockNumber)
-	<- pool.requestReset(nil, nil)
+	<-pool.requestReset(nil, nil)
 }
 
 // Stop terminates the transaction pool.
