@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -25,7 +24,7 @@ import (
 
 type stagedSyncTester struct {
 	downloader *Downloader
-	db         ethdb.Database
+	db         *ethdb.ObjectDatabase
 	peers      map[string]*stagedSyncTesterPeer
 	genesis    *types.Block
 	lock       sync.RWMutex
@@ -193,7 +192,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise(id, hash, number, StagedSync, vm.NewDestsCache(100), getTestTxPoolControl())
+	err := st.downloader.synchronise(id, hash, number, StagedSync, vm.NewDestsCache(100), nil)
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle
@@ -304,9 +303,3 @@ func TestUnwind(t *testing.T) {
 	}
 }
 
-func getTestTxPoolControl() *stagedsync.TxPoolStartStopper {
-	return &stagedsync.TxPoolStartStopper{
-		Start: func() error { return nil },
-		Stop:  func() error { return nil },
-	}
-}

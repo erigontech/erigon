@@ -54,8 +54,8 @@ type downloadTester struct {
 	downloader *Downloader
 
 	genesis *types.Block   // Genesis blocks used by the tester and peers
-	stateDb ethdb.Database // Database used by the tester for syncing from peers
-	peerDb  ethdb.Database // Database of the peers containing all data
+	stateDb *ethdb.ObjectDatabase // Database used by the tester for syncing from peers
+	peerDb  *ethdb.ObjectDatabase // Database of the peers containing all data
 	peers   map[string]*downloadTesterPeer
 
 	ownHashes   []common.Hash                  // Hash chain belonging to the tester
@@ -118,7 +118,7 @@ func (dl *downloadTester) sync(id string, td *big.Int, mode SyncMode) error {
 	dl.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := dl.downloader.synchronise(id, hash, number, mode, vm.NewDestsCache(100), getTestTxPoolControl())
+	err := dl.downloader.synchronise(id, hash, number, mode, vm.NewDestsCache(100), nil)
 	select {
 	case <-dl.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle
@@ -1173,7 +1173,7 @@ func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 		// Simulate a synchronisation and check the required result
 		tester.downloader.synchroniseMock = func(string, common.Hash) error { return tt.result }
 
-		_ = tester.downloader.Synchronise(id, tester.genesis.Hash(), tester.genesis.NumberU64(), FullSync, dests, getTestTxPoolControl())
+		_ = tester.downloader.Synchronise(id, tester.genesis.Hash(), tester.genesis.NumberU64(), FullSync, dests, nil)
 		if _, ok := tester.peers[id]; !ok != tt.drop {
 			t.Errorf("test %d: peer drop mismatch for %v: have %v, want %v", i, tt.result, !ok, tt.drop)
 		}

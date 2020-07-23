@@ -29,6 +29,7 @@ import (
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -113,8 +114,8 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB    ethdb.Database  // Database to state sync into (and deduplicate via)
-	stateBloom *trie.SyncBloom // Bloom filter for fast trie node existence checks
+	stateDB    *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
+	stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
 
 	// Statistics
 	syncStatsChainOrigin uint64       // Origin block number where syncing started at
@@ -241,7 +242,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -351,8 +352,8 @@ func (d *Downloader) UnregisterPeer(id string) error {
 
 // Synchronise tries to sync up our local block chain with a remote peer, both
 // adding various sanity checks as well as wrapping it with various log entries.
-func (d *Downloader) Synchronise(id string, head common.Hash, blockNumber uint64, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
-	err := d.synchronise(id, head, blockNumber, mode, dests, txPoolControl)
+func (d *Downloader) Synchronise(id string, head common.Hash, blockNumber uint64, mode SyncMode, dests vm.Cache, txPool *core.TxPool) error {
+	err := d.synchronise(id, head, blockNumber, mode, dests, txPool)
 
 	switch err {
 	case nil, errBusy, errCanceled:
@@ -392,7 +393,7 @@ func (d *Downloader) Synchronise(id string, head common.Hash, blockNumber uint64
 // synchronise will select the peer and use it for synchronising. If an empty string is given
 // it will use the best peer possible and synchronize if its TD is higher than our own. If any of the
 // checks fail an error will be returned. This method is synchronous
-func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64, mode SyncMode, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) error {
+func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64, mode SyncMode, dests vm.Cache, txPool *core.TxPool) error {
 	// Mock out the synchronisation if testing
 	if d.synchroniseMock != nil {
 		return d.synchroniseMock(id, hash)
@@ -455,12 +456,12 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 	if p == nil {
 		return errUnknownPeer
 	}
-	return d.syncWithPeer(p, hash, blockNumber, dests, txPoolControl)
+	return d.syncWithPeer(p, hash, blockNumber, dests, txPool)
 }
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.s
-func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumber uint64, dests vm.Cache, txPoolControl *stagedsync.TxPoolStartStopper) (err error) {
+func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumber uint64, dests vm.Cache, txPool *core.TxPool) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -576,7 +577,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			d.quitCh,
 			fetchers,
 			dests,
-			txPoolControl,
+			txPool,
 			nil,
 		)
 		if err != nil {
