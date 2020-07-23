@@ -1283,6 +1283,231 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block6, block6Expected)
 }
+func TestName(t *testing.T) {
+	t.Log(binary.BigEndian.Uint64([]byte{0,0,0,0,0,0,3,232}))
+}
+func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+	emptyValAcc := accounts.NewAccount()
+	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
+	emptyValAcc.EncodeForStorage(emptyVal)
+
+	block3ValAcc := emptyValAcc.SelfCopy()
+	block3ValAcc.Nonce = 3
+	block3ValAcc.Initialised = true
+	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
+	block3ValAcc.EncodeForStorage(block3Val)
+
+	stateValAcc := emptyValAcc.SelfCopy()
+	stateValAcc.Nonce = 5
+	stateValAcc.Initialised = true
+	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
+	stateValAcc.EncodeForStorage(stateVal)
+
+	numOfAccounts := uint8(4)
+	addrs := make([]common.Address, numOfAccounts)
+	addrHashes := make([]common.Hash, numOfAccounts)
+	for i := uint8(0); i < numOfAccounts; i++ {
+		addrs[i] = common.Address{i + 1}
+		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHashes[i] = addrHash
+	}
+
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+
+	addr1Old:=emptyValAcc.SelfCopy()
+	addr1Old.Initialised=true
+	addr1Old.Nonce=1
+	addr2Old:=emptyValAcc.SelfCopy()
+	addr2Old.Initialised=true
+	addr2Old.Nonce=1
+	addr3Old:=emptyValAcc.SelfCopy()
+	addr3Old.Initialised=true
+	addr3Old.Nonce=1
+
+	var addr1New,addr2New,addr3New *accounts.Account
+
+	writeBlockData(t, tds, 1, []accData{
+		{
+			addrs[0],
+			&emptyValAcc,
+			addr1Old,
+		},
+		{
+			addrs[1],
+			&emptyValAcc,
+			addr1Old,
+		},
+		{
+			addrs[2],
+			&emptyValAcc,
+			addr1Old,
+		},
+	}, true, true)
+
+	for i:=2;i<1100;i++ {
+		addr1New = addr1Old.SelfCopy()
+		addr1New.Nonce=uint64(i)
+		addr2New = addr2Old.SelfCopy()
+		addr2New.Nonce=uint64(i)
+		addr3New = addr3Old.SelfCopy()
+		addr3New.Nonce=uint64(i)
+		writeBlockData(t, tds, uint64(i), []accData{
+			{
+				addrs[0],
+				addr1Old,
+				addr1New,
+			},
+			{
+				addrs[1],
+				addr2Old,
+				addr2New,
+			},
+			{
+				addrs[2],
+				addr3Old,
+				addr3New,
+			},
+		}, true, true)
+		addr1Old=addr1New.SelfCopy()
+		addr2Old=addr2New.SelfCopy()
+		addr3Old=addr3New.SelfCopy()
+	}
+
+	addr1New = addr1Old.SelfCopy()
+	addr1New.Nonce=1100
+	addr2New = addr2Old.SelfCopy()
+	addr2New.Nonce=1100
+	addr3New = addr3Old.SelfCopy()
+	addr3New.Nonce=1100
+
+
+	writeBlockData(t, tds, 1100, []accData{
+		{
+			addrs[0],
+			addr1Old,
+			addr1New,
+		},
+		{
+			addrs[1],
+			addr1Old,
+			addr1New,
+		},
+		{
+			addrs[2],
+			addr1Old,
+			addr1New,
+		},
+	}, true, true)
+
+
+	var startKey [20]byte
+	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 1050, func(k []byte, v []byte) (b bool, e error) {
+		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if innerErr != nil {
+			t.Fatal(innerErr)
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("block2")
+	str := ""
+	for _, v := range block2.Changes {
+		acc:=accounts.NewAccount()
+		acc.DecodeForStorage(v.Value)
+		str += fmt.Sprintf("%v %s : %v\n", len(v.Key), common.Bytes2Hex(v.Key), acc.Nonce)
+	}
+	//block2Expected := &changeset.ChangeSet{
+	//	Changes: make([]changeset.Change, 0),
+	//}
+
+	fmt.Println(str)
+
+	//fmt.Println(block2.String())
+	//err=db.Walk(dbutils.AccountsHistoryBucket,addrs[0].Bytes(), common.AddressLength*8, func(k, v []byte) (bool, error) {
+	//	fmt.Println(common.Bytes2Hex(k))
+	//	fmt.Println(dbutils.WrapHistoryIndex(v).Decode())
+	//	return true, nil
+	//})
+	//if err!=nil {
+	//	t.Fatal(err)
+	//}
+
+	//assertChangesEquals(t, block2, block2Expected)
+	//
+	//block4 := &changeset.ChangeSet{
+	//	Changes: make([]changeset.Change, 0),
+	//}
+	//
+	//block4Expected := &changeset.ChangeSet{
+	//	Changes: []changeset.Change{
+	//		{
+	//			addrs[0].Bytes(),
+	//			block3Val,
+	//		},
+	//		{
+	//			addrs[2].Bytes(),
+	//			block3Val,
+	//		},
+	//		{
+	//			addrs[3].Bytes(),
+	//			block3Val,
+	//		},
+	//	},
+	//}
+	//
+	//err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	//	innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+	//	if innerErr != nil {
+	//		t.Fatal(innerErr)
+	//	}
+	//	return true, nil
+	//})
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//assertChangesEquals(t, block4, block4Expected)
+	//
+	//block6 := &changeset.ChangeSet{
+	//	Changes: make([]changeset.Change, 0),
+	//}
+	//
+	//block6Expected := &changeset.ChangeSet{
+	//	Changes: []changeset.Change{
+	//		{
+	//			addrs[0].Bytes(),
+	//			stateVal,
+	//		},
+	//		{
+	//			addrs[1].Bytes(),
+	//			stateVal,
+	//		},
+	//		{
+	//			addrs[2].Bytes(),
+	//			block3Val,
+	//		},
+	//	},
+	//}
+	//
+	//err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	//	innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+	//	if innerErr != nil {
+	//		t.Fatal(innerErr)
+	//	}
+	//	return true, nil
+	//})
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//assertChangesEquals(t, block6, block6Expected)
+}
 
 func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	db := ethdb.NewMemDatabase()
