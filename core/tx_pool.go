@@ -286,7 +286,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 		pool.locals.add(addr)
 	}
 	pool.priced = newTxPricedList(pool.all)
-	pool.ResetHead(gasLimit, headNumber)
+	pool.resetHead(gasLimit, headNumber)
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
@@ -380,13 +380,18 @@ func (pool *TxPool) loop() {
 	}
 }
 
-func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
+func (pool *TxPool) resetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
 	pool.pendingNonces = newTxNoncer(pool.currentState)
 	pool.currentMaxGas = blockGasLimit
 	pool.istanbul = pool.chainconfig.IsIstanbul(big.NewInt(int64(blockNumber + 1)))
+}
+
+func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
+	pool.resetHead(blockGasLimit, blockNumber)
+	<- pool.requestReset(nil, nil)
 }
 
 // Stop terminates the transaction pool.
@@ -966,23 +971,30 @@ func (pool *TxPool) scheduleReorgLoop() {
 		launchNextRun bool
 		dirtyAccounts *accountSet
 		queuedEvents  = make(map[common.Address]*txSortedMap)
+		reset         bool
 	)
 	for {
 		// Launch next background reorg if needed
 		if curDone == nil && launchNextRun {
 			// Run the background reorg and announcements
-			go pool.runReorg(nextDone, dirtyAccounts, queuedEvents)
+			go pool.runReorg(nextDone, dirtyAccounts, queuedEvents, reset)
 
 			// Prepare everything for the next round of reorg
 			curDone, nextDone = nextDone, make(chan struct{})
 			launchNextRun = false
 
 			dirtyAccounts = nil
+			reset = false
 			queuedEvents = make(map[common.Address]*txSortedMap)
 		}
 
 		select {
 
+		case <-pool.reqResetCh:
+			// Reset request: update head if request is already pending.
+			reset = true
+			launchNextRun = true
+			pool.reorgDoneCh <- nextDone
 		case req := <-pool.reqPromoteCh:
 			// Promote request: update address set if request is already pending.
 			if dirtyAccounts == nil {
@@ -1017,7 +1029,7 @@ func (pool *TxPool) scheduleReorgLoop() {
 }
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
-func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap) {
+func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap, reset bool) {
 	defer close(done)
 
 	var promoteAddrs []common.Address
@@ -1025,8 +1037,28 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 		promoteAddrs = dirtyAccounts.flatten()
 	}
 	pool.mu.Lock()
+	if reset {
+		// Nonces were reset, discard any events that became stale
+		for addr := range events {
+			events[addr].Forward(pool.pendingNonces.get(addr))
+			if events[addr].Len() == 0 {
+				delete(events, addr)
+			}
+		}
+		// Reset needs promote for all addresses
+		promoteAddrs = promoteAddrs[:0]
+		for addr := range pool.queue {
+			promoteAddrs = append(promoteAddrs, addr)
+		}
+	}
 	// Check for pending transactions for every account that sent new ones
 	promoted := pool.promoteExecutables(promoteAddrs)
+	// If a new block appeared, validate the pool of pending transactions. This will
+	// remove any transaction that has been included in the block or was invalidated
+	// because of another transaction (e.g. higher gas price).
+	if reset {
+		pool.demoteUnexecutables()
+	}
 
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
 	pool.truncatePending()
