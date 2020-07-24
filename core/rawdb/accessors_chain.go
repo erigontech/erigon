@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/big"
 
 	"github.com/golang/snappy"
@@ -595,12 +594,4 @@ func ReadBlockByHash(db DatabaseReader, hash common.Hash) *types.Block {
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
 func WriteAncientBlock(db DatabaseWriter, block *types.Block, receipts types.Receipts, td *big.Int) int {
 	panic("not implemented")
-}
-
-func ReadLastBlockNumber(db DatabaseReader) (uint64, error) {
-	b := ReadHeaderNumber(db, ReadHeadHeaderHash(db))
-	if b == nil {
-		return 0, fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
-	}
-	return *b, nil
 }
