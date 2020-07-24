@@ -397,7 +397,6 @@ func TestTransactionPropagation(t *testing.T)  { testSyncTransaction(t, true) }
 func TestTransactionAnnouncement(t *testing.T) { testSyncTransaction(t, false) }
 
 func testSyncTransaction(t *testing.T, propagtion bool) {
-	t.Skip("fix when refactoring tx pool")
 	// Create a protocol manager for transaction fetcher and sender
 	pmFetcher, fetcherClear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer fetcherClear()
@@ -408,8 +407,10 @@ func testSyncTransaction(t *testing.T, propagtion bool) {
 	// Sync up the two peers
 	io1, io2 := p2p.MsgPipe()
 
-	go pmSender.handle(pmSender.newPeer(65, p2p.NewPeer(enode.ID{}, "sender", nil), io2, pmSender.txpool.Get))
-	go pmFetcher.handle(pmFetcher.newPeer(65, p2p.NewPeer(enode.ID{}, "fetcher", nil), io1, pmFetcher.txpool.Get))
+	senderPeer := pmSender.newPeer(65, p2p.NewPeer(enode.ID{}, "sender", nil), io2, pmSender.txpool.Get)
+	go pmSender.handle(senderPeer)
+	fetcherPeer := pmFetcher.newPeer(65, p2p.NewPeer(enode.ID{}, "fetcher", nil), io1, pmFetcher.txpool.Get)
+	go pmFetcher.handle(fetcherPeer)
 
 	time.Sleep(250 * time.Millisecond)
 	pmFetcher.doSync(peerToSyncOp(downloader.StagedSync, pmFetcher.peers.BestPeer()))

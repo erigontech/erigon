@@ -152,6 +152,7 @@ func (p *testTxPool) AddRemotes(txs []*types.Transaction) []error {
 	if p.added != nil {
 		p.added <- txs
 	}
+	fmt.Printf("Sending %d txs\n", len(txs))
 	p.txFeed.Send(core.NewTxsEvent{Txs: txs})
 	return make([]error, len(txs))
 }

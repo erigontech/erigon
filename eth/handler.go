@@ -448,39 +448,42 @@ func (pm *ProtocolManager) handle(p *peer) error {
 
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
-	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
-		return err
-	}
-	// Handle one message
-	if err := pm.handleMsg(p); err != nil {
-		p.Log().Debug("Ethereum message handling failed", "err", err)
-		return err
-	}
-	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
-	if pm.checkpointHash != (common.Hash{}) {
-		// Request the peer's checkpoint header for chain height/weight validation
-		if err := p.RequestHeadersByNumber(pm.checkpointNumber, 1, 0, false); err != nil {
-			return err
-		}
-		// Start a timer to disconnect if the peer doesn't reply in time
-		p.syncDrop = time.AfterFunc(syncChallengeTimeout, func() {
-			p.Log().Warn("Checkpoint challenge timed out, dropping", "addr", p.RemoteAddr(), "type", p.Name())
+	go func() {
+		if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+			p.Log().Error("Requesting initial header", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
 			pm.removePeer(p.id)
-		})
-		// Make sure it's cleaned up if the peer dies off
-		defer func() {
-			if p.syncDrop != nil {
-				p.syncDrop.Stop()
-				p.syncDrop = nil
-			}
-		}()
-	}
-	// If we have any explicit whitelist block hashes, request them
-	for number := range pm.whitelist {
-		if err := p.RequestHeadersByNumber(number, 1, 0, false); err != nil {
-			return err
+			return
 		}
-	}
+		// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
+		if pm.checkpointHash != (common.Hash{}) {
+			// Request the peer's checkpoint header for chain height/weight validation
+			if err := p.RequestHeadersByNumber(pm.checkpointNumber, 1, 0, false); err != nil {
+				p.Log().Error("Requesting checkpoint", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
+				pm.removePeer(p.id)
+				return
+			}
+			// Start a timer to disconnect if the peer doesn't reply in time
+			p.syncDrop = time.AfterFunc(syncChallengeTimeout, func() {
+				p.Log().Warn("Checkpoint challenge timed out, dropping", "addr", p.RemoteAddr(), "type", p.Name())
+				pm.removePeer(p.id)
+			})
+			// Make sure it's cleaned up if the peer dies off
+			defer func() {
+				if p.syncDrop != nil {
+					p.syncDrop.Stop()
+					p.syncDrop = nil
+				}
+			}()
+		}
+		// If we have any explicit whitelist block hashes, request them
+		for number := range pm.whitelist {
+			if err := p.RequestHeadersByNumber(number, 1, 0, false); err != nil {
+				p.Log().Error("Requesting whitelist number", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
+				pm.removePeer(p.id)
+				return
+			}
+		}
+	}()
 	// Handle incoming messages until the connection is torn down
 	for {
 		if err := pm.handleMsg(p); err != nil {
@@ -604,7 +607,13 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				query.Origin.Number += query.Skip + 1
 			}
 		}
-		return p.SendBlockHeaders(headers)
+		go func() {
+			if err := p.SendBlockHeaders(headers); err != nil {
+				p.Log().Error("Sending headers", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
+				pm.removePeer(p.id)
+				return
+			}
+		}()
 
 	case msg.Code == BlockHeadersMsg:
 		// A batch of headers arrived to one of our previous requests
