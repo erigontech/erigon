@@ -20,9 +20,11 @@ type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
 	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error)
+	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
+	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 }
 
-// APIImpl is implementation of the EthAPI interface based on remote Db access
+// APIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	db           ethdb.KV
 	dbReader     ethdb.Getter
@@ -45,16 +47,6 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, err
 	}
 	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
-}
-
-// computeIntraBlockState retrieves the state database associated with a certain block.
-// If no state is locally available for the given block, a number of blocks are
-// attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
-	// If we have the state fully available, use that
-	dbstate := state.NewDbState(api.db, block.NumberU64())
-	statedb := state.New(dbstate)
-	return statedb, dbstate
 }
 
 // AccountRange re-implementation of eth/api.go:AccountRange
@@ -102,8 +94,6 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 	return res, err
 }
-
-
 
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error) {
 	if endNum != nil && startNum.Int64() >= endNum.Int64() {
