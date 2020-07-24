@@ -11,6 +11,7 @@ import (
 type State struct {
 	unwindStack  *PersistentUnwindStack
 	stages       []*Stage
+	unwindOrder  []*Stage
 	currentStage uint
 }
 
@@ -32,7 +33,7 @@ func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 	log.Info("UnwindTo", "block", blockNumber)
-	for _, stage := range s.stages {
+	for _, stage := range s.unwindOrder {
 		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
 			return err
 		}
@@ -155,7 +156,6 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 					return err
 				}
 			}
-			return nil
 		}
 
 		index, stage := s.CurrentStage()
