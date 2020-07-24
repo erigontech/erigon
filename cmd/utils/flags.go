@@ -224,12 +224,8 @@ var (
 	defaultSyncMode = eth.DefaultConfig.SyncMode
 	SyncModeFlag    = TextMarshalerFlag{
 		Name:  "syncmode",
-		Usage: `Blockchain sync mode ("fast", "full", "staged", or "light")`,
+		Usage: `Blockchain sync mode ("staged" (default) or "full")`,
 		Value: &defaultSyncMode,
-	}
-	StagedSyncPlainExecFlag = cli.BoolFlag{
-		Name:  "plainstate",
-		Usage: "use plain state when doing staged sync (affects only syncmode=staged)",
 	}
 	GCModePruningFlag = cli.BoolFlag{
 		Name:  "pruning",
@@ -1541,12 +1537,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
 
-	core.UsePlainStateExecution = ctx.Bool(StagedSyncPlainExecFlag.Name)
-	log.Info("setting up plain text execution", "plain", core.UsePlainStateExecution)
-
 	if ctx.GlobalIsSet(SyncModeFlag.Name) {
 		cfg.SyncMode = *GlobalTextMarshaler(ctx, SyncModeFlag.Name).(*downloader.SyncMode)
 	}
+	core.UsePlainStateExecution = cfg.SyncMode == downloader.StagedSync
+
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}

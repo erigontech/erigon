@@ -92,7 +92,6 @@ var (
 		utils.TxPoolGlobalQueueFlag,
 		utils.TxPoolLifetimeFlag,
 		utils.SyncModeFlag,
-		utils.StagedSyncPlainExecFlag,
 		utils.ExitWhenSyncedFlag,
 		utils.TxLookupLimitFlag,
 		utils.LightServeFlag,
