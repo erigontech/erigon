@@ -526,7 +526,10 @@ func StartGrpc(kv ethdb.KV, addr string) {
 		return
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.NumStreamWorkers(2),
+		grpc.WriteBufferSize(1024),
+		grpc.ReadBufferSize(1024))
 	remote.RegisterKvServer(grpcServer, NewServer2(kv))
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {

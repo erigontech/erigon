@@ -78,7 +78,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
 	db := &LmdbKV{
@@ -582,6 +582,7 @@ func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 func (c *LmdbCursor) Close() error {
 	if c.cursor != nil {
 		c.cursor.Close()
+		c.cursor = nil
 	}
 	return nil
 }

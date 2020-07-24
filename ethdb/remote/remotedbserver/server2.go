@@ -125,18 +125,29 @@ func (s *Server2) Cursor(ctx context.Context, in *remote.CursorRequest) (out *re
 	return &remote.CursorReply{CursorHandle: cursorHandle}, nil
 }
 
+func (s *Server2) bucket(bucketHandle uint64) (ethdb.Bucket, error) {
+	s.Lock()
+	defer s.Unlock()
+	bucket, ok := s.buckets[bucketHandle]
+	if !ok {
+		return nil, fmt.Errorf("bucket not found: %d", bucketHandle)
+	}
+	return bucket, nil
+}
+
 func (s *Server2) cursor(cursorHandle uint64) (ethdb.Cursor, func(), error) {
 	s.Lock()
 	defer s.Unlock()
 
 	c, ok := s.cursors[cursorHandle]
 	if !ok {
-		return nil, nil, fmt.Errorf("cursor not found for .Seek(): %d", cursorHandle)
+		return nil, nil, fmt.Errorf("cursor not found: %d", cursorHandle)
 	}
 	closer := func() {}
-	if casted, ok := c.(io.Closer); ok {
+	if casted, ok := c.(io.Closer); ok && casted != nil {
 		closer = func() {
 			_ = casted.Close()
+			delete(s.cursors, cursorHandle)
 		}
 	}
 
@@ -144,9 +155,6 @@ func (s *Server2) cursor(cursorHandle uint64) (ethdb.Cursor, func(), error) {
 }
 
 func (s *Server2) Seek(stream remote.Kv_SeekServer) (err error) {
-	defer func() {
-		fmt.Printf("Cusrsor exit?\n")
-	}()
 	in, err := stream.Recv()
 	if err != nil {
 		return err
@@ -164,11 +172,9 @@ func (s *Server2) Seek(stream remote.Kv_SeekServer) (err error) {
 
 	for {
 		if err := stream.Send(&remote.Pair{Key: k, Value: v}); err != nil {
-			fmt.Printf("Seek 4, %s\n", err)
 			return err
 		}
 		if k == nil {
-			fmt.Printf("Seek 5\n")
 			return nil
 		}
 
@@ -187,12 +193,12 @@ func (s *Server2) Seek(stream remote.Kv_SeekServer) (err error) {
 }
 
 func (s *Server2) Get(ctx context.Context, in *remote.GetRequest) (out *remote.GetReply, err error) {
-	bucket, ok := s.buckets[in.BucketHandle]
-	if !ok {
-		return nil, fmt.Errorf("bucket not found for .Cursor(): %d", in.BucketHandle)
+	b, err := s.bucket(in.BucketHandle)
+	if err != nil {
+		return nil, err
 	}
 
-	v, err := bucket.Get(in.Key)
+	v, err := b.Get(in.Key)
 	if err != nil {
 		return nil, err
 	}
