@@ -41,7 +41,8 @@ type operation struct {
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int
-
+	numPop int
+	numPush int
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
 
@@ -96,6 +97,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		constantGas: GasFastestStep,
 		minStack:    minStack(2, 1),
 		maxStack:    maxStack(2, 1),
+		numPop: 	2,
+		numPush: 	1,
 		valid:       true,
 	}
 	instructionSet[SHR] = operation{
@@ -103,6 +106,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		constantGas: GasFastestStep,
 		minStack:    minStack(2, 1),
 		maxStack:    maxStack(2, 1),
+		numPop: 	2,
+		numPush: 	1,
 		valid:       true,
 	}
 	instructionSet[SAR] = operation{
@@ -110,6 +115,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		constantGas: GasFastestStep,
 		minStack:    minStack(2, 1),
 		maxStack:    maxStack(2, 1),
+		numPop: 	2,
+		numPush: 	1,
 		valid:       true,
 	}
 	instructionSet[EXTCODEHASH] = operation{
@@ -117,6 +124,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		constantGas: params.ExtcodeHashGasConstantinople,
 		minStack:    minStack(1, 1),
 		maxStack:    maxStack(1, 1),
+		numPop: 	1,
+		numPush: 	1,
 		valid:       true,
 	}
 	instructionSet[CREATE2] = operation{
@@ -125,6 +134,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		dynamicGas:  gasCreate2,
 		minStack:    minStack(4, 1),
 		maxStack:    maxStack(4, 1),
+		numPop: 	4,
+		numPush: 	1,
 		memorySize:  memoryCreate2,
 		valid:       true,
 		writes:      true,
@@ -143,6 +154,8 @@ func newByzantiumInstructionSet() JumpTable {
 		dynamicGas:  gasStaticCall,
 		minStack:    minStack(6, 1),
 		maxStack:    maxStack(6, 1),
+		numPop: 	6,
+		numPush: 	1,
 		memorySize:  memoryStaticCall,
 		valid:       true,
 		returns:     true,
@@ -152,6 +165,8 @@ func newByzantiumInstructionSet() JumpTable {
 		constantGas: GasQuickStep,
 		minStack:    minStack(0, 1),
 		maxStack:    maxStack(0, 1),
+		numPop: 	0,
+		numPush: 	1,
 		valid:       true,
 	}
 	instructionSet[RETURNDATACOPY] = operation{
@@ -160,6 +175,8 @@ func newByzantiumInstructionSet() JumpTable {
 		dynamicGas:  gasReturnDataCopy,
 		minStack:    minStack(3, 0),
 		maxStack:    maxStack(3, 0),
+		numPop: 	3,
+		numPush: 	0,
 		memorySize:  memoryReturnDataCopy,
 		valid:       true,
 	}
@@ -168,6 +185,8 @@ func newByzantiumInstructionSet() JumpTable {
 		dynamicGas: gasRevert,
 		minStack:   minStack(2, 0),
 		maxStack:   maxStack(2, 0),
+		numPop: 	2,
+		numPush: 	0,
 		memorySize: memoryRevert,
 		valid:      true,
 		reverts:    true,
@@ -207,6 +226,8 @@ func newHomesteadInstructionSet() JumpTable {
 		constantGas: params.CallGasFrontier,
 		minStack:    minStack(6, 1),
 		maxStack:    maxStack(6, 1),
+		numPop: 	6,
+		numPush: 	1,
 		memorySize:  memoryDelegateCall,
 		valid:       true,
 		returns:     true,
@@ -224,6 +245,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: 0,
 			minStack:    minStack(0, 0),
 			maxStack:    maxStack(0, 0),
+			numPop: 	0,
+			numPush: 	0,
 			halts:       true,
 			valid:       true,
 		},
@@ -233,6 +256,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		MUL: {
@@ -241,6 +266,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		SUB: {
@@ -249,6 +276,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		DIV: {
@@ -257,6 +286,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		SDIV: {
@@ -265,6 +296,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		MOD: {
@@ -273,6 +306,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		SMOD: {
@@ -281,6 +316,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		ADDMOD: {
@@ -289,6 +326,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasMidStep,
 			minStack:    minStack(3, 1),
 			maxStack:    maxStack(3, 1),
+			numPop: 	3,
+			numPush: 	1,
 			valid:       true,
 		},
 		MULMOD: {
@@ -297,6 +336,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasMidStep,
 			minStack:    minStack(3, 1),
 			maxStack:    maxStack(3, 1),
+			numPop: 	3,
+			numPush: 	1,
 			valid:       true,
 		},
 		EXP: {
@@ -305,6 +346,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: gasExpFrontier,
 			minStack:   minStack(2, 1),
 			maxStack:   maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:      true,
 		},
 		SIGNEXTEND: {
@@ -313,6 +356,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		LT: {
@@ -321,6 +366,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		GT: {
@@ -329,6 +376,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		SLT: {
@@ -337,6 +386,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		SGT: {
@@ -345,6 +396,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		EQ: {
@@ -353,6 +406,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		ISZERO: {
@@ -361,6 +416,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		AND: {
@@ -369,6 +426,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		XOR: {
@@ -376,6 +435,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		OR: {
@@ -383,6 +444,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		NOT: {
@@ -390,6 +453,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		BYTE: {
@@ -397,6 +462,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			valid:       true,
 		},
 		SHA3: {
@@ -405,6 +472,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasSha3,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
+			numPop: 	2,
+			numPush: 	1,
 			memorySize:  memorySha3,
 			valid:       true,
 		},
@@ -413,6 +482,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		BALANCE: {
@@ -420,6 +491,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: params.BalanceGasFrontier,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		ORIGIN: {
@@ -427,6 +500,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		CALLER: {
@@ -434,6 +509,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		CALLVALUE: {
@@ -441,6 +518,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		CALLDATALOAD: {
@@ -448,6 +527,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		CALLDATASIZE: {
@@ -455,6 +536,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		CALLDATACOPY: {
@@ -463,6 +546,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasCallDataCopy,
 			minStack:    minStack(3, 0),
 			maxStack:    maxStack(3, 0),
+			numPop: 	3,
+			numPush: 	0,
 			memorySize:  memoryCallDataCopy,
 			valid:       true,
 		},
@@ -471,6 +556,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		CODECOPY: {
@@ -479,6 +566,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasCodeCopy,
 			minStack:    minStack(3, 0),
 			maxStack:    maxStack(3, 0),
+			numPop: 	3,
+			numPush: 	0,
 			memorySize:  memoryCodeCopy,
 			valid:       true,
 		},
@@ -487,6 +576,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		EXTCODESIZE: {
@@ -494,6 +585,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: params.ExtcodeSizeGasFrontier,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		EXTCODECOPY: {
@@ -502,6 +595,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasExtCodeCopy,
 			minStack:    minStack(4, 0),
 			maxStack:    maxStack(4, 0),
+			numPop: 	4,
+			numPush: 	0,
 			memorySize:  memoryExtCodeCopy,
 			valid:       true,
 		},
@@ -510,6 +605,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasExtStep,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		COINBASE: {
@@ -517,6 +614,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		TIMESTAMP: {
@@ -524,6 +623,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		NUMBER: {
@@ -531,6 +632,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DIFFICULTY: {
@@ -538,6 +641,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		GASLIMIT: {
@@ -545,6 +650,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		POP: {
@@ -552,6 +659,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(1, 0),
 			maxStack:    maxStack(1, 0),
+			numPop: 	1,
+			numPush: 	0,
 			valid:       true,
 		},
 		MLOAD: {
@@ -560,6 +669,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasMLoad,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			memorySize:  memoryMLoad,
 			valid:       true,
 		},
@@ -569,6 +680,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasMStore,
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
+			numPop: 	2,
+			numPush: 	0,
 			memorySize:  memoryMStore,
 			valid:       true,
 		},
@@ -579,7 +692,8 @@ func newFrontierInstructionSet() JumpTable {
 			memorySize:  memoryMStore8,
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
-
+			numPop: 	2,
+			numPush: 	0,
 			valid: true,
 		},
 		SLOAD: {
@@ -587,6 +701,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: params.SloadGasFrontier,
 			minStack:    minStack(1, 1),
 			maxStack:    maxStack(1, 1),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SSTORE: {
@@ -594,6 +710,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: gasSStore,
 			minStack:   minStack(2, 0),
 			maxStack:   maxStack(2, 0),
+			numPop: 	2,
+			numPush: 	0,
 			valid:      true,
 			writes:     true,
 		},
@@ -602,6 +720,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasMidStep,
 			minStack:    minStack(1, 0),
 			maxStack:    maxStack(1, 0),
+			numPop: 	1,
+			numPush: 	0,
 			jumps:       true,
 			valid:       true,
 		},
@@ -610,6 +730,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasSlowStep,
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
+			numPop: 	2,
+			numPush: 	0,
 			jumps:       true,
 			valid:       true,
 		},
@@ -618,6 +740,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		MSIZE: {
@@ -625,6 +749,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		GAS: {
@@ -632,6 +758,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		JUMPDEST: {
@@ -639,6 +767,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: params.JumpdestGas,
 			minStack:    minStack(0, 0),
 			maxStack:    maxStack(0, 0),
+			numPop: 	0,
+			numPush: 	0,
 			valid:       true,
 		},
 		PUSH1: {
@@ -647,6 +777,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH2: {
@@ -654,6 +786,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH3: {
@@ -661,6 +795,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH4: {
@@ -668,6 +804,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH5: {
@@ -675,6 +813,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH6: {
@@ -682,6 +822,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH7: {
@@ -689,6 +831,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH8: {
@@ -696,6 +840,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH9: {
@@ -703,6 +849,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH10: {
@@ -710,6 +858,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH11: {
@@ -717,6 +867,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH12: {
@@ -724,6 +876,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH13: {
@@ -731,6 +885,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH14: {
@@ -738,6 +894,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH15: {
@@ -745,6 +903,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH16: {
@@ -752,6 +912,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH17: {
@@ -759,6 +921,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH18: {
@@ -766,6 +930,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH19: {
@@ -773,6 +939,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH20: {
@@ -780,6 +948,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH21: {
@@ -787,6 +957,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH22: {
@@ -794,6 +966,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH23: {
@@ -801,6 +975,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH24: {
@@ -808,6 +984,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH25: {
@@ -815,6 +993,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH26: {
@@ -822,6 +1002,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH27: {
@@ -829,6 +1011,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH28: {
@@ -836,6 +1020,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH29: {
@@ -843,6 +1029,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH30: {
@@ -850,6 +1038,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH31: {
@@ -857,6 +1047,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		PUSH32: {
@@ -864,6 +1056,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minStack(0, 1),
 			maxStack:    maxStack(0, 1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP1: {
@@ -871,6 +1065,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(1),
 			maxStack:    maxDupStack(1),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP2: {
@@ -878,6 +1074,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(2),
 			maxStack:    maxDupStack(2),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP3: {
@@ -885,6 +1083,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(3),
 			maxStack:    maxDupStack(3),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP4: {
@@ -892,6 +1092,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(4),
 			maxStack:    maxDupStack(4),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP5: {
@@ -899,6 +1101,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(5),
 			maxStack:    maxDupStack(5),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP6: {
@@ -906,6 +1110,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(6),
 			maxStack:    maxDupStack(6),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP7: {
@@ -913,6 +1119,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(7),
 			maxStack:    maxDupStack(7),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP8: {
@@ -920,6 +1128,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(8),
 			maxStack:    maxDupStack(8),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP9: {
@@ -927,6 +1137,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(9),
 			maxStack:    maxDupStack(9),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP10: {
@@ -934,6 +1146,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(10),
 			maxStack:    maxDupStack(10),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP11: {
@@ -941,6 +1155,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(11),
 			maxStack:    maxDupStack(11),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP12: {
@@ -948,6 +1164,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(12),
 			maxStack:    maxDupStack(12),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP13: {
@@ -955,6 +1173,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(13),
 			maxStack:    maxDupStack(13),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP14: {
@@ -962,6 +1182,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(14),
 			maxStack:    maxDupStack(14),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP15: {
@@ -969,6 +1191,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(15),
 			maxStack:    maxDupStack(15),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		DUP16: {
@@ -976,6 +1200,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minDupStack(16),
 			maxStack:    maxDupStack(16),
+			numPop: 	0,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP1: {
@@ -983,6 +1209,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(2),
 			maxStack:    maxSwapStack(2),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP2: {
@@ -990,6 +1218,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(3),
 			maxStack:    maxSwapStack(3),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP3: {
@@ -997,6 +1227,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(4),
 			maxStack:    maxSwapStack(4),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP4: {
@@ -1004,6 +1236,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(5),
 			maxStack:    maxSwapStack(5),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP5: {
@@ -1011,6 +1245,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(6),
 			maxStack:    maxSwapStack(6),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP6: {
@@ -1018,6 +1254,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(7),
 			maxStack:    maxSwapStack(7),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP7: {
@@ -1025,6 +1263,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(8),
 			maxStack:    maxSwapStack(8),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP8: {
@@ -1032,6 +1272,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(9),
 			maxStack:    maxSwapStack(9),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP9: {
@@ -1039,6 +1281,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(10),
 			maxStack:    maxSwapStack(10),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP10: {
@@ -1046,6 +1290,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(11),
 			maxStack:    maxSwapStack(11),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP11: {
@@ -1053,6 +1299,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(12),
 			maxStack:    maxSwapStack(12),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP12: {
@@ -1060,6 +1308,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(13),
 			maxStack:    maxSwapStack(13),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP13: {
@@ -1067,6 +1317,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(14),
 			maxStack:    maxSwapStack(14),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP14: {
@@ -1074,6 +1326,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(15),
 			maxStack:    maxSwapStack(15),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP15: {
@@ -1081,6 +1335,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(16),
 			maxStack:    maxSwapStack(16),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		SWAP16: {
@@ -1088,6 +1344,8 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			minStack:    minSwapStack(17),
 			maxStack:    maxSwapStack(17),
+			numPop: 	1,
+			numPush: 	1,
 			valid:       true,
 		},
 		LOG0: {
@@ -1095,6 +1353,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: makeGasLog(0),
 			minStack:   minStack(2, 0),
 			maxStack:   maxStack(2, 0),
+			numPop: 	2,
+			numPush: 	0,
 			memorySize: memoryLog,
 			valid:      true,
 			writes:     true,
@@ -1104,6 +1364,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: makeGasLog(1),
 			minStack:   minStack(3, 0),
 			maxStack:   maxStack(3, 0),
+			numPop: 	3,
+			numPush: 	0,
 			memorySize: memoryLog,
 			valid:      true,
 			writes:     true,
@@ -1113,6 +1375,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: makeGasLog(2),
 			minStack:   minStack(4, 0),
 			maxStack:   maxStack(4, 0),
+			numPop: 	4,
+			numPush: 	0,
 			memorySize: memoryLog,
 			valid:      true,
 			writes:     true,
@@ -1122,6 +1386,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: makeGasLog(3),
 			minStack:   minStack(5, 0),
 			maxStack:   maxStack(5, 0),
+			numPop: 	5,
+			numPush: 	0,
 			memorySize: memoryLog,
 			valid:      true,
 			writes:     true,
@@ -1131,6 +1397,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: makeGasLog(4),
 			minStack:   minStack(6, 0),
 			maxStack:   maxStack(6, 0),
+			numPop: 	6,
+			numPush: 	0,
 			memorySize: memoryLog,
 			valid:      true,
 			writes:     true,
@@ -1141,6 +1409,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasCreate,
 			minStack:    minStack(3, 1),
 			maxStack:    maxStack(3, 1),
+			numPop: 	3,
+			numPush: 	1,
 			memorySize:  memoryCreate,
 			valid:       true,
 			writes:      true,
@@ -1152,6 +1422,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasCall,
 			minStack:    minStack(7, 1),
 			maxStack:    maxStack(7, 1),
+			numPop: 	7,
+			numPush: 	1,
 			memorySize:  memoryCall,
 			valid:       true,
 			returns:     true,
@@ -1162,6 +1434,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas:  gasCallCode,
 			minStack:    minStack(7, 1),
 			maxStack:    maxStack(7, 1),
+			numPop: 	7,
+			numPush: 	1,
 			memorySize:  memoryCall,
 			valid:       true,
 			returns:     true,
@@ -1171,6 +1445,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: gasReturn,
 			minStack:   minStack(2, 0),
 			maxStack:   maxStack(2, 0),
+			numPop: 	2,
+			numPush: 	0,
 			memorySize: memoryReturn,
 			halts:      true,
 			valid:      true,
@@ -1180,6 +1456,8 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: gasSelfdestruct,
 			minStack:   minStack(1, 0),
 			maxStack:   maxStack(1, 0),
+			numPop: 	1,
+			numPush: 	0,
 			halts:      true,
 			valid:      true,
 			writes:     true,

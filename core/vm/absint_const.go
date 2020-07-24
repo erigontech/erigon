@@ -93,6 +93,11 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 
 	codeLen := len(prog.Code)
 	var edges []edge
+
+	if stmt.operation.halts {
+		return edges
+	}
+
 	if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 		jumpDest := st0.stack[0]
 		if jumpDest.kind == Value {
@@ -125,35 +130,17 @@ func post(st0 state, stmt stmt) state {
 	if stmt.opcode.IsPush() {
 		st1.Push(ConstValue(stmt.value))
 	} else {
-		switch stmt.opcode {
-		case JUMP:
+		for i := 0; i < stmt.operation.numPop; i++ {
 			st1.Pop()
-		case JUMPI:
-			st1.Pop()
-			st1.Pop()
-		case MLOAD:
-			st1.Pop()
+		}
+		for i := 0; i < stmt.operation.numPush; i++ {
 			st1.Push(ConstTop())
-		case LT:
-			lhs := st1.Pop()
-			rhs := st1.Pop()
-			if lhs.kind == Value && rhs.kind == Value {
-				res := lhs.value.Lt(&rhs.value)
-				resi := uint256.NewInt()
-				if res {
-					resi.SetOne()
-				} else {
-					resi.Clear()
-				}
-				st1.Push(ConstValue(*resi))
-			} else {
-				st1.Push(ConstTop())
-			}
 		}
 	}
 
 	return st1
 }
+
 
 func leq(st0 state, st1 state) bool {
 	for i := 0; i < absStackLen; i++ {
