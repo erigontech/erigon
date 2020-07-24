@@ -52,7 +52,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 // AccountRange re-implementation of eth/api.go:AccountRange
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
 	var blockNumber uint64
-	fmt.Println(blockNrOrHash)
+
 	if number, ok := blockNrOrHash.Number(); ok {
 		if number == rpc.PendingBlockNumber {
 			return state.IteratorDump{}, fmt.Errorf("accountRange for pending block not supported")

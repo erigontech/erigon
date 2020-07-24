@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"time"
 )
 
 type trieHasher interface {
@@ -130,11 +129,8 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 
 	var acc accounts.Account
 	numberOfResults := 0
-	tm := time.Now()
-	fmt.Println("dump start", common.Bytes2Hex(start))
-	t := time.Now()
+
 	err = WalkAsOf(d.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
-		fmt.Println(maxResults, numberOfResults, time.Since(t))
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -162,20 +158,14 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		incarnationList = append(incarnationList, acc.Incarnation)
 
 		numberOfResults++
-		t = time.Now()
 		return true, nil
 	})
-	fmt.Println("accounts walk", time.Since(tm))
+
 	if err != nil {
 		return nil, err
 	}
 
-	for i, v := range addrHashList {
-		fmt.Println(v.String(), incarnationList[i])
-	}
-	tm = time.Now()
 	for i, addrHash := range addrHashList {
-		tm1 := time.Now()
 		account := accountList[i]
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addrHash[:], incarnation)
@@ -191,7 +181,6 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 				account.CodeHash = emptyCodeHash.String()
 			}
 
-			fmt.Println(!excludeCode, bytes.Equal(codeHash, emptyCodeHash.Bytes()), len(codeHash), common.Bytes2Hex(codeHash), common.Bytes2Hex(emptyCodeHash.Bytes()))
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
@@ -218,9 +207,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			}
 		}
 		c.onAccount(addrHash, *account)
-		fmt.Println(addrHash.String(), " storage walk", len(account.Storage), time.Since(tm1))
 	}
-	fmt.Println("storage walk", time.Since(tm))
 	return nextKey, nil
 }
 
