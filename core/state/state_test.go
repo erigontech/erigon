@@ -308,16 +308,16 @@ func TestDump(t *testing.T) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := tds.PlainStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	err = tds.PlainStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = state.FinalizeTx(ctx, tds.TrieStateWriter())
+	err = state.FinalizeTx(ctx, tds.PlainStateWriter())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestDump(t *testing.T) {
 
 	tds.SetBlockNr(1)
 
-	blockWriter := tds.DbStateWriter()
+	blockWriter := tds.PlainStateWriter()
 	err = state.CommitBlock(ctx, blockWriter)
 	if err != nil {
 		t.Fatal(err)

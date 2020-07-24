@@ -36,6 +36,7 @@ type trieHasher interface {
 type Dumper struct {
 	blockNumber uint64
 	db          ethdb.KV
+	hashedState bool
 }
 
 // DumpAccount represents an account in the state.
@@ -115,7 +116,11 @@ func (d iterativeDump) onRoot(root common.Hash) {
 }
 
 func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
-	return &Dumper{db: db, blockNumber: blockNumber}
+	return &Dumper{
+		db:          db,
+		blockNumber: blockNumber,
+		hashedState: false,
+	}
 }
 
 func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
@@ -130,7 +135,12 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 	var acc accounts.Account
 	numberOfResults := 0
 
-	err = WalkAsOf(d.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
+	stateBucket := dbutils.PlainStateBucket
+	if d.hashedState {
+		stateBucket = dbutils.CurrentStateBucket
+	}
+
+	err = WalkAsOf(d.db, stateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
