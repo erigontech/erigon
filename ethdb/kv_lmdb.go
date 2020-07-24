@@ -57,7 +57,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}
 		opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
 	} else {
-		err = env.SetMapSize(32 << 40) // 32TB
+		err = env.SetMapSize(4 << 40) // 4TB
 		logger = log.New("lmdb", path.Base(opts.path))
 		if err != nil {
 			return nil, err
