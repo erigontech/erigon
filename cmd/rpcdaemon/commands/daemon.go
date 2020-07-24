@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -84,12 +85,11 @@ func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.Ch
 }
 
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	blockNumber, err := rawdb.ReadLastBlockNumber(api.dbReader)
+	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
 	if err != nil {
 		return 0, err
 	}
-
-	return hexutil.Uint64(blockNumber), nil
+	return hexutil.Uint64(execution), nil
 }
 
 func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {

@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	"github.com/wcharczuk/go-chart/util"
@@ -234,7 +235,7 @@ beginTx:
 	// Go through the history of account first
 	if r.StartedWhenBlockNumber == 0 {
 		var err error
-		r.StartedWhenBlockNumber, err = rawdb.ReadLastBlockNumber(ethdb.NewObjectDatabase(r.remoteDB))
+		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
 		if err != nil {
 			panic(err)
 		}
@@ -459,7 +460,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 beginTx:
 	if r.StartedWhenBlockNumber == 0 {
 		var err error
-		r.StartedWhenBlockNumber, err = rawdb.ReadLastBlockNumber(ethdb.NewObjectDatabase(r.remoteDB))
+		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
 		if err != nil {
 			panic(err)
 		}
@@ -695,7 +696,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 beginTx:
 	if r.StartedWhenBlockNumber == 0 {
 		var err error
-		r.StartedWhenBlockNumber, err = rawdb.ReadLastBlockNumber(ethdb.NewObjectDatabase(r.remoteDB))
+		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
 		if err != nil {
 			panic(err)
 		}
