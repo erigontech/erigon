@@ -38,8 +38,8 @@ import (
 
 var dumper = spew.ConfigState{Indent: "    "}
 
-func accountRangeTest(t *testing.T, trie *trie.Trie, db ethdb.KV, blockNumber uint64, sdb *state.IntraBlockState, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump { //nolint: unparam
-	result, err := state.NewDumper(db, blockNumber).IteratorDump(true, true, false, start.Bytes(), requestedNum)
+func accountRangeTest(t *testing.T, trie *trie.Trie, db ethdb.KV, blockNumber uint64, sdb *state.IntraBlockState, start []byte, requestedNum int, expectedNum int) state.IteratorDump { //nolint: unparam
+	result, err := state.NewDumper(db, blockNumber).IteratorDump(true, true, false, start, requestedNum)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +58,11 @@ func accountRangeTest(t *testing.T, trie *trie.Trie, db ethdb.KV, blockNumber ui
 	return result
 }
 
-type resultHash []common.Hash
+type resultHash [][]byte
 
 func (h resultHash) Len() int           { return len(h) }
 func (h resultHash) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h resultHash) Less(i, j int) bool { return bytes.Compare(h[i].Bytes(), h[j].Bytes()) < 0 }
+func (h resultHash) Less(i, j int) bool { return bytes.Compare(h[i], h[j]) < 0 }
 
 func TestAccountRange(t *testing.T) {
 	db := ethdb.NewMemDatabase()
@@ -86,7 +86,7 @@ func TestAccountRange(t *testing.T) {
 		}
 	}
 	tds.StartNewBuffer()
-	if err := sdb.CommitBlock(context.Background(), tds.DbStateWriter()); err != nil {
+	if err := sdb.CommitBlock(context.Background(), tds.PlainStateWriter()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,10 +97,10 @@ func TestAccountRange(t *testing.T) {
 
 	trie := tds.Trie()
 
-	accountRangeTest(t, trie, db.KV(), 0, sdb, common.Hash{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
+	accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
 	// test pagination
-	firstResult := accountRangeTest(t, trie, db.KV(), 0, sdb, common.Hash{}, AccountRangeMaxResults, AccountRangeMaxResults)
-	secondResult := accountRangeTest(t, trie, db.KV(), 0, sdb, common.BytesToHash(firstResult.Next), AccountRangeMaxResults, AccountRangeMaxResults)
+	firstResult := accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, AccountRangeMaxResults, AccountRangeMaxResults)
+	secondResult := accountRangeTest(t, trie, db.KV(), 0, sdb, firstResult.Next, AccountRangeMaxResults, AccountRangeMaxResults)
 
 	hList := make(resultHash, 0)
 	for addr1 := range firstResult.Accounts {
@@ -110,9 +110,9 @@ func TestAccountRange(t *testing.T) {
 			continue
 		}
 		if _, duplicate := secondResult.Accounts[addr1]; duplicate {
-			t.Fatalf("pagination test failed:  results should not overlap")
+			t.Fatal("pagination test failed:  results should not overlap")
 		}
-		hList = append(hList, crypto.Keccak256Hash(addr1.Bytes()))
+		hList = append(hList, addr1.Bytes())
 	}
 	// Test to see if it's possible to recover from the middle of the previous
 	// set and get an even split between the first and second sets.
