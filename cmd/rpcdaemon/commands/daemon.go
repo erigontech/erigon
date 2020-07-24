@@ -61,7 +61,6 @@ func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) 
 	}
 }
 
-
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
 	if err != nil {
@@ -291,7 +290,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	return response, err
 }
-
 
 // rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
 func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
