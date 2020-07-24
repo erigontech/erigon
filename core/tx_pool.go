@@ -19,7 +19,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"sort"
 	"sync"
@@ -27,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -124,15 +122,6 @@ const (
 	TxStatusIncluded
 )
 
-// blockChain provides the state of blockchain and current gas limit to do
-// some pre checks in tx pool and event subscribers.
-type blockChain interface {
-	CurrentBlock() *types.Block
-	GetBlock(hash common.Hash, number uint64) *types.Block
-	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
-	GetTrieDbState() (*state.TrieDbState, error)
-}
-
 // TxPoolConfig are the configuration parameters of the transaction pool.
 type TxPoolConfig struct {
 	Locals    []common.Address // Addresses that should be treated by default as local
@@ -218,7 +207,6 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
-	chain        blockChain
 	chaindb      *ethdb.ObjectDatabase
 	gasPrice     *big.Int
 	txFeed       event.Feed
@@ -234,8 +222,7 @@ type TxPool struct {
 	pendingNonces *txNoncer // Pending state tracking virtual nonces
 
 	currentState  *state.IntraBlockState // Current state in the blockchain head
-	currentTds    *state.TrieDbState
-	currentMaxGas uint64 // Current gas limit for transaction caps
+	currentMaxGas uint64                 // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
@@ -255,6 +242,7 @@ type TxPool struct {
 	isStarted       bool
 	initFns         []func() error
 	stopFns         []func() error
+	stopCh          chan struct{}
 }
 
 type txpoolResetRequest struct {
@@ -263,7 +251,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -271,7 +259,6 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	pool := &TxPool{
 		config:         config,
 		chainconfig:    chainconfig,
-		chain:          chain,
 		chaindb:        chaindb,
 		signer:         types.NewEIP155Signer(chainconfig.ChainID),
 		pending:        make(map[common.Address]*txList),
@@ -284,19 +271,13 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		queueTxEventCh: make(chan *types.Transaction),
 		reorgDoneCh:    make(chan chan struct{}),
 		gasPrice:       new(big.Int).SetUint64(config.PriceLimit),
-		senderCacher:   senderCacher,
-	}
-
-	if config.StartOnInit {
-		if err := pool.Start(); err != nil {
-			log.Error("cannot start transaction pool", "err", err)
-		}
+		stopCh:         make(chan struct{}),
 	}
 
 	return pool
 }
 
-func (pool *TxPool) Start() error {
+func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	pool.reorgShutdownCh = make(chan struct{}, 1)
 
 	pool.locals = newAccountSet(pool.signer)
@@ -305,10 +286,7 @@ func (pool *TxPool) Start() error {
 		pool.locals.add(addr)
 	}
 	pool.priced = newTxPricedList(pool.all)
-	headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
-	headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
-	head := rawdb.ReadHeader(pool.chaindb, headHash, *headNumber)
-	pool.reset(nil, head)
+	pool.resetHead(gasLimit, headNumber)
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
@@ -325,9 +303,6 @@ func (pool *TxPool) Start() error {
 			log.Warn("Failed to rotate transaction journal", "err", err)
 		}
 	}
-
-	// Subscribe events from blockchain and start the main event loop.
-	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
 
 	pool.wg.Add(1)
 	go pool.loop()
@@ -350,10 +325,6 @@ func (pool *TxPool) loop() {
 		report  = time.NewTicker(statsReportInterval)
 		evict   = time.NewTicker(evictionInterval)
 		journal = time.NewTicker(pool.config.Rejournal)
-		// Track the previous head headers for transaction reorgs
-		headHash   = rawdb.ReadHeadHeaderHash(pool.chaindb)
-		headNumber = rawdb.ReadHeaderNumber(pool.chaindb, headHash)
-		head       = rawdb.ReadBlock(pool.chaindb, headHash, *headNumber)
 	)
 	defer report.Stop()
 	defer evict.Stop()
@@ -361,15 +332,9 @@ func (pool *TxPool) loop() {
 
 	for {
 		select {
-		// Handle ChainHeadEvent
-		case ev := <-pool.chainHeadCh:
-			if ev.Block != nil {
-				pool.requestReset(head.Header(), ev.Block.Header())
-				head = ev.Block
-			}
 
 		// System shutdown.
-		case <-pool.chainHeadSub.Err():
+		case <-pool.stopCh:
 			common.SafeClose(pool.reorgShutdownCh)
 			return
 
@@ -396,7 +361,7 @@ func (pool *TxPool) loop() {
 				// Any non-locals old enough should be removed
 				if time.Since(pool.beats[addr]) > pool.config.Lifetime {
 					for _, tx := range pool.queue[addr].Flatten() {
-						pool.removeTx(tx.Hash(), true)
+						pool.RemoveTx(tx.Hash(), true)
 					}
 				}
 			}
@@ -415,85 +380,18 @@ func (pool *TxPool) loop() {
 	}
 }
 
-// lockedReset is a wrapper around reset to allow calling it in a thread safe
-// manner. This method is only ever used in the tester!
-func (pool *TxPool) lockedReset(oldHead, newHead *types.Header) {
+func (pool *TxPool) resetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-
-	pool.reset(oldHead, newHead)
-}
-
-// reset retrieves the current state of the blockchain and ensures the content
-// of the transaction pool is valid with regard to the chain state.
-func (pool *TxPool) reset(oldHead, newHead *types.Header) {
-	// If we're reorging an old state, reinject all dropped transactions
-	var reinject types.Transactions
-
-	if oldHead != nil && oldHead.Hash() != newHead.ParentHash {
-		// If the reorg is too deep, avoid doing it (will happen during fast sync)
-		oldNum := oldHead.Number.Uint64()
-		newNum := newHead.Number.Uint64()
-
-		if depth := uint64(math.Abs(float64(oldNum) - float64(newNum))); depth > 64 {
-			log.Debug("Skipping deep transaction reorg", "depth", depth)
-		} else {
-			// Reorg seems shallow enough to pull in all transactions into memory
-			var discarded, included types.Transactions
-
-			var (
-				rem = pool.chain.GetBlock(oldHead.Hash(), oldHead.Number.Uint64())
-				add = pool.chain.GetBlock(newHead.Hash(), newHead.Number.Uint64())
-			)
-			if rem != nil && add != nil {
-				for rem.NumberU64() > add.NumberU64() {
-					discarded = append(discarded, rem.Transactions()...)
-					if rem = pool.chain.GetBlock(rem.ParentHash(), rem.NumberU64()-1); rem == nil {
-						log.Error("Unrooted old chain seen by tx pool", "block", oldHead.Number, "hash", oldHead.Hash())
-						return
-					}
-				}
-				for add.NumberU64() > rem.NumberU64() {
-					included = append(included, add.Transactions()...)
-					if add = pool.chain.GetBlock(add.ParentHash(), add.NumberU64()-1); add == nil {
-						log.Error("Unrooted new chain seen by tx pool", "block", newHead.Number, "hash", newHead.Hash())
-						return
-					}
-				}
-				for rem.Hash() != add.Hash() {
-					discarded = append(discarded, rem.Transactions()...)
-					if rem = pool.chain.GetBlock(rem.ParentHash(), rem.NumberU64()-1); rem == nil {
-						log.Error("Unrooted old chain seen by tx pool", "block", oldHead.Number, "hash", oldHead.Hash())
-						return
-					}
-					included = append(included, add.Transactions()...)
-					if add = pool.chain.GetBlock(add.ParentHash(), add.NumberU64()-1); add == nil {
-						log.Error("Unrooted new chain seen by tx pool", "block", newHead.Number, "hash", newHead.Hash())
-						return
-					}
-				}
-			}
-			reinject = types.TxDifference(discarded, included)
-		}
-	}
-	// Initialize the internal state to the current head
-	if newHead == nil {
-		headHash := rawdb.ReadHeadHeaderHash(pool.chaindb)
-		headNumber := rawdb.ReadHeaderNumber(pool.chaindb, headHash)
-		newHead = rawdb.ReadHeader(pool.chaindb, headHash, *headNumber) // Special case during testing
-	}
 	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
 	pool.pendingNonces = newTxNoncer(pool.currentState)
-	pool.currentMaxGas = newHead.GasLimit
+	pool.currentMaxGas = blockGasLimit
+	pool.istanbul = pool.chainconfig.IsIstanbul(big.NewInt(int64(blockNumber + 1)))
+}
 
-	// Inject any transactions discarded due to reorgs
-	log.Debug("Reinjecting stale transactions", "count", len(reinject))
-	pool.senderCacher.recover(pool.signer, reinject)
-	pool.addTxsLocked(reinject, false)
-
-	// Update all fork indicator by next pending block number.
-	next := new(big.Int).Add(newHead.Number, big.NewInt(1))
-	pool.istanbul = pool.chainconfig.IsIstanbul(next)
+func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
+	pool.resetHead(blockGasLimit, blockNumber)
+	<-pool.requestReset(nil, nil)
 }
 
 // Stop terminates the transaction pool.
@@ -502,9 +400,9 @@ func (pool *TxPool) Stop() {
 	if !pool.IsStarted() {
 		return
 	}
+	close(pool.stopCh)
 
 	// Unsubscribe subscriptions registered from blockchain
-	pool.chainHeadSub.Unsubscribe()
 	pool.wg.Wait()
 
 	if pool.journal != nil {
@@ -541,7 +439,7 @@ func (pool *TxPool) SetGasPrice(price *big.Int) {
 
 	pool.gasPrice = price
 	for _, tx := range pool.priced.Cap(price, pool.locals) {
-		pool.removeTx(tx.Hash(), false)
+		pool.RemoveTx(tx.Hash(), false)
 	}
 	log.Info("Transaction pool price threshold updated", "price", price)
 }
@@ -712,7 +610,7 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		for _, tx := range drop {
 			log.Trace("Discarding freshly underpriced transaction", "hash", tx.Hash(), "price", tx.GasPrice())
 			underpricedTxMeter.Mark(1)
-			pool.removeTx(tx.Hash(), false)
+			pool.RemoveTx(tx.Hash(), false)
 		}
 	}
 	// Try to replace an existing transaction in the pending pool
@@ -984,7 +882,7 @@ func (pool *TxPool) Has(hash common.Hash) bool {
 
 // removeTx removes a single transaction from the queue, moving all subsequent
 // transactions back to the future queue.
-func (pool *TxPool) removeTx(hash common.Hash, outofbound bool) {
+func (pool *TxPool) RemoveTx(hash common.Hash, outofbound bool) {
 	// Fetch the transaction we wish to delete
 	tx := pool.all.Get(hash)
 	if tx == nil {
@@ -1071,35 +969,32 @@ func (pool *TxPool) scheduleReorgLoop() {
 		curDone       chan struct{} // non-nil while runReorg is active
 		nextDone      = make(chan struct{})
 		launchNextRun bool
-		reset         *txpoolResetRequest
 		dirtyAccounts *accountSet
 		queuedEvents  = make(map[common.Address]*txSortedMap)
+		reset         bool
 	)
 	for {
 		// Launch next background reorg if needed
 		if curDone == nil && launchNextRun {
 			// Run the background reorg and announcements
-			go pool.runReorg(nextDone, reset, dirtyAccounts, queuedEvents)
+			go pool.runReorg(nextDone, dirtyAccounts, queuedEvents, reset)
 
 			// Prepare everything for the next round of reorg
 			curDone, nextDone = nextDone, make(chan struct{})
 			launchNextRun = false
 
-			reset, dirtyAccounts = nil, nil
+			dirtyAccounts = nil
+			reset = false
 			queuedEvents = make(map[common.Address]*txSortedMap)
 		}
 
 		select {
-		case req := <-pool.reqResetCh:
+
+		case <-pool.reqResetCh:
 			// Reset request: update head if request is already pending.
-			if reset == nil {
-				reset = req
-			} else {
-				reset.newHead = req.newHead
-			}
+			reset = true
 			launchNextRun = true
 			pool.reorgDoneCh <- nextDone
-
 		case req := <-pool.reqPromoteCh:
 			// Promote request: update address set if request is already pending.
 			if dirtyAccounts == nil {
@@ -1134,7 +1029,7 @@ func (pool *TxPool) scheduleReorgLoop() {
 }
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
-func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap) {
+func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap, reset bool) {
 	defer close(done)
 
 	var promoteAddrs []common.Address
@@ -1142,10 +1037,7 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 		promoteAddrs = dirtyAccounts.flatten()
 	}
 	pool.mu.Lock()
-	if reset != nil && pool.currentState != nil {
-		// Reset from the old head to the new, rescheduling any reorged transactions
-		pool.reset(reset.oldHead, reset.newHead)
-
+	if reset {
 		// Nonces were reset, discard any events that became stale
 		for addr := range events {
 			events[addr].Forward(pool.pendingNonces.get(addr))
@@ -1161,13 +1053,13 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 	}
 	// Check for pending transactions for every account that sent new ones
 	promoted := pool.promoteExecutables(promoteAddrs)
-
 	// If a new block appeared, validate the pool of pending transactions. This will
 	// remove any transaction that has been included in the block or was invalidated
 	// because of another transaction (e.g. higher gas price).
-	if reset != nil && pool.currentState != nil {
+	if reset {
 		pool.demoteUnexecutables()
 	}
+
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
 	pool.truncatePending()
 	pool.truncateQueue()
@@ -1377,7 +1269,7 @@ func (pool *TxPool) truncateQueue() {
 		// Drop all transactions if they are less than the overflow
 		if size := uint64(list.Len()); size <= drop {
 			for _, tx := range list.Flatten() {
-				pool.removeTx(tx.Hash(), true)
+				pool.RemoveTx(tx.Hash(), true)
 			}
 			drop -= size
 			queuedRateLimitMeter.Mark(int64(size))
@@ -1386,7 +1278,7 @@ func (pool *TxPool) truncateQueue() {
 		// Otherwise drop only last few transactions
 		txs := list.Flatten()
 		for i := len(txs) - 1; i >= 0 && drop > 0; i-- {
-			pool.removeTx(txs[i].Hash(), true)
+			pool.RemoveTx(txs[i].Hash(), true)
 			drop--
 			queuedRateLimitMeter.Mark(1)
 		}
