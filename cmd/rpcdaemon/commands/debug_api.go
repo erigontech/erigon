@@ -57,49 +57,48 @@ func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*sta
 	return statedb, dbstate
 }
 
-
-
 // AccountRange re-implementation of eth/api.go:AccountRange
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
 	var blockNumber uint64
 	fmt.Println(blockNrOrHash)
 	if number, ok := blockNrOrHash.Number(); ok {
-
 		if number == rpc.PendingBlockNumber {
 			return state.IteratorDump{}, fmt.Errorf("accountRange for pending block not supported")
-		} else {
-
-			if number == rpc.LatestBlockNumber {
-
-			} else {
-				blockNumber = uint64(number)
-			}
 		}
+		if number == rpc.LatestBlockNumber {
+			var err error
+			blockNumber, err = rawdb.ReadLastBlockNumber(api.dbReader)
+			if err != nil {
+				return state.IteratorDump{}, fmt.Errorf("las block has not found: %w", err)
+			}
+		} else {
+			blockNumber = uint64(number)
+		}
+
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block := rawdb.ReadBlockByHash(api.dbReader,hash)
+		block := rawdb.ReadBlockByHash(api.dbReader, hash)
 		if block == nil {
 			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
 		}
 		blockNumber = block.NumberU64()
 	}
 
-	//if maxResults > state.AccountRangeMaxResults || maxResults <= 0 {
-	//	maxResults = AccountRangeMaxResults
-	//}
+	if maxResults > eth.AccountRangeMaxResults || maxResults <= 0 {
+		maxResults = eth.AccountRangeMaxResults
+	}
 
-	fmt.Println("bn", blockNumber, maxResults)
-	fmt.Println("last block", )
 	dumper := state.NewDumper(api.db, blockNumber)
-	res,err:=dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
-	if err!=nil {
+	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
+	if err != nil {
 		return state.IteratorDump{}, err
 	}
-	//hash:=rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
-	//if hash!=(common.Hash{}) {
-	//	header:=rawdb.ReadHeader(api.dbReader,hash, blockNumber)
-	//	if header!=nil {
-	//		res.Root=header.Root.String()
-	//	}
-	//}
+	hash := rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
+	if hash != (common.Hash{}) {
+		header := rawdb.ReadHeader(api.dbReader, hash, blockNumber)
+		if header != nil {
+			res.Root = header.Root.String()
+		}
+	}
+
 	return res, err
 }

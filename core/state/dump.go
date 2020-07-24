@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -129,10 +130,11 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 
 	var acc accounts.Account
 	numberOfResults := 0
-	tm:=time.Now()
+	tm := time.Now()
 	fmt.Println("dump start", common.Bytes2Hex(start))
+	t := time.Now()
 	err = WalkAsOf(d.db, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
-		fmt.Println(maxResults, numberOfResults)
+		fmt.Println(maxResults, numberOfResults, time.Since(t))
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -160,7 +162,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		incarnationList = append(incarnationList, acc.Incarnation)
 
 		numberOfResults++
-
+		t = time.Now()
 		return true, nil
 	})
 	fmt.Println("accounts walk", time.Since(tm))
@@ -168,29 +170,33 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		return nil, err
 	}
 
-	for i,v:=range addrHashList {
+	for i, v := range addrHashList {
 		fmt.Println(v.String(), incarnationList[i])
 	}
-	tm=time.Now()
+	tm = time.Now()
 	for i, addrHash := range addrHashList {
-		tm1:=time.Now()
+		tm1 := time.Now()
 		account := accountList[i]
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addrHash[:], incarnation)
 		if incarnation > 0 {
 			var codeHash []byte
-			codeHash, err = ethdb.Get(d.db, dbutils.ContractCodeBucket, storagePrefix)
+			codeHash, err = ethdb.Get(d.db, dbutils.PlainContractCodeBucket, storagePrefix)
 			if err != nil && err != ethdb.ErrKeyNotFound {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
 			}
 			if codeHash != nil {
 				account.CodeHash = common.Bytes2Hex(codeHash)
 			} else {
-				account.CodeHash = common.Bytes2Hex(emptyCodeHash[:])
+				account.CodeHash = emptyCodeHash.String()
 			}
-			if !excludeCode && codeHash != nil && !bytes.Equal(emptyCodeHash[:], codeHash) {
+
+			fmt.Println(!excludeCode, bytes.Equal(codeHash, emptyCodeHash.Bytes()), len(codeHash), common.Bytes2Hex(codeHash), common.Bytes2Hex(emptyCodeHash.Bytes()))
+			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
+					fmt.Println(addrHash.String(), "code hash with err", codeHash, common.Bytes2Hex(codeHash))
+					spew.Dump(account)
 					return nil, err
 				}
 				account.Code = common.Bytes2Hex(code)
