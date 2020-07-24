@@ -162,7 +162,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 				return err
 			}
 		default:
-			log.Trace("Next message", "msg", msg)
+			log.Info("Next message", "msg", msg)
 		}
 		if signaledHead {
 			break
@@ -200,7 +200,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 				return err
 			}
 		default:
-			log.Trace("Next message", "msg", msg)
+			log.Info("Next message", "msg", msg)
 		}
 	}
 	return nil
