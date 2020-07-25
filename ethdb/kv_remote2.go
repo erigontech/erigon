@@ -152,6 +152,8 @@ func (db *Remote2KV) View(ctx context.Context, f func(tx Tx) error) (err error) 
 	if err != nil {
 		return err
 	}
+
+	//nolint:errcheck
 	defer stream.Send(&remote.ViewRequest{}) // signal server to rollback
 
 	tx, err := stream.Recv()
