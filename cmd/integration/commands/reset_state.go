@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
+	"sync"
+	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -187,9 +191,41 @@ func copyCompact() error {
 	if err := env.SetMapSize(ethdb.LMDBMapSize); err != nil {
 		return err
 	}
+
+	f, err := os.Stat(path.Join(from, "data.mdb"))
+	if err != nil {
+		return err
+	}
+
+	ctx, stopLogging := context.WithCancel(context.Background())
+	defer stopLogging()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			f2, err := os.Stat(path.Join(to, "data.mdb"))
+			if err != nil {
+				log.Error("Progress check failed", "err", err)
+				return
+			}
+			log.Info("Progress", "done", common.StorageSize(f2.Size()), "from", common.StorageSize(f.Size()))
+			time.Sleep(20 * time.Second)
+		}
+	}()
+
 	if err := env.CopyFlag(to, lmdb.CopyCompact); err != nil {
 		return fmt.Errorf("%w, from: %s, to: %s", err, from, to)
 	}
+
+	stopLogging()
+	wg.Wait()
 	if err := os.Rename(from, backup); err != nil {
 		return err
 	}
