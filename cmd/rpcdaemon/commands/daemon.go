@@ -352,10 +352,11 @@ func (*RPCDaemonService) Protocols() []p2p.Protocol {
 func (r *RPCDaemonService) Start(server *p2p.Server) error {
 	var rpcAPI = []rpc.API{}
 
-	dbReader := ethdb.NewObjectDatabase(r.db)
+	db := r.db.KV()
+	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(r.db, dbReader, chainContext)
-	dbgAPIImpl := NewPrivateDebugAPI(r.db, dbReader, chainContext)
+	apiImpl := NewAPI(db, dbReader, chainContext)
+	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
 
 	rpcAPI = append(rpcAPI, rpc.API{
 		Namespace: "eth",
@@ -385,54 +386,11 @@ func (r *RPCDaemonService) APIs() []rpc.API {
 
 type RPCDaemonService struct {
 	api []rpc.API
-	db  ethdb.KV
+	db  *ethdb.ObjectDatabase
 }
 
-func NewService(db ethdb.KV) *RPCDaemonService {
+func NewService(db *ethdb.ObjectDatabase) *RPCDaemonService {
 	return &RPCDaemonService{[]rpc.API{}, db}
-}
-
-func DaemonWithDb(db ethdb.KV, server *rpc.Server, enabledApis []string) {
-	var rpcAPI = []rpc.API{}
-
-	dbReader := ethdb.NewObjectDatabase(db)
-	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(db, dbReader, chainContext)
-	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
-
-	for _, enabledAPI := range enabledApis {
-		switch enabledAPI {
-		case "eth":
-			rpcAPI = append(rpcAPI, rpc.API{
-				Namespace: "eth",
-				Public:    true,
-				Service:   EthAPI(apiImpl),
-				Version:   "1.0",
-			})
-		case "debug":
-			rpcAPI = append(rpcAPI, rpc.API{
-				Namespace: "debug",
-				Public:    true,
-				Service:   PrivateDebugAPI(dbgAPIImpl),
-				Version:   "1.0",
-			})
-
-		default:
-			log.Error("Unrecognised", "api", enabledAPI)
-		}
-	}
-	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
-
-	// register apis and create handler stack
-	err := node.RegisterApisFromWhitelist(rpcAPI, enabledApis, server, false)
-	if err != nil {
-		log.Error("Could not start register RPC apis", "error", err)
-		return
-	}
-
-	defer func() {
-		log.Info("HTTP endpoint closed", "url", httpEndpoint)
-	}()
 }
 
 func daemon(cmd *cobra.Command, cfg Config) {

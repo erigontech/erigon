@@ -24,10 +24,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/service"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/urfave/cli"
@@ -83,15 +82,11 @@ func localConsole(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 
 	err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		chaindata := fmt.Sprintf("%s/chaindata", ctx.Config.DataDir)
-
-		var db ethdb.KV
-		if database, errOpen := ethdb.Open(chaindata); errOpen == nil {
-			db = database.KV()
-		} else {
-			panic(errOpen)
+		diskdb, err := ctx.OpenDatabaseWithFreezer("chaindata", "")
+		if err != nil {
+			return nil, err
 		}
-		return commands.NewService(db), nil
+		return service.New(diskdb), nil
 	})
 	if err != nil {
 		panic(err)
