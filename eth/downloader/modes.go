@@ -38,7 +38,7 @@ const (
 )
 
 func (mode SyncMode) IsValid() bool {
-	return mode == StagedSync
+	return mode == StagedSync || mode == FullSync // needed for some (turbo-geth/console) tests
 }
 
 // String implements the stringer interface.
