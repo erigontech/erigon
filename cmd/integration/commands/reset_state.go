@@ -171,23 +171,23 @@ func copyCompact() error {
 	backup := from + "_backup"
 	to := chaindata + "_copy"
 
-	env, err := lmdb.NewEnv()
-	if err != nil {
+	env, errOpen := lmdb.NewEnv()
+	if errOpen != nil {
+		return errOpen
+	}
+
+	if err := env.Open(from, lmdb.Readonly, 0644); err != nil {
 		return err
 	}
-	err = env.Open(from, 0, 0644)
-	if err != nil {
-		return err
-	}
-	if err = os.MkdirAll(to, 0744); err != nil {
+	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
-
-	log.Info("Start copy-compact")
-	if err := env.CopyFlag(to, lmdb.CopyCompact); err != nil {
-		return fmt.Errorf("%w, from: %s, to: %s\n", err, from, to)
+	if err := env.SetMapSize(ethdb.LMDBMapSize); err != nil {
+		return err
 	}
-
+	if err := env.CopyFlag(to, lmdb.CopyCompact); err != nil {
+		return fmt.Errorf("%w, from: %s, to: %s", err, from, to)
+	}
 	if err := os.Rename(from, backup); err != nil {
 		return err
 	}
@@ -195,5 +195,5 @@ func copyCompact() error {
 		return err
 	}
 
-	return err
+	return nil
 }
