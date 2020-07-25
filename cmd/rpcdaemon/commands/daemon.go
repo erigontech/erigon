@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
@@ -343,79 +342,7 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-var _ node.Service = &RPCDaemonService{}
-
-func (*RPCDaemonService) Protocols() []p2p.Protocol {
-	return []p2p.Protocol{}
-}
-
-func (r *RPCDaemonService) Start(server *p2p.Server) error {
-	var rpcAPI = []rpc.API{}
-
-	db := r.db.KV()
-	dbReader := ethdb.NewObjectDatabase(db)
-	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(db, dbReader, chainContext)
-	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
-
-	rpcAPI = append(rpcAPI, rpc.API{
-		Namespace: "eth",
-		Public:    true,
-		Service:   EthAPI(apiImpl),
-		Version:   "1.0",
-	})
-	rpcAPI = append(rpcAPI, rpc.API{
-		Namespace: "debug",
-		Public:    true,
-		Service:   PrivateDebugAPI(dbgAPIImpl),
-		Version:   "1.0",
-	})
-
-	r.api = rpcAPI
-
-	return nil
-}
-
-func (r *RPCDaemonService) Stop() error {
-	return nil
-}
-
-func (r *RPCDaemonService) APIs() []rpc.API {
-	return r.api
-}
-
-type RPCDaemonService struct {
-	api []rpc.API
-	db  *ethdb.ObjectDatabase
-}
-
-func NewService(db *ethdb.ObjectDatabase) *RPCDaemonService {
-	return &RPCDaemonService{[]rpc.API{}, db}
-}
-
-func daemon(cmd *cobra.Command, cfg Config) {
-	vhosts := splitAndTrim(cfg.rpcVirtualHost)
-	cors := splitAndTrim(cfg.rpcCORSDomain)
-	enabledApis := splitAndTrim(cfg.rpcAPI)
-
-	var db ethdb.KV
-	var err error
-	if cfg.remoteDbAddress != "" {
-		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
-	} else if cfg.chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
-			db = database.KV()
-		} else {
-			err = errOpen
-		}
-	} else {
-		err = fmt.Errorf("either remote db or bolt db must be specified")
-	}
-	if err != nil {
-		log.Error("Could not connect to remoteDb", "error", err)
-		return
-	}
-
+func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
 	var rpcAPI = []rpc.API{}
 
 	dbReader := ethdb.NewObjectDatabase(db)
@@ -444,6 +371,34 @@ func daemon(cmd *cobra.Command, cfg Config) {
 			log.Error("Unrecognised", "api", enabledAPI)
 		}
 	}
+	return rpcAPI
+}
+
+func daemon(cmd *cobra.Command, cfg Config) {
+	vhosts := splitAndTrim(cfg.rpcVirtualHost)
+	cors := splitAndTrim(cfg.rpcCORSDomain)
+	enabledApis := splitAndTrim(cfg.rpcAPI)
+
+	var db ethdb.KV
+	var err error
+	if cfg.remoteDbAddress != "" {
+		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
+	} else if cfg.chaindata != "" {
+		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
+			db = database.KV()
+		} else {
+			err = errOpen
+		}
+	} else {
+		err = fmt.Errorf("either remote db or bolt db must be specified")
+	}
+	if err != nil {
+		log.Error("Could not connect to remoteDb", "error", err)
+		return
+	}
+
+	var rpcAPI = GetAPI(db, enabledApis)
+
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
 
 	// register apis and create handler stack
