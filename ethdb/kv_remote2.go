@@ -47,16 +47,15 @@ type remote2Bucket struct {
 }
 
 type remote2Cursor struct {
-	ctx          context.Context
-	bucket       *remote2Bucket
-	cursorHandle uint64
-	initialized  bool
-	prefetch     uint32
-	prefix       []byte
-
+	cursorHandle       uint64
+	initialized        bool
+	streamingRequested bool
+	prefetch           uint32
+	ctx                context.Context
+	bucket             *remote2Bucket
+	prefix             []byte
 	stream             remote.Kv_SeekClient
 	streamClose        context.CancelFunc
-	streamingRequested bool
 }
 
 type remote2NoValuesCursor struct {
