@@ -26,7 +26,7 @@ func withChaindata(cmd *cobra.Command) {
 }
 
 func withCompact(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&compact, "compact", false, "compact db")
+	cmd.Flags().BoolVar(&compact, "compact", false, "compact db file. if remove much data form LMDB it slows down tx.Commit because it performs `realloc()` of free_list every commit")
 }
 
 func withReferenceChaindata(cmd *cobra.Command) {
