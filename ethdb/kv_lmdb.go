@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+const LMDBMapSize = 4 << 40 // 4TB
+
 type lmdbOpts struct {
 	path     string
 	inMem    bool
@@ -57,7 +59,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}
 		opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
 	} else {
-		err = env.SetMapSize(4 << 40) // 4TB
+		err = env.SetMapSize(LMDBMapSize)
 		logger = log.New("lmdb", path.Base(opts.path))
 		if err != nil {
 			return nil, err

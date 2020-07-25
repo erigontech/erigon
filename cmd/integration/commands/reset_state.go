@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -23,12 +25,19 @@ var cmdResetState = &cobra.Command{
 			log.Error(err.Error())
 			return err
 		}
+		if compact {
+			if err := copyCompact(); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	},
 }
 
 func init() {
 	withChaindata(cmdResetState)
+	withCompact(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
 }
@@ -154,5 +163,42 @@ func printStages(db *ethdb.ObjectDatabase) error {
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
 	}
+	return nil
+}
+
+func copyCompact() error {
+	from := chaindata
+	backup := from + "_backup"
+	to := chaindata + "_copy"
+
+	log.Info("Start db copy-compact")
+
+	env, errOpen := lmdb.NewEnv()
+	if errOpen != nil {
+		return errOpen
+	}
+
+	if err := env.Open(from, lmdb.Readonly, 0644); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(to, 0744); err != nil {
+		return fmt.Errorf("could not create dir: %s, %w", to, err)
+	}
+	if err := env.SetMapSize(ethdb.LMDBMapSize); err != nil {
+		return err
+	}
+	if err := env.CopyFlag(to, lmdb.CopyCompact); err != nil {
+		return fmt.Errorf("%w, from: %s, to: %s", err, from, to)
+	}
+	if err := os.Rename(from, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(to, from); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(backup); err != nil {
+		return err
+	}
+
 	return nil
 }
