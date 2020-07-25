@@ -194,6 +194,9 @@ func copyCompact() error {
 	if err := os.Rename(to, from); err != nil {
 		return err
 	}
+	if err := os.RemoveAll(backup); err != nil {
+		return err
+	}
 
 	return nil
 }
