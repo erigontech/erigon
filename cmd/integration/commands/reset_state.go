@@ -171,6 +171,8 @@ func copyCompact() error {
 	backup := from + "_backup"
 	to := chaindata + "_copy"
 
+	log.Info("Start db copy-compact")
+
 	env, errOpen := lmdb.NewEnv()
 	if errOpen != nil {
 		return errOpen
