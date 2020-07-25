@@ -221,12 +221,6 @@ var (
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
 	}
-	defaultSyncMode = eth.DefaultConfig.SyncMode
-	SyncModeFlag    = TextMarshalerFlag{
-		Name:  "syncmode",
-		Usage: `Blockchain sync mode ("staged" (default) or "full")`,
-		Value: &defaultSyncMode,
-	}
 	GCModePruningFlag = cli.BoolFlag{
 		Name:  "pruning",
 		Usage: `Enable storage pruning`,
@@ -1180,7 +1174,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
 
-	lightClient := ctx.GlobalString(SyncModeFlag.Name) == "light"
+	lightClient := false
 	lightServer := (ctx.GlobalInt(LegacyLightServFlag.Name) != 0 || ctx.GlobalInt(LightServeFlag.Name) != 0)
 
 	lightPeers := ctx.GlobalInt(LegacyLightPeersFlag.Name)
@@ -1523,7 +1517,6 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	// Avoid conflicting network flags
 	CheckExclusive(ctx, DeveloperFlag, LegacyTestnetFlag, RopstenFlag, RinkebyFlag, GoerliFlag, YoloV1Flag)
-	CheckExclusive(ctx, LegacyLightServFlag, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 	var ks *keystore.KeyStore
 	if keystores := stack.AccountManager().Backends(keystore.KeyStoreType); len(keystores) > 0 {
@@ -1537,10 +1530,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
 
-	if ctx.GlobalIsSet(SyncModeFlag.Name) {
-		cfg.SyncMode = *GlobalTextMarshaler(ctx, SyncModeFlag.Name).(*downloader.SyncMode)
-	}
-	core.UsePlainStateExecution = cfg.SyncMode == downloader.StagedSync
+	core.UsePlainStateExecution = true
 
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
@@ -1766,9 +1756,6 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
 	name := "chaindata"
-	if ctx.GlobalString(SyncModeFlag.Name) == "light" {
-		name = "lightchaindata"
-	}
 	chainDb, err := stack.OpenDatabase(name)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
