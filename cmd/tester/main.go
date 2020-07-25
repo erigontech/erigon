@@ -127,34 +127,44 @@ func tester(cliCtx *cli.Context) error {
 		return err
 	}
 
-	tp := NewTesterProtocol()
-
-	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
-	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
 	blockGen, err := NewBlockGenerator(ctx, "blocks", 50000)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
 	}
 	defer blockGen.Close()
-	tp.blockFeeder = blockGen
-	tp.forkBase = 49998
-	tp.forkHeight = 5
-	tp.forkFeeder, err = NewForkGenerator(ctx, blockGen, "forkblocks", tp.forkBase, tp.forkHeight)
+	forkBase := uint64(49998)
+	forkHeight := uint64(5)
+	forkGen, err := NewForkGenerator(ctx, blockGen, "forkblocks", forkBase, forkHeight)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create fork generator: %v", err))
 	}
-	defer tp.forkFeeder.Close()
-	tp.protocolVersion = uint32(eth.ProtocolVersions[0])
-	tp.networkId = 1 // Mainnet
-	tp.genesisBlockHash = tp.forkFeeder.Genesis().Hash()
-
-	server := makeP2PServer(ctx, tp, []string{eth.ProtocolName, eth.DebugName})
+	defer forkGen.Close()
+	tp1 := NewTesterProtocol(true /* fork */)
+	tp1.blockFeeder = blockGen
+	tp1.forkBase = forkBase
+	tp1.forkFeeder = forkGen
+	tp1.protocolVersion = uint32(eth.ProtocolVersions[0])
+	tp1.networkId = 1 // Mainnet
+	tp1.genesisBlockHash = forkGen.Genesis().Hash()
+	server1 := makeP2PServer(ctx, tp1, []string{eth.ProtocolName, eth.DebugName})
 	// Add protocol
-	if err := server.Start(); err != nil {
-		panic(fmt.Errorf("could not start server: %w", err))
+	if err := server1.Start(); err != nil {
+		panic(fmt.Errorf("could not start server 1: %w", err))
 	}
-	server.AddPeer(nodeToConnect)
-
+	server1.AddPeer(nodeToConnect)
+/*
+	tp2 := NewTesterProtocol(false)
+	tp2.blockFeeder = blockGen
+	tp2.protocolVersion = uint32(eth.ProtocolVersions[0])
+	tp2.networkId = 1 // Mainnet
+	tp2.genesisBlockHash = blockGen.Genesis().Hash()
+	server2 := makeP2PServer(ctx, tp2, []string{eth.ProtocolName})
+	// Add protocol
+	if err := server2.Start(); err != nil {
+		panic(fmt.Errorf("could not start server 2: %w", err))
+	}
+	server2.AddPeer(nodeToConnect)
+*/
 	<-ctx.Done()
 	return nil
 }

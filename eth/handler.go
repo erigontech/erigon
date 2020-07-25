@@ -848,6 +848,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 		for _, block := range unknown {
+			fmt.Printf("Notify fetcher of the block %d hash %x\n", block.Number, block.Hash)
 			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies) //nolint:errcheck
 		}
 

@@ -431,7 +431,7 @@ func copyDb(ctx *cli.Context) error {
 	start := time.Now()
 
 	currentHeader := hc.CurrentHeader()
-	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, vm.NewDestsCache(10000), nil); err != nil {
+	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, vm.NewDestsCache(10000), nil, func() error { return nil }); err != nil {
 		return err
 	}
 	for dl.Synchronising() {

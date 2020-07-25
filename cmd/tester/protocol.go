@@ -40,12 +40,14 @@ type TesterProtocol struct {
 	// This is to prevent double counting them
 	forkBase   uint64
 	forkHeight uint64
+	fork bool
 }
 
-func NewTesterProtocol() *TesterProtocol {
+func NewTesterProtocol(fork bool) *TesterProtocol {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	mainnetGenesis := core.DefaultGenesisBlock().MustCommit(db)
-	return &TesterProtocol{mainnetGenesis: mainnetGenesis}
+	return &TesterProtocol{mainnetGenesis: mainnetGenesis, fork: fork}
 }
 
 // Return true if the block has already been marked. If the block has not been marked, returns false and marks it
@@ -164,43 +166,45 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 		default:
 			log.Info("Next message", "msg", msg)
 		}
-		if signaledHead {
+		if tp.fork && signaledHead {
 			break
 		}
-		if emptyBlocks+sentBlocks >= lastBlockNumber {
+		if tp.fork && emptyBlocks+sentBlocks >= lastBlockNumber {
 			break
 		}
 	}
-	log.Info("Peer downloaded all our blocks, entering next phase")
-	tp.announceForkHeaders(rw)
-	log.Info("Announced fork blocks")
-	for i := 0; i < 10000; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	if tp.fork {
+		log.Info("Peer downloaded all our blocks, entering next phase")
+		tp.announceForkHeaders(rw)
+		log.Info("Announced fork blocks")
+		for i := 0; i < 10000; i++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 
-		// Read the next message
-		msg, err = rw.ReadMsg()
-		if err != nil {
-			return fmt.Errorf("failed to receive state message from peer: %w", err)
-		}
-		switch {
-		case msg.Code == eth.GetBlockHeadersMsg:
-			if emptyBlocks, err = tp.handleGetBlockHeaderMsg(msg, rw, tp.forkFeeder, emptyBlocks); err != nil {
-				return err
+			// Read the next message
+			msg, err = rw.ReadMsg()
+			if err != nil {
+				return fmt.Errorf("failed to receive state message from peer: %w", err)
 			}
-		case msg.Code == eth.GetBlockBodiesMsg:
-			if sentBlocks, err = tp.handleGetBlockBodiesMsg(msg, rw, tp.forkFeeder, sentBlocks); err != nil {
-				return err
+			switch {
+			case msg.Code == eth.GetBlockHeadersMsg:
+				if emptyBlocks, err = tp.handleGetBlockHeaderMsg(msg, rw, tp.forkFeeder, emptyBlocks); err != nil {
+					return err
+				}
+			case msg.Code == eth.GetBlockBodiesMsg:
+				if sentBlocks, err = tp.handleGetBlockBodiesMsg(msg, rw, tp.forkFeeder, sentBlocks); err != nil {
+					return err
+				}
+			case msg.Code == eth.NewBlockHashesMsg:
+				if _, err = tp.handleNewBlockHashesMsg(msg, rw); err != nil {
+					return err
+				}
+			default:
+				log.Info("Next message", "msg", msg)
 			}
-		case msg.Code == eth.NewBlockHashesMsg:
-			if _, err = tp.handleNewBlockHashesMsg(msg, rw); err != nil {
-				return err
-			}
-		default:
-			log.Info("Next message", "msg", msg)
 		}
 	}
 	return nil
