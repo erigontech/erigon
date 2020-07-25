@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -37,6 +38,7 @@ func splitAndTrim(input string) []string {
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
+	Coinbase(context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
@@ -90,6 +92,11 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	return hexutil.Uint64(execution), nil
+}
+
+// Etherbase is the address that mining rewards will be send to
+func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
+	return common.Address{}, errors.New("not implemented")
 }
 
 func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {

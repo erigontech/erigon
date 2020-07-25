@@ -123,8 +123,6 @@ func localConsole(ctx *cli.Context) error {
 	console.Welcome()
 	console.Interactive()
 
-	panic("boom")
-
 	return nil
 }
 
