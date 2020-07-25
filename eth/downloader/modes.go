@@ -38,7 +38,7 @@ const (
 )
 
 func (mode SyncMode) IsValid() bool {
-	return mode == FullSync || mode == StagedSync
+	return mode == StagedSync
 }
 
 // String implements the stringer interface.

@@ -24,8 +24,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/urfave/cli"
@@ -78,7 +80,24 @@ JavaScript API. See https://github.com/ledgerwatch/turbo-geth/wiki/JavaScript-Co
 func localConsole(ctx *cli.Context) error {
 	// Create and start the node based on the CLI flags
 	prepare(ctx)
-	node := makeFullNode(ctx)
+	stack := makeFullNode(ctx)
+
+	err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
+		chaindata := fmt.Sprintf("%s/chaindata", ctx.Config.DataDir)
+
+		var db ethdb.KV
+		if database, errOpen := ethdb.Open(chaindata); errOpen == nil {
+			db = database.KV()
+		} else {
+			panic(errOpen)
+		}
+		return commands.NewService(db), nil
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	node := stack
 	startNode(ctx, node)
 	defer node.Close()
 
@@ -108,6 +127,8 @@ func localConsole(ctx *cli.Context) error {
 	// Otherwise print the welcome screen and enter interactive mode
 	console.Welcome()
 	console.Interactive()
+
+	panic("boom")
 
 	return nil
 }
