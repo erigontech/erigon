@@ -53,7 +53,6 @@ func (s *Server2) View(stream remote.Kv_ViewServer) error {
 	if err := stream.Send(&remote.ViewReply{TxHandle: txHandle}); err != nil {
 		return err
 	}
-	fmt.Printf("Wait for client\n")
 	_, _ = stream.Recv() // block until client gone, send message or cancel context
 	return nil
 }
@@ -74,7 +73,6 @@ func (s *Server2) begin() (uint64, error) {
 func (s *Server2) rollback(txHandle uint64) {
 	s.Lock()
 	defer s.Unlock()
-	fmt.Printf("Rollback\n")
 
 	buckets := s.bucketByTx[txHandle]
 	// Remove all the buckets
@@ -92,7 +90,6 @@ func (s *Server2) rollback(txHandle uint64) {
 	tx := s.txs[txHandle]
 	if tx != nil {
 		tx.Rollback()
-		fmt.Printf("Rollback DOne\n")
 	}
 	delete(s.bucketByTx, txHandle)
 	delete(s.txs, txHandle)
@@ -154,40 +151,37 @@ func (s *Server2) cursor(cursorHandle uint64) (ethdb.Cursor, func(), error) {
 	return c, closer, nil
 }
 
-func (s *Server2) Seek(stream remote.Kv_SeekServer) (err error) {
-	in, err := stream.Recv()
-	if err != nil {
-		return err
+func (s *Server2) Seek(stream remote.Kv_SeekServer) error {
+	in, recvErr := stream.Recv()
+	if recvErr != nil {
+		return recvErr
 	}
-	c, closer, err := s.cursor(in.CursorHandle)
-	if err != nil {
-		return err
+	c, closer, cursorErr := s.cursor(in.CursorHandle)
+	if cursorErr != nil {
+		return cursorErr
 	}
 	defer closer()
 
-	k, v, err := c.Seek(in.SeekKey)
-	if err != nil {
-		return err
-	}
+	// send all items to client, if k==nil - stil send it to client and break loop
+	for k, v, err := c.Seek(in.SeekKey); ; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
 
-	for {
-		if err := stream.Send(&remote.Pair{Key: k, Value: v}); err != nil {
+		err = stream.Send(&remote.Pair{Key: k, Value: v})
+		if err != nil {
 			return err
 		}
 		if k == nil {
 			return nil
 		}
 
+		// if client not requested stream then wait signal from him before send any item
 		if !in.StartSreaming {
 			in, err = stream.Recv()
 			if err != nil {
 				return err
 			}
-		}
-
-		k, v, err = c.Next()
-		if err != nil {
-			return err
 		}
 	}
 }

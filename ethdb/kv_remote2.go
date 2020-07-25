@@ -35,7 +35,6 @@ type remote2Tx struct {
 	ctx context.Context
 	db  *Remote2KV
 
-	remote     *remote.Tx
 	handle     uint64
 	finalizers []context.CancelFunc
 }
@@ -247,7 +246,8 @@ func (b *remote2Bucket) Clear() error {
 
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 	if !b.initialized {
-		if err := b.init(); err != nil {
+		err = b.init()
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -308,7 +308,8 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err != nil {
 		return []byte{}, nil, err
 	}
-	if err := c.stream.Send(&remote.SeekRequest{CursorHandle: c.cursorHandle, SeekKey: seek, StartSreaming: false}); err != nil {
+	err = c.stream.Send(&remote.SeekRequest{CursorHandle: c.cursorHandle, SeekKey: seek, StartSreaming: false})
+	if err != nil {
 		return []byte{}, nil, err
 	}
 
