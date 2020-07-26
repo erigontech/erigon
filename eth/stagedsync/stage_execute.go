@@ -84,13 +84,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
-		if core.UsePlainStateExecution {
-			stateReader = state.NewPlainStateReader(batch)
-			stateWriter = state.NewPlainStateWriter(batch, blockNum)
-		} else {
-			stateReader = state.NewDbStateReader(batch)
-			stateWriter = state.NewDbStateWriter(batch, blockNum)
-		}
+		stateReader = state.NewPlainStateReader(batch)
+		stateWriter = state.NewPlainStateWriter(batch, blockNum)
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, blockchain, engine, block, stateReader, stateWriter, dests)
@@ -177,25 +172,14 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database)
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	mutation := stateDB.NewBatch()
 
-	rewindFunc := ethdb.RewindData
-	stateBucket := dbutils.CurrentStateBucket
-	accountChangeSetBucket := dbutils.AccountChangeSetBucket
-	storageChangeSetBucket := dbutils.StorageChangeSetBucket
-	storageKeyLength := common.HashLength + common.IncarnationLength + common.HashLength
-	deleteAccountFunc := deleteAccountHashed
-	writeAccountFunc := writeAccountHashed
-	recoverCodeHashFunc := recoverCodeHashHashed
-
-	if core.UsePlainStateExecution {
-		rewindFunc = ethdb.RewindDataPlain
-		stateBucket = dbutils.PlainStateBucket
-		accountChangeSetBucket = dbutils.PlainAccountChangeSetBucket
-		storageChangeSetBucket = dbutils.PlainStorageChangeSetBucket
-		storageKeyLength = common.AddressLength + common.IncarnationLength + common.HashLength
-		deleteAccountFunc = deleteAccountPlain
-		writeAccountFunc = writeAccountPlain
-		recoverCodeHashFunc = recoverCodeHashPlain
-	}
+	rewindFunc := ethdb.RewindDataPlain
+	stateBucket := dbutils.PlainStateBucket
+	accountChangeSetBucket := dbutils.PlainAccountChangeSetBucket
+	storageChangeSetBucket := dbutils.PlainStorageChangeSetBucket
+	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
+	deleteAccountFunc := deleteAccountPlain
+	writeAccountFunc := writeAccountPlain
+	recoverCodeHashFunc := recoverCodeHashPlain
 
 	accountMap, storageMap, err := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
 	if err != nil {
