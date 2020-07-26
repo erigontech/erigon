@@ -152,19 +152,19 @@ func tester(cliCtx *cli.Context) error {
 		panic(fmt.Errorf("could not start server 1: %w", err))
 	}
 	server1.AddPeer(nodeToConnect)
-/*
-	tp2 := NewTesterProtocol(false)
-	tp2.blockFeeder = blockGen
-	tp2.protocolVersion = uint32(eth.ProtocolVersions[0])
-	tp2.networkId = 1 // Mainnet
-	tp2.genesisBlockHash = blockGen.Genesis().Hash()
-	server2 := makeP2PServer(ctx, tp2, []string{eth.ProtocolName})
-	// Add protocol
-	if err := server2.Start(); err != nil {
-		panic(fmt.Errorf("could not start server 2: %w", err))
-	}
-	server2.AddPeer(nodeToConnect)
-*/
+	/*
+		tp2 := NewTesterProtocol(false)
+		tp2.blockFeeder = blockGen
+		tp2.protocolVersion = uint32(eth.ProtocolVersions[0])
+		tp2.networkId = 1 // Mainnet
+		tp2.genesisBlockHash = blockGen.Genesis().Hash()
+		server2 := makeP2PServer(ctx, tp2, []string{eth.ProtocolName})
+		// Add protocol
+		if err := server2.Start(); err != nil {
+			panic(fmt.Errorf("could not start server 2: %w", err))
+		}
+		server2.AddPeer(nodeToConnect)
+	*/
 	<-ctx.Done()
 	return nil
 }

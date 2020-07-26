@@ -40,7 +40,7 @@ type TesterProtocol struct {
 	// This is to prevent double counting them
 	forkBase   uint64
 	forkHeight uint64
-	fork bool
+	fork       bool
 }
 
 func NewTesterProtocol(fork bool) *TesterProtocol {

@@ -448,13 +448,13 @@ func (pm *ProtocolManager) handle(p *peer) error {
 
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
-	go func() {
+	//go func() {
 		if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
-			p.Log().Error("Requesting initial header", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
-			pm.removePeer(p.id)
-			return
+			//p.Log().Error("Requesting initial header", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
+			//pm.removePeer(p.id)
+			return err
 		}
-	}()
+	//}()
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
@@ -608,13 +608,14 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				query.Origin.Number += query.Skip + 1
 			}
 		}
-		go func() {
-			if err := p.SendBlockHeaders(headers); err != nil {
-				p.Log().Error("Sending headers", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
-				pm.removePeer(p.id)
-				return
-			}
-		}()
+		return p.SendBlockHeaders(headers)
+		//go func() {
+		//	if err := p.SendBlockHeaders(headers); err != nil {
+		//		p.Log().Error("Sending headers", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
+		//		pm.removePeer(p.id)
+		//		return
+		//	}
+		//}()
 
 	case msg.Code == BlockHeadersMsg:
 		// A batch of headers arrived to one of our previous requests
