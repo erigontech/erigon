@@ -913,7 +913,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		for _, hash := range hashes {
 			p.MarkTransaction(hash)
 		}
-		fmt.Printf("NewPooledTransactionHashesMsg: %d hashes\n")
+		fmt.Printf("NewPooledTransactionHashesMsg: %d hashes\n", len(hashes))
 		pm.txFetcher.Notify(p.id, hashes) // nolint:errcheck
 
 	case msg.Code == GetPooledTransactionsMsg && p.version >= eth65:
