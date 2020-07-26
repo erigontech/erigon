@@ -129,6 +129,15 @@ func post(st0 state, stmt stmt) state {
 
 	if stmt.opcode.IsPush() {
 		st1.Push(ConstValue(stmt.value))
+	} else if stmt.operation.isDup {
+		value := st1.stack[stmt.operation.opNum-1]
+		st1.Push(value)
+	} else if stmt.operation.isSwap {
+		opNum := stmt.operation.opNum
+		a := st1.stack[0]
+		b := st1.stack[opNum]
+		st1.stack[0] = b
+		st1.stack[opNum] = a
 	} else {
 		for i := 0; i < stmt.operation.numPop; i++ {
 			st1.Pop()
@@ -176,7 +185,7 @@ func getStmts(prog *Contract) []stmt {
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {
-			pushByteSize := GetPushBytes(op)
+			pushByteSize := stmt.operation.opNum
 			startMin := pc + 1
 			if startMin >= codeLen {
 				startMin = codeLen

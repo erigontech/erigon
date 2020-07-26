@@ -43,6 +43,10 @@ type operation struct {
 	maxStack int
 	numPop int
 	numPush int
+	isPush bool
+	isSwap bool
+	isDup bool
+	opNum int // only for push, swap, dup
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
 
@@ -779,6 +783,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		1,
 			valid:       true,
 		},
 		PUSH2: {
@@ -788,6 +794,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		2,
 			valid:       true,
 		},
 		PUSH3: {
@@ -797,6 +805,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		3,
 			valid:       true,
 		},
 		PUSH4: {
@@ -806,6 +816,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		4,
 			valid:       true,
 		},
 		PUSH5: {
@@ -815,6 +827,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		5,
 			valid:       true,
 		},
 		PUSH6: {
@@ -824,6 +838,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		6,
 			valid:       true,
 		},
 		PUSH7: {
@@ -833,6 +849,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		7,
 			valid:       true,
 		},
 		PUSH8: {
@@ -842,6 +860,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		8,
 			valid:       true,
 		},
 		PUSH9: {
@@ -851,6 +871,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		9,
 			valid:       true,
 		},
 		PUSH10: {
@@ -860,6 +882,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		10,
 			valid:       true,
 		},
 		PUSH11: {
@@ -869,6 +893,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		11,
 			valid:       true,
 		},
 		PUSH12: {
@@ -878,6 +904,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		12,
 			valid:       true,
 		},
 		PUSH13: {
@@ -887,6 +915,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		13,
 			valid:       true,
 		},
 		PUSH14: {
@@ -896,6 +926,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		14,
 			valid:       true,
 		},
 		PUSH15: {
@@ -905,6 +937,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		15,
 			valid:       true,
 		},
 		PUSH16: {
@@ -914,6 +948,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		16,
 			valid:       true,
 		},
 		PUSH17: {
@@ -923,6 +959,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		17,
 			valid:       true,
 		},
 		PUSH18: {
@@ -932,6 +970,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		18,
 			valid:       true,
 		},
 		PUSH19: {
@@ -941,6 +981,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		19,
 			valid:       true,
 		},
 		PUSH20: {
@@ -950,6 +992,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		20,
 			valid:       true,
 		},
 		PUSH21: {
@@ -959,6 +1003,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		21,
 			valid:       true,
 		},
 		PUSH22: {
@@ -968,6 +1014,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		22,
 			valid:       true,
 		},
 		PUSH23: {
@@ -977,6 +1025,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		23,
 			valid:       true,
 		},
 		PUSH24: {
@@ -986,6 +1036,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		24,
 			valid:       true,
 		},
 		PUSH25: {
@@ -995,6 +1047,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		25,
 			valid:       true,
 		},
 		PUSH26: {
@@ -1004,6 +1058,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		26,
 			valid:       true,
 		},
 		PUSH27: {
@@ -1013,6 +1069,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		27,
 			valid:       true,
 		},
 		PUSH28: {
@@ -1022,6 +1080,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		28,
 			valid:       true,
 		},
 		PUSH29: {
@@ -1031,6 +1091,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		29,
 			valid:       true,
 		},
 		PUSH30: {
@@ -1040,6 +1102,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		30,
 			valid:       true,
 		},
 		PUSH31: {
@@ -1049,6 +1113,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		31,
 			valid:       true,
 		},
 		PUSH32: {
@@ -1058,6 +1124,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
+			isPush: 	true,
+			opNum: 		32,
 			valid:       true,
 		},
 		DUP1: {
@@ -1067,6 +1135,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(1),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		1,
 			valid:       true,
 		},
 		DUP2: {
@@ -1076,6 +1146,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(2),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		2,
 			valid:       true,
 		},
 		DUP3: {
@@ -1085,6 +1157,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(3),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		3,
 			valid:       true,
 		},
 		DUP4: {
@@ -1094,6 +1168,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(4),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		4,
 			valid:       true,
 		},
 		DUP5: {
@@ -1103,6 +1179,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(5),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		5,
 			valid:       true,
 		},
 		DUP6: {
@@ -1112,6 +1190,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(6),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		6,
 			valid:       true,
 		},
 		DUP7: {
@@ -1121,6 +1201,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(7),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		7,
 			valid:       true,
 		},
 		DUP8: {
@@ -1130,6 +1212,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(8),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		8,
 			valid:       true,
 		},
 		DUP9: {
@@ -1139,6 +1223,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(9),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		9,
 			valid:       true,
 		},
 		DUP10: {
@@ -1148,6 +1234,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(10),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		10,
 			valid:       true,
 		},
 		DUP11: {
@@ -1157,6 +1245,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(11),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		11,
 			valid:       true,
 		},
 		DUP12: {
@@ -1166,6 +1256,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(12),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		12,
 			valid:       true,
 		},
 		DUP13: {
@@ -1175,6 +1267,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(13),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		13,
 			valid:       true,
 		},
 		DUP14: {
@@ -1184,6 +1278,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(14),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		14,
 			valid:       true,
 		},
 		DUP15: {
@@ -1193,6 +1289,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(15),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		15,
 			valid:       true,
 		},
 		DUP16: {
@@ -1202,6 +1300,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxDupStack(16),
 			numPop: 	0,
 			numPush: 	1,
+			isDup: 		true,
+			opNum: 		16,
 			valid:       true,
 		},
 		SWAP1: {
@@ -1211,6 +1311,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(2),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		1,
 			valid:       true,
 		},
 		SWAP2: {
@@ -1220,6 +1322,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(3),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		2,
 			valid:       true,
 		},
 		SWAP3: {
@@ -1229,6 +1333,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(4),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		3,
 			valid:       true,
 		},
 		SWAP4: {
@@ -1238,6 +1344,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(5),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		4,
 			valid:       true,
 		},
 		SWAP5: {
@@ -1247,6 +1355,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(6),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		5,
 			valid:       true,
 		},
 		SWAP6: {
@@ -1256,6 +1366,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(7),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		6,
 			valid:       true,
 		},
 		SWAP7: {
@@ -1265,6 +1377,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(8),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		7,
 			valid:       true,
 		},
 		SWAP8: {
@@ -1274,6 +1388,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(9),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		8,
 			valid:       true,
 		},
 		SWAP9: {
@@ -1283,6 +1399,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(10),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		9,
 			valid:       true,
 		},
 		SWAP10: {
@@ -1292,6 +1410,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(11),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		10,
 			valid:       true,
 		},
 		SWAP11: {
@@ -1301,6 +1421,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(12),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		11,
 			valid:       true,
 		},
 		SWAP12: {
@@ -1310,6 +1432,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(13),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		12,
 			valid:       true,
 		},
 		SWAP13: {
@@ -1319,6 +1443,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(14),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		13,
 			valid:       true,
 		},
 		SWAP14: {
@@ -1328,6 +1454,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(15),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		14,
 			valid:       true,
 		},
 		SWAP15: {
@@ -1337,6 +1465,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(16),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		15,
 			valid:       true,
 		},
 		SWAP16: {
@@ -1346,6 +1476,8 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxSwapStack(17),
 			numPop: 	1,
 			numPush: 	1,
+			isSwap: 	true,
+			opNum: 		16,
 			valid:       true,
 		},
 		LOG0: {

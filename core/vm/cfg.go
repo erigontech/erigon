@@ -81,7 +81,7 @@ func ToCfg0(contract *Contract, jt *JumpTable) (cfg *Cfg, err error) {
 		}
 
 		if op.IsPush() {
-			pushByteSize := GetPushBytes(op)
+			pushByteSize := operation.opNum
 			startMin := int(pc + 1)
 			if startMin >= codeLen {
 				startMin = codeLen
