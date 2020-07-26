@@ -449,11 +449,11 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
 	//go func() {
-		if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
-			//p.Log().Error("Requesting initial header", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
-			//pm.removePeer(p.id)
-			return err
-		}
+	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+		//p.Log().Error("Requesting initial header", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
+		//pm.removePeer(p.id)
+		return err
+	}
 	//}()
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
