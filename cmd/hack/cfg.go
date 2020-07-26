@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/hex"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"log"
 	"math/big"
 )
 
@@ -15,7 +17,7 @@ func testGenCfg() error {
 	//dfTest2()
 	//dfTest3()
 	//absIntTest1()
-	absIntTest3()
+	absIntTest10()
 	return nil
 }
 
@@ -71,6 +73,26 @@ func absIntTest3() {
 							byte(vm.JUMPI),
 							byte(vm.STOP)}
 	_ = vm.AbsIntCfgHarness(contract)
+}
+
+func absIntTest10() {
+	/*
+	pragma solidity ^0.6.0;
+	contract simple00 {
+	    function execute() public returns (uint) {
+	        return 5;
+	    }
+	}
+	*/
+	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c80636146195414602d575b600080fd5b60336049565b6040518082815260200191505060405180910390f35b6000600590509056fea2646970667358221220e2d6ab235a595eb0ea85f8cc9c54b34e1b4fb7b8f0446851d77e72e6d973b15364736f6c634300060c0033"
+	decoded, err := hex.DecodeString(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract.Code = decoded
+	vm.AbsIntCfgHarness(contract)
 }
 
 
