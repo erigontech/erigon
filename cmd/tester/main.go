@@ -142,6 +142,7 @@ func tester(cliCtx *cli.Context) error {
 	tp1 := NewTesterProtocol(true /* fork */)
 	tp1.blockFeeder = blockGen
 	tp1.forkBase = forkBase
+	tp1.forkHeight = forkHeight
 	tp1.forkFeeder = forkGen
 	tp1.protocolVersion = uint32(eth.ProtocolVersions[0])
 	tp1.networkId = 1 // Mainnet

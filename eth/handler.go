@@ -187,6 +187,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
+		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		// FIXME: Workaround for staged sync, just do no-op
 		if manager.blockchain == nil || manager.blockchain.CurrentBlock() == nil {
 			log.Info("Workaround for staged sync: IIIAAAIII")
@@ -849,7 +850,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				unknown = append(unknown, block)
 			}
 		}
-		fmt.Printf("unknown block hashes: %d\n", len(unknown))
 		for _, block := range unknown {
 			fmt.Printf("Notify fetcher of the block %d hash %x\n", block.Number, block.Hash)
 			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies) //nolint:errcheck
@@ -913,9 +913,11 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		for _, hash := range hashes {
 			p.MarkTransaction(hash)
 		}
+		fmt.Printf("NewPooledTransactionHashesMsg: %d hashes\n")
 		pm.txFetcher.Notify(p.id, hashes) // nolint:errcheck
 
 	case msg.Code == GetPooledTransactionsMsg && p.version >= eth65:
+		fmt.Printf("GetPooledTransactionsMsg\n")
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -949,6 +951,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				bytes += len(encoded)
 			}
 		}
+		fmt.Printf("GetPooledTransactionsMsg sending back: %d hashes\n", len(hashes))
 		return p.SendPooledTransactionsRLP(hashes, txs)
 
 	case msg.Code == TransactionMsg || (msg.Code == PooledTransactionsMsg && p.version >= eth65):
