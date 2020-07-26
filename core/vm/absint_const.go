@@ -9,7 +9,7 @@ import (
 
 //////////////////////////////////////////////////
 const (
-	absStackLen = 10
+	absStackLen = 32
 )
 
 type AbsElmType int
