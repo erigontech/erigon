@@ -56,6 +56,7 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+	/*
 	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
 	if fromScratch {
 		if err := ResetHashState(db); err != nil {
@@ -67,6 +68,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, data
 		}
 		// here we are on same block as Exec step
 	}
+	*/
 
 	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err

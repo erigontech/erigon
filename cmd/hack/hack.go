@@ -1855,7 +1855,7 @@ func fixStages(chaindata string) error {
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
 		list = append(list, progress)
 	}
-	for stage := stages.IntermediateHashes; stage < stages.HashedState; stage++ {
+	for stage := stages.IntermediateHashes; stage < stages.HashState; stage++ {
 		if err = stages.SaveStageProgress(db, stage, list[int(stage)-1], nil); err != nil {
 			return err
 		}
