@@ -457,6 +457,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	}()
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
+		p.Log().Debug("Ethereum message handling failed", "err", err)
 		return err
 	}
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
@@ -847,6 +848,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				unknown = append(unknown, block)
 			}
 		}
+		fmt.Printf("unknown block hashes: %d\n", len(unknown))
 		for _, block := range unknown {
 			fmt.Printf("Notify fetcher of the block %d hash %x\n", block.Number, block.Hash)
 			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies) //nolint:errcheck

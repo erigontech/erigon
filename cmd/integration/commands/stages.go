@@ -351,7 +351,7 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 		panic(err)
 	}
 
-	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, hook)
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
