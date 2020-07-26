@@ -967,6 +967,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		if err := msg.Decode(&txs); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
+		fmt.Printf("TransactionMsg or PooledTransactionsMsg: %d txs\n", len(txs))
 		for i, tx := range txs {
 			// Validate and mark the remote transaction
 			if tx == nil {
