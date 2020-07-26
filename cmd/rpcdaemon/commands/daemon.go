@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -37,6 +38,7 @@ func splitAndTrim(input string) []string {
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
+	Coinbase(context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
@@ -90,6 +92,11 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	return hexutil.Uint64(execution), nil
+}
+
+// Etherbase is the address that mining rewards will be send to
+func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
+	return common.Address{}, errors.New("not implemented")
 }
 
 func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
@@ -342,29 +349,7 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func daemon(cmd *cobra.Command, cfg Config) {
-	vhosts := splitAndTrim(cfg.rpcVirtualHost)
-	cors := splitAndTrim(cfg.rpcCORSDomain)
-	enabledApis := splitAndTrim(cfg.rpcAPI)
-
-	var db ethdb.KV
-	var err error
-	if cfg.remoteDbAddress != "" {
-		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
-	} else if cfg.chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
-			db = database.KV()
-		} else {
-			err = errOpen
-		}
-	} else {
-		err = fmt.Errorf("either remote db or bolt db must be specified")
-	}
-	if err != nil {
-		log.Error("Could not connect to remoteDb", "error", err)
-		return
-	}
-
+func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
 	var rpcAPI = []rpc.API{}
 
 	dbReader := ethdb.NewObjectDatabase(db)
@@ -393,6 +378,34 @@ func daemon(cmd *cobra.Command, cfg Config) {
 			log.Error("Unrecognised", "api", enabledAPI)
 		}
 	}
+	return rpcAPI
+}
+
+func daemon(cmd *cobra.Command, cfg Config) {
+	vhosts := splitAndTrim(cfg.rpcVirtualHost)
+	cors := splitAndTrim(cfg.rpcCORSDomain)
+	enabledApis := splitAndTrim(cfg.rpcAPI)
+
+	var db ethdb.KV
+	var err error
+	if cfg.remoteDbAddress != "" {
+		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
+	} else if cfg.chaindata != "" {
+		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
+			db = database.KV()
+		} else {
+			err = errOpen
+		}
+	} else {
+		err = fmt.Errorf("either remote db or bolt db must be specified")
+	}
+	if err != nil {
+		log.Error("Could not connect to remoteDb", "error", err)
+		return
+	}
+
+	var rpcAPI = GetAPI(db, enabledApis)
+
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
 
 	// register apis and create handler stack

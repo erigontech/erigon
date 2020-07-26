@@ -79,7 +79,6 @@ The dumpgenesis command dumps the genesis block configuration in JSON format to 
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.CacheFlag,
-			utils.SyncModeFlag,
 			utils.GCModePruningFlag,
 			utils.CacheDatabaseFlag,
 			utils.CacheGCFlag,
@@ -109,7 +108,6 @@ processing will proceed even if an individual RLP-file import failure occurs.`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.CacheFlag,
-			utils.SyncModeFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 		Description: `
@@ -127,7 +125,6 @@ be gzipped.`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.CacheFlag,
-			utils.SyncModeFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 		Description: `
@@ -141,7 +138,6 @@ be gzipped.`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.CacheFlag,
-			utils.SyncModeFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 		Description: `
@@ -155,7 +151,6 @@ The export-preimages command export hash preimages to an RLP encoded stream`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.CacheFlag,
-			utils.SyncModeFlag,
 			utils.FakePoWFlag,
 			utils.RopstenFlag,
 			utils.RinkebyFlag,
@@ -188,7 +183,6 @@ Remove blockchain and state databases`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.CacheFlag,
-			utils.SyncModeFlag,
 			utils.IterativeOutputFlag,
 			utils.ExcludeCodeFlag,
 			utils.ExcludeStorageFlag,
@@ -213,7 +207,6 @@ Use "ethereum dump 0" to dump the genesis block.`,
 			utils.GoerliFlag,
 			utils.YoloV1Flag,
 			utils.LegacyTestnetFlag,
-			utils.SyncModeFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 	}
@@ -409,7 +402,7 @@ func copyDb(ctx *cli.Context) error {
 	defer stack.Close()
 
 	chainConfig, chain, chainDb := utils.MakeChain(ctx, stack, false)
-	syncMode := *utils.GlobalTextMarshaler(ctx, utils.SyncModeFlag.Name).(*downloader.SyncMode)
+	syncMode := downloader.StagedSync
 
 	var syncBloom *trie.SyncBloom
 	if syncMode == downloader.FastSync {
