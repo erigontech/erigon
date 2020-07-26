@@ -46,8 +46,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
 			return err
 		}
-	}
-	if s.BlockNumber == 0 || s.WasInterrupted() {
+
 		if err := regenerateIntermediateHashes(db, datadir, expectedRootHash, quit); err != nil {
 			return err
 		}

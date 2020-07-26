@@ -31,6 +31,7 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
+	/*
 	if s.WasInterrupted() {
 		log.Info("Cleanly promoting plain state", "from", s.BlockNumber, "to", to)
 		if err := ResetHashState(db); err != nil {
@@ -42,6 +43,7 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 		}
 		return s.DoneAndUpdate(db, to)
 	}
+	*/
 
 	if s.BlockNumber > 0 { // Initial hashing of the state is performed at the previous stage
 		log.Info("Promoting plain state", "from", s.BlockNumber, "to", to)
