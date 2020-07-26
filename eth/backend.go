@@ -705,7 +705,7 @@ func (s *Ethereum) Stop() error {
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()
-	s.chainDb.Close()
+	//s.chainDb.Close()
 	s.eventMux.Stop()
 	if s.txPool != nil {
 		s.txPool.Stop()

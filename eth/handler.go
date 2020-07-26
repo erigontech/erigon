@@ -851,7 +851,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 		for _, block := range unknown {
-			fmt.Printf("Notify fetcher of the block %d hash %x\n", block.Number, block.Hash)
+			//fmt.Printf("Notify fetcher of the block %d hash %x\n", block.Number, block.Hash)
 			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies) //nolint:errcheck
 		}
 
@@ -913,11 +913,11 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		for _, hash := range hashes {
 			p.MarkTransaction(hash)
 		}
-		fmt.Printf("NewPooledTransactionHashesMsg: %d hashes\n", len(hashes))
+		//fmt.Printf("NewPooledTransactionHashesMsg: %d hashes\n", len(hashes))
 		pm.txFetcher.Notify(p.id, hashes) // nolint:errcheck
 
 	case msg.Code == GetPooledTransactionsMsg && p.version >= eth65:
-		fmt.Printf("GetPooledTransactionsMsg\n")
+		//fmt.Printf("GetPooledTransactionsMsg\n")
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -951,7 +951,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				bytes += len(encoded)
 			}
 		}
-		fmt.Printf("GetPooledTransactionsMsg sending back: %d hashes\n", len(hashes))
+		//fmt.Printf("GetPooledTransactionsMsg sending back: %d hashes\n", len(hashes))
 		return p.SendPooledTransactionsRLP(hashes, txs)
 
 	case msg.Code == TransactionMsg || (msg.Code == PooledTransactionsMsg && p.version >= eth65):
@@ -967,7 +967,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		if err := msg.Decode(&txs); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
-		fmt.Printf("TransactionMsg or PooledTransactionsMsg: %d txs\n", len(txs))
+		//fmt.Printf("TransactionMsg or PooledTransactionsMsg: %d txs\n", len(txs))
 		for i, tx := range txs {
 			// Validate and mark the remote transaction
 			if tx == nil {
