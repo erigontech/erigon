@@ -192,12 +192,17 @@ func (db *LmdbKV) Close() {
 
 	if db.env != nil {
 		db.wg.Wait()
-		if err := db.env.Close(); err != nil {
+	}
+
+	if db.env != nil {
+		env := db.env
+		db.env = nil
+		time.Sleep(100 * time.Millisecond)
+		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
 			db.log.Info("database closed (LMDB)")
 		}
-		db.env = nil
 	}
 
 	if db.opts.inMem {
