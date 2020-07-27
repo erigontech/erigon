@@ -692,6 +692,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	if len(key) != b.dupFrom && len(key) >= b.dupTo {
 		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", dbutils.Buckets[b.id], b.dupFrom, b.dupTo, key)
 	}
+
 	if len(key) != b.dupFrom {
 		_, _, err := c.cursor.Get(key, nil, lmdb.Set)
 		if err != nil {
@@ -708,17 +709,13 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		//
 		// It's not achivable, then just delete and insert
 		// maybe can be optimized in future
-		err = c.cursor.Del(0)
-		if err != nil {
-			return err
-		}
-		return c.cursor.Put(key, value, 0)
+		return c.cursor.Put(key, value, lmdb.Current)
 	}
 
 	newValue := make([]byte, 0, b.dupFrom-b.dupTo+len(value))
 	newValue = append(append(newValue, key[b.dupTo:]...), value...)
-	key = key[:b.dupTo]
 
+	key = key[:b.dupTo]
 	_, v, err := c.cursor.Get(key, newValue[:b.dupFrom-b.dupTo], lmdb.GetBothRange)
 	if err != nil { // if key not found, or found another one - then just insert
 		if lmdb.IsNotFound(err) {
@@ -728,11 +725,15 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if bytes.Equal(v[:b.dupFrom-b.dupTo], newValue[:b.dupFrom-b.dupTo]) {
-		err = c.cursor.Del(0)
-		if err != nil {
-			return err
+		if len(v) == len(newValue) { // in DupSort case lmdb.Current works only with values of same length
+			return c.cursor.Put(key, newValue, lmdb.Current)
+		} else {
+			err = c.cursor.Del(0)
+			if err != nil {
+				return err
+			}
+			return c.cursor.Put(key, newValue, 0)
 		}
-		return c.cursor.Put(key, newValue, 0)
 	}
 
 	return c.cursor.Put(key, newValue, 0)
