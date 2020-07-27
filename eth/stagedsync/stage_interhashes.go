@@ -452,6 +452,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
 		return err
 	}
+	panic(1)
 	if err := p.Unwind(s, u, true /* storage */, 0x02, r); err != nil {
 		return err
 	}
