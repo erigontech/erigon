@@ -127,8 +127,8 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		seals[len(seals)-1] = true
 	}
 
-	abort, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
-	defer close(abort)
+	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	defer cancel()
 
 	// Iterate over the headers and ensure they all check out
 	for i := 0; i < len(headers); i++ {
