@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -25,25 +26,23 @@ type remote2Opts struct {
 }
 
 type Remote2KV struct {
-	opts   remote2Opts
-	client remote.KvClient
-	conn   *grpc.ClientConn
-	log    log.Logger
+	opts     remote2Opts
+	remoteKV remote.KvClient
+	conn     *grpc.ClientConn
+	log      log.Logger
 }
 
 type remote2Tx struct {
 	ctx context.Context
 	db  *Remote2KV
 
-	handle     uint64
 	finalizers []context.CancelFunc
 }
 
 type remote2Bucket struct {
-	tx           *remote2Tx
-	bucketHandle uint64
-	initialized  bool
-	name         []byte
+	tx          *remote2Tx
+	initialized bool
+	name        []byte
 }
 
 type remote2Cursor struct {
@@ -93,10 +92,10 @@ func (opts remote2Opts) Open() (KV, error) {
 	}
 
 	return &Remote2KV{
-		opts:   opts,
-		conn:   conn,
-		client: remote.NewKvClient(conn),
-		log:    log.New("remote_db", opts.DialAddress),
+		opts:     opts,
+		conn:     conn,
+		remoteKV: remote.NewKvClient(conn),
+		log:      log.New("remote_db", opts.DialAddress),
 	}, nil
 }
 
@@ -143,22 +142,7 @@ func (db *Remote2KV) Begin(ctx context.Context, writable bool) (Tx, error) {
 }
 
 func (db *Remote2KV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	txCtx, cancel := context.WithCancel(ctx)
-	defer cancel() // rollback in any case
-
-	stream, err := db.client.View(txCtx)
-	if err != nil {
-		return err
-	}
-
-	//nolint:errcheck
-	defer stream.Send(&remote.ViewRequest{}) // signal server to rollback
-
-	tx, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	t := &remote2Tx{ctx: ctx, db: db, handle: tx.TxHandle}
+	t := &remote2Tx{ctx: ctx, db: db}
 	defer t.close()
 
 	return f(t)
@@ -186,23 +170,6 @@ func (tx *remote2Tx) Bucket(name []byte) Bucket {
 	return &remote2Bucket{tx: tx, name: name}
 }
 
-func (c *remote2Cursor) init() error {
-	if !c.bucket.initialized {
-		if err := c.bucket.init(); err != nil {
-			return err
-		}
-	}
-
-	reply, err := c.bucket.tx.db.client.Cursor(c.ctx, &remote.CursorRequest{BucketHandle: c.bucket.bucketHandle, Prefix: c.prefix})
-	if err != nil {
-		return err
-	}
-
-	c.cursorHandle = reply.CursorHandle
-	c.initialized = true
-	return nil
-}
-
 func (c *remote2Cursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
@@ -222,19 +189,6 @@ func (c *remote2Cursor) NoValues() NoValuesCursor {
 	return &remote2NoValuesCursor{remote2Cursor: c}
 }
 
-func (b *remote2Bucket) init() error {
-	reply, err := b.tx.db.client.Bucket(b.tx.ctx, &remote.BucketRequest{Name: b.name, TxHandle: b.tx.handle})
-	if err != nil {
-		return err
-	}
-	if reply.BucketHandle == 0 {
-		return fmt.Errorf("unexpected bucketHandle: 0")
-	}
-	b.bucketHandle = reply.BucketHandle
-	b.initialized = true
-	return nil
-}
-
 func (b *remote2Bucket) Size() (uint64, error) {
 	panic("not implemented")
 }
@@ -244,19 +198,14 @@ func (b *remote2Bucket) Clear() error {
 }
 
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
-	if !b.initialized {
-		err = b.init()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	reply, err := b.tx.db.client.Get(b.tx.ctx, &remote.GetRequest{BucketHandle: b.bucketHandle, Key: key})
+	k, v, err := b.Cursor().Seek(key)
 	if err != nil {
-		fmt.Printf("%s\n", err)
 		return nil, err
 	}
-	return reply.Value, nil
+	if !bytes.Equal(key, k) {
+		return nil, nil
+	}
+	return v, nil
 }
 
 func (b *remote2Bucket) Put(key []byte, value []byte) error {
@@ -287,13 +236,9 @@ func (c *remote2Cursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
+// Seek - doesn't start streaming (because much of code does only several .Seek cals without reading sequenceof data)
+// .Next() - does request streaming (if configured by user)
 func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if !c.initialized {
-		if err := c.init(); err != nil {
-			return []byte{}, nil, err
-		}
-	}
-
 	if c.stream != nil {
 		c.streamClose()
 	}
@@ -303,11 +248,11 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	c.bucket.tx.finalizers = append(c.bucket.tx.finalizers, c.streamClose)
 
 	var err error
-	c.stream, err = c.bucket.tx.db.client.Seek(streamCtx)
+	c.stream, err = c.bucket.tx.db.remoteKV.Seek(streamCtx)
 	if err != nil {
 		return []byte{}, nil, err
 	}
-	err = c.stream.Send(&remote.SeekRequest{CursorHandle: c.cursorHandle, SeekKey: seek, StartSreaming: false})
+	err = c.stream.Send(&remote.SeekRequest{BucketName: c.bucket.name, SeekKey: seek, Prefix: c.prefix, StartSreaming: false})
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -324,11 +269,13 @@ func (c *remote2Cursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	return c.Seek(seek)
 }
 
+// Next - returns next data element from server, request streaming (if configured by user)
 func (c *remote2Cursor) Next() ([]byte, []byte, error) {
 	if !c.initialized {
 		return c.First()
 	}
 
+	// if streaming not requested, server will send data only when remoteKV send message to bi-directional channel
 	if !c.streamingRequested {
 		doStream := c.prefetch > 1
 		if err := c.stream.Send(&remote.SeekRequest{StartSreaming: doStream}); err != nil {

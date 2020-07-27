@@ -8,41 +8,17 @@ option java_package = "io.turbo-geth.db";
 option java_outer_classname = "KV";
 
 service Kv {
-  // create new read-only transaction, returns tx's handle (uint64). rollback it if client gone, send message, or cancel context
-  rpc View(stream ViewRequest) returns (stream ViewReply);
-  // open a bucket with given name, returns bucket's handle (uint64)
-  rpc Bucket(BucketRequest) returns (BucketReply);
-  // open a cursor, returns cursor's handle (uint64).
+  // open a cursor on given position of given bucket
   // if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
-  rpc Cursor(CursorRequest) returns (CursorReply);
+  // if streaming not requested - streams next data only when clients sends message to bi-directional channel
+  // no full consistency guarantee - server implementation can close/open underlying db transaction at any time
   rpc Seek(stream SeekRequest) returns (stream Pair);
-  rpc Get(GetRequest) returns (GetReply);
-}
-
-message ViewRequest {}
-message ViewReply {
-  uint64 txHandle = 1;
-}
-
-message BucketRequest {
-  uint64 txHandle = 1;
-  bytes name = 2;
-}
-message BucketReply {
-  uint64 bucketHandle = 1;
-}
-
-message CursorRequest {
-  uint64 bucketHandle = 1;
-  bytes prefix = 2;
-}
-message CursorReply {
-  uint64 cursorHandle = 1;
 }
 
 message SeekRequest {
-  uint64 cursorHandle = 1;
-  bytes seekKey = 3;
+  bytes bucketName = 1;
+  bytes seekKey = 2; // streaming start from this key
+  bytes prefix = 3;  // streaming stops when see first key without given prefix
   bool startSreaming = 4;
 }
 
@@ -54,12 +30,4 @@ message Pair {
 message PairKey {
   bytes key = 1;
   uint64 vSize = 2;
-}
-
-message GetRequest {
-  uint64 bucketHandle = 1;
-  bytes key = 2;
-}
-message GetReply {
-  bytes value = 1;
 }

@@ -17,13 +17,10 @@ const _ = grpc.SupportPackageIsVersion6
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type KvClient interface {
-	// create new read-only transaction, returns tx's handle (uint64). rollback it if client gone, send message, or cancel context
-	View(ctx context.Context, opts ...grpc.CallOption) (Kv_ViewClient, error)
-	// open a bucket with given name, returns bucket's handle (uint64)
-	Bucket(ctx context.Context, in *BucketRequest, opts ...grpc.CallOption) (*BucketReply, error)
-	// open a cursor, returns cursor's handle (uint64).
+	// open a cursor on given position of given bucket
 	// if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
-	Cursor(ctx context.Context, in *CursorRequest, opts ...grpc.CallOption) (*CursorReply, error)
+	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
+	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
 	Seek(ctx context.Context, opts ...grpc.CallOption) (Kv_SeekClient, error)
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetReply, error)
 }
@@ -36,57 +33,8 @@ func NewKvClient(cc grpc.ClientConnInterface) KvClient {
 	return &kvClient{cc}
 }
 
-func (c *kvClient) View(ctx context.Context, opts ...grpc.CallOption) (Kv_ViewClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_Kv_serviceDesc.Streams[0], "/ethdb.Kv/View", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &kvViewClient{stream}
-	return x, nil
-}
-
-type Kv_ViewClient interface {
-	Send(*ViewRequest) error
-	Recv() (*ViewReply, error)
-	grpc.ClientStream
-}
-
-type kvViewClient struct {
-	grpc.ClientStream
-}
-
-func (x *kvViewClient) Send(m *ViewRequest) error {
-	return x.ClientStream.SendMsg(m)
-}
-
-func (x *kvViewClient) Recv() (*ViewReply, error) {
-	m := new(ViewReply)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func (c *kvClient) Bucket(ctx context.Context, in *BucketRequest, opts ...grpc.CallOption) (*BucketReply, error) {
-	out := new(BucketReply)
-	err := c.cc.Invoke(ctx, "/ethdb.Kv/Bucket", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *kvClient) Cursor(ctx context.Context, in *CursorRequest, opts ...grpc.CallOption) (*CursorReply, error) {
-	out := new(CursorReply)
-	err := c.cc.Invoke(ctx, "/ethdb.Kv/Cursor", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *kvClient) Seek(ctx context.Context, opts ...grpc.CallOption) (Kv_SeekClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_Kv_serviceDesc.Streams[1], "/ethdb.Kv/Seek", opts...)
+	stream, err := c.cc.NewStream(ctx, &_Kv_serviceDesc.Streams[0], "/ethdb.Kv/Seek", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -129,13 +77,10 @@ func (c *kvClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOpt
 // All implementations must embed UnimplementedKvServer
 // for forward compatibility
 type KvServer interface {
-	// create new read-only transaction, returns tx's handle (uint64). rollback it if client gone, send message, or cancel context
-	View(Kv_ViewServer) error
-	// open a bucket with given name, returns bucket's handle (uint64)
-	Bucket(context.Context, *BucketRequest) (*BucketReply, error)
-	// open a cursor, returns cursor's handle (uint64).
+	// open a cursor on given position of given bucket
 	// if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
-	Cursor(context.Context, *CursorRequest) (*CursorReply, error)
+	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
+	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
 	Seek(Kv_SeekServer) error
 	Get(context.Context, *GetRequest) (*GetReply, error)
 	mustEmbedUnimplementedKvServer()
@@ -145,15 +90,6 @@ type KvServer interface {
 type UnimplementedKvServer struct {
 }
 
-func (*UnimplementedKvServer) View(Kv_ViewServer) error {
-	return status.Errorf(codes.Unimplemented, "method View not implemented")
-}
-func (*UnimplementedKvServer) Bucket(context.Context, *BucketRequest) (*BucketReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Bucket not implemented")
-}
-func (*UnimplementedKvServer) Cursor(context.Context, *CursorRequest) (*CursorReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Cursor not implemented")
-}
 func (*UnimplementedKvServer) Seek(Kv_SeekServer) error {
 	return status.Errorf(codes.Unimplemented, "method Seek not implemented")
 }
@@ -164,68 +100,6 @@ func (*UnimplementedKvServer) mustEmbedUnimplementedKvServer() {}
 
 func RegisterKvServer(s *grpc.Server, srv KvServer) {
 	s.RegisterService(&_Kv_serviceDesc, srv)
-}
-
-func _Kv_View_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(KvServer).View(&kvViewServer{stream})
-}
-
-type Kv_ViewServer interface {
-	Send(*ViewReply) error
-	Recv() (*ViewRequest, error)
-	grpc.ServerStream
-}
-
-type kvViewServer struct {
-	grpc.ServerStream
-}
-
-func (x *kvViewServer) Send(m *ViewReply) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func (x *kvViewServer) Recv() (*ViewRequest, error) {
-	m := new(ViewRequest)
-	if err := x.ServerStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func _Kv_Bucket_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BucketRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(KvServer).Bucket(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/ethdb.Kv/Bucket",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KvServer).Bucket(ctx, req.(*BucketRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Kv_Cursor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CursorRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(KvServer).Cursor(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/ethdb.Kv/Cursor",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KvServer).Cursor(ctx, req.(*CursorRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Kv_Seek_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -277,25 +151,11 @@ var _Kv_serviceDesc = grpc.ServiceDesc{
 	HandlerType: (*KvServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Bucket",
-			Handler:    _Kv_Bucket_Handler,
-		},
-		{
-			MethodName: "Cursor",
-			Handler:    _Kv_Cursor_Handler,
-		},
-		{
 			MethodName: "Get",
 			Handler:    _Kv_Get_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "View",
-			Handler:       _Kv_View_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
 		{
 			StreamName:    "Seek",
 			Handler:       _Kv_Seek_Handler,

@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
@@ -41,22 +42,6 @@ func NewServer2(kv ethdb.KV) *Server2 {
 	}
 }
 
-func (s *Server2) View(stream remote.Kv_ViewServer) error {
-	txHandle, err := s.begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		s.rollback(txHandle)
-	}()
-
-	if err := stream.Send(&remote.ViewReply{TxHandle: txHandle}); err != nil {
-		return err
-	}
-	_, _ = stream.Recv() // block until client gone, send message or cancel context
-	return nil
-}
-
 func (s *Server2) begin() (uint64, error) {
 	tx, err := s.kv.Begin(context.Background(), false)
 	if err != nil {
@@ -89,57 +74,40 @@ func (s *Server2) rollback(txHandle uint64) {
 	}
 	tx := s.txs[txHandle]
 	if tx != nil {
+		fmt.Printf("Rollback 1\n")
 		tx.Rollback()
+	} else {
+		fmt.Printf("Rollback 2\n")
 	}
 	delete(s.bucketByTx, txHandle)
 	delete(s.txs, txHandle)
 }
 
-func (s *Server2) Bucket(ctx context.Context, in *remote.BucketRequest) (out *remote.BucketReply, err error) {
+func (s *Server2) bucket(txHandle uint64, name []byte) (ethdb.Bucket, uint64, error) {
 	s.Lock()
 	defer s.Unlock()
-	bucket := s.txs[in.TxHandle].Bucket(in.Name)
+	bucket := s.txs[txHandle].Bucket(name)
 	s.lastHandle++
 	bucketHandle := s.lastHandle
 	s.buckets[bucketHandle] = bucket
-	s.bucketByTx[in.TxHandle] = append(s.bucketByTx[in.TxHandle], bucketHandle)
-	return &remote.BucketReply{BucketHandle: bucketHandle}, nil
+	s.bucketByTx[txHandle] = append(s.bucketByTx[txHandle], bucketHandle)
+	return bucket, bucketHandle, nil
 }
 
-func (s *Server2) Cursor(ctx context.Context, in *remote.CursorRequest) (out *remote.CursorReply, err error) {
-	s.Lock()
-	defer s.Unlock()
-	bucket, ok := s.buckets[in.BucketHandle]
-	if !ok {
-		return nil, fmt.Errorf("bucket not found for .Cursor(): %d", in.BucketHandle)
-	}
-
-	c := bucket.Cursor().Prefix(in.Prefix)
-	s.lastHandle++
-	cursorHandle := s.lastHandle
-	s.cursors[cursorHandle] = c
-	s.cursorsByBucket[in.BucketHandle] = append(s.cursorsByBucket[in.BucketHandle], cursorHandle)
-	return &remote.CursorReply{CursorHandle: cursorHandle}, nil
-}
-
-func (s *Server2) bucket(bucketHandle uint64) (ethdb.Bucket, error) {
+func (s *Server2) cursor(bucketHandle uint64, prefix []byte) (ethdb.Cursor, func(), error) {
 	s.Lock()
 	defer s.Unlock()
 	bucket, ok := s.buckets[bucketHandle]
 	if !ok {
-		return nil, fmt.Errorf("bucket not found: %d", bucketHandle)
+		return nil, nil, fmt.Errorf("bucket not found: %d", bucketHandle)
 	}
-	return bucket, nil
-}
 
-func (s *Server2) cursor(cursorHandle uint64) (ethdb.Cursor, func(), error) {
-	s.Lock()
-	defer s.Unlock()
+	c := bucket.Cursor().Prefix(prefix)
+	s.lastHandle++
+	cursorHandle := s.lastHandle
+	s.cursors[cursorHandle] = c
+	s.cursorsByBucket[bucketHandle] = append(s.cursorsByBucket[bucketHandle], cursorHandle)
 
-	c, ok := s.cursors[cursorHandle]
-	if !ok {
-		return nil, nil, fmt.Errorf("cursor not found: %d", cursorHandle)
-	}
 	closer := func() {}
 	if casted, ok := c.(io.Closer); ok && casted != nil {
 		closer = func() {
@@ -156,9 +124,24 @@ func (s *Server2) Seek(stream remote.Kv_SeekServer) error {
 	if recvErr != nil {
 		return recvErr
 	}
-	c, closer, cursorErr := s.cursor(in.CursorHandle)
-	if cursorErr != nil {
-		return cursorErr
+
+	txHandle, err := s.begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		s.rollback(txHandle)
+	}()
+
+	b, bucketHandle, err := s.bucket(txHandle, in.BucketName)
+	if err != nil {
+		return nil
+	}
+
+	_ = b
+	c, closer, err := s.cursor(bucketHandle, in.Prefix)
+	if err != nil {
+		return nil
 	}
 	defer closer()
 
@@ -168,7 +151,7 @@ func (s *Server2) Seek(stream remote.Kv_SeekServer) error {
 			return err
 		}
 
-		err = stream.Send(&remote.Pair{Key: k, Value: v})
+		err = stream.Send(&remote.Pair{Key: common.CopyBytes(k), Value: common.CopyBytes(v)})
 		if err != nil {
 			return err
 		}
@@ -184,18 +167,4 @@ func (s *Server2) Seek(stream remote.Kv_SeekServer) error {
 			}
 		}
 	}
-}
-
-func (s *Server2) Get(ctx context.Context, in *remote.GetRequest) (out *remote.GetReply, err error) {
-	b, err := s.bucket(in.BucketHandle)
-	if err != nil {
-		return nil, err
-	}
-
-	v, err := b.Get(in.Key)
-	if err != nil {
-		return nil, err
-	}
-	return &remote.GetReply{Value: v}, nil
-
 }
