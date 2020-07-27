@@ -36,8 +36,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 
-	fromScratch := s.BlockNumber == 0 || s.WasInterrupted()
-	if fromScratch {
+	if s.BlockNumber == 0 {
 		log.Info("Initial hashing plain state", "to", to)
 		if err := ResetHashState(db); err != nil {
 			return err
@@ -423,19 +422,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
-	if fromScratch {
-		log.Info("Generate intermediate hashes cleanly")
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-		log.Debug("Clean done")
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
-			return err
-		}
-		log.Info("Create hashing state done")
-		// here we are on same block as Exec step
-	}
+
 	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
 		return err
 	}

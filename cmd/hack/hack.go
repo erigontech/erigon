@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1853,8 +1855,8 @@ func fixStages(chaindata string) error {
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
 		list = append(list, progress)
 	}
-	for stage := stages.IntermediateHashes; stage < stages.TxLookup; stage++ {
-		if err = stages.SaveStageProgress(db, stage+1, list[int(stage)], nil); err != nil {
+	for stage := stages.IntermediateHashes; stage < stages.HashState; stage++ {
+		if err = stages.SaveStageProgress(db, stage, list[int(stage)-1], nil); err != nil {
 			return err
 		}
 	}
@@ -2001,6 +2003,57 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	}); err != nil {
 		return err
 	}
+	return nil
+}
+
+func runDosBlock(chaindata string) error {
+	fmt.Printf("Running dos tx in a block\n")
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	engine := ethash.NewFaker()
+	bcb, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, engine, vm.Config{}, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
+	batch := db.NewBatch()
+	stateReader := state.NewPlainStateReader(db)
+	stateWriter := state.NewPlainStateWriter(batch, 10000000)
+	ibs := state.New(stateReader)
+	var receipts types.Receipts
+	usedGas := new(uint64)
+	gp := new(core.GasPool).AddGas(11000000)
+	noop := state.NewNoopWriter()
+	header := &types.Header{Number: big.NewInt(10000000), Difficulty: big.NewInt(10)}
+	tx := types.NewContractCreation(0, uint256.NewInt(), 10000000, uint256.NewInt(), []byte{
+		byte(vm.JUMPDEST),
+		byte(vm.GAS),
+		byte(vm.EXTCODEHASH),
+		byte(vm.PUSH1), 0x0,
+		byte(vm.JUMP),
+	})
+
+	receipt, err := core.ApplyTransaction(params.MainnetChainConfig, bcb, nil, gp, ibs, noop, header, tx, usedGas, vm.Config{}, nil)
+	if err != nil {
+		return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+	}
+	fmt.Printf("Receipt: status %d, gas used: %d\n", receipt.Status, receipt.GasUsed)
+	receipts = append(receipts, receipt)
+	types.DeriveSha(receipts)
+
+	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	if _, err := engine.FinalizeAndAssemble(params.MainnetChainConfig, header, ibs, types.Transactions{tx}, []*types.Header{}, receipts); err != nil {
+		return fmt.Errorf("finalize of block ailed: %v", err)
+	}
+
+	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
+		return fmt.Errorf("committing block failed: %v", err)
+	}
+
+	if err := stateWriter.WriteChangeSets(); err != nil {
+		return fmt.Errorf("writing changesets failed: %v", err)
+	}
+	fmt.Printf("Took %s\n", time.Since(start))
 	return nil
 }
 
@@ -2166,5 +2219,9 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-
+	if *action == "dos" {
+		if err := runDosBlock(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
 }

@@ -26,6 +26,7 @@ func PrepareStagedSync(
 	headersFetchers []func() error,
 	dests vm.Cache,
 	txPool *core.TxPool,
+	poolStart func() error,
 	changeSetHook ChangeSetHook,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
@@ -145,7 +146,7 @@ func PrepareStagedSync(
 			ID:          stages.TxPool,
 			Description: "Starts the transaction pool",
 			ExecFunc: func(s *StageState, _ Unwinder) error {
-				return spawnTxPool(s, stateDB, txPool, quitCh)
+				return spawnTxPool(s, stateDB, txPool, poolStart, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindTxPool(u, s, stateDB, txPool, quitCh)
