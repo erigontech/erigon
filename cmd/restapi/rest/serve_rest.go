@@ -20,7 +20,7 @@ func printError(name string, err error) {
 	}
 }
 
-func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaindata string) error {
+func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) error {
 	r := gin.Default()
 	root := r.Group("api/v1")
 	allowCORS(root)
@@ -34,8 +34,8 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 	var kv ethdb.KV
 	var db ethdb.Database
 	var err error
-	if remoteDBAddress != "" {
-		kv, err = ethdb.NewRemote().Path(remoteDBAddress).Open()
+	if rpcHost != "" {
+		kv, err = ethdb.NewRemote().Path(rpcHost).Open()
 		db = ethdb.NewObjectDatabase(kv)
 	} else if chaindata != "" {
 		database, errOpen := ethdb.Open(chaindata)
@@ -53,7 +53,7 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 	e := &apis.Env{
 		KV:              kv,
 		DB:              db,
-		RemoteDBAddress: remoteDBAddress,
+		RemoteDBAddress: rpcHost,
 		Chaindata:       chaindata,
 	}
 
@@ -76,9 +76,9 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string, chaind
 		return err
 	}
 
-	log.Printf("serving on %v... press ctrl+C to abort\n", localAddress)
+	log.Printf("serving on %v... press ctrl+C to abort\n", restHost)
 
-	srv := &http.Server{Addr: localAddress, Handler: r}
+	srv := &http.Server{Addr: restHost, Handler: r}
 
 	// Initializing the server in a goroutine so that
 	// it won't block the graceful shutdown handling below

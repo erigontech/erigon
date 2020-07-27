@@ -18,13 +18,13 @@ import (
 )
 
 type Config struct {
-	remoteDbAddress  string
-	chaindata        string
-	rpcListenAddress string
-	rpcPort          int
-	rpcCORSDomain    string
-	rpcVirtualHost   string
-	rpcAPI           string
+	privateApiAddr    string
+	chaindata         string
+	httpListenAddress string
+	httpPort          int
+	httpCORSDomain    string
+	httpVirtualHost   string
+	API               string
 }
 
 var (
@@ -36,15 +36,15 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
+	rootCmd.PersistentFlags().StringVar(&cpuprofile, "pprof.cpuprofile", "", "write cpu profile `file`")
 	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
-	rootCmd.Flags().StringVar(&cfg.remoteDbAddress, "remote-db-addr", "", "address of remote DB listener of a turbo-geth node")
+	rootCmd.Flags().StringVar(&cfg.privateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.Flags().StringVar(&cfg.chaindata, "chaindata", "", "path to the database")
-	rootCmd.Flags().StringVar(&cfg.rpcListenAddress, "rpcaddr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.Flags().IntVar(&cfg.rpcPort, "rpcport", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.Flags().StringVar(&cfg.rpcCORSDomain, "rpccorsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.Flags().StringVar(&cfg.rpcVirtualHost, "rpcvhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.Flags().StringVar(&cfg.rpcAPI, "rpcapi", "", "API's offered over the HTTP-RPC interface")
+	rootCmd.Flags().StringVar(&cfg.httpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.Flags().IntVar(&cfg.httpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.Flags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
+	rootCmd.Flags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.Flags().StringVar(&cfg.API, "http.api", "", "API's offered over the HTTP-RPC interface")
 }
 
 var rootCmd = &cobra.Command{

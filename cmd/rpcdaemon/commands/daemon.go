@@ -338,14 +338,18 @@ func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
 }
 
 func daemon(cmd *cobra.Command, cfg Config) {
-	vhosts := splitAndTrim(cfg.rpcVirtualHost)
-	cors := splitAndTrim(cfg.rpcCORSDomain)
-	enabledApis := splitAndTrim(cfg.rpcAPI)
+	vhosts := splitAndTrim(cfg.httpVirtualHost)
+	cors := splitAndTrim(cfg.httpCORSDomain)
+	enabledApis := splitAndTrim(cfg.API)
 
 	var db ethdb.KV
 	var err error
-	if cfg.remoteDbAddress != "" {
-		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
+	if cfg.privateApiAddr != "" {
+		db, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		if err != nil {
+			log.Error("Could not connect to remoteDb", "error", err)
+			return
+		}
 	} else if cfg.chaindata != "" {
 		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
 			db = database.KV()
@@ -355,6 +359,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	} else {
 		err = fmt.Errorf("either remote db or bolt db must be specified")
 	}
+
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
@@ -362,7 +367,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 
 	var rpcAPI = GetAPI(db, enabledApis)
 
-	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
+	httpEndpoint := fmt.Sprintf("%s:%d", cfg.httpListenAddress, cfg.httpPort)
 
 	// register apis and create handler stack
 	srv := rpc.NewServer()

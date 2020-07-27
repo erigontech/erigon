@@ -78,7 +78,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
 	db := &LmdbKV{
@@ -189,15 +189,20 @@ func (db *LmdbKV) Close() {
 	if db.stopStaleReadsCheck != nil {
 		db.stopStaleReadsCheck()
 	}
-	db.wg.Wait()
 
 	if db.env != nil {
-		if err := db.env.Close(); err != nil {
+		db.wg.Wait()
+	}
+
+	if db.env != nil {
+		env := db.env
+		db.env = nil
+		time.Sleep(10 * time.Millisecond) // TODO: remove after consensus/ethash/consensus.go:VerifyHeaders will spawn controllable goroutines
+		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
 			db.log.Info("database closed (LMDB)")
 		}
-		db.env = nil
 	}
 
 	if db.opts.inMem {
@@ -333,7 +338,7 @@ func (tx *lmdbTx) closeCursors() {
 			c.Close()
 		}
 	}
-	tx.cursors = tx.cursors[:0]
+	tx.cursors = []*lmdb.Cursor{}
 }
 
 func (c *LmdbCursor) Prefix(v []byte) Cursor {
@@ -575,6 +580,14 @@ func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 		if !ok {
 			return nil
 		}
+	}
+	return nil
+}
+
+func (c *LmdbCursor) Close() error {
+	if c.cursor != nil {
+		c.cursor.Close()
+		c.cursor = nil
 	}
 	return nil
 }

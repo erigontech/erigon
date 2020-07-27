@@ -241,6 +241,10 @@ func (db *BoltKV) IdealBatchSize() int {
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	if db.bolt == nil {
+		return nil, fmt.Errorf("db closed")
+	}
+
 	t := &boltTx{db: db, ctx: ctx}
 	var err error
 	t.bolt, err = db.bolt.Begin(writable)
@@ -248,6 +252,10 @@ func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.bolt == nil {
+		return fmt.Errorf("db closed")
+	}
+
 	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.View(func(tx *bolt.Tx) error {
 		t.bolt = tx
@@ -256,6 +264,10 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.bolt == nil {
+		return fmt.Errorf("db closed")
+	}
+
 	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.Update(func(tx *bolt.Tx) error {
 		t.bolt = tx
@@ -264,12 +276,19 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *boltTx) Commit(ctx context.Context) error {
+	if tx.bolt == nil {
+		return fmt.Errorf("db closed")
+	}
+
 	return tx.bolt.Commit()
 }
 
 func (tx *boltTx) Rollback() {
+	if tx.bolt == nil {
+		return
+	}
 	if err := tx.bolt.Rollback(); err != nil {
-		tx.db.log.Warn("bolt rollback failed", "err", err)
+		log.Warn("bolt rollback failed", "err", err)
 	}
 }
 

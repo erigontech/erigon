@@ -633,7 +633,6 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-
 	decoder := codecpool.Decoder(b.in)
 	defer codecpool.Return(decoder)
 	encoder := codecpool.Encoder(b.out)
@@ -834,13 +833,11 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 		return nil, nil, c.ctx.Err()
 	default:
 	}
-
 	if !c.initialized {
 		if err := c.init(); err != nil {
 			return nil, nil, err
 		}
 	}
-
 	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
 
 	select {

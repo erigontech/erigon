@@ -80,7 +80,7 @@ type Ethereum struct {
 
 	// DB interfaces
 	chainDb *ethdb.ObjectDatabase // Block chain database
-	chainKV ethdb.KV       // Same as chainDb, but different interface
+	chainKV ethdb.KV              // Same as chainDb, but different interface
 
 	eventMux       *event.TypeMux
 	engine         consensus.Engine
@@ -99,7 +99,7 @@ type Ethereum struct {
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
 
-	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	lock          sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	txPoolStarted bool
 }
 
@@ -154,8 +154,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			return nil, err
 		}
 	}
-	if ctx.Config.RemoteDbListenAddress != "" {
-		remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.RemoteDbListenAddress)
+	if ctx.Config.PrivateApiAddr != "" {
+		//remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.PrivateApiAddr)
+		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
