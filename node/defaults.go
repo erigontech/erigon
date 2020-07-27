@@ -17,10 +17,12 @@
 package node
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
@@ -54,6 +56,8 @@ var DefaultConfig = Config{
 	},
 }
 
+const dirname = "TurboGeth"
+
 // DefaultDataDir is the default data directory to use for the databases and other
 // persistence requirements.
 func DefaultDataDir() string {
@@ -62,19 +66,19 @@ func DefaultDataDir() string {
 	if home != "" {
 		switch runtime.GOOS {
 		case "darwin":
-			return filepath.Join(home, "Library", "Ethereum")
+			return filepath.Join(home, "Library", dirname)
 		case "windows":
 			// We used to put everything in %HOME%\AppData\Roaming, but this caused
 			// problems with non-typical setups. If this fallback location exists and
 			// is non-empty, use it, otherwise DTRT and check %LOCALAPPDATA%.
-			fallback := filepath.Join(home, "AppData", "Roaming", "Ethereum")
+			fallback := filepath.Join(home, "AppData", "Roaming", dirname)
 			appdata := windowsAppData()
 			if appdata == "" || isNonEmptyDir(fallback) {
 				return fallback
 			}
-			return filepath.Join(appdata, "Ethereum")
+			return filepath.Join(appdata, dirname)
 		default:
-			return filepath.Join(home, ".ethereum")
+			return filepath.Join(home, fmt.Sprintf(".%s", strings.ToLower(dirname)))
 		}
 	}
 	// As we cannot guess a stable location, return empty and handle later
