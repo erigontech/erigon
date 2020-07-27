@@ -139,7 +139,7 @@ func tester(cliCtx *cli.Context) error {
 		panic(fmt.Sprintf("Failed to create fork generator: %v", err))
 	}
 	defer forkGen.Close()
-	tp1 := NewTesterProtocol(true /* fork */)
+	tp1 := NewTesterProtocol("tp1", true /* fork */, true /* debug */)
 	tp1.blockFeeder = blockGen
 	tp1.forkBase = forkBase
 	tp1.forkHeight = forkHeight
@@ -153,19 +153,20 @@ func tester(cliCtx *cli.Context) error {
 		panic(fmt.Errorf("could not start server 1: %w", err))
 	}
 	server1.AddPeer(nodeToConnect)
-	/*
-		tp2 := NewTesterProtocol(false)
-		tp2.blockFeeder = blockGen
-		tp2.protocolVersion = uint32(eth.ProtocolVersions[0])
-		tp2.networkId = 1 // Mainnet
-		tp2.genesisBlockHash = blockGen.Genesis().Hash()
-		server2 := makeP2PServer(ctx, tp2, []string{eth.ProtocolName})
-		// Add protocol
-		if err := server2.Start(); err != nil {
-			panic(fmt.Errorf("could not start server 2: %w", err))
-		}
-		server2.AddPeer(nodeToConnect)
-	*/
+	
+	tp2 := NewTesterProtocol("tp2", false, false)
+	tp2.blockFeeder = blockGen
+	tp2.protocolVersion = uint32(eth.ProtocolVersions[0])
+	tp2.networkId = 1 // Mainnet
+	tp2.genesisBlockHash = blockGen.Genesis().Hash()
+	server2 := makeP2PServer(ctx, tp2, []string{eth.ProtocolName})
+	tp1.WaitForFork(ctx)
+	// Add protocol
+	if err := server2.Start(); err != nil {
+		panic(fmt.Errorf("could not start server 2: %w", err))
+	}
+	server2.AddPeer(nodeToConnect)
+	
 	<-ctx.Done()
 	return nil
 }

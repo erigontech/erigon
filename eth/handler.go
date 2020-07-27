@@ -1033,6 +1033,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
+		log.Warn("Sent back the DebugSetGenesisMsg")
 		return nil
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
