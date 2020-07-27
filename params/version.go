@@ -20,23 +20,39 @@ import (
 	"fmt"
 )
 
+// see https://calver.org
 const (
-	VersionMajor = 1        // Major version component of the current release
-	VersionMinor = 9        // Minor version component of the current release
-	VersionPatch = 15       // Patch version component of the current release
-	VersionMeta  = "stable" // Version metadata to append to the version string
+	VersionMajor    = 2020    // Major version component of the current release
+	VersionMinor    = 7       // Minor version component of the current release
+	VersionMicro    = 0       // Patch version component of the current release
+	VersionModifier = "alpha" // Patch version component of the current release
 )
+
+func withModifier(vsn string) string {
+	if !isStable() {
+		vsn += "-" + VersionModifier
+	}
+	return vsn
+}
+
+func isStable() bool {
+	return VersionModifier == "stable"
+}
+
+func isRelease() bool {
+	return isStable() || VersionModifier == "alpha" || VersionModifier == "beta"
+}
 
 // Version holds the textual version string.
 var Version = func() string {
-	return fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionPatch)
+	return fmt.Sprintf("%d.%02d.%d", VersionMajor, VersionMinor, VersionMicro)
 }()
 
 // VersionWithMeta holds the textual version string including the metadata.
 var VersionWithMeta = func() string {
 	v := Version
-	if VersionMeta != "" {
-		v += "-" + VersionMeta
+	if VersionModifier != "" {
+		v += "-" + VersionModifier
 	}
 	return v
 }()
@@ -45,10 +61,7 @@ var VersionWithMeta = func() string {
 // e.g. "1.8.11-dea1ce05" for stable releases, or
 //      "1.8.13-unstable-21c059b6" for unstable releases
 func ArchiveVersion(gitCommit string) string {
-	vsn := Version
-	if VersionMeta != "stable" {
-		vsn += "-" + VersionMeta
-	}
+	vsn := withModifier(Version)
 	if len(gitCommit) >= 8 {
 		vsn += "-" + gitCommit[:8]
 	}
@@ -60,7 +73,7 @@ func VersionWithCommit(gitCommit, gitDate string) string {
 	if len(gitCommit) >= 8 {
 		vsn += "-" + gitCommit[:8]
 	}
-	if (VersionMeta != "stable") && (gitDate != "") {
+	if !isRelease() && (gitDate != "") {
 		vsn += "-" + gitDate
 	}
 	return vsn
