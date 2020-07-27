@@ -205,18 +205,20 @@ func copyCompact() error {
 		defer wg.Done()
 
 		for {
+			time.Sleep(20 * time.Second)
+
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
+
 			f2, err := os.Stat(path.Join(to, "data.mdb"))
 			if err != nil {
 				log.Error("Progress check failed", "err", err)
 				return
 			}
 			log.Info("Progress", "done", common.StorageSize(f2.Size()), "from", common.StorageSize(f.Size()))
-			time.Sleep(20 * time.Second)
 		}
 	}()
 
