@@ -221,7 +221,7 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainReader, header *types.Head
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
