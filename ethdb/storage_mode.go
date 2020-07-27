@@ -63,25 +63,25 @@ func GetStorageModeFromDB(db Database) (StorageMode, error) {
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.History = len(v) > 0
+	sm.History = len(v) == 1 && v[0] == 1
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModePreImages)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.Preimages = len(v) > 0
+	sm.Preimages = len(v) == 1 && v[0] == 1
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.Receipts = len(v) > 0
+	sm.Receipts = len(v) == 1 && v[0] == 1
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.TxIndex = len(v) > 0
+	sm.TxIndex = len(v) == 1 && v[0] == 1
 
 	return sm, nil
 }
@@ -119,7 +119,7 @@ func setModeOnEmpty(db Database, key []byte, currentValue bool) error {
 		return err
 	}
 	if errors.Is(err, ErrKeyNotFound) {
-		val := []byte{}
+		val := []byte{2}
 		if currentValue {
 			val = []byte{1}
 		}
