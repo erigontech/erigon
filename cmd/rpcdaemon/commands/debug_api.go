@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -59,7 +60,8 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 		if number == rpc.LatestBlockNumber {
 			var err error
-			blockNumber, err = rawdb.ReadLastBlockNumber(api.dbReader)
+
+			blockNumber, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("las block has not found: %w", err)
 			}
@@ -100,10 +102,12 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, s
 		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum.Int64(), endNum.Int64())
 	}
 
-	lastBlockNumber, err := rawdb.ReadLastBlockNumber(api.dbReader)
+	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
 	if err != nil {
 		return nil, err
 	}
+
+	lastBlockNumber := execution
 
 	if startNum.Int64() < 1 || uint64(startNum.Int64()) > lastBlockNumber {
 		return nil, fmt.Errorf("start block %x not found", uint64(startNum.Int64()))
