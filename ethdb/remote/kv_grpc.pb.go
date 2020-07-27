@@ -13,49 +13,49 @@ import (
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion6
 
-// KvClient is the client API for Kv service.
+// KVClient is the client API for KV service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type KvClient interface {
+type KVClient interface {
 	// open a cursor on given position of given bucket
 	// if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
 	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
 	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
-	Seek(ctx context.Context, opts ...grpc.CallOption) (Kv_SeekClient, error)
+	Seek(ctx context.Context, opts ...grpc.CallOption) (KV_SeekClient, error)
 }
 
-type kvClient struct {
+type kVClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewKvClient(cc grpc.ClientConnInterface) KvClient {
-	return &kvClient{cc}
+func NewKVClient(cc grpc.ClientConnInterface) KVClient {
+	return &kVClient{cc}
 }
 
-func (c *kvClient) Seek(ctx context.Context, opts ...grpc.CallOption) (Kv_SeekClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_Kv_serviceDesc.Streams[0], "/ethdb.Kv/Seek", opts...)
+func (c *kVClient) Seek(ctx context.Context, opts ...grpc.CallOption) (KV_SeekClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_KV_serviceDesc.Streams[0], "/remote.KV/Seek", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &kvSeekClient{stream}
+	x := &kVSeekClient{stream}
 	return x, nil
 }
 
-type Kv_SeekClient interface {
+type KV_SeekClient interface {
 	Send(*SeekRequest) error
 	Recv() (*Pair, error)
 	grpc.ClientStream
 }
 
-type kvSeekClient struct {
+type kVSeekClient struct {
 	grpc.ClientStream
 }
 
-func (x *kvSeekClient) Send(m *SeekRequest) error {
+func (x *kVSeekClient) Send(m *SeekRequest) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *kvSeekClient) Recv() (*Pair, error) {
+func (x *kVSeekClient) Recv() (*Pair, error) {
 	m := new(Pair)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -63,50 +63,50 @@ func (x *kvSeekClient) Recv() (*Pair, error) {
 	return m, nil
 }
 
-// KvServer is the server API for Kv service.
-// All implementations must embed UnimplementedKvServer
+// KVServer is the server API for KV service.
+// All implementations must embed UnimplementedKVServer
 // for forward compatibility
-type KvServer interface {
+type KVServer interface {
 	// open a cursor on given position of given bucket
 	// if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
 	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
 	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
-	Seek(Kv_SeekServer) error
-	mustEmbedUnimplementedKvServer()
+	Seek(KV_SeekServer) error
+	mustEmbedUnimplementedKVServer()
 }
 
-// UnimplementedKvServer must be embedded to have forward compatible implementations.
-type UnimplementedKvServer struct {
+// UnimplementedKVServer must be embedded to have forward compatible implementations.
+type UnimplementedKVServer struct {
 }
 
-func (*UnimplementedKvServer) Seek(Kv_SeekServer) error {
+func (*UnimplementedKVServer) Seek(KV_SeekServer) error {
 	return status.Errorf(codes.Unimplemented, "method Seek not implemented")
 }
-func (*UnimplementedKvServer) mustEmbedUnimplementedKvServer() {}
+func (*UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
-func RegisterKvServer(s *grpc.Server, srv KvServer) {
-	s.RegisterService(&_Kv_serviceDesc, srv)
+func RegisterKVServer(s *grpc.Server, srv KVServer) {
+	s.RegisterService(&_KV_serviceDesc, srv)
 }
 
-func _Kv_Seek_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(KvServer).Seek(&kvSeekServer{stream})
+func _KV_Seek_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(KVServer).Seek(&kVSeekServer{stream})
 }
 
-type Kv_SeekServer interface {
+type KV_SeekServer interface {
 	Send(*Pair) error
 	Recv() (*SeekRequest, error)
 	grpc.ServerStream
 }
 
-type kvSeekServer struct {
+type kVSeekServer struct {
 	grpc.ServerStream
 }
 
-func (x *kvSeekServer) Send(m *Pair) error {
+func (x *kVSeekServer) Send(m *Pair) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *kvSeekServer) Recv() (*SeekRequest, error) {
+func (x *kVSeekServer) Recv() (*SeekRequest, error) {
 	m := new(SeekRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -114,14 +114,14 @@ func (x *kvSeekServer) Recv() (*SeekRequest, error) {
 	return m, nil
 }
 
-var _Kv_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "ethdb.Kv",
-	HandlerType: (*KvServer)(nil),
+var _KV_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "remote.KV",
+	HandlerType: (*KVServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Seek",
-			Handler:       _Kv_Seek_Handler,
+			Handler:       _KV_Seek_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

@@ -366,7 +366,6 @@ func (db *DB) Close() error {
 
 // Tx mimicks the interface of bolt.Tx
 type Tx struct {
-	db  *DB
 	ctx context.Context
 	in  io.Reader
 	out io.Writer

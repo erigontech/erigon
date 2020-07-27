@@ -2,6 +2,7 @@ package remotedbserver
 
 import (
 	"context"
+	"io"
 	"net"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 const MaxTxTTL = time.Minute
 
 type KvServer struct {
-	remote.UnimplementedKvServer // must be embedded to have forward compatible implementations.
+	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
 	kv ethdb.KV
 }
@@ -52,10 +53,9 @@ func StartGrpc(kv ethdb.KV, addr string) {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	)
-	remote.RegisterKvServer(grpcServer, kvSrv)
+	remote.RegisterKVServer(grpcServer, kvSrv)
 
 	if metrics.Enabled {
-		grpc_prometheus.EnableHandlingTimeHistogram()
 		grpc_prometheus.Register(grpcServer)
 	}
 
@@ -70,7 +70,7 @@ func NewKvServer(kv ethdb.KV) *KvServer {
 	return &KvServer{kv: kv}
 }
 
-func (s *KvServer) Seek(stream remote.Kv_SeekServer) error {
+func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 	in, recvErr := stream.Recv()
 	if recvErr != nil {
 		return recvErr
@@ -109,6 +109,9 @@ func (s *KvServer) Seek(stream remote.Kv_SeekServer) error {
 		if !in.StartSreaming {
 			in, err = stream.Recv()
 			if err != nil {
+				if err == io.EOF {
+					return nil
+				}
 				return err
 			}
 		}

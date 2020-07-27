@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -27,22 +28,20 @@ type remote2Opts struct {
 
 type Remote2KV struct {
 	opts     remote2Opts
-	remoteKV remote.KvClient
+	remoteKV remote.KVClient
 	conn     *grpc.ClientConn
 	log      log.Logger
 }
 
 type remote2Tx struct {
-	ctx context.Context
-	db  *Remote2KV
-
-	finalizers []context.CancelFunc
+	ctx     context.Context
+	db      *Remote2KV
+	cursors []remote2Cursor
 }
 
 type remote2Bucket struct {
-	tx          *remote2Tx
-	initialized bool
-	name        []byte
+	tx   *remote2Tx
+	name []byte
 }
 
 type remote2Cursor struct {
@@ -52,8 +51,7 @@ type remote2Cursor struct {
 	ctx                context.Context
 	bucket             *remote2Bucket
 	prefix             []byte
-	stream             remote.Kv_SeekClient
-	streamClose        context.CancelFunc
+	stream             remote.KV_SeekClient
 }
 
 type remote2NoValuesCursor struct {
@@ -75,17 +73,21 @@ func (opts remote2Opts) InMem(listener *bufconn.Listener) remote2Opts {
 }
 
 func (opts remote2Opts) Open() (KV, error) {
-	var dialOpts grpc.DialOption = grpc.EmptyDialOption{}
+	var dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
+		grpc.WithInsecure(),
+	}
+
 	if opts.inMemConn != nil {
-		dialOpts = grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
+		dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
 			return opts.inMemConn.Dial()
-		})
+		}))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(ctx, opts.DialAddress, grpc.WithInsecure(), dialOpts)
+	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +95,7 @@ func (opts remote2Opts) Open() (KV, error) {
 	return &Remote2KV{
 		opts:     opts,
 		conn:     conn,
-		remoteKV: remote.NewKvClient(conn),
+		remoteKV: remote.NewKVClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
 	}, nil
 }
@@ -143,7 +145,7 @@ func (db *Remote2KV) Begin(ctx context.Context, writable bool) (Tx, error) {
 
 func (db *Remote2KV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &remote2Tx{ctx: ctx, db: db}
-	defer t.close()
+	defer t.Rollback()
 
 	return f(t)
 }
@@ -156,14 +158,14 @@ func (tx *remote2Tx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")
 }
 
-func (tx *remote2Tx) close() {
-	for i := range tx.finalizers {
-		tx.finalizers[i]()
-	}
-}
-
 func (tx *remote2Tx) Rollback() {
-	panic("remote db is read-only")
+	for _, c := range tx.cursors {
+		if c.stream != nil {
+			_ = c.stream.CloseSend()
+			c.stream = nil
+		}
+	}
+	return
 }
 
 func (tx *remote2Tx) Bucket(name []byte) Bucket {
@@ -200,6 +202,7 @@ func (b *remote2Bucket) Clear() error {
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 	k, v, err := b.Cursor().Seek(key)
 	if err != nil {
+		fmt.Printf("errr3: %s\n", err)
 		return nil, err
 	}
 	if !bytes.Equal(key, k) {
@@ -240,17 +243,15 @@ func (c *remote2Cursor) First() ([]byte, []byte, error) {
 // .Next() - does request streaming (if configured by user)
 func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
-		c.streamClose()
+		_ = c.stream.CloseSend()
+		c.stream = nil
 	}
 	c.initialized = true
 
-	streamCtx, cancel := context.WithCancel(c.ctx) // cancel signaling for server that need stop streaming
-	c.streamClose = cancel
-	c.bucket.tx.finalizers = append(c.bucket.tx.finalizers, c.streamClose)
-
 	var err error
-	c.stream, err = c.bucket.tx.db.remoteKV.Seek(streamCtx)
+	c.stream, err = c.bucket.tx.db.remoteKV.Seek(c.ctx)
 	if err != nil {
+		fmt.Printf("errr2: %s\n", err)
 		return []byte{}, nil, err
 	}
 	err = c.stream.Send(&remote.SeekRequest{BucketName: c.bucket.name, SeekKey: seek, Prefix: c.prefix, StartSreaming: false})
