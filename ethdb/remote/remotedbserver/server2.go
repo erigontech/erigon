@@ -74,10 +74,7 @@ func (s *Server2) rollback(txHandle uint64) {
 	}
 	tx := s.txs[txHandle]
 	if tx != nil {
-		fmt.Printf("Rollback 1\n")
 		tx.Rollback()
-	} else {
-		fmt.Printf("Rollback 2\n")
 	}
 	delete(s.bucketByTx, txHandle)
 	delete(s.txs, txHandle)
