@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package remote;
+
+option go_package = "./remote;remote";
+option java_multiple_files = true;
+option java_package = "io.turbo-geth.db";
+option java_outer_classname = "KV";
+
+service KV {
+  // open a cursor on given position of given bucket
+  // if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
+  // if streaming not requested - streams next data only when clients sends message to bi-directional channel
+  // no full consistency guarantee - server implementation can close/open underlying db transaction at any time
+  rpc Seek(stream SeekRequest) returns (stream Pair);
+}
+
+message SeekRequest {
+  bytes bucketName = 1;
+  bytes seekKey = 2; // streaming start from this key
+  bytes prefix = 3;  // streaming stops when see first key without given prefix
+  bool startSreaming = 4;
+}
+
+message Pair {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message PairKey {
+  bytes key = 1;
+  uint64 vSize = 2;
+}

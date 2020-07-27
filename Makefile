@@ -143,7 +143,8 @@ devtools:
 	env GOBIN= go get -u golang.org/x/tools/cmd/stringer
 	env GOBIN= go get -u github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go get -u github.com/fjl/gencodec
-	env GOBIN= go get -u github.com/golang/protobuf/protoc-gen-go
+	env GOBIN= go get -u google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	env GOBIN= go get -u google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	env GOBIN= go install ./cmd/abigen
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
@@ -245,6 +246,7 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
+	go generate ./ethdb
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json

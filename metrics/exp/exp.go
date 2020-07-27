@@ -10,6 +10,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/prometheus"
+	prometheus2 "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type exp struct {
@@ -44,6 +46,9 @@ func Exp(r metrics.Registry, mux *http.ServeMux) {
 	// haven't found an elegant way, so just use a different endpoint
 	mux.Handle("/debug/metrics", h)
 	mux.Handle("/debug/metrics/prometheus", prometheus.Handler(r))
+	mux.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
+		EnableOpenMetrics: true,
+	}))
 }
 
 // ExpHandler will return an expvar powered metrics handler.
