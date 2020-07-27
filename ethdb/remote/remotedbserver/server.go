@@ -15,12 +15,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
-	"google.golang.org/grpc"
 )
 
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
 // this constant needs to be increased
-const Version uint32 = 2
+const Version uint64 = 2
 
 // Server is to be called as a go-routine, one per every client connection.
 // It runs while the connection is active and keep the entire connection's context
@@ -514,31 +513,6 @@ func encodeErr(encoder *codec.Encoder, mainError error) {
 
 var netAddr string
 var stopNetInterface context.CancelFunc
-
-func StartGrpc(kv ethdb.KV, addr string) {
-	if addr != "" {
-		netAddr = addr
-	}
-	log.Info("Starting private RPC server", "on", netAddr)
-	lis, err := net.Listen("tcp", netAddr)
-	if err != nil {
-		logger.Error("Could not create listener", "address", netAddr, "err", err)
-		return
-	}
-
-	grpcServer := grpc.NewServer(
-		grpc.NumStreamWorkers(2),   // reduce amount of goroutines
-		grpc.WriteBufferSize(1024), // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(16), // to force clients reduce concurency level
-	)
-	remote.RegisterKvServer(grpcServer, NewKvServer(kv))
-	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("private RPC server fail", "err", err)
-		}
-	}()
-}
 
 func StartDeprecated(db ethdb.KV, addr string) {
 	if stopNetInterface != nil {

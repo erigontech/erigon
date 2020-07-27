@@ -38,7 +38,7 @@ var (
 
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
 // this constant needs to be increased
-const Version uint32 = 2
+const Version uint64 = 2
 
 // Command is the type of command in the boltdb remote protocol
 type Command uint8
@@ -252,7 +252,7 @@ func (db *DB) ping(ctx context.Context) (err error) {
 		return decodeErr(decoder, responseCode)
 	}
 
-	var v uint32
+	var v uint64
 	if err := decoder.Decode(&v); err != nil {
 		return err
 	}
@@ -432,7 +432,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 		return decodeErr(decoder, responseCode)
 	}
 
-	tx := &Tx{ctx: ctx, in: in, out: out, db: db}
+	tx := &Tx{ctx: ctx, in: in, out: out}
 	opErr = f(tx)
 
 	endTxErr = db.endTx(ctx, encoder, decoder)
@@ -549,7 +549,7 @@ type Cursor struct {
 	prefetchValues bool
 	initialized    bool
 	cursorHandle   uint64
-	prefetchSize   uint32
+	prefetchSize   uint
 	cacheLastIdx   uint
 	cacheIdx       uint
 	prefix         []byte
@@ -570,7 +570,7 @@ func (c *Cursor) Prefix(v []byte) *Cursor {
 }
 
 func (c *Cursor) Prefetch(v uint) *Cursor {
-	c.prefetchSize = uint32(v)
+	c.prefetchSize = v
 	return c
 }
 
@@ -629,6 +629,11 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 		return nil, b.ctx.Err()
 	}
 
+	if !b.initialized {
+		if err := b.init(); err != nil {
+			return nil, err
+		}
+	}
 	decoder := codecpool.Decoder(b.in)
 	defer codecpool.Return(decoder)
 	encoder := codecpool.Encoder(b.out)
@@ -670,7 +675,7 @@ func (b *Bucket) Cursor() *Cursor {
 		in:     b.in,
 		out:    b.out,
 
-		prefetchSize:   uint32(DefaultCursorBatchSize),
+		prefetchSize:   DefaultCursorBatchSize,
 		prefetchValues: false,
 	}
 }
@@ -824,18 +829,17 @@ func (c *Cursor) SeekKey(seek []byte) (key []byte, vSize uint32, err error) {
 }
 
 func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
 	if !c.initialized {
 		if err := c.init(); err != nil {
 			return nil, nil, err
 		}
 	}
 	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
-
-	select {
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	default:
-	}
 
 	select {
 	default:
@@ -881,7 +885,51 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 }
 
 func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
-	return c.Seek(seek)
+	if !c.initialized {
+		if err := c.init(); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+
+	select {
+	default:
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	}
+
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
+
+	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
+		return nil, nil, fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
+	}
+	if err := encoder.Encode(c.cursorHandle); err != nil {
+		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
+	}
+	if err := encoder.Encode(&seek); err != nil {
+		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
+	}
+
+	var responseCode ResponseCode
+	if err := decoder.Decode(&responseCode); err != nil {
+		return nil, nil, fmt.Errorf("could not decode ResponseCode for CmdCursorSeekTo: %w", err)
+	}
+
+	if responseCode != ResponseOk {
+		if err := decodeErr(decoder, responseCode); err != nil {
+			return nil, nil, fmt.Errorf("could not decode errorMessage for CmdCursorSeekTo: %w", err)
+		}
+	}
+
+	if err := decodeKeyValue(decoder, &key, &value); err != nil {
+		return nil, nil, fmt.Errorf("could not decode (key, value) for CmdCursorSeekTo: %w", err)
+	}
+
+	return key, value, nil
 }
 
 func (c *Cursor) needFetchNextPage() bool {
@@ -966,7 +1014,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		}
 	}
 
-	for c.cacheLastIdx = uint(0); c.cacheLastIdx < uint(c.prefetchSize); c.cacheLastIdx++ {
+	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
 		select {
 		default:
 		case <-c.ctx.Done():
