@@ -2,11 +2,14 @@ package remotedbserver
 
 import (
 	"context"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
+
+const MaxTxTTL = time.Minute
 
 type KvServer struct {
 	remote.UnimplementedKvServer // must be embedded to have forward compatible implementations.
@@ -28,10 +31,17 @@ func (s *KvServer) Seek(stream remote.Kv_SeekServer) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	rollback := func() {
+		tx.Rollback()
+	}
+	defer rollback()
 
-	c := tx.Bucket(in.BucketName).Cursor().Prefix(in.Prefix)
+	bucketName, prefix := in.BucketName, in.Prefix // 'in' value will cahnge, but this params will immutable
 
+	c := tx.Bucket(bucketName).Cursor().Prefix(prefix)
+
+	t := time.Now()
+	i := 0
 	// send all items to client, if k==nil - stil send it to client and break loop
 	for k, v, err := c.Seek(in.SeekKey); ; k, v, err = c.Next() {
 		if err != nil {
@@ -52,6 +62,18 @@ func (s *KvServer) Seek(stream remote.Kv_SeekServer) error {
 			if err != nil {
 				return err
 			}
+		}
+
+		//TODO: protect against stale client
+		i++
+		if i%128 == 0 && time.Since(t) > MaxTxTTL {
+			tx.Rollback()
+			tx, err = s.kv.Begin(context.Background(), false)
+			if err != nil {
+				return err
+			}
+			c = tx.Bucket(bucketName).Cursor().Prefix(prefix)
+			_, _, _ = c.Seek(k)
 		}
 	}
 }
