@@ -527,9 +527,11 @@ func StartGrpc(kv ethdb.KV, addr string) {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.NumStreamWorkers(2),
-		grpc.WriteBufferSize(1024),
-		grpc.ReadBufferSize(1024))
+		grpc.NumStreamWorkers(2),   // reduce amount of goroutines
+		grpc.WriteBufferSize(1024), // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(16), // to force clients reduce concurency level
+	)
 	remote.RegisterKvServer(grpcServer, NewKvServer(kv))
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {

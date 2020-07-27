@@ -22,7 +22,6 @@ type KvClient interface {
 	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
 	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
 	Seek(ctx context.Context, opts ...grpc.CallOption) (Kv_SeekClient, error)
-	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetReply, error)
 }
 
 type kvClient struct {
@@ -64,15 +63,6 @@ func (x *kvSeekClient) Recv() (*Pair, error) {
 	return m, nil
 }
 
-func (c *kvClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetReply, error) {
-	out := new(GetReply)
-	err := c.cc.Invoke(ctx, "/ethdb.Kv/Get", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // KvServer is the server API for Kv service.
 // All implementations must embed UnimplementedKvServer
 // for forward compatibility
@@ -82,7 +72,6 @@ type KvServer interface {
 	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
 	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
 	Seek(Kv_SeekServer) error
-	Get(context.Context, *GetRequest) (*GetReply, error)
 	mustEmbedUnimplementedKvServer()
 }
 
@@ -92,9 +81,6 @@ type UnimplementedKvServer struct {
 
 func (*UnimplementedKvServer) Seek(Kv_SeekServer) error {
 	return status.Errorf(codes.Unimplemented, "method Seek not implemented")
-}
-func (*UnimplementedKvServer) Get(context.Context, *GetRequest) (*GetReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
 }
 func (*UnimplementedKvServer) mustEmbedUnimplementedKvServer() {}
 
@@ -128,33 +114,10 @@ func (x *kvSeekServer) Recv() (*SeekRequest, error) {
 	return m, nil
 }
 
-func _Kv_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(KvServer).Get(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/ethdb.Kv/Get",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KvServer).Get(ctx, req.(*GetRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 var _Kv_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "ethdb.Kv",
 	HandlerType: (*KvServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "Get",
-			Handler:    _Kv_Get_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Seek",

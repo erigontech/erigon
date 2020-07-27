@@ -143,7 +143,6 @@ devtools:
 	env GOBIN= go get -u golang.org/x/tools/cmd/stringer
 	env GOBIN= go get -u github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go get -u github.com/fjl/gencodec
-	#env GOBIN= go get -u github.com/golang/protobuf/{proto,protoc-gen-go}
 	env GOBIN= go get -u google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	env GOBIN= go get -u google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	env GOBIN= go install ./cmd/abigen
