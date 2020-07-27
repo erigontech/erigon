@@ -197,7 +197,7 @@ func (db *LmdbKV) Close() {
 	if db.env != nil {
 		env := db.env
 		db.env = nil
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) // TODO: remove after consensus/ethash/consensus.go:VerifyHeaders will spawn controllable goroutines
 		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
