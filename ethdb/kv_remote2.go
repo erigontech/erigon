@@ -46,7 +46,6 @@ type remote2Bucket struct {
 }
 
 type remote2Cursor struct {
-	cursorHandle       uint64
 	initialized        bool
 	streamingRequested bool
 	prefetch           uint32
@@ -243,6 +242,7 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
 		c.streamClose()
 	}
+	c.initialized = true
 
 	streamCtx, cancel := context.WithCancel(c.ctx) // cancel signaling for server that need stop streaming
 	c.streamClose = cancel

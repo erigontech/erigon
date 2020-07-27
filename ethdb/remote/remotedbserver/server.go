@@ -530,7 +530,7 @@ func StartGrpc(kv ethdb.KV, addr string) {
 		grpc.NumStreamWorkers(2),
 		grpc.WriteBufferSize(1024),
 		grpc.ReadBufferSize(1024))
-	remote.RegisterKvServer(grpcServer, NewServer2(kv))
+	remote.RegisterKvServer(grpcServer, NewKvServer(kv))
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
 			logger.Error("private RPC server fail", "err", err)
