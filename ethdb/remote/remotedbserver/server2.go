@@ -32,6 +32,7 @@ func StartGrpc(kv ethdb.KV, addr string) {
 		return
 	}
 
+	kvSrv := NewKvServer(kv)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -51,7 +52,11 @@ func StartGrpc(kv ethdb.KV, addr string) {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	)
-	remote.RegisterKvServer(grpcServer, NewKvServer(kv))
+	remote.RegisterKvServer(grpcServer, kvSrv)
+
+	if metrics.Enabled {
+		grpc_prometheus.Register(grpcServer)
+	}
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
