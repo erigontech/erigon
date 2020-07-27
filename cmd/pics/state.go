@@ -624,10 +624,10 @@ func initialState1() error {
 		return err
 	}
 
-	_, kv2 := ethdb.NewMemDatabase2()
+	kv2 := ethdb.NewMemDatabase().KV()
+	defer kv2.Close()
 	if err = stateDatabaseComparison(kv2, kv, 9); err != nil {
 		return err
 	}
-	kv2.Close()
 	return nil
 }

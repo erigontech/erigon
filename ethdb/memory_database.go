@@ -17,11 +17,7 @@
 package ethdb
 
 import (
-	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func NewMemDatabase() *ObjectDatabase {
@@ -34,71 +30,5 @@ func NewMemDatabase() *ObjectDatabase {
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	default:
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
-	}
-}
-
-func NewMemDatabase2() (*BoltDatabase, KV) {
-	logger := log.New("database", "in-memory")
-
-	// Open the db and recover any potential corruptions
-	db, errOpen := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if errOpen != nil {
-		panic(errOpen)
-	}
-
-	if err := db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range dbutils.Buckets {
-			if _, err := tx.CreateBucketIfNotExists(bucket, false); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
-	b := &BoltDatabase{
-		db:  db,
-		log: logger,
-		id:  id(),
-	}
-
-	return b, b.KV()
-}
-
-func (db *BoltDatabase) MemCopy() Database {
-	logger := log.New("database", "in-memory")
-
-	// Open the db and recover any potential corruptions
-	mem, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		panic(err)
-	}
-
-	if err := db.db.View(func(readTx *bolt.Tx) error {
-		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if bolt.IsSystemBucket(name) {
-				return nil
-			}
-			return mem.Update(func(writeTx *bolt.Tx) error {
-				newBucketToWrite, err := writeTx.CreateBucket(name, true)
-				if err != nil {
-					return err
-				}
-				return b.ForEach(func(k, v []byte) error {
-					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-						return err
-					}
-					return nil
-				})
-			})
-		})
-	}); err != nil {
-		panic(err)
-	}
-	return &BoltDatabase{
-		db:  mem,
-		log: logger,
-		id:  id(),
 	}
 }

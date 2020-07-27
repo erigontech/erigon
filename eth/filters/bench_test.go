@@ -144,8 +144,12 @@ var bloomBitsPrefix = []byte("BloomBits")
 
 func clearBloomBits(db ethdb.Database) {
 	fmt.Println("Clearing bloombits data...")
-	if err := db.(*ethdb.BoltDatabase).ClearBuckets(bloomBitsPrefix); err != nil {
-		panic(err)
+	casted, ok := db.(ethdb.NonTransactional)
+	if !ok {
+		panic(fmt.Errorf("imposible to drop"))
+	}
+	if err := casted.ClearBuckets(bloomBitsPrefix); err != nil {
+		panic(fmt.Errorf("imposible to drop, %w", err))
 	}
 }
 

@@ -139,16 +139,13 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 }
 
 func (ig *IndexGenerator) DropIndex(bucket []byte) error {
-	//todo add truncate to all db
-	if bolt, ok := ig.db.(*ethdb.BoltDatabase); ok {
-		log.Warn("Remove bucket", "bucket", string(bucket))
-		err := bolt.ClearBuckets(bucket)
-		if err != nil {
-			return err
-		}
-		return nil
+	casted, ok := ig.db.(ethdb.NonTransactional)
+	if !ok {
+		return errors.New("imposible to drop")
+
 	}
-	return errors.New("imposible to drop")
+	log.Warn("Remove bucket", "bucket", string(bucket))
+	return casted.ClearBuckets(bucket)
 }
 
 func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
