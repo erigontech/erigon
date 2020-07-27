@@ -104,15 +104,3 @@ Date:   Fri Jul 24 09:46:26 2020 +0200
     
     Co-authored-by: Péter Szilágyi <peterke@gmail.com>
 
-commit 3a57eecc69447766ab51b6b290ff6d8656e16b3f
-Author: Felix Lange <fjl@twurst.com>
-Date:   Thu Jul 23 19:15:40 2020 +0200
-
-    mobile: fix build on iOS (#21362)
-    
-    This fixes the iOS framework build by naming the second parameter of the
-    Signer interface method. The name is important because it becomes part
-    of the objc method signature.
-    
-    Fixes #21340
-
