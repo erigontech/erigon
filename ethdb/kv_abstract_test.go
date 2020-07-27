@@ -101,8 +101,8 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	go func() {
 		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
 	}()
+	grpcServer := grpc.NewServer()
 	go func() {
-		grpcServer := grpc.NewServer()
 		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[4]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
@@ -110,20 +110,23 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	}()
 
 	return writeDBs, readDBs, func() {
-		for _, db := range writeDBs {
-			db.Close()
-		}
-		for _, db := range readDBs {
-			db.Close()
-		}
-
 		serverIn.Close()
 		serverOut.Close()
 		clientIn.Close()
 		clientOut.Close()
+		grpcServer.Stop()
+
 		conn.Close()
 
 		serverCancel()
+
+		for _, db := range readDBs {
+			db.Close()
+		}
+
+		for _, db := range writeDBs {
+			db.Close()
+		}
 	}
 }
 

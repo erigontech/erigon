@@ -189,9 +189,9 @@ func (db *LmdbKV) Close() {
 	if db.stopStaleReadsCheck != nil {
 		db.stopStaleReadsCheck()
 	}
-	db.wg.Wait()
 
 	if db.env != nil {
+		db.wg.Wait()
 		if err := db.env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {

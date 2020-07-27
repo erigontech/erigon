@@ -95,8 +95,6 @@ func TestLMDB_PutGet(t *testing.T) {
 }
 
 func testPutGet(db MinDatabase, t *testing.T) {
-	t.Parallel()
-
 	for _, k := range testValues {
 		err := db.Put(testBucket, []byte(k), []byte{})
 		if err != nil {
