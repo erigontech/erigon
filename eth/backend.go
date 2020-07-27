@@ -154,9 +154,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			return nil, err
 		}
 	}
-	if ctx.Config.PrivateRpcAddr != "" {
-		//remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.PrivateRpcAddr)
-		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateRpcAddr)
+	if ctx.Config.PrivateApiAddr != "" {
+		//remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.PrivateApiAddr)
+		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)

@@ -446,9 +446,9 @@ var (
 		Usage: "Which database software to use? Currently supported values: badger & bolt & lmdb",
 		Value: "lmdb",
 	}
-	PrivateRpcAddr = cli.StringFlag{
-		Name:  "private.rpc.addr",
-		Usage: "binary RPC network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
+	PrivateApiAddr = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
 		Value: "",
 	}
 	// Miner settings
@@ -1028,10 +1028,10 @@ func setWS(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
-// setPrivateRpc populates configuration fields related to the remote
+// setPrivateApi populates configuration fields related to the remote
 // read-only interface to the databae
-func setPrivateRpc(ctx *cli.Context, cfg *node.Config) {
-	cfg.PrivateRpcAddr = ctx.GlobalString(PrivateRpcAddr.Name)
+func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
+	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 }
 
 // setIPC creates an IPC path configuration from the set command line flags,
@@ -1249,7 +1249,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setHTTP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
-	setPrivateRpc(ctx, cfg)
+	setPrivateApi(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)

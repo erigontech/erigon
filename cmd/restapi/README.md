@@ -8,7 +8,7 @@ make restapi
 
 ## Running
 
-* Running node with `--private.rpc.addr` (e.g `./build/bin/geth --private.rpc.addr localhost:9999`).
+* Running node with `--private.api.addr` (e.g `./build/bin/geth --private.api.addr localhost:9999`).
 * Running Restapi: `./build/bin/restapi` (Default Port: 8080)
 
 ## API

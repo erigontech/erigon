@@ -18,7 +18,7 @@ import (
 )
 
 type Config struct {
-	privateRpcAddr    string
+	privateApiAddr    string
 	chaindata         string
 	httpListenAddress string
 	httpPort          int
@@ -38,7 +38,7 @@ var (
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "pprof.cpuprofile", "", "write cpu profile `file`")
 	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
-	rootCmd.Flags().StringVar(&cfg.privateRpcAddr, "private.rpc.addr", "", "address of remote DB listener of a turbo-geth node")
+	rootCmd.Flags().StringVar(&cfg.privateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.Flags().StringVar(&cfg.chaindata, "chaindata", "", "path to the database")
 	rootCmd.Flags().StringVar(&cfg.httpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.Flags().IntVar(&cfg.httpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")

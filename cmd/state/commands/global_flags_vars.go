@@ -9,7 +9,7 @@ var (
 	chaindata       string
 	statsfile       string
 	block           uint64
-	privateRpcAddr  string
+	privateApiAddr  string
 	changeSetBucket string
 	indexBucket     string
 )
@@ -34,8 +34,8 @@ func withStatsfile(cmd *cobra.Command) {
 	must(cmd.MarkFlagFilename("statsfile", "csv"))
 }
 
-func withPrivateRpc(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&privateRpcAddr, "private.rpc.addr", "", "remote db rpc address")
+func withPrivateApi(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 }
 
 func withCSBucket(cmd *cobra.Command) {

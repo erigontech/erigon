@@ -195,7 +195,7 @@ type Config struct {
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
-	PrivateRpcAddr string
+	PrivateApiAddr string
 
 	staticNodesWarning     bool
 	trustedNodesWarning    bool

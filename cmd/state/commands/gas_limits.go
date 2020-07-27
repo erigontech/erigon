@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	withPrivateRpc(gasLimitsCmd)
+	withPrivateApi(gasLimitsCmd)
 	rootCmd.AddCommand(gasLimitsCmd)
 }
 
@@ -25,7 +25,7 @@ var gasLimitsCmd = &cobra.Command{
 			panic(err)
 		}
 
-		remoteDB, err := ethdb.NewRemote().Path(privateRpcAddr).Open()
+		remoteDB, err := ethdb.NewRemote().Path(privateApiAddr).Open()
 		if err != nil {
 			return err
 		}

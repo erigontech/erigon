@@ -344,8 +344,8 @@ func daemon(cmd *cobra.Command, cfg Config) {
 
 	var db ethdb.KV
 	var err error
-	if cfg.privateRpcAddr != "" {
-		db, err = ethdb.NewRemote2().Path(cfg.privateRpcAddr).Open()
+	if cfg.privateApiAddr != "" {
+		db, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return
