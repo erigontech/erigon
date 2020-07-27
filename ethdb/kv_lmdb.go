@@ -324,7 +324,7 @@ func (tx *lmdbTx) Rollback() {
 	}
 	defer tx.db.wg.Done()
 	tx.closeCursors()
-	tx.tx.Reset()
+	tx.tx.Abort()
 }
 
 func (tx *lmdbTx) closeCursors() {
