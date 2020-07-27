@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
@@ -53,21 +52,6 @@ type APIImpl struct {
 	chainContext core.ChainContext
 }
 
-// PrivateDebugAPI
-type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
-	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
-	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-}
-
-// APIImpl is implementation of the EthAPI interface based on remote Db access
-type PrivateDebugAPIImpl struct {
-	db           ethdb.KV
-	dbReader     ethdb.Getter
-	chainContext core.ChainContext
-}
-
 // NewAPI returns APIImpl instance
 func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
 	return &APIImpl{
@@ -77,14 +61,6 @@ func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) 
 	}
 }
 
-// NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
-	return &PrivateDebugAPIImpl{
-		db:           db,
-		dbReader:     dbReader,
-		chainContext: chainContext,
-	}
-}
 
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
@@ -316,24 +292,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	return response, err
 }
 
-// StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, stateReader, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
-	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
-}
-
-// computeIntraBlockState retrieves the state database associated with a certain block.
-// If no state is locally available for the given block, a number of blocks are
-// attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
-	// If we have the state fully available, use that
-	dbstate := state.NewDbState(api.db, block.NumberU64())
-	statedb := state.New(dbstate)
-	return statedb, dbstate
-}
 
 // rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
 func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {

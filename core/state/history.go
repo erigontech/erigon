@@ -327,13 +327,11 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		goOn := true
 		for goOn {
 			cmp, br := keyCmp(addrHash, hAddrHash)
-			//fmt.Println("core/state/history.go:319 addr", common.Bytes2Hex(addrHash), "vs", common.Bytes2Hex(hAddrHash), cmp)
 			if br {
 				break
 			}
 			if cmp == 0 {
 				cmp, br = keyCmp(keyHash, hKeyHash)
-				//fmt.Println("core/state/history.go:325 key",common.Bytes2Hex(keyHash),"vs", common.Bytes2Hex(hKeyHash), cmp)
 			}
 			if br {
 				break
@@ -463,7 +461,6 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 			if br {
 				break
 			}
-
 			if cmp < 0 {
 				goOn, err = walker(k, v)
 			} else {
@@ -542,8 +539,6 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byt
 		}
 		return nil, true, nil
 	}
-	//dec,_,_:=index.Decode()
-	//fmt.Println("core/state/history.go:548", "not in history", timestamp,common.Bytes2Hex(hK), dec)
 	return nil, false, nil
 }
 
@@ -624,6 +619,30 @@ type changesetSearchDecorator struct {
 	cerr              error
 }
 
+func NextForChunkedData(oldAddr, oldKey []byte, cursor historyCursor, timestamp uint64) ([]byte, []byte, []byte, []byte, error) {
+	hAddrHash, hKeyHash, tsEnc, hV, err2 := cursor.Next()
+	if err2 != nil {
+		return nil, nil, nil, nil, err2
+	}
+
+	for bytes.Equal(hAddrHash, oldAddr) && bytes.Equal(hKeyHash, oldKey) {
+		hAddrHash, hKeyHash, tsEnc, hV, err2 = cursor.Next()
+		if err2 != nil {
+			return nil, nil, nil, nil, err2
+		}
+	}
+
+	hAddrHash0 := hAddrHash
+	hKeyHash0 := hKeyHash
+	for bytes.Equal(hAddrHash, hAddrHash0) && bytes.Equal(hKeyHash, hKeyHash0) && tsEnc != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
+		hAddrHash, hKeyHash, tsEnc, hV, err2 = cursor.Next()
+		if err2 != nil {
+			return nil, nil, nil, nil, err2
+		}
+	}
+	return hAddrHash, hKeyHash, tsEnc, hV, nil
+}
+
 func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, error) {
 	pos := sort.Search(len(csd.values), func(i int) bool {
 		return bytes.Compare(csd.startKey, csd.values[i].Key) < 0
@@ -649,13 +668,16 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		return nil, nil, nil, nil, err2
 	}
 
+	hAddrHash0 := hAddrHash
+	hKeyHash0 := hKeyHash
 	//find first chunk after timestamp
-	for hAddrHash != nil && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
+	for hAddrHash != nil && tsEnc != nil && bytes.Equal(hAddrHash, hAddrHash0) && bytes.Equal(hKeyHash, hKeyHash0) && binary.BigEndian.Uint64(tsEnc) < csd.timestamp {
 		hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
 		}
 	}
+
 	if len(hAddrHash) > 0 {
 		hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 		copy(hK[:len(hAddrHash)], hAddrHash)
@@ -700,7 +722,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		err = csd.cerr
 
 	}
-	//shift changesets cursor~
+	//shift changesets cursor
 	if cmp <= 0 {
 		csd.pos++
 		if csd.pos < len(csd.values) {
@@ -725,14 +747,11 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 
 	//shift history cursor
 	if cmp >= 0 {
-		hKeyHash0 := hKeyHash
-		hAddrHash0 := hAddrHash
-		for bytes.Equal(hAddrHash0, hAddrHash) && hAddrHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
-			hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
-			if err2 != nil {
-				return nil, nil, nil, nil, err2
-			}
+		hAddrHash, hKeyHash, tsEnc, hV, err2 := NextForChunkedData(common.CopyBytes(csd.kc1), common.CopyBytes(csd.kc2), csd.historyCursor, csd.timestamp)
+		if err2 != nil {
+			return nil, nil, nil, nil, err2
 		}
+
 		if len(hAddrHash) > 0 {
 			hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 			copy(hK[:len(hAddrHash)], hAddrHash)
@@ -807,18 +826,9 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 
 	//shift history cursor
 	if cmp >= 0 {
-		hKeyHash0 := csd.kc2
-		hAddrHash0 := csd.kc1
-		hAddrHash, hKeyHash, tsEnc, hV, err2 := csd.historyCursor.Next()
+		hAddrHash, hKeyHash, tsEnc, hV, err2 := NextForChunkedData(common.CopyBytes(csd.kc1), common.CopyBytes(csd.kc2), csd.historyCursor, csd.timestamp)
 		if err2 != nil {
 			return nil, nil, nil, nil, err2
-		}
-
-		for bytes.Equal(hAddrHash0, hAddrHash) && hAddrHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < csd.timestamp) {
-			hAddrHash, hKeyHash, tsEnc, hV, err2 = csd.historyCursor.Next()
-			if err2 != nil {
-				return nil, nil, nil, nil, err2
-			}
 		}
 		if len(hAddrHash) > 0 {
 			hK := make([]byte, len(hAddrHash)+len(hKeyHash))
@@ -861,7 +871,6 @@ func (csd *changesetSearchDecorator) matchKey(k []byte) bool {
 }
 
 func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
-	//fmt.Println("core/state/history.go:832 buildChangeset")
 	if from >= to {
 		return nil
 	}
@@ -898,7 +907,6 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 		replace := cs[i].BlockNum >= csd.timestamp
 		err = cs[i].Walker.Walk(func(k, v []byte) error {
 			if replace {
-				//fmt.Println("core/state/history.go:866", cs[i].BlockNum, "replace ", common.Bytes2Hex(k), string(v))
 				mp[string(k)] = v
 			}
 			return nil

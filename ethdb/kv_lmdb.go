@@ -165,7 +165,7 @@ func NewLMDB() lmdbOpts {
 // never closed by their owning process, and for which the owning process
 // has exited.  See the documentation on transactions for more information.
 func (db *LmdbKV) staleReadsCheckLoop(ctx context.Context, ticker *time.Ticker) {
-	for {
+	for db.env != nil {
 		// check once on app start
 		staleReaders, err2 := db.env.ReaderCheck()
 		if err2 != nil {
@@ -228,6 +228,10 @@ func (db *LmdbKV) IdealBatchSize() int {
 }
 
 func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	if db.env == nil {
+		return nil, fmt.Errorf("db closed")
+	}
+	db.wg.Add(1)
 	flags := uint(0)
 	if !writable {
 		flags |= lmdb.Readonly
@@ -270,6 +274,8 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
+	db.wg.Add(1)
+	defer db.wg.Done()
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
@@ -280,6 +286,11 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.env == nil {
+		return fmt.Errorf("db closed")
+	}
+	db.wg.Add(1)
+	defer db.wg.Done()
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
@@ -299,13 +310,21 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
+	if tx.db.env == nil {
+		return fmt.Errorf("db closed")
+	}
+	defer tx.db.wg.Done()
 	tx.closeCursors()
 	return tx.tx.Commit()
 }
 
 func (tx *lmdbTx) Rollback() {
+	if tx.db.env == nil {
+		return
+	}
+	defer tx.db.wg.Done()
 	tx.closeCursors()
-	tx.tx.Reset()
+	tx.tx.Abort()
 }
 
 func (tx *lmdbTx) closeCursors() {
