@@ -449,13 +449,9 @@ func (pm *ProtocolManager) handle(p *peer) error {
 
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
-	//go func() {
 	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
-		//p.Log().Error("Requesting initial header", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
-		//pm.removePeer(p.id)
 		return err
 	}
-	//}()
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
@@ -610,13 +606,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 		return p.SendBlockHeaders(headers)
-		//go func() {
-		//	if err := p.SendBlockHeaders(headers); err != nil {
-		//		p.Log().Error("Sending headers", "addr", p.RemoteAddr(), "type", p.Name(), "error", err)
-		//		pm.removePeer(p.id)
-		//		return
-		//	}
-		//}()
 
 	case msg.Code == BlockHeadersMsg:
 		// A batch of headers arrived to one of our previous requests
@@ -851,7 +840,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 		for _, block := range unknown {
-			//fmt.Printf("Notify fetcher of the block %d hash %x\n", block.Number, block.Hash)
 			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies) //nolint:errcheck
 		}
 
@@ -913,11 +901,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		for _, hash := range hashes {
 			p.MarkTransaction(hash)
 		}
-		//fmt.Printf("NewPooledTransactionHashesMsg: %d hashes\n", len(hashes))
 		pm.txFetcher.Notify(p.id, hashes) // nolint:errcheck
 
 	case msg.Code == GetPooledTransactionsMsg && p.version >= eth65:
-		//fmt.Printf("GetPooledTransactionsMsg\n")
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -951,7 +937,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				bytes += len(encoded)
 			}
 		}
-		//fmt.Printf("GetPooledTransactionsMsg sending back: %d hashes\n", len(hashes))
 		return p.SendPooledTransactionsRLP(hashes, txs)
 
 	case msg.Code == TransactionMsg || (msg.Code == PooledTransactionsMsg && p.version >= eth65):
@@ -967,7 +952,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		if err := msg.Decode(&txs); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
-		//fmt.Printf("TransactionMsg or PooledTransactionsMsg: %d txs\n", len(txs))
 		for i, tx := range txs {
 			// Validate and mark the remote transaction
 			if tx == nil {

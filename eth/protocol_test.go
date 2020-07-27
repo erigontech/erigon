@@ -397,7 +397,7 @@ func TestTransactionPropagation(t *testing.T)  { testSyncTransaction(t, true) }
 func TestTransactionAnnouncement(t *testing.T) { testSyncTransaction(t, false) }
 
 func testSyncTransaction(t *testing.T, propagtion bool) {
-	t.Skip()
+	t.Skip("deadlocks two peers but only in the test mode")
 	// Create a protocol manager for transaction fetcher and sender
 	pmFetcher, fetcherClear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer fetcherClear()

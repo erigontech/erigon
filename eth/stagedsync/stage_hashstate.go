@@ -31,20 +31,6 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	/*
-	if s.WasInterrupted() {
-		log.Info("Cleanly promoting plain state", "from", s.BlockNumber, "to", to)
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-		log.Debug("Clean bucket: done")
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
-			return err
-		}
-		return s.DoneAndUpdate(db, to)
-	}
-	*/
-
 	if s.BlockNumber > 0 { // Initial hashing of the state is performed at the previous stage
 		log.Info("Promoting plain state", "from", s.BlockNumber, "to", to)
 		if err := promoteHashedStateIncrementally(s, s.BlockNumber, to, db, datadir, quit); err != nil {
@@ -56,20 +42,6 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	/*
-	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
-	if fromScratch {
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
-			return err
-		}
-		// here we are on same block as Exec step
-	}
-	*/
-
 	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err
 	}

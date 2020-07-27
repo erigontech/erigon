@@ -2032,7 +2032,6 @@ func runDosBlock(chaindata string) error {
 		byte(vm.PUSH1), 0x0,
 		byte(vm.JUMP),
 	})
-	//tx.SetFrom(common.HexToAddress("0x8BFBB529A9E85fDC4b70A4FCdC0D68Bb298B8816"))
 
 	receipt, err := core.ApplyTransaction(params.MainnetChainConfig, bcb, nil, gp, ibs, noop, header, tx, usedGas, vm.Config{}, nil)
 	if err != nil {
