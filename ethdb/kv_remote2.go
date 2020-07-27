@@ -165,7 +165,6 @@ func (tx *remote2Tx) Rollback() {
 			c.stream = nil
 		}
 	}
-	return
 }
 
 func (tx *remote2Tx) Bucket(name []byte) Bucket {
