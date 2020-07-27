@@ -14,6 +14,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+// https://github.com/dgraph-io/badger#garbage-collection
+const gcPeriod = 5 * time.Minute
+
 type badgerOpts struct {
 	Badger badger.Options
 }
