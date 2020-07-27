@@ -52,12 +52,12 @@ func NewTesterProtocol(name string, fork bool, debug bool) *TesterProtocol {
 	defer db.Close()
 	mainnetGenesis := core.DefaultGenesisBlock().MustCommit(db)
 	return &TesterProtocol{
-		name: name,
+		name:           name,
 		mainnetGenesis: mainnetGenesis,
-		fork: fork,
-		debug: debug,
-		debugCh: make(chan struct{}, 1),
-		forkCh: make(chan struct{}, 1),
+		fork:           fork,
+		debug:          debug,
+		debugCh:        make(chan struct{}, 1),
+		forkCh:         make(chan struct{}, 1),
 	}
 }
 
@@ -98,15 +98,15 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 	}
 
 	log.Info("eth set custom genesis.config", "name", tp.name)
-	<- ctx.Done() // Wait until the protocol is closed
+	<-ctx.Done() // Wait until the protocol is closed
 	return nil
 }
 
 func (tp *TesterProtocol) WaitForFork(ctx context.Context) {
 	fmt.Printf("[%s] Waiting for fork...\n", tp.name)
 	select {
-	case <- ctx.Done():
-	case <- tp.forkCh:
+	case <-ctx.Done():
+	case <-tp.forkCh:
 	}
 	fmt.Printf("[%s] Cleared the fork\n", tp.name)
 }
@@ -114,12 +114,12 @@ func (tp *TesterProtocol) WaitForFork(ctx context.Context) {
 func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	log.Info("Ethereum peer connected", "name", tp.name, "peer", peer.Name())
 	log.Debug("Protocol version", "name", tp.name, "version", tp.protocolVersion)
-	time.Sleep(3*time.Second)
+	time.Sleep(3 * time.Second)
 	if tp.debug {
 		// Wait for the debug protocol to finish its message exchange
 		select {
-		case <- ctx.Done():
-		case <- tp.debugCh:
+		case <-ctx.Done():
+		case <-tp.debugCh:
 		}
 	}
 
@@ -387,7 +387,7 @@ func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgWriter) {
 }
 
 func (tp *TesterProtocol) SendTransaction(tx *types.Transaction) {
-	
+
 }
 
 func (tp *TesterProtocol) sendLastBlock(rw p2p.MsgReadWriter, blockFeeder BlockFeeder) error {

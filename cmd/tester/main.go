@@ -153,7 +153,7 @@ func tester(cliCtx *cli.Context) error {
 		panic(fmt.Errorf("could not start server 1: %w", err))
 	}
 	server1.AddPeer(nodeToConnect)
-	
+
 	tp2 := NewTesterProtocol("tp2", false, false)
 	tp2.blockFeeder = blockGen
 	tp2.protocolVersion = uint32(eth.ProtocolVersions[0])
@@ -166,7 +166,7 @@ func tester(cliCtx *cli.Context) error {
 		panic(fmt.Errorf("could not start server 2: %w", err))
 	}
 	server2.AddPeer(nodeToConnect)
-	
+
 	<-ctx.Done()
 	return nil
 }

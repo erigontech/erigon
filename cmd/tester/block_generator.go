@@ -431,7 +431,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 
 func (bg *BlockGenerator) GenerateTx() (*types.Transaction, error) {
 	account0 := common.HexToAddress("0000000000000000000000000000000000000000")
-	amount := uint256.NewInt().SetUint64(1) // 1 wei
+	amount := uint256.NewInt().SetUint64(1)       // 1 wei
 	gasPrice := uint256.NewInt().SetUint64(10000) // 1 wei
 	tx := types.NewTransaction(bg.coinbaseNonce, account0, amount, params.TxGas, gasPrice, nil)
 	signer := types.MakeSigner(genesis().Config, big.NewInt(int64(bg.coinbaseNonce)))
