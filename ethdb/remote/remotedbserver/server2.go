@@ -55,6 +55,7 @@ func StartGrpc(kv ethdb.KV, addr string) {
 	remote.RegisterKvServer(grpcServer, kvSrv)
 
 	if metrics.Enabled {
+		grpc_prometheus.EnableHandlingTimeHistogram()
 		grpc_prometheus.Register(grpcServer)
 	}
 
