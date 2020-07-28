@@ -94,6 +94,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	if err := st.RunInterruptedStage(db); err != nil {
 		return fmt.Errorf("runInterruptedStage: %w", err)
 	}
+	_, cs := st.CurrentStage()
+	currentStage := 0
+	if cs.ID == stages.HashState {
+		currentStage = 1
+	}
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
@@ -116,6 +121,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			unwind = 0
 		}
 
+		if currentStage > 0 {
+			currentStage = 0
+			goto HashState
+		}
+
 		if err := stagedsync.SpawnExecuteBlocksStage(progress(stages.Execution), db, chainConfig, blockchain, execToBlock, ch, nil, false, changeSetHook); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}
@@ -123,7 +133,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		if err := st.RunStage(stages.IntermediateHashes, db); err != nil {
 			return fmt.Errorf("spawnIntermediateHashesStage: %w", err)
 		}
-
+	HashState:
 		if err := st.RunStage(stages.HashState, db); err != nil {
 			return fmt.Errorf("spawnHashStateStage: %w", err)
 		}

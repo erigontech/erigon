@@ -123,11 +123,13 @@ func (s *State) RunInterruptedStage(db ethdb.GetterPutter) error {
 	if interruptedStage, err := s.findInterruptedStage(db); err != nil {
 		return err
 	} else if interruptedStage != nil {
+		log.Info("Run interrupted stage")
 		if err := s.runStage(interruptedStage, db); err != nil {
 			return err
 		}
-		// restart from 0 after completing the missing stage
-		s.currentStage = 0
+		s.SetCurrentStage(interruptedStage.ID)
+		s.NextStage()
+		return nil
 	}
 
 	if interruptedStage, err := s.findInterruptedUnwindStage(db); err != nil {
@@ -140,7 +142,11 @@ func (s *State) RunInterruptedStage(db ethdb.GetterPutter) error {
 		if u == nil {
 			return nil
 		}
-		return s.UnwindStage(u, db)
+		log.Info("Unwind interrupted stage")
+		if err := s.UnwindStage(u, db); err != nil {
+			return err
+		}
+		s.SetCurrentStage(interruptedStage.ID)
 	}
 	return nil
 }
@@ -235,8 +241,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
 		return err
 	}
 
-	// always restart from stage 1 after unwind
-	s.currentStage = 0
+	s.SetCurrentStage(stage.ID)
 	log.Info("Unwinding... DONE!")
 	return nil
 }
