@@ -17,6 +17,23 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
+var (
+	boltPagesAllocGauge    = metrics.NewRegisteredGauge("bolt/pages/alloc_bytes", nil)
+	boltPagesFreeGauge     = metrics.NewRegisteredGauge("bolt/pages/free", nil)
+	boltPagesPendingGauge  = metrics.NewRegisteredGauge("bolt/pages/pending", nil)
+	boltFreelistInuseGauge = metrics.NewRegisteredGauge("bolt/freelist/inuse", nil)
+	boltTxGauge            = metrics.NewRegisteredGauge("bolt/tx/total", nil)
+	boltTxOpenGauge        = metrics.NewRegisteredGauge("bolt/tx/open", nil)
+	boltTxCursorGauge      = metrics.NewRegisteredGauge("bolt/tx/cursors_total", nil)
+	boltRebalanceGauge     = metrics.NewRegisteredGauge("bolt/rebalance/total", nil)
+	boltRebalanceTimer     = metrics.NewRegisteredTimer("bolt/rebalance/time", nil)
+	boltSplitGauge         = metrics.NewRegisteredGauge("bolt/split/total", nil)
+	boltSpillGauge         = metrics.NewRegisteredGauge("bolt/spill/total", nil)
+	boltSpillTimer         = metrics.NewRegisteredTimer("bolt/spill/time", nil)
+	boltWriteGauge         = metrics.NewRegisteredGauge("bolt/write/total", nil)
+	boltWriteTimer         = metrics.NewRegisteredTimer("bolt/write/time", nil)
+)
+
 var valueBytesMetrics []metrics.Gauge
 var keyBytesMetrics []metrics.Gauge
 var totalBytesPutMetrics []metrics.Gauge

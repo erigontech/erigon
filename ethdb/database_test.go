@@ -22,9 +22,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -36,19 +33,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestBoltDB() (*BoltDatabase, func()) {
-	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_test_")
-	if err != nil {
-		panic("failed to create test file: " + err.Error())
-	}
-	db, err := NewBoltDatabase(path.Join(dirname, "db"))
-	if err != nil {
-		panic("failed to create test database: " + err.Error())
-	}
-
+func newTestBoltDB() (Database, func()) {
+	db := NewObjectDatabase(NewBolt().InMem().MustOpen())
 	return db, func() {
 		db.Close()
-		os.RemoveAll(dirname)
 	}
 }
 
