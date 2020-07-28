@@ -45,7 +45,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
-	canonical := make([]common.Hash, to-from+1)
+	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
@@ -58,7 +58,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 			return true, nil
 		}
 
-		if currentHeaderIdx > to-from { // if header stage is ehead of body stage
+		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
 			return false, nil
 		}
 
@@ -120,7 +120,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 	headHash := rawdb.ReadCanonicalHash(db, from)
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
-	canonical := make([]common.Hash, to-from+1)
+	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
@@ -133,7 +133,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return true, nil
 		}
 
-		if currentHeaderIdx > to-from { // if header stage is ehead of body stage
+		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
 			return false, nil
 		}
 
