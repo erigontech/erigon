@@ -727,13 +727,12 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	if bytes.Equal(v[:b.dupFrom-b.dupTo], newValue[:b.dupFrom-b.dupTo]) {
 		if len(v) == len(newValue) { // in DupSort case lmdb.Current works only with values of same length
 			return c.cursor.Put(key, newValue, lmdb.Current)
-		} else {
-			err = c.cursor.Del(0)
-			if err != nil {
-				return err
-			}
-			return c.cursor.Put(key, newValue, 0)
 		}
+		err = c.cursor.Del(0)
+		if err != nil {
+			return err
+		}
+		return c.cursor.Put(key, newValue, 0)
 	}
 
 	return c.cursor.Put(key, newValue, 0)
