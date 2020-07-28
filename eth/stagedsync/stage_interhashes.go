@@ -266,7 +266,7 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 	}
 }
 
-func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, index byte, r *Receiver) error {
+func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *Receiver) error {
 	var changeSetBucket []byte
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
@@ -298,12 +298,6 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(putter, from, []byte{index})
-				}
-				return s.UpdateWithStageData(putter, from, append([]byte{index}, key...))
-			},
 			Quit: p.quitCh,
 		},
 	); err != nil {
@@ -312,7 +306,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, ind
 	return nil
 }
 
-func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index byte, r *Receiver) error {
+func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Receiver) error {
 	to := u.UnwindPoint
 	var changeSetBucket []byte
 	if storage {
@@ -342,12 +336,6 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, index
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return u.UpdateWithStageData(putter, []byte{index})
-				}
-				return u.UpdateWithStageData(putter, append([]byte{index}, key...))
-			},
 			Quit: p.quitCh,
 		},
 	); err != nil {
@@ -360,10 +348,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver(quit)
-	if err := p.Promote(s, s.BlockNumber, to, false /* storage */, 0x01, r); err != nil {
+	if err := p.Promote(s, s.BlockNumber, to, false /* storage */, r); err != nil {
 		return err
 	}
-	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, 0x02, r); err != nil {
+	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, r); err != nil {
 		return err
 	}
 	for ks, acc := range r.accountMap {
@@ -436,10 +424,10 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	r := NewReceiver(quit)
-	if err := p.Unwind(s, u, false /* storage */, 0x01, r); err != nil {
+	if err := p.Unwind(s, u, false /* storage */, r); err != nil {
 		return err
 	}
-	if err := p.Unwind(s, u, true /* storage */, 0x02, r); err != nil {
+	if err := p.Unwind(s, u, true /* storage */, r); err != nil {
 		return err
 	}
 	for ks, acc := range r.accountMap {
