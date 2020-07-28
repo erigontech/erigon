@@ -114,6 +114,7 @@ func init() {
 	withReset(cmdStage3)
 	withBlock(cmdStage3)
 	withUnwind(cmdStage3)
+	withDatadir(cmdStage3)
 
 	rootCmd.AddCommand(cmdStage3)
 
@@ -128,6 +129,7 @@ func init() {
 	withReset(cmdStage5)
 	withBlock(cmdStage5)
 	withUnwind(cmdStage5)
+	withDatadir(cmdStage5)
 
 	rootCmd.AddCommand(cmdStage5)
 
@@ -135,6 +137,7 @@ func init() {
 	withReset(cmdStage6)
 	withBlock(cmdStage6)
 	withUnwind(cmdStage6)
+	withDatadir(cmdStage6)
 
 	rootCmd.AddCommand(cmdStage6)
 
@@ -142,6 +145,7 @@ func init() {
 	withReset(cmdStage78)
 	withBlock(cmdStage78)
 	withUnwind(cmdStage78)
+	withDatadir(cmdStage78)
 
 	rootCmd.AddCommand(cmdStage78)
 
@@ -149,6 +153,7 @@ func init() {
 	withReset(cmdStage9)
 	withBlock(cmdStage9)
 	withUnwind(cmdStage9)
+	withDatadir(cmdStage9)
 
 	rootCmd.AddCommand(cmdStage9)
 }
@@ -188,7 +193,7 @@ func stage3(ctx context.Context) error {
 		Now:             time.Now(),
 	}
 
-	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, "", ch)
+	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, datadir, ch)
 }
 
 func stage4(ctx context.Context) error {
@@ -242,9 +247,9 @@ func stage5(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, "", ch)
+		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, datadir, ch)
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, "", ch)
+	return stagedsync.SpawnIntermediateHashesStage(stage5, db, datadir, ch)
 }
 
 func stage6(ctx context.Context) error {
@@ -256,11 +261,6 @@ func stage6(ctx context.Context) error {
 	bc, _, progress := newSync(ctx.Done(), db, nil)
 	defer bc.Stop()
 
-	if reset {
-		if err := stagedsync.ResetHashState(db); err != nil {
-			return err
-		}
-	}
 	stage5 := progress(stages.IntermediateHashes)
 	stage6 := progress(stages.HashState)
 	log.Info("Stage5", "progress", stage5.BlockNumber)
@@ -269,9 +269,9 @@ func stage6(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage6, db, "", ch)
+		return stagedsync.UnwindIntermediateHashesStage(u, stage6, db, datadir, ch)
 	}
-	return stagedsync.SpawnHashStateStage(stage6, db, "", ch)
+	return stagedsync.SpawnHashStateStage(stage6, db, datadir, ch)
 }
 
 func stage78(ctx context.Context) error {
@@ -300,10 +300,10 @@ func stage78(ctx context.Context) error {
 		// TODO
 	}
 
-	if err := stagedsync.SpawnAccountHistoryIndex(stage7, db, "", ch); err != nil {
+	if err := stagedsync.SpawnAccountHistoryIndex(stage7, db, datadir, ch); err != nil {
 		return err
 	}
-	if err := stagedsync.SpawnStorageHistoryIndex(stage8, db, "", ch); err != nil {
+	if err := stagedsync.SpawnStorageHistoryIndex(stage8, db, datadir, ch); err != nil {
 		return err
 	}
 	return nil
@@ -330,10 +330,10 @@ func stage9(ctx context.Context) error {
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
 		s := progress(stages.TxLookup)
-		return stagedsync.UnwindTxLookup(u, s, db, "", ch)
+		return stagedsync.UnwindTxLookup(u, s, db, datadir, ch)
 	}
 
-	return stagedsync.SpawnTxLookup(stage9, db, "", ch)
+	return stagedsync.SpawnTxLookup(stage9, db, datadir, ch)
 }
 
 func printAllStages(_ context.Context) error {
