@@ -346,6 +346,7 @@ func (pm *ProtocolManager) StopTxPool() {
 }
 
 func (pm *ProtocolManager) Stop() {
+	pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
 	pm.StopTxPool()
 
 	if pm.minedBlockSub != nil {
@@ -753,6 +754,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			code, err := tds.ReadCodeByHash(hash)
 			if err == nil {
 				data = append(data, code)
+		}
 				bytes += len(code)
 			} else {
 				data = append(data, nil)
