@@ -721,8 +721,8 @@ func TestStateSyncInterruptLongStage(t *testing.T) {
 
 	expectedFlow := []stages.SyncStage{
 		stages.Headers, stages.Bodies,
-		stages.Bodies, // finish the interrupted state, then restart from 0
-		stages.Headers, stages.Bodies, stages.Senders,
+		stages.Bodies, // finish the interrupted state, then continue to the next  stage
+		stages.Senders,
 	}
 	assert.Equal(t, expectedFlow, flow)
 }
