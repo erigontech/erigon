@@ -11,6 +11,7 @@ var (
 	unwindEvery        uint64
 	reset              bool
 	bucket             string
+	datadir            string
 )
 
 func must(err error) {
@@ -52,4 +53,8 @@ func withReset(cmd *cobra.Command) {
 
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
+}
+
+func withDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadir, "datadir", "", "data directory for temporary ELT files")
 }
