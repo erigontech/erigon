@@ -52,16 +52,16 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/cespare/cp"
 	"github.com/ledgerwatch/turbo-geth/internal/build"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/cespare/cp"
 )
 
 var (
@@ -207,13 +207,11 @@ func main() {
 
 func doInstall(cmdline []string) {
 	var (
-		arch     = flag.String("arch", "", "Architecture to cross build for")
-		cc       = flag.String("cc", "", "C compiler to cross build with")
-		procsVal = flag.Int("procs", runtime.NumCPU(), "compile in number of threads")
+		arch = flag.String("arch", "", "Architecture to cross build for")
+		cc   = flag.String("cc", "", "C compiler to cross build with")
 	)
 	flag.CommandLine.Parse(cmdline)
 	env := build.Env()
-	procs := *procsVal
 
 	// Check Go version. People regularly open issues about compilation
 	// failure with outdated Go. This should save them the trouble.
@@ -222,80 +220,64 @@ func doInstall(cmdline []string) {
 		var minor int
 		fmt.Sscanf(strings.TrimPrefix(runtime.Version(), "go1."), "%d", &minor)
 
-		if minor < 11 {
+		if minor < 13 {
 			log.Println("You have Go version", runtime.Version())
-			log.Println("go-ethereum requires at least Go version 1.11 and cannot")
+			log.Println("turbo-geth requires at least Go version 1.13 and cannot")
 			log.Println("be compiled with an earlier version. Please upgrade your Go installation.")
 			os.Exit(1)
 		}
 	}
+
 	// Compile packages given as arguments, or everything if there are no arguments.
-	packages := []string{"./..."}
+	dirs := []string{}
 	if flag.NArg() > 0 {
-		packages = flag.Args()
+		dirs = flag.Args()
+	} else {
+		if cmds, err := ioutil.ReadDir("cmd"); err != nil {
+			log.Fatal(err)
+		} else {
+			for _, cmd := range cmds {
+				dirs = append(dirs, "."+string(filepath.Separator)+path.Join(".", "cmd", cmd.Name()))
+			}
+		}
 	}
 
-	if *arch == "" || *arch == runtime.GOARCH {
-		packCh := make(chan string, 2*procs)
-		wg := sync.WaitGroup{}
-		wg.Add(procs)
-
-		for i := 0; i < procs; i++ {
-			go func() {
-				for pack := range packCh {
-					goinstall := goTool("install", buildFlags(env)...)
-					goinstall.Args = append(goinstall.Args, "-v")
-					goinstall.Args = append(goinstall.Args, pack)
-					build.MustRun(goinstall)
-				}
-				wg.Done()
-			}()
+	packages := []string{}
+	for _, d := range dirs {
+		dir := strings.TrimPrefix(d, "github.com/ledgerwatch/turbo-geth/")
+		if !strings.HasPrefix(d, ".") {
+			dir = "." + string(filepath.Separator) + dir
+		}
+		pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
+		if err != nil {
+			continue
 		}
 
-		for _, pack := range packages {
-			dir := strings.TrimPrefix(pack, "github.com/ledgerwatch/turbo-geth/")
-			pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
-			if err != nil {
-				continue
-			}
-
-			for name := range pkgs {
-				if name == "main" {
-					packCh <- pack
-					break
-				}
+		for name := range pkgs {
+			if name == "main" {
+				packages = append(packages, dir)
+				fmt.Printf("%s\n", dir)
+				break
 			}
 		}
-
-		close(packCh)
-		wg.Wait()
-		return
 	}
 
-	// Seems we are cross compiling, work around forbidden GOBIN
-	goinstall := goToolArch(*arch, *cc, "install", buildFlags(env)...)
-	goinstall.Args = append(goinstall.Args, "-v")
-	goinstall.Args = append(goinstall.Args, []string{"-buildmode", "archive"}...)
-	goinstall.Args = append(goinstall.Args, packages...)
-	build.MustRun(goinstall)
-
-	if cmds, err := ioutil.ReadDir("cmd"); err == nil {
-		for _, cmd := range cmds {
-			pkgs, err := parser.ParseDir(token.NewFileSet(), filepath.Join(".", "cmd", cmd.Name()), nil, parser.PackageClauseOnly)
-			if err != nil {
-				log.Fatal(err)
-			}
-			for name := range pkgs {
-				if name == "main" {
-					gobuild := goToolArch(*arch, *cc, "build", buildFlags(env)...)
-					gobuild.Args = append(gobuild.Args, "-v")
-					gobuild.Args = append(gobuild.Args, []string{"-o", executablePath(cmd.Name())}...)
-					gobuild.Args = append(gobuild.Args, "."+string(filepath.Separator)+filepath.Join("cmd", cmd.Name()))
-					build.MustRun(gobuild)
-					break
-				}
-			}
+	for _, pkg := range packages {
+		outName := strings.Replace(path.Base(pkg), "geth", "tg", -1)
+		var gobuild *exec.Cmd
+		if *arch == "" || *arch == runtime.GOARCH {
+			gobuild = goTool("build", buildFlags(env)...)
+		} else {
+			gobuild = goToolArch(*arch, *cc, "build", buildFlags(env)...)
 		}
+		if runtime.GOARCH == "arm64" {
+			gobuild.Args = append(gobuild.Args, "-p", "1")
+		}
+		gobuild.Args = append(gobuild.Args, "-trimpath")
+		gobuild.Args = append(gobuild.Args, "-v")
+		gobuild.Args = append(gobuild.Args, []string{"-o", executablePath(outName)}...)
+		gobuild.Args = append(gobuild.Args, pkg)
+		build.MustRun(gobuild)
 	}
 }
 
