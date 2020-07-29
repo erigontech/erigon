@@ -221,7 +221,7 @@ func stage4(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, block, ch, blockchain.DestsCache, false, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, blockchain.GetVMConfig(), block, ch, blockchain.DestsCache, false, nil)
 }
 
 func stage5(ctx context.Context) error {
@@ -351,7 +351,7 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 		panic(err)
 	}
 
-	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, func() error { return nil }, hook)
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}

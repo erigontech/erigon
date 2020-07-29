@@ -17,7 +17,8 @@ const prof = false // whether to profile
 func PrepareStagedSync(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
-	blockchain BlockChain,
+	chainContext core.ChainContext,
+	vmConfig *vm.Config,
 	stateDB *ethdb.ObjectDatabase,
 	pid string,
 	storageMode ethdb.StorageMode,
@@ -34,7 +35,7 @@ func PrepareStagedSync(
 	stages := []*Stage{
 		{
 			ID:          stages.Headers,
-			Description: "Downloading headers",
+			Description: "Download headers",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnHeaderDownloadStage(s, u, d, headersFetchers)
 			},
@@ -44,7 +45,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.Bodies,
-			Description: "Downloading block bodies",
+			Description: "Download block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return spawnBodyDownloadStage(s, u, d, pid)
 			},
@@ -54,7 +55,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recover senders from tx signatures",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				const batchSize = 10000
 				const blockSize = 4096
@@ -78,9 +79,9 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.Execution,
-			Description: "Executing blocks w/o hash checks",
+			Description: "Execute blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
+				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)
@@ -88,7 +89,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.IntermediateHashes,
-			Description: "Generating intermediate hashes and compiting state root",
+			Description: "Generate intermediate hashes and compiting state root",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
 			},
@@ -98,7 +99,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.HashState,
-			Description: "Hashing the key in the state",
+			Description: "Hash the key in the state",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnHashStateStage(s, stateDB, datadir, quitCh)
 			},
@@ -108,7 +109,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:                  stages.AccountHistoryIndex,
-			Description:         "Generating account history index",
+			Description:         "Generate account history index",
 			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
@@ -120,7 +121,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:                  stages.StorageHistoryIndex,
-			Description:         "Generating storage history index",
+			Description:         "Generate storage history index",
 			Disabled:            !storageMode.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
@@ -132,7 +133,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:                  stages.TxLookup,
-			Description:         "Generating tx lookup index",
+			Description:         "Generate tx lookup index",
 			Disabled:            !storageMode.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(s *StageState, u Unwinder) error {
@@ -144,7 +145,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.TxPool,
-			Description: "Starts the transaction pool",
+			Description: "Update transaction pool",
 			ExecFunc: func(s *StageState, _ Unwinder) error {
 				return spawnTxPool(s, stateDB, txPool, poolStart, quitCh)
 			},
