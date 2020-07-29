@@ -83,7 +83,7 @@ integration:
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 all:
-	$(GORUN) build/ci.go install -procs=1
+	$(GORUN) build/ci.go install
 
 android:
 	$(GORUN) build/ci.go aar --local
