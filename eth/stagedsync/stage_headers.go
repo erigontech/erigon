@@ -12,6 +12,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -92,6 +93,19 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			alreadyCanonicalIndex++
 		} else {
 			break
+		}
+		// If the header is a banned one, straight out abort
+		if core.BadHashes[h.Hash()] {
+			log.Error(fmt.Sprintf(`
+########## BAD BLOCK #########
+
+Number: %v
+Hash: 0x%x
+
+Error: %v
+##############################
+`, h.Number, h.Hash(), core.ErrBlacklistedHash))
+			return false, 0, core.ErrBlacklistedHash
 		}
 	}
 	headers = headers[alreadyCanonicalIndex:]
