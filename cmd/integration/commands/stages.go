@@ -219,7 +219,7 @@ func stage4(ctx context.Context) error {
 	ch := ctx.Done()
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		return stagedsync.UnwindExecutionStage(u, stage4, db)
+		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, blockchain.GetVMConfig(), block, ch, blockchain.DestsCache, false, nil)
 }

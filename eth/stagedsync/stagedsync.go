@@ -84,7 +84,7 @@ func PrepareStagedSync(
 				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return UnwindExecutionStage(u, s, stateDB)
+				return UnwindExecutionStage(u, s, stateDB, storageMode.Receipts)
 			},
 		},
 		{
