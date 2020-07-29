@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -211,17 +210,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 	}
 
-	err = migrations.NewMigrator().Apply(
-		chainDb,
-		config.StorageMode.History,
-		config.StorageMode.Receipts,
-		config.StorageMode.TxIndex,
-		config.StorageMode.Preimages,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, dests, txCacher)
@@ -237,7 +225,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 
 	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
 	eth.blockchain.EnableTxLookupIndex(config.StorageMode.TxIndex)
-	eth.blockchain.EnablePreimages(config.StorageMode.Preimages)
 
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
