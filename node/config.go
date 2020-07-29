@@ -334,7 +334,7 @@ func (c *Config) instanceDir() string {
 	}
 	if c.name() == "turbo-geth" {
 		// backwards compatibility
-		return filepath.Join(c.DataDir, "geth")
+		return filepath.Join(c.DataDir, "tg")
 	}
 	return filepath.Join(c.DataDir, c.name())
 }
