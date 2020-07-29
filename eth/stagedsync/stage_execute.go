@@ -162,14 +162,14 @@ func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPend
 	return time.Now(), now
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
 	}
 
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
-	mutation := stateDB.NewBatch()
+	batch := stateDB.NewBatch()
 
 	rewindFunc := ethdb.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
@@ -194,38 +194,42 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database)
 
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, stateDB, key)
-			if err = writeAccountFunc(mutation, key, acc); err != nil {
+			if err = writeAccountFunc(batch, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err = deleteAccountFunc(mutation, key); err != nil {
+			if err = deleteAccountFunc(batch, key); err != nil {
 				return err
 			}
 		}
 	}
 	for key, value := range storageMap {
 		if len(value) > 0 {
-			if err = mutation.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
+			if err = batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err = mutation.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
+			if err = batch.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
 				return err
 			}
 		}
 	}
 
 	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
-		if err = deleteChangeSets(mutation, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
+		if err = deleteChangeSets(batch, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
+		}
+		if writeReceipts {
+			blockHash := rawdb.ReadCanonicalHash(batch, i)
+			rawdb.DeleteReceipts(batch, blockHash, i)
 		}
 	}
 
-	if err = u.Done(mutation); err != nil {
+	if err = u.Done(batch); err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
 
-	_, err = mutation.Commit()
+	_, err = batch.Commit()
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
