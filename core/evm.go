@@ -60,6 +60,21 @@ func NewEVMContext(msg Message, header *types.Header, chain ChainContext, author
 	}
 }
 
+func NewEVMContextByHeader(msg Message, header *types.Header, hashGetter func(n uint64) common.Hash) vm.Context {
+	return vm.Context{
+		CanTransfer: CanTransfer,
+		Transfer:    Transfer,
+		GetHash:     hashGetter,
+		Origin:      msg.From(),
+		Coinbase:    header.Coinbase,
+		BlockNumber: new(big.Int).Set(header.Number),
+		Time:        new(big.Int).SetUint64(header.Time),
+		Difficulty:  new(big.Int).Set(header.Difficulty),
+		GasLimit:    header.GasLimit,
+		GasPrice:    msg.GasPrice().ToBig(),
+	}
+}
+
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, chain ChainContext) func(n uint64) common.Hash {
 	// Cache will initially contain [refHash.parent],

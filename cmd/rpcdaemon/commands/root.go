@@ -25,6 +25,7 @@ type Config struct {
 	httpCORSDomain    string
 	httpVirtualHost   string
 	API               string
+	gascap            uint64
 }
 
 var (
@@ -45,6 +46,8 @@ func init() {
 	rootCmd.Flags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.Flags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.Flags().StringVar(&cfg.API, "http.api", "", "API's offered over the HTTP-RPC interface")
+
+	rootCmd.Flags().Uint64Var(&cfg.gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 }
 
 var rootCmd = &cobra.Command{
