@@ -78,4 +78,8 @@ func TestHistoryIndex_Idempotent(t *testing.T) {
 			t.Errorf("index is not idempotent, managed to append %d", i)
 		}
 	}
+	index = index.Append(11, false)
+	if len(index) != oldLen + 3 {
+		t.Errorf("appending after the last element should still work: %d != %d", len(index), oldLen + 3)
+	}
 }

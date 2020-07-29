@@ -72,7 +72,7 @@ func (hi HistoryIndexBytes) Append(v uint64, emptyValue bool) HistoryIndexBytes 
 	} else {
 		minElement = binary.BigEndian.Uint64(hi[:8])
 		// last value
-		lastIdx := len(hi) - 8 - 3
+		lastIdx := len(hi) - 3
 		lastElement := minElement + (uint64(hi[lastIdx]&0x7f) << 16) + (uint64(hi[lastIdx+1]) << 8) + uint64(hi[lastIdx+2])
 		// Do not append if the value is less or equal to the last - to make operation idempotent
 		if v <= lastElement {
@@ -239,5 +239,12 @@ func CheckNewIndexChunk(b []byte, v uint64) bool {
 		return false
 	}
 	minElement := binary.BigEndian.Uint64(b[:8])
+	// last value
+	lastIdx := len(b) - 3
+	lastElement := minElement + (uint64(b[lastIdx]&0x7f) << 16) + (uint64(b[lastIdx+1]) << 8) + uint64(b[lastIdx+2])
+	// Do not append if the value is less or equal to the last - to make operation idempotent
+	if v <= lastElement {
+		return false
+	}
 	return (numElements >= MaxChunkSize) || (v > minElement+0x7fffff)
 }
