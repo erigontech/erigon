@@ -89,14 +89,11 @@ func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	if m.db == nil {
 		return 0, nil
 	}
-	return m.db.(HasStats).DiskSize(ctx)
-}
-
-func (m *mutation) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	if m.db == nil {
-		return nil, nil
+	sz, err := m.db.(HasStats).DiskSize(ctx)
+	if err != nil {
+		return 0, err
 	}
-	return m.db.(HasStats).BucketsStat(ctx)
+	return common.StorageSize(sz), nil
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {

@@ -158,18 +158,12 @@ func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	if casted, ok := db.kv.(HasStats); ok {
-		return casted.DiskSize(ctx)
+func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
+	casted, ok := db.kv.(HasStats)
+	if !ok {
+		return 0, nil
 	}
-	return common.StorageSize(0), nil
-}
-
-func (db *ObjectDatabase) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	if casted, ok := db.kv.(HasStats); ok {
-		return casted.BucketsStat(ctx)
-	}
-	return nil, nil
+	return casted.DiskSize(ctx)
 }
 
 // Get returns the value for a given key if it's present.

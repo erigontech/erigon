@@ -233,8 +233,8 @@ func (db *BoltKV) Close() {
 	}
 }
 
-func (db *BoltKV) DiskSize(_ context.Context) (common.StorageSize, error) {
-	return common.StorageSize(db.bolt.Size()), nil
+func (db *BoltKV) DiskSize(_ context.Context) (uint64, error) {
+	return uint64(db.bolt.Size()), nil
 }
 
 func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {

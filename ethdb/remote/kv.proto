@@ -7,6 +7,7 @@ option java_multiple_files = true;
 option java_package = "io.turbo-geth.db";
 option java_outer_classname = "KV";
 
+// Provides methods to access key-value data
 service KV {
   // open a cursor on given position of given bucket
   // if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer

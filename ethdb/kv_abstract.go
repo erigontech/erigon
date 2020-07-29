@@ -2,8 +2,6 @@ package ethdb
 
 import (
 	"context"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type KV interface {
@@ -57,8 +55,7 @@ type NoValuesCursor interface {
 }
 
 type HasStats interface {
-	DiskSize(context.Context) (common.StorageSize, error) // db size
-	BucketsStat(context.Context) (map[string]common.StorageBucketWriteStats, error)
+	DiskSize(context.Context) (uint64, error) // db size
 }
 
 type DbProvider uint8
