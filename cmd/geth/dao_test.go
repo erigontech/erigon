@@ -124,7 +124,7 @@ func testDAOForkBlockNewChain(t *testing.T, test int, genesis string, expectBloc
 		geth.WaitExit()
 	}
 	// Retrieve the DAO config flag from the database
-	path := filepath.Join(datadir, "geth", "chaindata")
+	path := filepath.Join(datadir, "tg", "chaindata")
 	db := ethdb.MustOpen(path)
 	defer db.Close()
 
