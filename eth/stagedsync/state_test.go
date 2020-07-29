@@ -275,7 +275,6 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 }
 
 func TestStateUnwind(t *testing.T) {
-	t.Skip("Disabled for unwind fixes")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	flow := make([]stages.SyncStage, 0)
@@ -334,8 +333,25 @@ func TestStateUnwind(t *testing.T) {
 				return u.Done(db)
 			},
 		},
+		{
+			ID:       stages.IntermediateHashes,
+			Disabled: true,
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				flow = append(flow, stages.IntermediateHashes)
+				if s.BlockNumber == 0 {
+					return s.DoneAndUpdate(db, 2000)
+				}
+				s.Done()
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				flow = append(flow, unwindOf(stages.IntermediateHashes))
+				return u.Done(db)
+			},
+		},
 	}
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err := state.Run(db)
 	assert.NoError(t, err)
 
