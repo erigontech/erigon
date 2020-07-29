@@ -52,7 +52,7 @@ func (api *APIImpl) doCall(ctx context.Context, args ethapi.CallArgs, blockNrOrH
 		return nil, err
 	}
 
-	ds := state.NewDbState(api.db, blockNumber)
+	ds := state.NewPlainDBState(api.db, blockNumber)
 	state := state.New(ds)
 	if state == nil {
 		return nil, fmt.Errorf("can't get the state for %d", blockNumber)
@@ -194,7 +194,7 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 	}
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		ds := state.NewDbState(api.db, blockNumber)
+		ds := state.NewPlainDBState(api.db, blockNumber)
 		state := state.New(ds)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the state for %d", blockNumber)
