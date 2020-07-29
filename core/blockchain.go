@@ -2290,22 +2290,6 @@ func InsertBodies(
 			return true, nil
 		}
 
-		// If the header is a banned one, straight out abort
-		if BadHashes[block.Hash()] {
-			badBlocks.Add(block.Hash(), block)
-			log.Error(fmt.Sprintf(`
-########## BAD BLOCK #########
-
-Number: %v
-Hash: 0x%x
-
-Error: %v
-Callers: %v
-##############################
-`, block.Number(), block.Hash(), ErrBlacklistedHash, debug.Callers(20)))
-			return true, ErrBlacklistedHash
-		}
-
 		// Calculate the total difficulty of the block
 		ptd := rawdb.ReadTd(batch, block.ParentHash(), block.NumberU64()-1)
 
