@@ -570,6 +570,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			d,
 			d.chainConfig,
 			d.blockchain,
+			d.blockchain.GetVMConfig(),
 			d.stateDB,
 			p.id,
 			d.storageMode,

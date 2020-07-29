@@ -17,7 +17,8 @@ const prof = false // whether to profile
 func PrepareStagedSync(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
-	blockchain BlockChain,
+	chainContext core.ChainContext,
+	vmConfig *vm.Config,
 	stateDB *ethdb.ObjectDatabase,
 	pid string,
 	storageMode ethdb.StorageMode,
@@ -80,7 +81,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, blockchain, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
+				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB)
