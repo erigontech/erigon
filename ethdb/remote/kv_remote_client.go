@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -103,8 +102,6 @@ const (
 
 	// maintenance methods
 
-	// CmdDBBucketsStat (): map[string]common.StorageBucketWriteStats
-	CmdDBBucketsStat
 	// CmdDBDiskSize (): common.StorageSize
 	CmdDBDiskSize
 )
@@ -442,7 +439,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	return opErr
 }
 
-func (db *DB) DiskSize(ctx context.Context) (common.StorageSize, error) {
+func (db *DB) DiskSize(ctx context.Context) (uint64, error) {
 	var opErr error
 	var endTxErr error
 
@@ -480,54 +477,9 @@ func (db *DB) DiskSize(ctx context.Context) (common.StorageSize, error) {
 		return 0, decodeErr(decoder, responseCode)
 	}
 
-	var value common.StorageSize
+	var value uint64
 	if err := decoder.Decode(&value); err != nil {
 		return 0, fmt.Errorf("could not decode value for CmdDBSize: %w", err)
-	}
-	return value, nil
-}
-
-func (db *DB) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	var opErr error
-	var endTxErr error
-
-	var responseCode ResponseCode
-
-	in, out, closer, err := db.getConnection(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err != nil || endTxErr != nil || opErr != nil {
-			if closeErr := closer.Close(); closeErr != nil {
-				logger.Error("can't close connection", "err", closeErr)
-			}
-			return
-		}
-		db.returnConn(ctx, in, out, closer)
-	}()
-
-	decoder := codecpool.Decoder(in)
-	defer codecpool.Return(decoder)
-	encoder := codecpool.Encoder(out)
-	defer codecpool.Return(encoder)
-
-	if err = encoder.Encode(CmdDBBucketsStat); err != nil {
-		return nil, fmt.Errorf("could not encode CmdDBWriteStats: %w", err)
-	}
-
-	if err = decoder.Decode(&responseCode); err != nil {
-		return nil, fmt.Errorf("could not decode response code of CmdDBWriteStats: %w", err)
-	}
-
-	if responseCode != ResponseOk {
-		return nil, decodeErr(decoder, responseCode)
-	}
-
-	var value map[string]common.StorageBucketWriteStats
-	if err := decoder.Decode(&value); err != nil {
-		return nil, fmt.Errorf("could not decode value for CmdDBWriteStats: %w", err)
 	}
 	return value, nil
 }

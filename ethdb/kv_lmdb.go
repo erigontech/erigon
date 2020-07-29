@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -213,12 +212,12 @@ func (db *LmdbKV) Close() {
 
 }
 
-func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
-	return common.StorageSize(0), nil
-}
-
-func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return map[string]common.StorageBucketWriteStats{}, nil
+func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
+	stats, err := db.env.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("could not read database size: %w", err)
+	}
+	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
 func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {

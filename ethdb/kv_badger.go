@@ -144,13 +144,9 @@ func (db *badgerKV) Close() {
 	}
 }
 
-func (db *badgerKV) DiskSize(_ context.Context) (common.StorageSize, error) {
+func (db *badgerKV) DiskSize(_ context.Context) (uint64, error) {
 	lsm, vlog := db.badger.Size()
-	return common.StorageSize(lsm + vlog), nil
-}
-
-func (db *badgerKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return map[string]common.StorageBucketWriteStats{}, nil
+	return uint64(lsm + vlog), nil
 }
 
 func (db *badgerKV) IdealBatchSize() int {

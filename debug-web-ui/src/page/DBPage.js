@@ -76,7 +76,7 @@ const StatTable = ({ data }) => {
   const keys = Object.keys(data);
   const firstRow = data[keys[0]];
   return (
-    <Table size="sm" borderless>
+    <Table size="sm" borderless className="table-responsive">
       <StatHead stat={firstRow} />
       {keys.map((bucket, i) => (
         <StatRow key={i} bucket={bucket} stat={data[bucket]} />
@@ -96,7 +96,7 @@ const StatHead = ({ stat }) => (
 
 const StatRow = ({ bucket, stat }) => (
   <tr>
-    <td>Bucket: {bucket}</td>
+    <td>{bucket}</td>
     {Object.keys(stat).map((name) => (
       <td>{stat[name]}</td>
     ))}

@@ -7,7 +7,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -17,9 +16,11 @@ import (
 
 // generate the messages
 //go:generate protoc --go_out=. "./remote/kv.proto"
+//go:generate protoc --go_out=. "./remote/db.proto"
 
 // generate the services
 //go:generate protoc --go-grpc_out=. "./remote/kv.proto"
+//go:generate protoc --go-grpc_out=. "./remote/db.proto"
 
 type remote2Opts struct {
 	DialAddress string
@@ -29,6 +30,7 @@ type remote2Opts struct {
 type Remote2KV struct {
 	opts     remote2Opts
 	remoteKV remote.KVClient
+	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
 }
@@ -96,6 +98,7 @@ func (opts remote2Opts) Open() (KV, error) {
 		opts:     opts,
 		conn:     conn,
 		remoteKV: remote.NewKVClient(conn),
+		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
 	}, nil
 }
@@ -125,14 +128,12 @@ func (db *Remote2KV) Close() {
 	}
 }
 
-func (db *Remote2KV) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	//return db.remote.DiskSize(ctx)
-	panic(1)
-}
-
-func (db *Remote2KV) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	//return db.remote.BucketsStat(ctx)
-	panic(1)
+func (db *Remote2KV) DiskSize(ctx context.Context) (uint64, error) {
+	sizeReply, err := db.remoteDB.Size(ctx, &remote.SizeRequest{})
+	if err != nil {
+		return 0, err
+	}
+	return sizeReply.Size, nil
 }
 
 func (db *Remote2KV) IdealBatchSize() int {
@@ -191,7 +192,11 @@ func (c *remote2Cursor) NoValues() NoValuesCursor {
 }
 
 func (b *remote2Bucket) Size() (uint64, error) {
-	panic("not implemented")
+	sizeReply, err := b.tx.db.remoteDB.BucketSize(b.tx.ctx, &remote.BucketSizeRequest{BucketName: b.name})
+	if err != nil {
+		return 0, err
+	}
+	return sizeReply.Size, nil
 }
 
 func (b *remote2Bucket) Clear() error {
