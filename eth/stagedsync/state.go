@@ -97,8 +97,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 }
 
 func (s *State) Run(db ethdb.GetterPutter) error {
-	for !s.
-		IsDone() {
+	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
 				if err := s.UnwindStage(unwind, db); err != nil {
