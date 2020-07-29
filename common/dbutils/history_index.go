@@ -71,6 +71,13 @@ func (hi HistoryIndexBytes) Append(v uint64, emptyValue bool) HistoryIndexBytes 
 		binary.BigEndian.PutUint64(hi[:], minElement)
 	} else {
 		minElement = binary.BigEndian.Uint64(hi[:8])
+		// last value
+		lastIdx := len(hi) - 8 - 3
+		lastElement := minElement+(uint64(hi[lastIdx]&0x7f)<<16)+(uint64(hi[lastIdx+1])<<8)+uint64(hi[lastIdx+2])
+		// Do not append if the value is less or equal to the last - to make operation idempotent
+		if v <= lastElement {
+			return hi
+		}
 	}
 	if v > minElement+0x7fffff { // Maximum number representable in 23 bits
 		panic(fmt.Errorf("item %d cannot be placed into the chunk with minElement %d", v, minElement))

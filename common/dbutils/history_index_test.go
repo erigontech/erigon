@@ -65,3 +65,17 @@ func TestHistoryIndex_Append(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+func TestHistoryIndex_Idempotent(t *testing.T) {
+	index := NewHistoryIndex()
+	for i := uint64(1); i < 10; i++ {
+		index = index.Append(i, false)
+	}
+	oldLen := len(index)
+	for i := uint64(1); i < 10; i++ {
+		index = index.Append(i, false)
+		if len(index) != oldLen {
+			t.Errorf("index is not idempotent, managed to append %d", i)
+		}
+	}	
+}
