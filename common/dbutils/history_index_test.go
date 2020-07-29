@@ -77,5 +77,5 @@ func TestHistoryIndex_Idempotent(t *testing.T) {
 		if len(index) != oldLen {
 			t.Errorf("index is not idempotent, managed to append %d", i)
 		}
-	}	
+	}
 }
