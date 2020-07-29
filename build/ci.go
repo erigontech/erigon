@@ -240,6 +240,11 @@ func doInstall(cmdline []string) {
 				dirs = append(dirs, "."+string(filepath.Separator)+path.Join(".", "cmd", cmd.Name()))
 			}
 		}
+		goinstall.Args = append(goinstall.Args, "-trimpath")
+		goinstall.Args = append(goinstall.Args, "-v")
+		goinstall.Args = append(goinstall.Args, packages...)
+		build.MustRun(goinstall)
+		return
 	}
 
 	packages := []string{}
