@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/sys/cpu"
 )
 
 const (
@@ -229,8 +228,6 @@ func fnvHash(mix []uint32, data []uint32) {
 		mix[i] = mix[i]*0x01000193 ^ data[i]
 	}
 }
-
-var useAVX2 = runtime.GOARCH == "amd64" && cpu.X86.HasAVX2
 
 // generateDatasetItem combines data from 256 pseudorandomly selected cache nodes,
 // and hashes that to compute a single dataset node.
