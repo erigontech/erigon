@@ -170,6 +170,8 @@ Core contributors:
 
 * Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
+* Giulio Rebuffo
+
 Thanks to:
 
 * All contributors of Turbo-Geth
