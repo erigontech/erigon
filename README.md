@@ -158,17 +158,17 @@ Send an email to `security [at] torquem.ch`.
 
 Core contributors:
 
-* Alexey
+* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
 
 * Alex
 
-* Andrew
+* Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
 
 * Boris
 
 * Eugene
 
-* Igor
+* Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
 Thanks to:
 
