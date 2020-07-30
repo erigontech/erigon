@@ -36,8 +36,14 @@ export default class ErrorCatcher extends React.Component {
     let info = this.state.errorInfo !== undefined ? this.state.errorInfo.componentStack : '';
     let details = process.env.NODE_ENV === 'development' ? info : '';
 
-    let serverErrors =
-      err !== undefined && err.response !== undefined && Array.isArray(err.response.data) ? err.response.data : [];
+    let serverErrors = [];
+    if (err !== undefined && err.response !== undefined) {
+      if (Array.isArray(err.response.data)) {
+        serverErrors = err.response.data;
+      } else if (err.response.data.error !== undefined) {
+        serverErrors = [err.response.data.error];
+      }
+    }
 
     return (
       <div className={this.props.className}>
@@ -48,6 +54,7 @@ export default class ErrorCatcher extends React.Component {
           </Modal.Header>
           <Modal.Body>
             <code>Server Error: {serverErrors.join('<br/>')}</code>
+            <br />
             <code>{this.state.error && this.state.error.message}</code>
             <pre>{details}</pre>
           </Modal.Body>
