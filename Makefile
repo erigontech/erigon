@@ -23,6 +23,11 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
+tg:
+	$(GORUN) build/ci.go install ./cmd/geth
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+
 hack:
 	$(GORUN) build/ci.go install ./cmd/hack
 	@echo "Done building."

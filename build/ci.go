@@ -341,6 +341,7 @@ func doTest(cmdline []string) {
 	// and some tests run into timeouts under load.
 	gotest := goTool("test", buildFlags(env)...)
 	gotest.Args = append(gotest.Args, "-p", "1")
+	*verbose = true
 	if *coverage {
 		gotest.Args = append(gotest.Args, "-covermode=atomic", "-cover")
 	}
