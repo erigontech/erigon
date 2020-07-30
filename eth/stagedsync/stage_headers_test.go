@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -82,7 +83,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 	blockNumber := origin.Number.Uint64()
-	collection := NewHeaderNumSets(1000)
+	collection := etl.NewMemoryCollector(32, 8, 1000)
 	reorg, _, err := InsertHeaderChain(db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), collection, &blockNumber, 0, 0)
 	assert.NoError(t, err)
 	assert.False(t, reorg)

@@ -29,6 +29,7 @@ import (
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -1475,11 +1476,11 @@ func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight fun
 	if err != nil {
 		return err
 	}
-	collection := stagedsync.NewHeaderNumSets((height - d.headerNumber + maxExtraHeaders) * 40) // The additional blocks are in case new blocks added exceed length
+	collection := etl.NewMemoryCollector(32, 8, int((height-d.headerNumber+maxExtraHeaders)*40)) // The additional blocks are in case new blocks added exceed length
 	start := d.headerNumber
 	defer func() {
 		if d.mode == StagedSync {
-			err := collection.InsertHeaderNumbers(d.stateDB)
+			err := collection.Commit(d.stateDB, dbutils.HeaderNumberPrefix)
 			if err != nil {
 				log.Error(err.Error())
 			}

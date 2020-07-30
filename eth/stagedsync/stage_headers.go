@@ -1,18 +1,17 @@
 package stagedsync
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
 	mrand "math/rand"
 	"os"
 	"runtime/pprof"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -21,51 +20,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
-
-type HeaderNumSets []byte
-
-func NewHeaderNumSets(ram uint64) HeaderNumSets {
-	return make(HeaderNumSets, ram)
-}
-func (a HeaderNumSets) Len() int { return len(a) / 40 }
-
-func (a HeaderNumSets) Less(i, j int) bool {
-	return bytes.Compare(a[40*i:40*i+40], a[40*j:40*j+40]) < 0
-}
-
-func (a HeaderNumSets) Swap(i, j int) {
-	tmp := common.CopyBytes(a[40*i : 40*i+40])
-	copy(a[40*i:40*i+40], a[40*j:40*j+40])
-	copy(a[40*j:40*j+40], tmp)
-}
-
-// InsertHeaderNumbers pushes BlockHash => number bucket in ordered sequence to the Database
-func (a HeaderNumSets) InsertHeaderNumbers(db ethdb.Database) error {
-	batch := db.NewBatch()
-	sort.Sort(a)
-	zero := make([]byte, 40)
-	w := 0
-	for i := 0; i < len(a); i += 40 {
-		if bytes.Equal(zero, a[i:i+40]) {
-			continue
-		}
-		w++
-		if err := batch.Put(dbutils.HeaderNumberPrefix, common.CopyBytes(a[i:i+32]), common.CopyBytes(a[i+32:i+40])); err != nil {
-			log.Crit("Failed to store hash to number mapping", "err", err)
-			return err
-		}
-		if batch.BatchSize() >= batch.IdealBatchSize() {
-			log.Info("Committed Headers Number", "progress", w)
-			_, err := batch.Commit()
-			if err != nil {
-				return err
-			}
-		}
-	}
-	log.Info("Committed Headers Number", "progress", w)
-	_, err := batch.Commit()
-	return err
-}
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
 	if prof {
@@ -129,7 +83,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection HeaderNumSets, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection *etl.MemoryCollector, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -236,10 +190,8 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 			hash    = header.Hash()
 			encoded = dbutils.EncodeBlockNumber(number)
 		)
-		entry := make([]byte, 40)
-		copy(entry, hash[:])
-		copy(entry[32:], encoded)
-		copy(collection[(number-origin)*40:], entry)
+
+		collection.Put(hash[:], encoded)
 
 		// Write the encoded header
 		data, err := rlp.EncodeToBytes(header)
@@ -272,10 +224,10 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 	if newCanonical {
 		*blockNumber = lastHeader.Number.Uint64()
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
-		currentPos := (lastHeader.Number.Uint64() - origin) * 40
-		hash := collection[currentPos:currentPos+32]
-		encoded := collection[currentPos+32:currentPos+40]
-		if err := batch.Put(dbutils.HeaderNumberPrefix, common.CopyBytes(hash), common.CopyBytes(encoded); err != nil {
+		hash, encoded := collection.Last()
+		fmt.Println(hash)
+		fmt.Println(encoded)
+		if err := batch.Put(dbutils.HeaderNumberPrefix, common.CopyBytes(hash), common.CopyBytes(encoded)); err != nil {
 			log.Crit("Failed to store header", "err", err)
 		}
 	}
