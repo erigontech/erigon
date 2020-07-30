@@ -45,7 +45,7 @@ type txsync struct {
 }
 
 // syncTransactions starts sending all currently pending transactions to the given peer.
-func (pm *ProtocolManager) syncTransactions(p *peer) {
+func (pm *ProtocolManager) syncTransactions(p *peer) error {
 	// Assemble the set of transaction to broadcast or announce to the remote
 	// peer. Fun fact, this is quite an expensive operation as it needs to sort
 	// the transactions if the sorting is not cached yet. However, with a random
@@ -58,7 +58,7 @@ func (pm *ProtocolManager) syncTransactions(p *peer) {
 		txs = append(txs, batch...)
 	}
 	if len(txs) == 0 {
-		return
+		return nil
 	}
 	// The eth/65 protocol introduces proper transaction announcements, so instead
 	// of dripping transactions across multiple peers, just send the entire list as
@@ -68,14 +68,18 @@ func (pm *ProtocolManager) syncTransactions(p *peer) {
 		for i, tx := range txs {
 			hashes[i] = tx.Hash()
 		}
-		p.AsyncSendPooledTransactionHashes(hashes)
-		return
+		if err := p.sendPooledTransactionHashes(hashes); err != nil {
+			log.Error("Sending pooled transaction hashes", "error", err)
+			return err
+		}
+		return nil
 	}
 	// Out of luck, peer is running legacy protocols, drop the txs over
 	select {
 	case pm.txsyncCh <- &txsync{p: p, txs: txs}:
 	case <-pm.quitSync:
 	}
+	return nil
 }
 
 // txsyncLoop64 takes care of the initial transaction sync for each new

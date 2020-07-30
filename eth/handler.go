@@ -443,10 +443,6 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	}
 	pm.chainSync.handlePeerEvent(p)
 
-	// Propagate existing transactions. new transactions appearing
-	// after this will be sent via broadcasts.
-	pm.syncTransactions(p)
-
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
 	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
@@ -457,6 +453,13 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
 		return err
 	}
+	// Propagate existing transactions. new transactions appearing
+	// after this will be sent via broadcasts.
+	if err := pm.syncTransactions(p); err != nil {
+		p.Log().Debug("Sending pooled tx hashes failed", "err", err)
+		return err
+	}
+
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
 	if pm.checkpointHash != (common.Hash{}) {
 		// Request the peer's checkpoint header for chain height/weight validation
