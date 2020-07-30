@@ -21,10 +21,13 @@ Usage:
 
 ## Key features 
 
+See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html).
+It is being updated on recurring basis.
+
 #### 1. More Efficient State Storage
 
-**Plain KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
-a simple way.
+**Flat KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
+a simple way. **See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).**
 
 **Preprocessing**. For some operations, turbo-geth uses temporary files to preprocess data before
 inserting it into the main DB. That reduces write amplification and 
