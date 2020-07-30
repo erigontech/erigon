@@ -1,5 +1,9 @@
 # Turbo-Geth
 
+[GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
+
+[![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
+
 **Disclaimer: this software is currenly a tech preview. We will do our best to
 keep it stable and make no breaking changes but we don't guarantee anything.
 Things can and will break.**
@@ -32,11 +36,18 @@ DB inserts sometimes are orders of magnitude quicker.
 accounts and the storage.
 
 
-#### 2. Faster initial sync using Staged Sync
+#### 2. Faster Initial Sync
 
-Turbo-Geth uses a different sync algorithm, that runs in stages. That allows to
-batch data together and minimize overwriting. That makes it possible to sync
-Ethereum mainnet in under 2 days if you have a fast enough network connection
+Turbo-Geth uses a rearchitected full sync algorithm from
+[Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
+"stages".
+
+It uses the same network primitives and is compatible with regular go-ethereum
+nodes that are using full sync, you do not need any special sync capabilities
+for turbo-geth to sync.
+
+When reimagining the full sync, we focused on batching data together and minimize DB overwrites.
+That makes it possible to sync Ethereum mainnet in under 2 days if you have a fast enough network connection
 and an SSD drive.
 
 Examples of stages are:

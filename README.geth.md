@@ -1,8 +1,5 @@
 ## Turbo-Geth
 
-Faster derivative of Go Ethereum.
-
-
 [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
 
 [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
