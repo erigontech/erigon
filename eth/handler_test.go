@@ -47,11 +47,11 @@ import (
 )
 
 // Tests that block headers can be retrieved from a remote chain based on user queries.
-func TestGetBlockHeaders63(t *testing.T) { testGetBlockHeaders(t, 63) }
 func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
+func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 
 func testGetBlockHeaders(t *testing.T, protocol int) {
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxHashFetch+15, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, downloader.MaxHashFetch+15, nil, nil)
 	defer clear()
 
 	// Create a "random" unknown hash for testing
@@ -217,11 +217,11 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 }
 
 // Tests that block contents can be retrieved from a remote chain based on their hashes.
-func TestGetBlockBodies63(t *testing.T) { testGetBlockBodies(t, 63) }
 func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
+func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 
 func testGetBlockBodies(t *testing.T, protocol int) {
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, downloader.MaxBlockFetch+15, nil, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, downloader.MaxBlockFetch+15, nil, nil)
 	defer clear()
 
 	// Create a batch of tests for various scenarios
@@ -290,9 +290,8 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 }
 
 // Tests that the node state database can be retrieved based on hashes.
-func TestGetNodeData63(t *testing.T) { testGetNodeData(t, 63) }
-
 func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
+func TestGetNodeData65(t *testing.T) { testGetNodeData(t, 65) }
 
 func testGetNodeData(t *testing.T, protocol int) {
 	debug.OverrideGetNodeData(true)
@@ -346,8 +345,8 @@ func testGetNodeData(t *testing.T, protocol int) {
 }
 
 // Tests that the transaction receipts can be retrieved based on hashes.
-func TestGetReceipt63(t *testing.T) { testGetReceipt(t, 63) }
 func TestGetReceipt64(t *testing.T) { testGetReceipt(t, 64) }
+func TestGetReceipt65(t *testing.T) { testGetReceipt(t, 65) }
 
 func testGetReceipt(t *testing.T, protocol int) {
 	// Define two accounts to simulate transactions with
@@ -386,7 +385,7 @@ func testGetReceipt(t *testing.T, protocol int) {
 		}
 	}
 	// Assemble the test environment
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 4, generator, nil)
 	defer clear()
 	peer, _ := newTestPeer("peer", protocol, pm, true)
 	defer peer.close()
@@ -419,24 +418,19 @@ func TestCheckpointChallenge(t *testing.T) {
 		drop       bool
 	}{
 		// If checkpointing is not enabled locally, don't challenge and don't drop
-		{downloader.FullSync, false, false, false, false, false},
-		{downloader.FastSync, false, false, false, false, false},
+		{downloader.StagedSync, false, false, false, false, false},
 
 		// If checkpointing is enabled locally and remote response is empty, only drop during fast sync
-		{downloader.FullSync, true, false, true, false, false},
-		{downloader.FastSync, true, false, true, false, true}, // Special case, fast sync, unsynced peer
+		{downloader.StagedSync, true, false, true, false, false},
 
 		// If checkpointing is enabled locally and remote response mismatches, always drop
-		{downloader.FullSync, true, false, false, false, true},
-		{downloader.FastSync, true, false, false, false, true},
+		{downloader.StagedSync, true, false, false, false, true},
 
 		// If checkpointing is enabled locally and remote response matches, never drop
-		{downloader.FullSync, true, false, false, true, false},
-		{downloader.FastSync, true, false, false, true, false},
+		{downloader.StagedSync, true, false, false, true, false},
 
 		// If checkpointing is enabled locally and remote times out, always drop
-		{downloader.FullSync, true, true, false, true, true},
-		{downloader.FastSync, true, true, false, true, true},
+		{downloader.StagedSync, true, true, false, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("sync %v checkpoint %v timeout %v empty %v match %v", tt.syncmode, tt.checkpoint, tt.timeout, tt.empty, tt.match), func(t *testing.T) {
@@ -487,7 +481,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	defer pm.Stop()
 
 	// Connect a new peer and check that we receive the checkpoint challenge
-	peer, _ := newTestPeer("peer", eth63, pm, true)
+	peer, _ := newTestPeer("peer", eth65, pm, true)
 	defer peer.close()
 
 	if checkpoint {
@@ -569,7 +563,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	}
 	defer blockchain.Stop()
 	cht := &params.TrustedCheckpoint{}
-	pm, err := NewProtocolManager(config, cht, downloader.FullSync, DefaultConfig.NetworkID, evmux, &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, pow, blockchain, db, nil)
+	pm, err := NewProtocolManager(config, cht, downloader.StagedSync, DefaultConfig.NetworkID, evmux, &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, pow, blockchain, db, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
@@ -580,7 +574,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	defer pm.Stop()
 	var peers []*testPeer
 	for i := 0; i < totalPeers; i++ {
-		peer, _ := newTestPeer(fmt.Sprintf("peer %d", i), eth63, pm, true)
+		peer, _ := newTestPeer(fmt.Sprintf("peer %d", i), eth65, pm, true)
 		defer peer.close()
 		peers = append(peers, peer)
 	}
@@ -668,7 +662,7 @@ func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehos
 		}
 	}
 
-	pm, pmClear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	pm, pmClear := newTestProtocolManagerMust(t, downloader.StagedSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 
 	clear := func() {
@@ -755,7 +749,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 		block.AddTx(tx)
 	}
 
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, MaxLeavesPerPrefix, generator, nil)
 	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
@@ -1306,7 +1300,7 @@ func TestFirehoseBytecode(t *testing.T) {
 		}
 	}
 
-	pm, clear := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, numBlocks, generator, nil)
 	defer clear()
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
@@ -1352,7 +1346,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
 	defer blockchain.Stop()
-	pm, err := NewProtocolManager(config, nil, downloader.FullSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), engine, blockchain, db, nil)
+	pm, err := NewProtocolManager(config, nil, downloader.StagedSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), engine, blockchain, db, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
@@ -1363,10 +1357,10 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 
 	// Create two peers, one to send the malformed block with and one to check
 	// propagation
-	source, _ := newTestPeer("source", eth63, pm, true)
+	source, _ := newTestPeer("source", eth65, pm, true)
 	defer source.close()
 
-	sink, _ := newTestPeer("sink", eth63, pm, true)
+	sink, _ := newTestPeer("sink", eth65, pm, true)
 	defer sink.close()
 
 	// Create various combinations of malformed blocks

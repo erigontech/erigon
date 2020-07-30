@@ -566,19 +566,10 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	errc := make(chan error, 2)
 
 	var (
-		status63 statusData63 // safe to read after two values have been received from errc
-		status   statusData   // safe to read after two values have been received from errc
+		status statusData // safe to read after two values have been received from errc
 	)
 	go func() {
 		switch {
-		case p.version == eth63:
-			errc <- p2p.Send(p.rw, StatusMsg, &statusData63{
-				ProtocolVersion: uint32(p.version),
-				NetworkID:       network,
-				TD:              td,
-				CurrentBlock:    head,
-				GenesisBlock:    genesis,
-			})
 		case p.version >= eth64:
 			errc <- p2p.Send(p.rw, StatusMsg, &statusData{
 				ProtocolVersion: uint32(p.version),
@@ -594,8 +585,6 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	}()
 	go func() {
 		switch {
-		case p.version == eth63:
-			errc <- p.readStatusLegacy(network, &status63, genesis)
 		case p.version >= eth64:
 			errc <- p.readStatus(network, &status, genesis, forkFilter)
 		default:
@@ -615,40 +604,10 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		}
 	}
 	switch {
-	case p.version == eth63:
-		p.headHash = status63.CurrentBlock
 	case p.version >= eth64:
 		p.headHash = status.Head
 	default:
 		panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
-	}
-	return nil
-}
-
-func (p *peer) readStatusLegacy(network uint64, status *statusData63, genesis common.Hash) error {
-	msg, err := p.rw.ReadMsg()
-	if err != nil {
-		p.Log().Debug("Failed to read Status msg", "err", err)
-		return err
-	}
-	if msg.Code != StatusMsg {
-		return errResp(ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, StatusMsg)
-	}
-	if msg.Size > ProtocolMaxMsgSize {
-		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, ProtocolMaxMsgSize)
-	}
-	// Decode the handshake and make sure everything matches
-	if err := msg.Decode(&status); err != nil {
-		return errResp(ErrDecode, "msg %v: %v", msg, err)
-	}
-	if status.GenesisBlock != genesis {
-		return errResp(ErrGenesisMismatch, "%x (!= %x)", status.GenesisBlock[:8], genesis[:8])
-	}
-	if status.NetworkID != network {
-		return errResp(ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkID, network)
-	}
-	if int(status.ProtocolVersion) != p.version {
-		return errResp(ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, p.version)
 	}
 	return nil
 }
