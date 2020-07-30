@@ -57,7 +57,7 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 		Chaindata:       chaindata,
 	}
 
-	if err = apis.RegisterRemoteDBAPI(root.Group("remote-db"), e); err != nil {
+	if err = apis.RegisterPrivateAPI(root.Group("private-api"), e); err != nil {
 		return err
 	}
 	if err = apis.RegisterAccountAPI(root.Group("accounts"), e); err != nil {
