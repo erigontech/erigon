@@ -160,13 +160,13 @@ Core contributors:
 
 * Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
 
-* Alex
+* Alex Sharov ([AskAlexSharov](https://github.com/AskAlexSharov))
 
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
 
-* Boris
+* Boris Petrov ([b00ris](https://github.com/b00ris))
 
-* Eugene
+* Eugene Danilenko ([JekaMas](https://github.com/JekaMas))
 
 * Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
