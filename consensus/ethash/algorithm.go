@@ -232,15 +232,6 @@ func fnvHash(mix []uint32, data []uint32) {
 
 var useAVX2 = runtime.GOARCH == "amd64" && cpu.X86.HasAVX2
 
-// fnvHash16 is a specialized version of fnvHash for 16 elements.
-func fnvHash16(mix []uint32, data []uint32) {
-	if useAVX2 {
-		fnvHash16AVX2(&mix[0], &data[0], 0x01000193)
-	} else {
-		fnvHash(mix, data)
-	}
-}
-
 // generateDatasetItem combines data from 256 pseudorandomly selected cache nodes,
 // and hashes that to compute a single dataset node.
 func generateDatasetItem(cache []uint32, index uint32, keccak512 hasher) []byte {
@@ -264,7 +255,7 @@ func generateDatasetItem(cache []uint32, index uint32, keccak512 hasher) []byte 
 	// fnv it with a lot of random cache nodes based on index
 	for i := uint32(0); i < datasetParents; i++ {
 		parent := fnv(index^i, intMix[i%16]) % rows
-		fnvHash16(intMix, cache[parent*hashWords:])
+		fnvHash(intMix, cache[parent*hashWords:])
 	}
 	// Flatten the uint32 mix into a binary one and return
 	for i, val := range intMix {
