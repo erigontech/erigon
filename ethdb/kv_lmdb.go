@@ -115,15 +115,11 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	if !opts.inMem {
-		ctx, ctxCancel := context.WithCancel(context.Background())
-		db.stopStaleReadsCheck = ctxCancel
-		db.wg.Add(1)
-		go func() {
-			defer db.wg.Done()
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			db.staleReadsCheckLoop(ctx, ticker)
-		}()
+		if staleReaders, err := db.env.ReaderCheck(); err != nil {
+			db.log.Error("failed ReaderCheck", "err", err)
+		} else if staleReaders > 0 {
+			db.log.Debug("cleared reader slots from dead processes", "amount", staleReaders)
+		}
 	}
 
 	return db, nil
@@ -160,35 +156,9 @@ func NewLMDB() lmdbOpts {
 	return lmdbOpts{}
 }
 
-// staleReadsCheckLoop - In any real application it is important to check for readers that were
-// never closed by their owning process, and for which the owning process
-// has exited.  See the documentation on transactions for more information.
-func (db *LmdbKV) staleReadsCheckLoop(ctx context.Context, ticker *time.Ticker) {
-	for db.env != nil {
-		// check once on app start
-		staleReaders, err2 := db.env.ReaderCheck()
-		if err2 != nil {
-			db.log.Error("failed ReaderCheck", "err", err2)
-		}
-		if staleReaders > 0 {
-			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if db.stopStaleReadsCheck != nil {
-		db.stopStaleReadsCheck()
-	}
-
 	if db.env != nil {
 		db.wg.Wait()
 	}
