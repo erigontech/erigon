@@ -54,7 +54,7 @@ const get = (api, setHost, setPort) => {
       throw error;
     });
   };
-  return api.getRemoteDB().then(lookupSuccess).catch(lookupFail);
+  return api.getPrivateAPI().then(lookupSuccess).catch(lookupFail);
 };
 
 const set = (host, port, api, setHost, setPort) => {
@@ -67,7 +67,7 @@ const set = (host, port, api, setHost, setPort) => {
       throw error;
     });
   };
-  return api.setRemoteDB(host, port).then(lookupSuccess).catch(lookupFail);
+  return api.setPrivateAPI(host, port).then(lookupSuccess).catch(lookupFail);
 };
 
 const RemoteDBForm = ({ api }) => {
@@ -91,12 +91,12 @@ const RemoteDBForm = ({ api }) => {
 
   return (
     <div className="pl-2 mb-2 font-weight-light text-break">
-      <a href="/remote-db" onClick={handleClick}>
-        Remote DB
+      <a href="/private-api" onClick={handleClick}>
+        Private Api
         <br />
         {host && host + ':' + port}
       </a>
-      <ModalWindow title="Remote DB" show={show} onHide={() => setShow(false)}>
+      <ModalWindow title="Private Api" show={show} onHide={() => setShow(false)}>
         <Form onSubmit={handleSubmit}>
           <Input label="Host" defaultValue={host} />
           <Input label="Port" defaultValue={port} />

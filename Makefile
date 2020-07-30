@@ -21,7 +21,12 @@ endif
 geth:
 	$(GORUN) build/ci.go install ./cmd/geth
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/geth\" to launch geth."
+	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+
+tg:
+	$(GORUN) build/ci.go install ./cmd/geth
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
 	$(GORUN) build/ci.go install ./cmd/hack
@@ -83,7 +88,7 @@ integration:
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 all:
-	$(GORUN) build/ci.go install -procs=1
+	$(GORUN) build/ci.go install
 
 android:
 	$(GORUN) build/ci.go aar --local
@@ -95,21 +100,21 @@ ios:
 	@echo "Done building."
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
-test: semantics/z3/build/libz3.a all
+test: semantics/z3/build/libz3.a
 	$(GORUN) build/ci.go test
 
-test-lmdb: semantics/z3/build/libz3.a all
+test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GORUN) build/ci.go test
 
-test-badger: semantics/z3/build/libz3.a all
+test-badger: semantics/z3/build/libz3.a
 	TEST_DB=badger $(GORUN) build/ci.go test
 
-test-bolt: semantics/z3/build/libz3.a all
+test-bolt: semantics/z3/build/libz3.a
 	TEST_DB=bolt $(GORUN) build/ci.go test
 
 lint: lintci
 
-lintci: semantics/z3/build/libz3.a all
+lintci: semantics/z3/build/libz3.a
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
@@ -130,7 +135,7 @@ lintci: semantics/z3/build/libz3.a all
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.28.2
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.29.0
 
 clean:
 	env GO111MODULE=on go clean -cache
@@ -143,7 +148,8 @@ devtools:
 	env GOBIN= go get -u golang.org/x/tools/cmd/stringer
 	env GOBIN= go get -u github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go get -u github.com/fjl/gencodec
-	env GOBIN= go get -u github.com/golang/protobuf/protoc-gen-go
+	env GOBIN= go get -u google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	env GOBIN= go get -u google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	env GOBIN= go install ./cmd/abigen
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
@@ -245,6 +251,7 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
+	go generate ./ethdb
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json

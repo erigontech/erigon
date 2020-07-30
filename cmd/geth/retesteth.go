@@ -212,7 +212,7 @@ func (e *NoRewardEngine) VerifyHeader(chain consensus.ChainReader, header *types
 	return e.inner.VerifyHeader(chain, header, seal)
 }
 
-func (e *NoRewardEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+func (e *NoRewardEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	return e.inner.VerifyHeaders(chain, headers, seals)
 }
 

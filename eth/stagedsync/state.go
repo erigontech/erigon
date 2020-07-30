@@ -11,6 +11,7 @@ import (
 type State struct {
 	unwindStack  *PersistentUnwindStack
 	stages       []*Stage
+	unwindOrder  []*Stage
 	currentStage uint
 }
 
@@ -32,7 +33,10 @@ func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 	log.Info("UnwindTo", "block", blockNumber)
-	for _, stage := range s.stages {
+	for _, stage := range s.unwindOrder {
+		if stage.Disabled {
+			continue
+		}
 		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
 			return err
 		}
@@ -92,62 +96,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 	return &StageState{s, stage, blockNum, stageData}, nil
 }
 
-func (s *State) findInterruptedStage(db ethdb.Getter) (*Stage, error) {
-	for _, stage := range s.stages {
-		_, stageData, err := stages.GetStageProgress(db, stage.ID)
-		if err != nil {
-			return nil, err
-		}
-		if len(stageData) > 0 {
-			return stage, nil
-		}
-	}
-	return nil, nil
-}
-
-func (s *State) findInterruptedUnwindStage(db ethdb.Getter) (*Stage, error) {
-	for _, stage := range s.stages {
-		_, stageData, err := stages.GetStageUnwind(db, stage.ID)
-		if err != nil {
-			return nil, err
-		}
-		if len(stageData) > 0 {
-			return stage, nil
-		}
-	}
-	return nil, nil
-}
-
-func (s *State) RunInterruptedStage(db ethdb.GetterPutter) error {
-	if interruptedStage, err := s.findInterruptedStage(db); err != nil {
-		return err
-	} else if interruptedStage != nil {
-		if err := s.runStage(interruptedStage, db); err != nil {
-			return err
-		}
-		// restart from 0 after completing the missing stage
-		s.currentStage = 0
-	}
-
-	if interruptedStage, err := s.findInterruptedUnwindStage(db); err != nil {
-		return err
-	} else if interruptedStage != nil {
-		u, err := s.unwindStack.LoadFromDB(db, interruptedStage.ID)
-		if err != nil {
-			return err
-		}
-		if u == nil {
-			return nil
-		}
-		return s.UnwindStage(u, db)
-	}
-	return nil
-}
-
 func (s *State) Run(db ethdb.GetterPutter) error {
-	if err := s.RunInterruptedStage(db); err != nil {
-		return err
-	}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
@@ -155,7 +104,6 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 					return err
 				}
 			}
-			return nil
 		}
 
 		index, stage := s.CurrentStage()
@@ -235,8 +183,28 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
 		return err
 	}
 
-	// always restart from stage 1 after unwind
-	s.currentStage = 0
+	if err := s.SetCurrentStage(stage.ID); err != nil {
+		return err
+	}
 	log.Info("Unwinding... DONE!")
 	return nil
+}
+
+func (s *State) DisableStages(ids ...stages.SyncStage) {
+	for i := range s.stages {
+		for _, id := range ids {
+			if s.stages[i].ID != id {
+				continue
+			}
+			s.stages[i].Disabled = true
+		}
+	}
+}
+
+func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
+	for i := range s.stages {
+		if s.stages[i].ID == id {
+			s.stages[i].ExecFunc = f
+		}
+	}
 }

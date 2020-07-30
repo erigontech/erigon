@@ -23,10 +23,9 @@ import (
 	"math/big"
 
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"

@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func RegisterRemoteDBAPI(router *gin.RouterGroup, e *Env) error {
+func RegisterPrivateAPI(router *gin.RouterGroup, e *Env) error {
 	router.GET("/", e.GetDB)
 	router.POST("/", e.PostDB)
 	return nil
@@ -26,14 +26,17 @@ func (e *Env) GetDB(c *gin.Context) {
 
 func (e *Env) PostDB(c *gin.Context) {
 	newAddr := c.Query("host") + ":" + c.Query("port")
-	remoteDB, err := ethdb.NewRemote().Path(newAddr).Open()
+	kv, err := ethdb.NewRemote2().Path(newAddr).Open()
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return
 	}
 	e.RemoteDBAddress = newAddr
 
-	e.DB.Close()
-	e.DB = remoteDB
+	e.KV.Close()
+
+	e.KV = kv
+	db := ethdb.NewObjectDatabase(kv)
+	e.DB = db
 	c.Status(http.StatusOK)
 }

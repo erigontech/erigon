@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -80,7 +79,7 @@ type Ethereum struct {
 
 	// DB interfaces
 	chainDb *ethdb.ObjectDatabase // Block chain database
-	chainKV ethdb.KV       // Same as chainDb, but different interface
+	chainKV ethdb.KV              // Same as chainDb, but different interface
 
 	eventMux       *event.TypeMux
 	engine         consensus.Engine
@@ -99,7 +98,7 @@ type Ethereum struct {
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
 
-	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	lock          sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	txPoolStarted bool
 }
 
@@ -154,8 +153,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			return nil, err
 		}
 	}
-	if ctx.Config.RemoteDbListenAddress != "" {
-		remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.RemoteDbListenAddress)
+	if ctx.Config.PrivateApiAddr != "" {
+		//remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.PrivateApiAddr)
+		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
@@ -210,17 +210,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 	}
 
-	err = migrations.NewMigrator().Apply(
-		chainDb,
-		config.StorageMode.History,
-		config.StorageMode.Receipts,
-		config.StorageMode.TxIndex,
-		config.StorageMode.Preimages,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, dests, txCacher)
@@ -236,7 +225,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 
 	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
 	eth.blockchain.EnableTxLookupIndex(config.StorageMode.TxIndex)
-	eth.blockchain.EnablePreimages(config.StorageMode.Preimages)
 
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
@@ -252,7 +240,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
 	}
 
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain, chainDb, txCacher)
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
@@ -267,9 +255,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		if err = eth.StartTxPool(); err != nil {
 			return nil, err
 		}
-	} else {
-		eth.txPool.AddInit(eth.StartTxPool)
-		eth.txPool.AddStop(eth.StopTxPool)
 	}
 
 	if config.SyncMode != downloader.StagedSync {
@@ -322,7 +307,7 @@ func makeExtraData(extra []byte) []byte {
 	if len(extra) == 0 {
 		// create default extradata
 		extra, _ = rlp.EncodeToBytes([]interface{}{
-			uint(params.VersionMajor<<16 | params.VersionMinor<<8 | params.VersionPatch),
+			uint(params.VersionMajor<<16 | params.VersionMinor<<8 | params.VersionMicro),
 			"turbo-geth",
 			runtime.Version(),
 			runtime.GOOS,
@@ -664,7 +649,10 @@ func (s *Ethereum) StartTxPool() error {
 	if s.txPoolStarted {
 		return errors.New("transaction pool is already started")
 	}
-	if err := s.txPool.Start(); err != nil {
+	headHash := rawdb.ReadHeadHeaderHash(s.chainDb)
+	headNumber := rawdb.ReadHeaderNumber(s.chainDb, headHash)
+	head := rawdb.ReadHeader(s.chainDb, headHash, *headNumber)
+	if err := s.txPool.Start(head.GasLimit, *headNumber); err != nil {
 		return err
 	}
 	if err := s.protocolManager.StartTxPool(); err != nil {
@@ -705,7 +693,10 @@ func (s *Ethereum) Stop() error {
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()
-	s.chainDb.Close()
 	s.eventMux.Stop()
+	if s.txPool != nil {
+		s.txPool.Stop()
+	}
+	//s.chainDb.Close()
 	return nil
 }

@@ -221,16 +221,6 @@ var (
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
 	}
-	defaultSyncMode = eth.DefaultConfig.SyncMode
-	SyncModeFlag    = TextMarshalerFlag{
-		Name:  "syncmode",
-		Usage: `Blockchain sync mode ("fast", "full", "staged", or "light")`,
-		Value: &defaultSyncMode,
-	}
-	StagedSyncPlainExecFlag = cli.BoolFlag{
-		Name:  "plainstate",
-		Usage: "use plain state when doing staged sync (affects only syncmode=staged)",
-	}
 	GCModePruningFlag = cli.BoolFlag{
 		Name:  "pruning",
 		Usage: `Enable storage pruning`,
@@ -456,9 +446,9 @@ var (
 		Usage: "Which database software to use? Currently supported values: badger & bolt & lmdb",
 		Value: "lmdb",
 	}
-	RemoteDbListenAddress = cli.StringFlag{
-		Name:  "remote-db-listen-addr",
-		Usage: "network address (for example, localhost:9999) to start remote database server on",
+	PrivateApiAddr = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
 		Value: "",
 	}
 	// Miner settings
@@ -1038,10 +1028,10 @@ func setWS(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
-// setRemoteDb populates configuration fields related to the remote
+// setPrivateApi populates configuration fields related to the remote
 // read-only interface to the databae
-func setRemoteDb(ctx *cli.Context, cfg *node.Config) {
-	cfg.RemoteDbListenAddress = ctx.GlobalString(RemoteDbListenAddress.Name)
+func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
+	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 }
 
 // setIPC creates an IPC path configuration from the set command line flags,
@@ -1184,7 +1174,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
 
-	lightClient := ctx.GlobalString(SyncModeFlag.Name) == "light"
+	lightClient := false
 	lightServer := (ctx.GlobalInt(LegacyLightServFlag.Name) != 0 || ctx.GlobalInt(LightServeFlag.Name) != 0)
 
 	lightPeers := ctx.GlobalInt(LegacyLightPeersFlag.Name)
@@ -1259,7 +1249,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setHTTP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
-	setRemoteDb(ctx, cfg)
+	setPrivateApi(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
@@ -1527,7 +1517,6 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	// Avoid conflicting network flags
 	CheckExclusive(ctx, DeveloperFlag, LegacyTestnetFlag, RopstenFlag, RinkebyFlag, GoerliFlag, YoloV1Flag)
-	CheckExclusive(ctx, LegacyLightServFlag, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 	var ks *keystore.KeyStore
 	if keystores := stack.AccountManager().Backends(keystore.KeyStoreType); len(keystores) > 0 {
@@ -1541,12 +1530,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
 
-	core.UsePlainStateExecution = ctx.Bool(StagedSyncPlainExecFlag.Name)
-	log.Info("setting up plain text execution", "plain", core.UsePlainStateExecution)
+	core.UsePlainStateExecution = true
 
-	if ctx.GlobalIsSet(SyncModeFlag.Name) {
-		cfg.SyncMode = *GlobalTextMarshaler(ctx, SyncModeFlag.Name).(*downloader.SyncMode)
-	}
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
@@ -1771,9 +1756,6 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
 	name := "chaindata"
-	if ctx.GlobalString(SyncModeFlag.Name) == "light" {
-		name = "lightchaindata"
-	}
 	chainDb, err := stack.OpenDatabase(name)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)

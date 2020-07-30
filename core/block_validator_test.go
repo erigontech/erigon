@@ -201,8 +201,8 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, dests, txCacher)
 	defer chain.Stop()
 
-	abort, results := chain.engine.VerifyHeaders(chain, headers, seals)
-	close(abort)
+	cancel, results := chain.engine.VerifyHeaders(chain, headers, seals)
+	cancel()
 
 	// Deplete the results channel
 	verified := 0

@@ -31,18 +31,6 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	if s.WasInterrupted() {
-		log.Info("Cleanly promoting plain state", "from", s.BlockNumber, "to", to)
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-		log.Debug("Clean bucket: done")
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
-			return err
-		}
-		return s.DoneAndUpdate(db, to)
-	}
-
 	if s.BlockNumber > 0 { // Initial hashing of the state is performed at the previous stage
 		log.Info("Promoting plain state", "from", s.BlockNumber, "to", to)
 		if err := promoteHashedStateIncrementally(s, s.BlockNumber, to, db, datadir, quit); err != nil {
@@ -54,18 +42,6 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	fromScratch := u.UnwindPoint == 0 || u.WasInterrupted()
-	if fromScratch {
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
-			return err
-		}
-		// here we are on same block as Exec step
-	}
-
 	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
 		return err
 	}
@@ -80,13 +56,13 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
 	prom.TempDir = datadir
-	if err := prom.Unwind(s, u, false /* storage */, false /* codes */, 0x00); err != nil {
+	if err := prom.Unwind(s, u, false /* storage */, false /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Unwind(s, u, false /* storage */, true /* codes */, 0x01); err != nil {
+	if err := prom.Unwind(s, u, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Unwind(s, u, true /* storage */, false /* codes */, 0x02); err != nil {
+	if err := prom.Unwind(s, u, true /* storage */, false /* codes */); err != nil {
 		return err
 	}
 	return nil
@@ -321,7 +297,7 @@ func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 	}
 }
 
-func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes bool, index byte) error {
+func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes bool) error {
 	var changeSetBucket []byte
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
@@ -355,18 +331,12 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(putter, from, []byte{index})
-				}
-				return s.UpdateWithStageData(putter, from, append([]byte{index}, key...))
-			},
 			Quit: p.quitCh,
 		},
 	)
 }
 
-func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes bool, index byte) error {
+func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket []byte
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
@@ -403,12 +373,6 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			OnLoadCommit: func(putter ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return u.UpdateWithStageData(putter, []byte{index})
-				}
-				return u.UpdateWithStageData(putter, append([]byte{index}, key...))
-			},
 			Quit: p.quitCh,
 		},
 	)
@@ -417,13 +381,13 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
-	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */, 0x00); err != nil {
+	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Promote(s, from, to, false /* storage */, true /* codes */, 0x01); err != nil {
+	if err := prom.Promote(s, from, to, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Promote(s, from, to, true /* storage */, false /* codes */, 0x02); err != nil {
+	if err := prom.Promote(s, from, to, true /* storage */, false /* codes */); err != nil {
 		return err
 	}
 	return nil

@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -36,6 +36,7 @@ type trieHasher interface {
 type Dumper struct {
 	blockNumber uint64
 	db          ethdb.KV
+	hashedState bool
 }
 
 // DumpAccount represents an account in the state.
@@ -115,7 +116,11 @@ func (d iterativeDump) onRoot(root common.Hash) {
 }
 
 func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
-	return &Dumper{db: db, blockNumber: blockNumber}
+	return &Dumper{
+		db:          db,
+		blockNumber: blockNumber,
+		hashedState: false,
+	}
 }
 
 func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
@@ -123,12 +128,19 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var incarnationList []uint64
-	var addrHashList []common.Hash
+	var addrHashList []common.Address
+
 	c.onRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
-	err = WalkAsOf(d.db, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
+
+	stateBucket := dbutils.PlainStateBucket
+	if d.hashedState {
+		stateBucket = dbutils.CurrentStateBucket
+	}
+
+	err = WalkAsOf(d.db, stateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -152,13 +164,13 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
-		addrHashList = append(addrHashList, common.BytesToHash(k))
+		addrHashList = append(addrHashList, common.BytesToAddress(k))
 		incarnationList = append(incarnationList, acc.Incarnation)
 
 		numberOfResults++
-
 		return true, nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -166,56 +178,45 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 	for i, addrHash := range addrHashList {
 		account := accountList[i]
 		incarnation := incarnationList[i]
-		var addr []byte
-		addr, err = ethdb.Get(d.db, dbutils.PreimagePrefix, addrHash[:])
-		if err != nil {
-			return nil, fmt.Errorf("getting preimage of %x: %v", addrHash, err)
-		}
-		storagePrefix := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
+		storagePrefix := dbutils.PlainGenerateStoragePrefix(addrHash[:], incarnation)
 		if incarnation > 0 {
 			var codeHash []byte
-			codeHash, err = ethdb.Get(d.db, dbutils.ContractCodeBucket, storagePrefix)
+			codeHash, err = ethdb.Get(d.db, dbutils.PlainContractCodeBucket, storagePrefix)
 			if err != nil && err != ethdb.ErrKeyNotFound {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
 			}
 			if codeHash != nil {
 				account.CodeHash = common.Bytes2Hex(codeHash)
 			} else {
-				account.CodeHash = common.Bytes2Hex(emptyCodeHash[:])
+				account.CodeHash = emptyCodeHash.String()
 			}
-			if !excludeCode && codeHash != nil && !bytes.Equal(emptyCodeHash[:], codeHash) {
+
+			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
+					fmt.Println(addrHash.String(), "code hash with err", codeHash, common.Bytes2Hex(codeHash))
+					spew.Dump(account)
 					return nil, err
 				}
 				account.Code = common.Bytes2Hex(code)
 			}
 		}
 		if !excludeStorage {
-			storageMap := make(map[common.Hash][]byte)
 			err = WalkAsOf(d.db,
-				dbutils.CurrentStateBucket,
+				dbutils.PlainStateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
-				8*(common.HashLength+common.IncarnationLength),
+				8*(common.AddressLength+common.IncarnationLength),
 				d.blockNumber,
 				func(ks, vs []byte) (bool, error) {
-					storageMap[common.BytesToHash(ks[common.HashLength:])] = common.CopyBytes(vs)
+					account.Storage[common.BytesToHash(ks[common.AddressLength:]).String()] = common.Bytes2Hex(vs)
 					return true, nil
 				})
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
 			}
-			for keyHash, vs := range storageMap {
-				var key []byte
-				key, err = ethdb.Get(d.db, dbutils.PreimagePrefix, keyHash[:]) //remove account address and version from composite key
-				if err != nil {
-					return nil, fmt.Errorf("getting preimage for storage %x %x: %v", addrHash, keyHash, err)
-				}
-				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
-			}
 		}
-		c.onAccount(common.BytesToAddress(addr), *account)
+		c.onAccount(addrHash, *account)
 	}
 	return nextKey, nil
 }

@@ -14,6 +14,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+// https://github.com/dgraph-io/badger#garbage-collection
+const gcPeriod = 5 * time.Minute
+
 type badgerOpts struct {
 	Badger badger.Options
 }
@@ -103,7 +106,7 @@ func (db *badgerKV) vlogGCLoop(ctx context.Context, gcTicker *time.Ticker) {
 	// of at max one log file. As an optimization, you could also immediately re-run it whenever
 	// it returns nil error (indicating a successful value log GC), as shown below.
 	i := 0
-	for {
+	for db.badger != nil {
 		for { // do work until badger.ErrNoRewrite
 			err := db.badger.RunValueLogGC(0.7)
 			if err == nil {
@@ -137,16 +140,13 @@ func (db *badgerKV) Close() {
 		} else {
 			db.log.Info("badger database closed")
 		}
+		db.badger = nil
 	}
 }
 
-func (db *badgerKV) DiskSize(_ context.Context) (common.StorageSize, error) {
+func (db *badgerKV) DiskSize(_ context.Context) (uint64, error) {
 	lsm, vlog := db.badger.Size()
-	return common.StorageSize(lsm + vlog), nil
-}
-
-func (db *badgerKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return map[string]common.StorageBucketWriteStats{}, nil
+	return uint64(lsm + vlog), nil
 }
 
 func (db *badgerKV) IdealBatchSize() int {
@@ -154,6 +154,11 @@ func (db *badgerKV) IdealBatchSize() int {
 }
 
 func (db *badgerKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	if db.badger == nil {
+		return nil, fmt.Errorf("db closed")
+	}
+
+	db.wg.Add(1)
 	return &badgerTx{
 		db:     db,
 		ctx:    ctx,
@@ -190,6 +195,13 @@ type badgerCursor struct {
 }
 
 func (db *badgerKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.badger == nil {
+		return fmt.Errorf("db closed")
+	}
+
+	db.wg.Add(1)
+	defer db.wg.Done()
+
 	t := &badgerTx{db: db, ctx: ctx}
 	return db.badger.View(func(tx *badger.Txn) error {
 		defer t.closeCursors()
@@ -199,6 +211,13 @@ func (db *badgerKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.badger == nil {
+		return fmt.Errorf("db closed")
+	}
+
+	db.wg.Add(1)
+	defer db.wg.Done()
+
 	t := &badgerTx{db: db, ctx: ctx}
 	return db.badger.Update(func(tx *badger.Txn) error {
 		defer t.closeCursors()
@@ -214,11 +233,21 @@ func (tx *badgerTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *badgerTx) Commit(ctx context.Context) error {
+	if tx.db.badger == nil {
+		return fmt.Errorf("db closed")
+	}
+
+	defer tx.db.wg.Done()
 	tx.closeCursors()
 	return tx.badger.Commit()
 }
 
 func (tx *badgerTx) Rollback() {
+	if tx.db.badger == nil {
+		return
+	}
+
+	defer tx.db.wg.Done()
 	tx.closeCursors()
 	tx.badger.Discard()
 }

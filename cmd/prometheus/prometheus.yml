@@ -17,6 +17,21 @@ scrape_configs:
     static_configs:
       - targets:
         - turbo-geth:6060
+        - turbo-geth:6061
+        - turbo-geth:6062
         - host.docker.internal:6060
         - host.docker.internal:6061
         - host.docker.internal:6062
+
+  - job_name: turbo-geth2
+    metrics_path: /debug/metrics/prometheus2
+    scheme: http
+    static_configs:
+      - targets:
+        - turbo-geth:6060
+        - turbo-geth:6061
+        - turbo-geth:6062
+        - host.docker.internal:6060
+        - host.docker.internal:6061
+        - host.docker.internal:6062
+

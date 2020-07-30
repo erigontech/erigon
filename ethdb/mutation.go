@@ -12,7 +12,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
-var fullBatchCommitTimer = metrics.NewRegisteredTimer("db/full_batch/commit_time", nil)
+var (
+	dbCommitBigBatchTimer   = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
+	dbCommitSmallBatchTimer = metrics.NewRegisteredTimer("db/commit/small_batch", nil)
+)
 
 type mutation struct {
 	puts   *puts // Map buckets to map[key]value
@@ -86,14 +89,11 @@ func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	if m.db == nil {
 		return 0, nil
 	}
-	return m.db.(HasStats).DiskSize(ctx)
-}
-
-func (m *mutation) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	if m.db == nil {
-		return nil, nil
+	sz, err := m.db.(HasStats).DiskSize(ctx)
+	if err != nil {
+		return 0, err
 	}
-	return m.db.(HasStats).BucketsStat(ctx)
+	return common.StorageSize(sz), nil
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {
@@ -146,9 +146,10 @@ func (m *mutation) Delete(bucket, key []byte) error {
 
 func (m *mutation) Commit() (uint64, error) {
 	if metrics.Enabled {
-		if m.db.IdealBatchSize() <= m.puts.Len() {
-			t := time.Now()
-			defer fullBatchCommitTimer.Update(time.Since(t))
+		if m.puts.Size() >= m.db.IdealBatchSize() {
+			defer dbCommitBigBatchTimer.UpdateSince(time.Now())
+		} else if m.puts.Len() < m.db.IdealBatchSize()/4 {
+			defer dbCommitSmallBatchTimer.UpdateSince(time.Now())
 		}
 	}
 	if m.db == nil {

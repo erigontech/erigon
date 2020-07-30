@@ -176,6 +176,7 @@ func TestStateErroredStage(t *testing.T) {
 		},
 	}
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	err := state.Run(db)
@@ -188,7 +189,6 @@ func TestStateErroredStage(t *testing.T) {
 }
 
 func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
-	t.Skip("Disabled for unwind fixes")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	flow := make([]stages.SyncStage, 0)
@@ -248,8 +248,25 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				return u.Done(db)
 			},
 		},
+		{
+			ID:       stages.IntermediateHashes,
+			Disabled: true,
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				flow = append(flow, stages.IntermediateHashes)
+				if s.BlockNumber == 0 {
+					return s.DoneAndUpdate(db, 2000)
+				}
+				s.Done()
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				flow = append(flow, unwindOf(stages.IntermediateHashes))
+				return u.Done(db)
+			},
+		},
 	}
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
 	err := state.Run(db)
 	assert.NoError(t, err)
 
@@ -275,7 +292,6 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 }
 
 func TestStateUnwind(t *testing.T) {
-	t.Skip("Disabled for unwind fixes")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	flow := make([]stages.SyncStage, 0)
@@ -334,8 +350,25 @@ func TestStateUnwind(t *testing.T) {
 				return u.Done(db)
 			},
 		},
+		{
+			ID:       stages.IntermediateHashes,
+			Disabled: true,
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				flow = append(flow, stages.IntermediateHashes)
+				if s.BlockNumber == 0 {
+					return s.DoneAndUpdate(db, 2000)
+				}
+				s.Done()
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				flow = append(flow, unwindOf(stages.IntermediateHashes))
+				return u.Done(db)
+			},
+		},
 	}
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
 	err := state.Run(db)
 	assert.NoError(t, err)
 
@@ -362,7 +395,6 @@ func TestStateUnwind(t *testing.T) {
 }
 
 func TestStateUnwindEmptyUnwinder(t *testing.T) {
-	t.Skip("Disabled for unwind fixes")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	flow := make([]stages.SyncStage, 0)
@@ -419,6 +451,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 		},
 	}
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err := state.Run(db)
 	assert.NoError(t, err)
 
@@ -554,7 +587,6 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 }
 
 func TestStateSyncInterruptLongUnwind(t *testing.T) {
-	t.Skip("Disabled for unwind fixes")
 	// interrupt a stage that is too big to fit in one batch,
 	// so the db is in inconsitent state, so we have to restart with that
 	db := ethdb.NewMemDatabase()
@@ -630,6 +662,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 		},
 	}
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err := state.Run(db)
 	assert.Error(t, errInterrupted, err)
 
@@ -712,16 +745,18 @@ func TestStateSyncInterruptLongStage(t *testing.T) {
 	}
 
 	state := NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err := state.Run(db)
 	assert.Equal(t, errInterrupted, err)
 
 	state = NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err = state.Run(db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
 		stages.Headers, stages.Bodies,
-		stages.Bodies, // finish the interrupted state, then restart from 0
+		// after restart - start from 0
 		stages.Headers, stages.Bodies, stages.Senders,
 	}
 	assert.Equal(t, expectedFlow, flow)

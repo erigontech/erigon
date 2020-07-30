@@ -23,22 +23,22 @@ type SyncMode int
 
 const (
 	FullSync   SyncMode = iota // Synchronise the entire blockchain history from full blocks
-	FastSync                   // Quickly download the headers, full sync only at the chain head
-	LightSync                  // Download only the headers and terminate afterwards
 	StagedSync                 // Full sync but done in stages
 	MgrSync                    // MarryGoRound sync
+
+	// FIXME: these are kept for simplicity of rebasing
+	FastSync  // (not supported by turbo-geth)
+	LightSync // (not supported by turbo-geth)
 )
 
 const (
 	FullSyncName   = "full"
-	FastSyncName   = "fast"
-	LightSyncName  = "light"
 	StagedSyncName = "staged"
 	MgrSyncName    = "mgr"
 )
 
 func (mode SyncMode) IsValid() bool {
-	return mode == FullSync || mode == StagedSync
+	return mode == StagedSync || mode == FullSync // needed for some (turbo-geth/console) tests
 }
 
 // String implements the stringer interface.
@@ -46,10 +46,6 @@ func (mode SyncMode) String() string {
 	switch mode {
 	case FullSync:
 		return FullSyncName
-	case FastSync:
-		return FastSyncName
-	case LightSync:
-		return LightSyncName
 	case StagedSync:
 		return StagedSyncName
 	case MgrSync:
@@ -63,10 +59,6 @@ func (mode SyncMode) MarshalText() ([]byte, error) {
 	switch mode {
 	case FullSync:
 		return []byte(FullSyncName), nil
-	case FastSync:
-		return []byte(FastSyncName), nil
-	case LightSync:
-		return []byte(LightSyncName), nil
 	case StagedSync:
 		return []byte(StagedSyncName), nil
 	case MgrSync:
@@ -80,17 +72,12 @@ func (mode *SyncMode) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case FullSyncName:
 		*mode = FullSync
-	case FastSyncName:
-		*mode = FastSync
-	case LightSyncName:
-		*mode = LightSync
 	case StagedSyncName:
 		*mode = StagedSync
 	case MgrSyncName:
 		*mode = MgrSync
 	default:
-		return fmt.Errorf(`unknown sync mode %q, want "%s", "%s", "%s" or "%s" or "%s"`,
-			FullSyncName, FastSyncName, LightSyncName, StagedSyncName, MgrSyncName, text)
+		return fmt.Errorf(`unknown sync mode %q, want one of %s`, text, []string{FullSyncName, StagedSyncName, MgrSyncName})
 	}
 	return nil
 }

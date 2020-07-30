@@ -145,8 +145,8 @@ type BlockChain struct {
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
 	db            *ethdb.ObjectDatabase // Low level persistent database to store final content in
-	triegc        *prque.Prque                 // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration                // Accumulates canonical block processing for trie dumping
+	triegc        *prque.Prque          // Priority queue mapping block numbers to tries to gc
+	gcproc        time.Duration         // Accumulates canonical block processing for trie dumping
 	txLookupLimit uint64
 
 	hc            *HeaderChain
@@ -385,16 +385,13 @@ func (bc *BlockChain) loadLastState() error {
 	// Restore the last known head block
 	head := rawdb.ReadHeadBlockHash(bc.db)
 	if head == (common.Hash{}) {
-		// Corrupt or empty database, init from scratch
-		log.Warn("Empty database, resetting chain")
-		return bc.Reset()
+		return fmt.Errorf("empty or corrupt database")
 	}
 	// Make sure the entire head block is available
 	currentBlock := bc.GetBlockByHash(head)
 	if currentBlock == nil {
 		// Corrupt or empty database, init from scratch
-		log.Warn("Head block missing, resetting chain", "hash", head)
-		return bc.Reset()
+		return fmt.Errorf("head block missing, hash %x", head)
 	}
 	// Make sure the state associated with the block is available
 	// Everything seems to be fine, set as the head block
@@ -421,15 +418,12 @@ func (bc *BlockChain) loadLastState() error {
 		}
 	}
 	// Issue a status log for the user
-	currentFastBlock := bc.CurrentFastBlock()
 
 	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
 	blockTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
-	fastTd := bc.GetTd(currentFastBlock.Hash(), currentFastBlock.NumberU64())
 
-	log.Info("Loaded most recent local header", "number", currentHeader.Number, "hash", currentHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(currentHeader.Time), 0)))
-	log.Info("Loaded most recent local full block", "number", currentBlock.Number(), "hash", currentBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
-	log.Info("Loaded most recent local fast block", "number", currentFastBlock.Number(), "hash", currentFastBlock.Hash(), "td", fastTd, "age", common.PrettyAge(time.Unix(int64(currentFastBlock.Time()), 0)))
+	log.Info("Most recent local header", "number", currentHeader.Number, "hash", currentHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(currentHeader.Time), 0)))
+	log.Info("Most recent local block", "number", currentBlock.Number(), "hash", currentBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
 
 	return nil
 }
@@ -2213,6 +2207,8 @@ func ExecuteBlockEphemerally(
 	stateWriter state.WriterWithChangeSets,
 	dests vm.Cache,
 ) (types.Receipts, error) {
+	defer blockExecutionTimer.UpdateSince(time.Now())
+
 	ibs := state.New(stateReader)
 	header := block.Header()
 	var receipts types.Receipts
@@ -2293,22 +2289,6 @@ func InsertBodies(
 		// If the chain is terminating, stop processing blocks
 		if atomic.LoadInt32(procInterrupt) == 1 {
 			return true, nil
-		}
-
-		// If the header is a banned one, straight out abort
-		if BadHashes[block.Hash()] {
-			badBlocks.Add(block.Hash(), block)
-			log.Error(fmt.Sprintf(`
-########## BAD BLOCK #########
-
-Number: %v
-Hash: 0x%x
-
-Error: %v
-Callers: %v
-##############################
-`, block.Number(), block.Hash(), ErrBlacklistedHash, debug.Callers(20)))
-			return true, ErrBlacklistedHash
 		}
 
 		// Calculate the total difficulty of the block

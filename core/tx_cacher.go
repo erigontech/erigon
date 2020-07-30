@@ -17,6 +17,8 @@
 package core
 
 import (
+	"sync"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -39,6 +41,7 @@ type TxSenderCacher struct {
 	threads int
 	tasks   chan *txSenderCacherRequest
 	exitCh  chan struct{}
+	wg      *sync.WaitGroup
 }
 
 // newTxSenderCacher creates a new transaction sender background cacher and starts
@@ -48,10 +51,15 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 		tasks:   make(chan *txSenderCacherRequest, threads),
 		threads: threads,
 		exitCh:  make(chan struct{}),
+		wg:      &sync.WaitGroup{},
 	}
 
 	for i := 0; i < threads; i++ {
-		go cacher.cache()
+		cacher.wg.Add(1)
+		go func() {
+			defer cacher.wg.Done()
+			cacher.cache()
+		}()
 	}
 	return cacher
 }
@@ -115,4 +123,5 @@ func (cacher *TxSenderCacher) recoverFromBlocks(signer types.Signer, blocks []*t
 func (cacher *TxSenderCacher) Close() {
 	common.SafeClose(cacher.exitCh)
 	close(cacher.tasks)
+	cacher.wg.Wait()
 }

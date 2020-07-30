@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -95,6 +96,19 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		} else {
 			break
 		}
+		// If the header is a banned one, straight out abort
+		if core.BadHashes[h.Hash()] {
+			log.Error(fmt.Sprintf(`
+########## BAD BLOCK #########
+
+Number: %v
+Hash: 0x%x
+
+Error: %v
+##############################
+`, h.Number, h.Hash(), core.ErrBlacklistedHash))
+			return false, 0, core.ErrBlacklistedHash
+		}
 	}
 	headers = headers[alreadyCanonicalIndex:]
 	if len(headers) < 1 {
@@ -129,8 +143,8 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		seals[len(seals)-1] = true
 	}
 
-	abort, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
-	defer close(abort)
+	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	defer cancel()
 
 	// Iterate over the headers and ensure they all check out
 	for i := 0; i < len(headers); i++ {

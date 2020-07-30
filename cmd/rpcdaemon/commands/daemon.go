@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -13,9 +14,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -36,25 +37,18 @@ func splitAndTrim(input string) []string {
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
+	Coinbase(context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
+	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
+	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]ethapi.Account) (hexutil.Bytes, error)
+	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
-	db           ethdb.KV
-	dbReader     ethdb.Getter
-	chainContext core.ChainContext
-}
-
-// PrivateDebugAPI
-type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
-}
-
-// APIImpl is implementation of the EthAPI interface based on remote Db access
-type PrivateDebugAPIImpl struct {
 	db           ethdb.KV
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
@@ -69,30 +63,133 @@ func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) 
 	}
 }
 
-// NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
-	return &PrivateDebugAPIImpl{
-		db:           db,
-		dbReader:     dbReader,
-		chainContext: chainContext,
-	}
-}
-
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	var blockNumber uint64
-
-	if err := api.db.View(ctx, func(tx ethdb.Tx) error {
-		var err error
-		blockNumber, err = remotechain.ReadLastBlockNumber(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
+	if err != nil {
 		return 0, err
 	}
+	return hexutil.Uint64(execution), nil
+}
 
-	return hexutil.Uint64(blockNumber), nil
+// Etherbase is the address that mining rewards will be send to
+func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
+	return common.Address{}, errors.New("not implemented")
+}
+
+func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, fmt.Errorf("block not found: %x", hash)
+	}
+
+	block := rawdb.ReadBlock(db, hash, *number)
+	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64(), cfg); cached != nil {
+		return cached, nil
+	}
+
+	bc := &blockGetter{db}
+	_, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var receipts types.Receipts
+	cc := &chainContext{db}
+	gp := new(core.GasPool).AddGas(block.GasLimit())
+	var usedGas = new(uint64)
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+
+		header := rawdb.ReadHeader(db, hash, *number)
+		receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{}, nil)
+		if err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, receipt)
+	}
+
+	return receipts, nil
+}
+
+func (api *APIImpl) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
+	number := rawdb.ReadHeaderNumber(api.dbReader, hash)
+	if number == nil {
+		return nil, fmt.Errorf("block not found: %x", hash)
+	}
+
+	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, hash)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipt error: %v", err)
+	}
+	logs := make([][]*types.Log, len(receipts))
+	for i, receipt := range receipts {
+		logs[i] = receipt.Logs
+	}
+	return logs, nil
+}
+
+func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	// Retrieve the transaction and assemble its EVM context
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
+	if tx == nil {
+		return nil, fmt.Errorf("transaction %#x not found", hash)
+	}
+
+	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipt error: %v", err)
+	}
+	if len(receipts) <= int(txIndex) {
+		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
+	}
+	receipt := receipts[txIndex]
+
+	var signer types.Signer = types.FrontierSigner{}
+	if tx.Protected() {
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
+	}
+	from, _ := types.Sender(signer, tx)
+
+	// Fill in the derived information in the logs
+	if receipt.Logs != nil {
+		for i, log := range receipt.Logs {
+			log.BlockNumber = blockNumber
+			log.TxHash = hash
+			log.TxIndex = uint(txIndex)
+			log.BlockHash = blockHash
+			log.Index = uint(i)
+		}
+	}
+
+	// Now reconstruct the bloom filter
+	fields := map[string]interface{}{
+		"blockHash":         blockHash,
+		"blockNumber":       hexutil.Uint64(blockNumber),
+		"transactionHash":   hash,
+		"transactionIndex":  hexutil.Uint64(txIndex),
+		"from":              from,
+		"to":                tx.To(),
+		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
+		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
+		"contractAddress":   nil,
+		"logs":              receipt.Logs,
+		"logsBloom":         receipt.Bloom,
+	}
+
+	// Assign receipt status or post state.
+	if len(receipt.PostState) > 0 {
+		fields["root"] = hexutil.Bytes(receipt.PostState)
+	} else {
+		fields["status"] = hexutil.Uint(receipt.Status)
+	}
+	if receipt.Logs == nil {
+		fields["logs"] = [][]*types.Log{}
+	}
+	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
+	if receipt.ContractAddress != (common.Address{}) {
+		fields["contractAddress"] = receipt.ContractAddress
+	}
+	return fields, nil
 }
 
 type blockGetter struct {
@@ -114,7 +211,7 @@ type chainContext struct {
 
 func NewChainContext(db rawdb.DatabaseReader) *chainContext {
 	return &chainContext{
-		db:          db,
+		db: db,
 	}
 
 }
@@ -126,7 +223,7 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainReader, header *types.Head
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
@@ -177,56 +274,23 @@ func (c *chainContext) Engine() consensus.Engine {
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	var err error
-	var block *types.Block
 	additionalFields := make(map[string]interface{})
 
-	err = api.db.View(ctx, func(tx ethdb.Tx) error {
-		block, err = remotechain.GetBlockByNumber(tx, uint64(number.Int64()))
-		if err != nil {
-			return err
-		}
-		additionalFields["totalDifficulty"], err = remotechain.ReadTd(tx, block.Hash(), uint64(number.Int64()))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	block := rawdb.ReadBlockByNumber(api.dbReader, uint64(number.Int64()))
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %d", number.Int64())
 	}
 
-	if block != nil {
-		response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
+	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
+	response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
 
-		if err == nil && number == rpc.PendingBlockNumber {
-			// Pending blocks need to nil out a few fields
-			for _, field := range []string{"hash", "nonce", "miner"} {
-				response[field] = nil
-			}
+	if err == nil && number == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
 		}
-		return response, err
 	}
-	return nil, nil
-}
-
-// StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, stateReader, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
-	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
-}
-
-// computeIntraBlockState retrieves the state database associated with a certain block.
-// If no state is locally available for the given block, a number of blocks are
-// attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
-	// If we have the state fully available, use that
-	dbstate := state.NewDbState(api.db, block.NumberU64())
-	statedb := state.New(dbstate)
-	return statedb, dbstate
+	return response, err
 }
 
 // rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
@@ -243,32 +307,10 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func daemon(cmd *cobra.Command, cfg Config) {
-	vhosts := splitAndTrim(cfg.rpcVirtualHost)
-	cors := splitAndTrim(cfg.rpcCORSDomain)
-	enabledApis := splitAndTrim(cfg.rpcAPI)
-
-	var db ethdb.KV
-	var err error
-	if cfg.remoteDbAddress != "" {
-		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
-	} else if cfg.chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
-			db = database.KV()
-		} else {
-			err = errOpen
-		}
-	} else {
-		err = fmt.Errorf("either remote db or bolt db must be specified")
-	}
-	if err != nil {
-		log.Error("Could not connect to remoteDb", "error", err)
-		return
-	}
-
+func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
 	var rpcAPI = []rpc.API{}
 
-	dbReader := ethdb.NewRemoteBoltDatabase(db)
+	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
 	apiImpl := NewAPI(db, dbReader, chainContext)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
@@ -294,7 +336,40 @@ func daemon(cmd *cobra.Command, cfg Config) {
 			log.Error("Unrecognised", "api", enabledAPI)
 		}
 	}
-	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
+	return rpcAPI
+}
+
+func daemon(cmd *cobra.Command, cfg Config) {
+	vhosts := splitAndTrim(cfg.httpVirtualHost)
+	cors := splitAndTrim(cfg.httpCORSDomain)
+	enabledApis := splitAndTrim(cfg.API)
+
+	var db ethdb.KV
+	var err error
+	if cfg.privateApiAddr != "" {
+		db, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		if err != nil {
+			log.Error("Could not connect to remoteDb", "error", err)
+			return
+		}
+	} else if cfg.chaindata != "" {
+		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
+			db = database.KV()
+		} else {
+			err = errOpen
+		}
+	} else {
+		err = fmt.Errorf("either remote db or bolt db must be specified")
+	}
+
+	if err != nil {
+		log.Error("Could not connect to remoteDb", "error", err)
+		return
+	}
+
+	var rpcAPI = GetAPI(db, enabledApis)
+
+	httpEndpoint := fmt.Sprintf("%s:%d", cfg.httpListenAddress, cfg.httpPort)
 
 	// register apis and create handler stack
 	srv := rpc.NewServer()

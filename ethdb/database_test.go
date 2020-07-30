@@ -20,41 +20,28 @@ package ethdb
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func newTestBoltDB() (*BoltDatabase, func()) {
-	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_test_")
-	if err != nil {
-		panic("failed to create test file: " + err.Error())
-	}
-	db, err := NewBoltDatabase(path.Join(dirname, "db"))
-	if err != nil {
-		panic("failed to create test database: " + err.Error())
-	}
-
+func newTestBoltDB() (Database, func()) {
+	db := NewObjectDatabase(NewBolt().InMem().MustOpen())
 	return db, func() {
 		db.Close()
-		os.RemoveAll(dirname)
 	}
 }
 
-func newTestBadgerDB() (*BadgerDatabase, func()) {
-	db, err := NewEphemeralBadger()
-	if err != nil {
-		panic("failed to create test database: " + err.Error())
-	}
-
+func newTestBadgerDB() (Database, func()) {
+	db := NewObjectDatabase(NewBadger().InMem().MustOpen())
 	return db, func() {
 		db.Close()
 	}
@@ -71,29 +58,31 @@ func TestBoltDB_PutGet(t *testing.T) {
 	db, remove := newTestBoltDB()
 	defer remove()
 	testPutGet(db, t)
+	testNoPanicAfterDbClosed(db, t)
 }
 
 func TestMemoryDB_PutGet(t *testing.T) {
 	db := NewMemDatabase()
 	defer db.Close()
 	testPutGet(db, t)
+	testNoPanicAfterDbClosed(db, t)
 }
 
 func TestBadgerDB_PutGet(t *testing.T) {
 	db, remove := newTestBadgerDB()
 	defer remove()
 	testPutGet(db, t)
+	testNoPanicAfterDbClosed(db, t)
 }
 
 func TestLMDB_PutGet(t *testing.T) {
 	db := newTestLmdb()
 	defer db.Close()
 	testPutGet(db, t)
+	testNoPanicAfterDbClosed(db, t)
 }
 
 func testPutGet(db MinDatabase, t *testing.T) {
-	t.Parallel()
-
 	for _, k := range testValues {
 		err := db.Put(testBucket, []byte(k), []byte{})
 		if err != nil {
@@ -180,6 +169,36 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	}
 }
 
+func testNoPanicAfterDbClosed(db Database, t *testing.T) {
+	tx, err := db.(HasKV).KV().Begin(context.Background(), false)
+	require.NoError(t, err)
+	writeTx, err := db.(HasKV).KV().Begin(context.Background(), true)
+	require.NoError(t, err)
+	go func() {
+		require.NotPanics(t, func() {
+			db.Close()
+		})
+	}()
+	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
+	err = writeTx.Bucket(dbutils.Buckets[0]).Put([]byte{1}, []byte{1})
+	require.NoError(t, err)
+	err = writeTx.Commit(context.Background())
+	require.NoError(t, err)
+	_, err = tx.Bucket(dbutils.Buckets[0]).Get([]byte{1})
+	require.NoError(t, err)
+	tx.Rollback()
+
+	db.Close() // close db from 2nd goroutine
+
+	// after db closed, methods must not panic but return some error
+	require.NotPanics(t, func() {
+		_, err := db.Get(testBucket, []byte{11})
+		require.Error(t, err)
+		err = db.Put(testBucket, []byte{11}, []byte{11})
+		require.Error(t, err)
+	})
+}
+
 func TestBoltDB_ParallelPutGet(t *testing.T) {
 	db, remove := newTestBoltDB()
 	defer remove()
@@ -203,6 +222,7 @@ func TestBadgerDB_ParallelPutGet(t *testing.T) {
 	defer remove()
 	testParallelPutGet(db)
 }
+
 func testParallelPutGet(db MinDatabase) {
 	const n = 8
 	var pending sync.WaitGroup

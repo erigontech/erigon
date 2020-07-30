@@ -236,8 +236,8 @@ func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header, checkFreq int)
 		seals[len(seals)-1] = true
 	}
 
-	abort, results := hc.engine.VerifyHeaders(hc, chain, seals)
-	defer close(abort)
+	cancel, results := hc.engine.VerifyHeaders(hc, chain, seals)
+	defer cancel()
 
 	// Iterate over the headers and ensure they all check out
 	for i, header := range chain {

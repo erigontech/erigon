@@ -4,12 +4,14 @@ import "github.com/spf13/cobra"
 
 var (
 	chaindata          string
+	compact            bool
 	referenceChaindata string
 	block              uint64
 	unwind             uint64
 	unwindEvery        uint64
 	reset              bool
 	bucket             string
+	datadir            string
 )
 
 func must(err error) {
@@ -22,6 +24,10 @@ func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
 	must(cmd.MarkFlagRequired("chaindata"))
+}
+
+func withCompact(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&compact, "compact", false, "compact db file. if remove much data form LMDB it slows down tx.Commit because it performs `realloc()` of free_list every commit")
 }
 
 func withReferenceChaindata(cmd *cobra.Command) {
@@ -47,4 +53,8 @@ func withReset(cmd *cobra.Command) {
 
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
+}
+
+func withDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadir, "datadir", "", "data directory for temporary ELT files")
 }

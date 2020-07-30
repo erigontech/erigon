@@ -187,6 +187,13 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
+		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
+		// FIXME: Workaround for staged sync, just do no-op
+		if manager.blockchain == nil || manager.blockchain.CurrentBlock() == nil {
+			log.Info("Workaround for staged sync: IIIAAAIII")
+			return 0, err
+		}
+
 		// If sync hasn't reached the checkpoint yet, deny importing weird blocks.
 		//
 		// Ideally we would also compare the head block's timestamp and similarly reject
@@ -445,7 +452,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
 		return err
 	}
-	// Handle one message
+	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
 		return err
@@ -717,7 +724,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 
-	case p.version >= eth63 && msg.Code == GetNodeDataMsg:
+	case p.version >= eth64 && msg.Code == GetNodeDataMsg:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -769,7 +776,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 		return p.SendNodeData(data)
 
-	case p.version >= eth63 && msg.Code == GetReceiptsMsg:
+	case p.version >= eth64 && msg.Code == GetReceiptsMsg:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -805,7 +812,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 		return p.SendReceiptsRLP(receipts)
 
-	case p.version >= eth63 && msg.Code == ReceiptsMsg:
+	case p.version >= eth64 && msg.Code == ReceiptsMsg:
 		// A batch of receipts arrived to one of our previous requests
 		var receipts [][]*types.Receipt
 		if err := msg.Decode(&receipts); err != nil {
@@ -1010,6 +1017,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
+		log.Warn("Sent back the DebugSetGenesisMsg")
 		return nil
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)

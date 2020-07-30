@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
+
+const LMDBMapSize = 4 << 40 // 4TB
 
 type lmdbOpts struct {
 	path     string
@@ -50,14 +51,14 @@ func (opts lmdbOpts) Open() (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		err = env.SetMapSize(64 << 20) // 64MB
+		err = env.SetMapSize(32 << 20) // 32MB
 		logger = log.New("lmdb", "inMem")
 		if err != nil {
 			return nil, err
 		}
 		opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
 	} else {
-		err = env.SetMapSize(32 << 40) // 32TB
+		err = env.SetMapSize(LMDBMapSize)
 		logger = log.New("lmdb", path.Base(opts.path))
 		if err != nil {
 			return nil, err
@@ -76,7 +77,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
 	db := &LmdbKV{
@@ -102,12 +103,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}
 	} else {
 		if err := env.Update(func(tx *lmdb.Txn) error {
-			for _, name := range dbutils.Buckets {
-				dbi, createErr := tx.OpenDBI(string(name), lmdb.Create)
-				if createErr != nil {
-					return createErr
+			for id := range dbutils.Buckets {
+				if err := createBucket(tx, db, id); err != nil {
+					return err
 				}
-				db.buckets[dbutils.BucketsIndex[string(name)]] = dbi
 			}
 			return nil
 		}); err != nil {
@@ -116,18 +115,24 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	if !opts.inMem {
-		ctx, ctxCancel := context.WithCancel(context.Background())
-		db.stopStaleReadsCheck = ctxCancel
-		db.wg.Add(1)
-		go func() {
-			defer db.wg.Done()
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			db.staleReadsCheckLoop(ctx, ticker)
-		}()
+		if staleReaders, err := db.env.ReaderCheck(); err != nil {
+			db.log.Error("failed ReaderCheck", "err", err)
+		} else if staleReaders > 0 {
+			db.log.Debug("cleared reader slots from dead processes", "amount", staleReaders)
+		}
 	}
 
 	return db, nil
+}
+
+func createBucket(tx *lmdb.Txn, db *LmdbKV, id int) error {
+	var flags uint = lmdb.Create
+	dbi, err := tx.OpenDBI(string(dbutils.Buckets[id]), flags)
+	if err != nil {
+		return err
+	}
+	db.buckets[id] = dbi
+	return nil
 }
 
 func (opts lmdbOpts) MustOpen() KV {
@@ -151,43 +156,22 @@ func NewLMDB() lmdbOpts {
 	return lmdbOpts{}
 }
 
-// staleReadsCheckLoop - In any real application it is important to check for readers that were
-// never closed by their owning process, and for which the owning process
-// has exited.  See the documentation on transactions for more information.
-func (db *LmdbKV) staleReadsCheckLoop(ctx context.Context, ticker *time.Ticker) {
-	for {
-		// check once on app start
-		staleReaders, err2 := db.env.ReaderCheck()
-		if err2 != nil {
-			db.log.Error("failed ReaderCheck", "err", err2)
-		}
-		if staleReaders > 0 {
-			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if db.stopStaleReadsCheck != nil {
-		db.stopStaleReadsCheck()
+	if db.env != nil {
+		db.wg.Wait()
 	}
-	db.wg.Wait()
 
 	if db.env != nil {
-		if err := db.env.Close(); err != nil {
+		env := db.env
+		db.env = nil
+		time.Sleep(10 * time.Millisecond) // TODO: remove after consensus/ethash/consensus.go:VerifyHeaders will spawn controllable goroutines
+		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
 			db.log.Info("database closed (LMDB)")
 		}
-		db.env = nil
 	}
 
 	if db.opts.inMem {
@@ -198,12 +182,12 @@ func (db *LmdbKV) Close() {
 
 }
 
-func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
-	return common.StorageSize(0), nil
-}
-
-func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return map[string]common.StorageBucketWriteStats{}, nil
+func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
+	stats, err := db.env.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("could not read database size: %w", err)
+	}
+	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
 func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
@@ -218,6 +202,10 @@ func (db *LmdbKV) IdealBatchSize() int {
 }
 
 func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	if db.env == nil {
+		return nil, fmt.Errorf("db closed")
+	}
+	db.wg.Add(1)
 	flags := uint(0)
 	if !writable {
 		flags |= lmdb.Readonly
@@ -260,6 +248,8 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
+	db.wg.Add(1)
+	defer db.wg.Done()
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
@@ -270,6 +260,11 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.env == nil {
+		return fmt.Errorf("db closed")
+	}
+	db.wg.Add(1)
+	defer db.wg.Done()
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
@@ -289,13 +284,21 @@ func (tx *lmdbTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
+	if tx.db.env == nil {
+		return fmt.Errorf("db closed")
+	}
+	defer tx.db.wg.Done()
 	tx.closeCursors()
 	return tx.tx.Commit()
 }
 
 func (tx *lmdbTx) Rollback() {
+	if tx.db.env == nil {
+		return
+	}
+	defer tx.db.wg.Done()
 	tx.closeCursors()
-	tx.tx.Reset()
+	tx.tx.Abort()
 }
 
 func (tx *lmdbTx) closeCursors() {
@@ -304,7 +307,7 @@ func (tx *lmdbTx) closeCursors() {
 			c.Close()
 		}
 	}
-	tx.cursors = tx.cursors[:0]
+	tx.cursors = []*lmdb.Cursor{}
 }
 
 func (c *LmdbCursor) Prefix(v []byte) Cursor {
@@ -381,7 +384,13 @@ func (b *lmdbBucket) Size() (uint64, error) {
 }
 
 func (b *lmdbBucket) Clear() error {
-	return b.tx.tx.Drop(b.dbi, false)
+	if err := b.tx.tx.Drop(b.dbi, true); err != nil {
+		return err
+	}
+	if err := createBucket(b.tx.tx, b.tx.db, b.id); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *lmdbBucket) Cursor() Cursor {
@@ -544,6 +553,14 @@ func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
+func (c *LmdbCursor) Close() error {
+	if c.cursor != nil {
+		c.cursor.Close()
+		c.cursor = nil
+	}
+	return nil
+}
+
 type lmdbNoValuesCursor struct {
 	*LmdbCursor
 }
@@ -569,26 +586,9 @@ func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {
 }
 
 func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, vSize uint32, err error) {
-	if c.cursor == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, 0, err
-		}
-	}
-
-	var v []byte
-	if len(seek) == 0 {
-		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
-	} else {
-		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
-	}
+	k, v, err := c.LmdbCursor.Seek(seek)
 	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return []byte{}, uint32(len(v)), nil
-		}
 		return []byte{}, 0, err
-	}
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, uint32(len(v)), err
@@ -598,24 +598,10 @@ func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
 	return c.Seek(seek)
 }
 
-func (c *lmdbNoValuesCursor) Next() (k []byte, v uint32, err error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, 0, c.ctx.Err()
-	default:
-	}
-
-	var val []byte
-	k, val, err = c.cursor.Get(nil, nil, lmdb.Next)
+func (c *lmdbNoValuesCursor) Next() (k []byte, vSize uint32, err error) {
+	k, v, err := c.LmdbCursor.Next()
 	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return []byte{}, uint32(len(val)), nil
-		}
 		return []byte{}, 0, err
 	}
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, val = nil, nil
-	}
-
-	return k, uint32(len(val)), err
+	return k, uint32(len(v)), err
 }
