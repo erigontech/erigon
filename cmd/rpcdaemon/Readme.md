@@ -6,7 +6,7 @@ In order to build and run turbo-geth node together with RPC daemon, you need to 
 2. Build it by running `make`
 3. Start it (it will start syncing to the mainnet) like this:
 ````
-./build/bin/geth --remote-db-listen-addr localhost:9999
+./build/bin/geth --private.api.addr=localhost:9999
 ````
 4. Look out for this in the console/log file:
 ````

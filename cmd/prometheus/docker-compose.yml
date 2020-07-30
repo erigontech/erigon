@@ -4,7 +4,7 @@ services:
 
   turbo-geth:
     build: ./../..
-    command: --nousb --metrics --metrics.expensive --pprof --pprofaddr=0.0.0.0 --pprofport=6060 --remote-db-listen-addr=0.0.0.0:9999
+    command: --nousb --metrics --metrics.expensive --pprof --pprof.addr=0.0.0.0 --pprof.port=6060 --private.api.addr=0.0.0.0:9999
     stop_grace_period: 2m
     volumes:
       - ${TGETH_DATADIR:-~/Library/Ethereum}:/root/.ethereum/
@@ -35,7 +35,7 @@ services:
     build:
       context: ./../../
       dockerfile: ./cmd/restapi/Dockerfile
-    command: --remote-db-addr turbo-geth:9999
+    command: --private.api.addr=turbo-geth:9999
     ports:
       - 8080:8080
 
