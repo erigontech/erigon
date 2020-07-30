@@ -80,7 +80,13 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	if maxResults > eth.AccountRangeMaxResults || maxResults <= 0 {
 		maxResults = eth.AccountRangeMaxResults
 	}
-
+	fmt.Println("start", common.Bytes2Hex(start), common.BytesToAddress(start).String(), common.BytesToAddress(common.Hex2Bytes("52b1e6dd9d145a370c4bf3aa97644c95e5ff76f2")).String())
+	fmt.Println(string(start))
+	fmt.Println(start)
+	fmt.Println(start)
+	start = common.Hex2Bytes(string(start))
+	start = common.Hex2Bytes("52b1e6dd9d145a370c4bf3aa97644c95e5ff76f2")
+	fmt.Println(len(start), common.Bytes2Hex(start), start)
 	dumper := state.NewDumper(api.db, blockNumber)
 	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 	if err != nil {

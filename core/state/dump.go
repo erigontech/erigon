@@ -27,6 +27,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie"
+	"time"
 )
 
 type trieHasher interface {
@@ -139,8 +141,13 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 	if d.hashedState {
 		stateBucket = dbutils.CurrentStateBucket
 	}
-
+	t:=time.Now()
+	tt:=time.Now()
 	err = WalkAsOf(d.db, stateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
+		defer func() {
+			fmt.Println(common.Bytes2Hex(k), time.Since(tt))
+			tt=time.Now()
+		}()
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -171,11 +178,13 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		return true, nil
 	})
 
+	fmt.Println("accounts", time.Since(t))
 	if err != nil {
 		return nil, err
 	}
-
+	t=time.Now()
 	for i, addrHash := range addrHashList {
+		tt=time.Now()
 		account := accountList[i]
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addrHash[:], incarnation)
@@ -201,7 +210,9 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 				account.Code = common.Bytes2Hex(code)
 			}
 		}
+
 		if !excludeStorage {
+			t:=trie.New(common.Hash{})
 			err = WalkAsOf(d.db,
 				dbutils.PlainStateBucket,
 				dbutils.StorageHistoryBucket,
@@ -210,14 +221,22 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 				d.blockNumber,
 				func(ks, vs []byte) (bool, error) {
 					account.Storage[common.BytesToHash(ks[common.AddressLength:]).String()] = common.Bytes2Hex(vs)
+					h, _ := common.HashData(ks[common.AddressLength:])
+					t.Update(h.Bytes(), common.CopyBytes(vs))
 					return true, nil
 				})
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
 			}
+			account.Root = t.Hash().String()
 		}
+
 		c.onAccount(addrHash, *account)
+
+		fmt.Println(addrHash.String(), "storage", time.Since(tt))
+		tt=time.Now()
 	}
+	fmt.Println("storage", time.Since(tt))
 	return nextKey, nil
 }
 
