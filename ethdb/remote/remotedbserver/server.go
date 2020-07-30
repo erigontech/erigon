@@ -456,17 +456,6 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 			if err := encoder.Encode(size); err != nil {
 				return fmt.Errorf("could not encode remote.CmdDBDiskSize: %w", err)
 			}
-		case remote.CmdDBBucketsStat:
-			stats, err := db.(ethdb.HasStats).BucketsStat(ctx)
-			if err != nil {
-				return fmt.Errorf("in CmdDBBucketsStat: %w", err)
-			}
-			if err := encoder.Encode(remote.ResponseOk); err != nil {
-				return fmt.Errorf("could not encode responseCode for CmdDBBucketsStat: %w", err)
-			}
-			if err := encoder.Encode(stats); err != nil {
-				return fmt.Errorf("could not encode remote.CmdDBBucketsStat: %w", err)
-			}
 		default:
 			logger.Error("unknown", "remote.Command", c)
 			return fmt.Errorf("unknown remote.Command %d", c)

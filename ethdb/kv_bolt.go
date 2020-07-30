@@ -17,6 +17,23 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
+var (
+	boltPagesAllocGauge    = metrics.NewRegisteredGauge("bolt/pages/alloc_bytes", nil)
+	boltPagesFreeGauge     = metrics.NewRegisteredGauge("bolt/pages/free", nil)
+	boltPagesPendingGauge  = metrics.NewRegisteredGauge("bolt/pages/pending", nil)
+	boltFreelistInuseGauge = metrics.NewRegisteredGauge("bolt/freelist/inuse", nil)
+	boltTxGauge            = metrics.NewRegisteredGauge("bolt/tx/total", nil)
+	boltTxOpenGauge        = metrics.NewRegisteredGauge("bolt/tx/open", nil)
+	boltTxCursorGauge      = metrics.NewRegisteredGauge("bolt/tx/cursors_total", nil)
+	boltRebalanceGauge     = metrics.NewRegisteredGauge("bolt/rebalance/total", nil)
+	boltRebalanceTimer     = metrics.NewRegisteredTimer("bolt/rebalance/time", nil)
+	boltSplitGauge         = metrics.NewRegisteredGauge("bolt/split/total", nil)
+	boltSpillGauge         = metrics.NewRegisteredGauge("bolt/spill/total", nil)
+	boltSpillTimer         = metrics.NewRegisteredTimer("bolt/spill/time", nil)
+	boltWriteGauge         = metrics.NewRegisteredGauge("bolt/write/total", nil)
+	boltWriteTimer         = metrics.NewRegisteredTimer("bolt/write/time", nil)
+)
+
 var valueBytesMetrics []metrics.Gauge
 var keyBytesMetrics []metrics.Gauge
 var totalBytesPutMetrics []metrics.Gauge
@@ -216,8 +233,8 @@ func (db *BoltKV) Close() {
 	}
 }
 
-func (db *BoltKV) DiskSize(_ context.Context) (common.StorageSize, error) {
-	return common.StorageSize(db.bolt.Size()), nil
+func (db *BoltKV) DiskSize(_ context.Context) (uint64, error) {
+	return uint64(db.bolt.Size()), nil
 }
 
 func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
@@ -241,6 +258,10 @@ func (db *BoltKV) IdealBatchSize() int {
 }
 
 func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	if db.bolt == nil {
+		return nil, fmt.Errorf("db closed")
+	}
+
 	t := &boltTx{db: db, ctx: ctx}
 	var err error
 	t.bolt, err = db.bolt.Begin(writable)
@@ -248,6 +269,10 @@ func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.bolt == nil {
+		return fmt.Errorf("db closed")
+	}
+
 	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.View(func(tx *bolt.Tx) error {
 		t.bolt = tx
@@ -256,6 +281,10 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	if db.bolt == nil {
+		return fmt.Errorf("db closed")
+	}
+
 	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.Update(func(tx *bolt.Tx) error {
 		t.bolt = tx
@@ -264,12 +293,19 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *boltTx) Commit(ctx context.Context) error {
+	if tx.bolt == nil {
+		return fmt.Errorf("db closed")
+	}
+
 	return tx.bolt.Commit()
 }
 
 func (tx *boltTx) Rollback() {
+	if tx.bolt == nil {
+		return
+	}
 	if err := tx.bolt.Rollback(); err != nil {
-		tx.db.log.Warn("bolt rollback failed", "err", err)
+		log.Warn("bolt rollback failed", "err", err)
 	}
 }
 

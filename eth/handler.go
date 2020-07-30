@@ -187,6 +187,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
+		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		// FIXME: Workaround for staged sync, just do no-op
 		if manager.blockchain == nil || manager.blockchain.CurrentBlock() == nil {
 			log.Info("Workaround for staged sync: IIIAAAIII")
@@ -451,7 +452,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
 		return err
 	}
-	// Handle one message
+	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
 		return err
@@ -1016,6 +1017,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
+		log.Warn("Sent back the DebugSetGenesisMsg")
 		return nil
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)

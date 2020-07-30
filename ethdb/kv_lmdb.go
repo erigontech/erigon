@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -78,7 +77,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
 	db := &LmdbKV{
@@ -189,15 +188,20 @@ func (db *LmdbKV) Close() {
 	if db.stopStaleReadsCheck != nil {
 		db.stopStaleReadsCheck()
 	}
-	db.wg.Wait()
 
 	if db.env != nil {
-		if err := db.env.Close(); err != nil {
+		db.wg.Wait()
+	}
+
+	if db.env != nil {
+		env := db.env
+		db.env = nil
+		time.Sleep(10 * time.Millisecond) // TODO: remove after consensus/ethash/consensus.go:VerifyHeaders will spawn controllable goroutines
+		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
 			db.log.Info("database closed (LMDB)")
 		}
-		db.env = nil
 	}
 
 	if db.opts.inMem {
@@ -208,12 +212,12 @@ func (db *LmdbKV) Close() {
 
 }
 
-func (db *LmdbKV) DiskSize(_ context.Context) (common.StorageSize, error) {
-	return common.StorageSize(0), nil
-}
-
-func (db *LmdbKV) BucketsStat(_ context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return map[string]common.StorageBucketWriteStats{}, nil
+func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
+	stats, err := db.env.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("could not read database size: %w", err)
+	}
+	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
 func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
@@ -333,7 +337,7 @@ func (tx *lmdbTx) closeCursors() {
 			c.Close()
 		}
 	}
-	tx.cursors = tx.cursors[:0]
+	tx.cursors = []*lmdb.Cursor{}
 }
 
 func (c *LmdbCursor) Prefix(v []byte) Cursor {
@@ -575,6 +579,14 @@ func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 		if !ok {
 			return nil
 		}
+	}
+	return nil
+}
+
+func (c *LmdbCursor) Close() error {
+	if c.cursor != nil {
+		c.cursor.Close()
+		c.cursor = nil
 	}
 	return nil
 }

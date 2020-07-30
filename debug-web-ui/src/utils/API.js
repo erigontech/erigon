@@ -9,16 +9,16 @@ export default class API {
     return this.baseURL + name;
   }
 
-  getRemoteDB() {
+  getPrivateAPI() {
     return axios({
-      url: this.endpoint('/api/v1/remote-db/'),
+      url: this.endpoint('/api/v1/private-api/'),
       method: 'get',
     });
   }
 
-  setRemoteDB(host, port) {
+  setPrivateAPI(host, port) {
     return axios({
-      url: this.endpoint('/api/v1/remote-db/'),
+      url: this.endpoint('/api/v1/private-api/'),
       method: 'post',
       params: {
         host: host,

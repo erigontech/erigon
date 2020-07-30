@@ -446,9 +446,9 @@ var (
 		Usage: "Which database software to use? Currently supported values: badger & bolt & lmdb",
 		Value: "lmdb",
 	}
-	RemoteDbListenAddress = cli.StringFlag{
-		Name:  "remote-db-listen-addr",
-		Usage: "network address (for example, localhost:9999) to start remote database server on",
+	PrivateApiAddr = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
 		Value: "",
 	}
 	// Miner settings
@@ -1028,10 +1028,10 @@ func setWS(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
-// setRemoteDb populates configuration fields related to the remote
+// setPrivateApi populates configuration fields related to the remote
 // read-only interface to the databae
-func setRemoteDb(ctx *cli.Context, cfg *node.Config) {
-	cfg.RemoteDbListenAddress = ctx.GlobalString(RemoteDbListenAddress.Name)
+func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
+	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 }
 
 // setIPC creates an IPC path configuration from the set command line flags,
@@ -1249,7 +1249,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setHTTP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
-	setRemoteDb(ctx, cfg)
+	setPrivateApi(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
