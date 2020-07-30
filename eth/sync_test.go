@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
 
-func TestFastSyncDisabling63(t *testing.T) { testFastSyncDisabling(t, 63) }
 func TestFastSyncDisabling64(t *testing.T) { testFastSyncDisabling(t, 64) }
 func TestFastSyncDisabling65(t *testing.T) { testFastSyncDisabling(t, 65) }
 
