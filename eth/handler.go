@@ -429,14 +429,11 @@ func (pm *ProtocolManager) handle(p *peer) error {
 
 	// this mutex ensures that we don't try to reply to other messages from
 	// the app, until we handled the handshake
-	fmt.Println("handle: locking")
 	p.HandshakeMutex.Lock()
-	fmt.Println("handle: locked")
 	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
-	fmt.Println("handle: after handshake")
 	// Register the peer locally
 	if err := pm.peers.Register(p); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
@@ -450,7 +447,6 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		return err
 	}
 	pm.chainSync.handlePeerEvent(p)
-	fmt.Println("handle: after register peer")
 
 	// Propagate existing transactions. new transactions appearing
 	// after this will be sent via broadcasts.
@@ -460,18 +456,15 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		return err
 	}
 
-	fmt.Println("handle: after head")
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
 		return err
 	}
 
-	fmt.Println("handle: unlocking")
 	p.HandshakeMutex.Unlock()
 
 	pm.syncTransactions(p)
-	fmt.Println("handle: after send tx")
 
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
 	if pm.checkpointHash != (common.Hash{}) {
