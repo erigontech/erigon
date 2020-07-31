@@ -195,7 +195,7 @@ type Config struct {
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
-	RemoteDbListenAddress string
+	PrivateApiAddr string
 
 	staticNodesWarning     bool
 	trustedNodesWarning    bool
@@ -334,7 +334,7 @@ func (c *Config) instanceDir() string {
 	}
 	if c.name() == "turbo-geth" {
 		// backwards compatibility
-		return filepath.Join(c.DataDir, "geth")
+		return filepath.Join(c.DataDir, "tg")
 	}
 	return filepath.Join(c.DataDir, c.name())
 }

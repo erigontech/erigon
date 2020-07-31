@@ -57,11 +57,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	core.UsePlainStateExecution = true
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	chainConfig, blockchain, chainErr := newBlockChain(db)
-	if chainErr != nil {
-		return chainErr
-	}
-	defer blockchain.Stop()
+
 	ch := ctx.Done()
 
 	expectedAccountChanges := make(map[uint64][]byte)
@@ -91,9 +87,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	bc, st, progress := newSync(ch, db, changeSetHook)
 	defer bc.Stop()
 
-	if err := st.RunInterruptedStage(db); err != nil {
-		return fmt.Errorf("runInterruptedStage: %w", err)
-	}
+	st.DisableStages(stages.Headers, stages.Bodies, stages.Senders, stages.TxPool)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
@@ -116,27 +110,16 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			unwind = 0
 		}
 
-		if err := stagedsync.SpawnExecuteBlocksStage(progress(stages.Execution), db, chainConfig, blockchain, execToBlock, ch, nil, false, changeSetHook); err != nil {
-			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
-		}
+		// set block limit of execute stage
+		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, db, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, nil, false, changeSetHook); err != nil {
+				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
+			}
+			return nil
+		})
 
-		if err := st.RunStage(stages.IntermediateHashes, db); err != nil {
-			return fmt.Errorf("spawnIntermediateHashesStage: %w", err)
-		}
-
-		if err := st.RunStage(stages.HashState, db); err != nil {
-			return fmt.Errorf("spawnHashStateStage: %w", err)
-		}
-
-		if err := st.RunStage(stages.AccountHistoryIndex, db); err != nil {
-			return fmt.Errorf("spawnAccountHistoryIndex: %w", err)
-		}
-		if err := st.RunStage(stages.StorageHistoryIndex, db); err != nil {
-			return fmt.Errorf("spawnStorageHistoryIndex: %w", err)
-		}
-
-		if err := st.RunStage(stages.TxLookup, db); err != nil {
-			return fmt.Errorf("spawnTxLookup: %w", err)
+		if err := st.Run(db); err != nil {
+			return err
 		}
 
 		for blockN := range expectedAccountChanges {
@@ -153,28 +136,9 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		execStage := progress(stages.Execution)
 		to := execStage.BlockNumber - unwind
-		if err := st.UnwindStage(&stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: to}, db); err != nil {
-			return fmt.Errorf("unwindTxLookup: %w", err)
-		}
 
-		if err := st.UnwindStage(&stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: to}, db); err != nil {
-			return fmt.Errorf("unwindStorageHistoryIndex: %w", err)
-		}
-
-		if err := st.UnwindStage(&stagedsync.UnwindState{Stage: stages.AccountHistoryIndex, UnwindPoint: to}, db); err != nil {
-			return fmt.Errorf("unwindAccountHistoryIndex: %w", err)
-		}
-
-		if err := st.UnwindStage(&stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}, db); err != nil {
-			return fmt.Errorf("unwindHashStateStage: %w", err)
-		}
-
-		if err := st.UnwindStage(&stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}, db); err != nil {
-			return fmt.Errorf("unwindIntermediateHashesStage: %w", err)
-		}
-
-		if err := st.UnwindStage(&stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: to}, db); err != nil {
-			return fmt.Errorf("unwindExecutionStage: %w", err)
+		if err := st.UnwindTo(to, db); err != nil {
+			return err
 		}
 	}
 

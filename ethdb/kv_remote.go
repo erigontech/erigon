@@ -6,7 +6,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -118,12 +117,8 @@ func (db *RemoteKV) Close() {
 	}
 }
 
-func (db *RemoteKV) DiskSize(ctx context.Context) (common.StorageSize, error) {
+func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	return db.remote.DiskSize(ctx)
-}
-
-func (db *RemoteKV) BucketsStat(ctx context.Context) (map[string]common.StorageBucketWriteStats, error) {
-	return db.remote.BucketsStat(ctx)
 }
 
 func (db *RemoteKV) IdealBatchSize() int {

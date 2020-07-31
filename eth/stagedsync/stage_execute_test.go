@@ -24,7 +24,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	core.UsePlainStateExecution = true
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, mutation)
+	err = UnwindExecutionStage(u, s, mutation, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}

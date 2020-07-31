@@ -137,8 +137,6 @@ var (
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
 	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModePreImages - does node save hash to value mapping
-	StorageModePreImages = []byte("smPreImages")
 	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
 	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
 
@@ -191,7 +189,6 @@ var Buckets = [][]byte{
 	StorageModeHistory,
 	StorageModeReceipts,
 	StorageModeTxIndex,
-	StorageModePreImages,
 	CliqueBucket,
 	SyncStageProgress,
 	SyncStageUnwind,

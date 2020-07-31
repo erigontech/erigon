@@ -13,22 +13,22 @@ import (
 )
 
 var (
-	remoteDbAddress string
-	chaindata       string
-	listenAddress   string
+	rpcAddr   string
+	chaindata string
+	addr      string
 )
 
 func init() {
-	rootCmd.Flags().StringVar(&remoteDbAddress, "remote-db-addr", "", "address of remote DB listener of a turbo-geth node")
+	rootCmd.Flags().StringVar(&rpcAddr, "private.api.addr", "127.0.0.1:9090", "binary RPC network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	rootCmd.Flags().StringVar(&addr, "http.addr", "127.0.0.1:8080", "REST server listening host")
 	rootCmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the database")
-	rootCmd.Flags().StringVar(&listenAddress, "rpcaddr", "localhost:8080", "REST server listening interface")
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "restapi",
 	Short: "restapi exposes read-only blockchain APIs through REST (requires running turbo-geth node)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return rest.ServeREST(cmd.Context(), listenAddress, remoteDbAddress, chaindata)
+		return rest.ServeREST(cmd.Context(), addr, rpcAddr, chaindata)
 	},
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, quitCh <-chan struct{}) error {
+func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -22,14 +22,15 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, qui
 	if to < s.BlockNumber {
 		return fmt.Errorf("txPoolUpdate to (%d) < from (%d)", to, s.BlockNumber)
 	}
-	if to-s.BlockNumber <= 1 {
-		if pool != nil && !pool.IsStarted() {
-			log.Info("Starting tx pool since block numbers converged", "from", s.BlockNumber, "to", to)
-			headHash := rawdb.ReadCanonicalHash(db, to)
-			headHeader := rawdb.ReadHeader(db, headHash, to)
-			if err := pool.Start(headHeader.GasLimit, to); err != nil {
-				return fmt.Errorf("txPoolUpdate start pool: %w", err)
-			}
+	if pool != nil && !pool.IsStarted() {
+		log.Info("Starting tx pool after sync", "from", s.BlockNumber, "to", to)
+		headHash := rawdb.ReadCanonicalHash(db, to)
+		headHeader := rawdb.ReadHeader(db, headHash, to)
+		if err := pool.Start(headHeader.GasLimit, to); err != nil {
+			return fmt.Errorf("txPoolUpdate start pool phase 1: %w", err)
+		}
+		if err := poolStart(); err != nil {
+			return fmt.Errorf("txPoolUpdate start pool phase 2: %w", err)
 		}
 	}
 	if pool != nil && pool.IsStarted() && s.BlockNumber > 0 {
@@ -44,7 +45,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
-	canonical := make([]common.Hash, to-from+1)
+	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
@@ -57,7 +58,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 			return true, nil
 		}
 
-		if currentHeaderIdx > to-from { // if header stage is ehead of body stage
+		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
 			return false, nil
 		}
 
@@ -119,7 +120,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 	headHash := rawdb.ReadCanonicalHash(db, from)
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
-	canonical := make([]common.Hash, to-from+1)
+	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
@@ -132,7 +133,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return true, nil
 		}
 
-		if currentHeaderIdx > to-from { // if header stage is ehead of body stage
+		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
 			return false, nil
 		}
 

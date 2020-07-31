@@ -187,6 +187,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
+		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		// FIXME: Workaround for staged sync, just do no-op
 		if manager.blockchain == nil || manager.blockchain.CurrentBlock() == nil {
 			log.Info("Workaround for staged sync: IIIAAAIII")
@@ -425,37 +426,50 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		number  = head.Number.Uint64()
 		td      = pm.blockchain.GetTd(hash, number)
 	)
+
 	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
+
+	// Make sure that we first exchange headers and only then announce transactions
+	p.HandshakeOrderMux.Lock()
 	// Register the peer locally
 	if err := pm.peers.Register(p); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
+		p.HandshakeOrderMux.Lock()
 		return err
 	}
 	defer pm.removePeer(p.id)
 
 	// Register the peer in the downloader. If the downloader considers it banned, we disconnect
 	if err := pm.downloader.RegisterPeer(p.id, p.version, p); err != nil {
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 	pm.chainSync.handlePeerEvent(p)
 
 	// Propagate existing transactions. new transactions appearing
 	// after this will be sent via broadcasts.
-	pm.syncTransactions(p)
-
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
 	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
-	// Handle one message
+
+	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
+
+	// Allow to handle transaction ordering
+	p.HandshakeOrderMux.Unlock()
+
+	pm.syncTransactions(p)
+
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
 	if pm.checkpointHash != (common.Hash{}) {
 		// Request the peer's checkpoint header for chain height/weight validation
@@ -723,7 +737,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 
-	case p.version >= eth63 && msg.Code == GetNodeDataMsg:
+	case p.version >= eth64 && msg.Code == GetNodeDataMsg:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -775,7 +789,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 		return p.SendNodeData(data)
 
-	case p.version >= eth63 && msg.Code == GetReceiptsMsg:
+	case p.version >= eth64 && msg.Code == GetReceiptsMsg:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -811,7 +825,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 		return p.SendReceiptsRLP(receipts)
 
-	case p.version >= eth63 && msg.Code == ReceiptsMsg:
+	case p.version >= eth64 && msg.Code == ReceiptsMsg:
 		// A batch of receipts arrived to one of our previous requests
 		var receipts [][]*types.Receipt
 		if err := msg.Decode(&receipts); err != nil {
@@ -1016,6 +1030,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
+		log.Warn("Sent back the DebugSetGenesisMsg")
 		return nil
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)

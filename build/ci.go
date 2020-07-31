@@ -52,23 +52,23 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/cespare/cp"
 	"github.com/ledgerwatch/turbo-geth/internal/build"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/cespare/cp"
 )
 
 var (
 	// Files that end up in the geth*.zip archive.
 	gethArchiveFiles = []string{
 		"COPYING",
-		executablePath("geth"),
+		executablePath("tg"),
 	}
 
 	// Files that end up in the geth-alltools*.zip archive.
@@ -77,7 +77,7 @@ var (
 		executablePath("abigen"),
 		executablePath("bootnode"),
 		executablePath("evm"),
-		executablePath("geth"),
+		executablePath("tg"),
 		executablePath("puppeth"),
 		executablePath("rlpdump"),
 		executablePath("wnode"),
@@ -100,7 +100,7 @@ var (
 			Description: "Developer utility version of the EVM (Ethereum Virtual Machine) that is capable of running bytecode snippets within a configurable environment and execution mode.",
 		},
 		{
-			BinaryName:  "geth",
+			BinaryName:  "tg",
 			Description: "Ethereum CLI client.",
 		},
 		{
@@ -207,13 +207,11 @@ func main() {
 
 func doInstall(cmdline []string) {
 	var (
-		arch     = flag.String("arch", "", "Architecture to cross build for")
-		cc       = flag.String("cc", "", "C compiler to cross build with")
-		procsVal = flag.Int("procs", runtime.NumCPU(), "compile in number of threads")
+		arch = flag.String("arch", "", "Architecture to cross build for")
+		cc   = flag.String("cc", "", "C compiler to cross build with")
 	)
 	flag.CommandLine.Parse(cmdline)
 	env := build.Env()
-	procs := *procsVal
 
 	// Check Go version. People regularly open issues about compilation
 	// failure with outdated Go. This should save them the trouble.
@@ -222,80 +220,64 @@ func doInstall(cmdline []string) {
 		var minor int
 		fmt.Sscanf(strings.TrimPrefix(runtime.Version(), "go1."), "%d", &minor)
 
-		if minor < 11 {
+		if minor < 13 {
 			log.Println("You have Go version", runtime.Version())
-			log.Println("go-ethereum requires at least Go version 1.11 and cannot")
+			log.Println("turbo-geth requires at least Go version 1.13 and cannot")
 			log.Println("be compiled with an earlier version. Please upgrade your Go installation.")
 			os.Exit(1)
 		}
 	}
+
 	// Compile packages given as arguments, or everything if there are no arguments.
-	packages := []string{"./..."}
+	dirs := []string{}
 	if flag.NArg() > 0 {
-		packages = flag.Args()
+		dirs = flag.Args()
+	} else {
+		if cmds, err := ioutil.ReadDir("cmd"); err != nil {
+			log.Fatal(err)
+		} else {
+			for _, cmd := range cmds {
+				dirs = append(dirs, "."+string(filepath.Separator)+path.Join(".", "cmd", cmd.Name()))
+			}
+		}
 	}
 
-	if *arch == "" || *arch == runtime.GOARCH {
-		packCh := make(chan string, 2*procs)
-		wg := sync.WaitGroup{}
-		wg.Add(procs)
-
-		for i := 0; i < procs; i++ {
-			go func() {
-				for pack := range packCh {
-					goinstall := goTool("install", buildFlags(env)...)
-					goinstall.Args = append(goinstall.Args, "-v")
-					goinstall.Args = append(goinstall.Args, pack)
-					build.MustRun(goinstall)
-				}
-				wg.Done()
-			}()
+	packages := []string{}
+	for _, d := range dirs {
+		dir := strings.TrimPrefix(d, "github.com/ledgerwatch/turbo-geth/")
+		if !strings.HasPrefix(d, ".") {
+			dir = "." + string(filepath.Separator) + dir
+		}
+		pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
+		if err != nil {
+			continue
 		}
 
-		for _, pack := range packages {
-			dir := strings.TrimPrefix(pack, "github.com/ledgerwatch/turbo-geth/")
-			pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
-			if err != nil {
-				continue
-			}
-
-			for name := range pkgs {
-				if name == "main" {
-					packCh <- pack
-					break
-				}
+		for name := range pkgs {
+			if name == "main" {
+				packages = append(packages, dir)
+				fmt.Printf("%s\n", dir)
+				break
 			}
 		}
-
-		close(packCh)
-		wg.Wait()
-		return
 	}
 
-	// Seems we are cross compiling, work around forbidden GOBIN
-	goinstall := goToolArch(*arch, *cc, "install", buildFlags(env)...)
-	goinstall.Args = append(goinstall.Args, "-v")
-	goinstall.Args = append(goinstall.Args, []string{"-buildmode", "archive"}...)
-	goinstall.Args = append(goinstall.Args, packages...)
-	build.MustRun(goinstall)
-
-	if cmds, err := ioutil.ReadDir("cmd"); err == nil {
-		for _, cmd := range cmds {
-			pkgs, err := parser.ParseDir(token.NewFileSet(), filepath.Join(".", "cmd", cmd.Name()), nil, parser.PackageClauseOnly)
-			if err != nil {
-				log.Fatal(err)
-			}
-			for name := range pkgs {
-				if name == "main" {
-					gobuild := goToolArch(*arch, *cc, "build", buildFlags(env)...)
-					gobuild.Args = append(gobuild.Args, "-v")
-					gobuild.Args = append(gobuild.Args, []string{"-o", executablePath(cmd.Name())}...)
-					gobuild.Args = append(gobuild.Args, "."+string(filepath.Separator)+filepath.Join("cmd", cmd.Name()))
-					build.MustRun(gobuild)
-					break
-				}
-			}
+	for _, pkg := range packages {
+		outName := strings.Replace(path.Base(pkg), "geth", "tg", -1)
+		var gobuild *exec.Cmd
+		if *arch == "" || *arch == runtime.GOARCH {
+			gobuild = goTool("build", buildFlags(env)...)
+		} else {
+			gobuild = goToolArch(*arch, *cc, "build", buildFlags(env)...)
 		}
+		if runtime.GOARCH == "arm64" {
+			gobuild.Args = append(gobuild.Args, "-p", "1")
+		}
+		gobuild.Args = append(gobuild.Args, "-trimpath")
+		gobuild.Args = append(gobuild.Args, "-v")
+		gobuild.Args = append(gobuild.Args, []string{"-o", executablePath(outName)}...)
+		gobuild.Args = append(gobuild.Args, pkg)
+		build.MustRun(gobuild)
 	}
 }
 
@@ -389,7 +371,7 @@ func doLint(cmdline []string) {
 
 // downloadLinter downloads and unpacks golangci-lint.
 func downloadLinter(cachedir string) string {
-	const version = "1.27.0"
+	const version = "1.29.0"
 
 	csdb := build.MustLoadChecksums("build/checksums.txt")
 	base := fmt.Sprintf("golangci-lint-%s-%s-%s", version, runtime.GOOS, runtime.GOARCH)
@@ -427,8 +409,8 @@ func doArchive(cmdline []string) {
 		env = build.Env()
 
 		basegeth = archiveBasename(*arch, params.ArchiveVersion(env.Commit))
-		geth     = "geth-" + basegeth + ext
-		alltools = "geth-alltools-" + basegeth + ext
+		geth     = "tg-" + basegeth + ext
+		alltools = "tg-alltools-" + basegeth + ext
 	)
 	maybeSkipArchive(env)
 	if err := build.WriteArchive(geth, gethArchiveFiles); err != nil {
@@ -801,7 +783,7 @@ func doWindowsInstaller(cmdline []string) {
 			continue
 		}
 		allTools = append(allTools, filepath.Base(file))
-		if filepath.Base(file) == "geth.exe" {
+		if filepath.Base(file) == "tg.exe" {
 			gethTool = file
 		} else {
 			devTools = append(devTools, file)
@@ -815,7 +797,7 @@ func doWindowsInstaller(cmdline []string) {
 		"Geth":     gethTool,
 		"DevTools": devTools,
 	}
-	build.Render("build/nsis.geth.nsi", filepath.Join(*workdir, "geth.nsi"), 0644, nil)
+	build.Render("build/nsis.geth.nsi", filepath.Join(*workdir, "tg.nsi"), 0644, nil)
 	build.Render("build/nsis.install.nsh", filepath.Join(*workdir, "install.nsh"), 0644, templateData)
 	build.Render("build/nsis.uninstall.nsh", filepath.Join(*workdir, "uninstall.nsh"), 0644, allTools)
 	build.Render("build/nsis.pathupdate.nsh", filepath.Join(*workdir, "PathUpdate.nsh"), 0644, nil)
@@ -833,14 +815,14 @@ func doWindowsInstaller(cmdline []string) {
 	if env.Commit != "" {
 		version[2] += "-" + env.Commit[:8]
 	}
-	installer, _ := filepath.Abs("geth-" + archiveBasename(*arch, params.ArchiveVersion(env.Commit)) + ".exe")
+	installer, _ := filepath.Abs("tg-" + archiveBasename(*arch, params.ArchiveVersion(env.Commit)) + ".exe")
 	build.MustRunCommand("makensis.exe",
 		"/DOUTPUTFILE="+installer,
 		"/DMAJORVERSION="+version[0],
 		"/DMINORVERSION="+version[1],
 		"/DBUILDVERSION="+version[2],
 		"/DARCH="+*arch,
-		filepath.Join(*workdir, "geth.nsi"),
+		filepath.Join(*workdir, "tg.nsi"),
 	)
 	// Sign and publish installer.
 	if err := archiveUpload(installer, *upload, *signer); err != nil {
@@ -870,7 +852,7 @@ func doAndroidArchive(cmdline []string) {
 
 	if *local {
 		// If we're building locally, copy bundle to build dir and skip Maven
-		os.Rename("geth.aar", filepath.Join(GOBIN, "geth.aar"))
+		os.Rename("tg.aar", filepath.Join(GOBIN, "tg.aar"))
 		return
 	}
 	meta := newMavenMetadata(env)
@@ -880,8 +862,8 @@ func doAndroidArchive(cmdline []string) {
 	maybeSkipArchive(env)
 
 	// Sign and upload the archive to Azure
-	archive := "geth-" + archiveBasename("android", params.ArchiveVersion(env.Commit)) + ".aar"
-	os.Rename("geth.aar", archive)
+	archive := "tg-" + archiveBasename("android", params.ArchiveVersion(env.Commit)) + ".aar"
+	os.Rename("tg.aar", archive)
 
 	if err := archiveUpload(archive, *upload, *signer); err != nil {
 		log.Fatal(err)
@@ -965,7 +947,7 @@ func newMavenMetadata(env build.Environment) mavenMetadata {
 	}
 	return mavenMetadata{
 		Version:      version,
-		Package:      "geth-" + version,
+		Package:      "tg-" + version,
 		Develop:      isUnstableBuild(env),
 		Contributors: contribs,
 	}
@@ -994,7 +976,7 @@ func doXCodeFramework(cmdline []string) {
 		build.MustRun(bind)
 		return
 	}
-	archive := "geth-" + archiveBasename("ios", params.ArchiveVersion(env.Commit))
+	archive := "tg-" + archiveBasename("ios", params.ArchiveVersion(env.Commit))
 	if err := os.Mkdir(archive, os.ModePerm); err != nil {
 		log.Fatal(err)
 	}
@@ -1012,8 +994,8 @@ func doXCodeFramework(cmdline []string) {
 	// Prepare and upload a PodSpec to CocoaPods
 	if *deploy != "" {
 		meta := newPodMetadata(env, archive)
-		build.Render("build/pod.podspec", "Geth.podspec", 0755, meta)
-		build.MustRunCommand("pod", *deploy, "push", "Geth.podspec", "--allow-warnings", "--verbose")
+		build.Render("build/pod.podspec", "TurboGeth.podspec", 0755, meta)
+		build.MustRunCommand("pod", *deploy, "push", "TurboGeth.podspec", "--allow-warnings", "--verbose")
 	}
 }
 
@@ -1131,6 +1113,7 @@ func doPurge(cmdline []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Printf("Found %d blobs\n", len(blobs))
 	// Iterate over the blobs, collect and sort all unstable builds
 	for i := 0; i < len(blobs); i++ {
 		if !strings.Contains(blobs[i].Name, "unstable") {
@@ -1152,6 +1135,7 @@ func doPurge(cmdline []string) {
 			break
 		}
 	}
+	fmt.Printf("Deleting %d blobs\n", len(blobs))
 	// Delete all marked as such and return
 	if err := build.AzureBlobstoreDelete(auth, blobs); err != nil {
 		log.Fatal(err)

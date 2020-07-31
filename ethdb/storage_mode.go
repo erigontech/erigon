@@ -11,18 +11,14 @@ type StorageMode struct {
 	History   bool
 	Receipts  bool
 	TxIndex   bool
-	Preimages bool
 }
 
-var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true}
+var DefaultStorageMode = StorageMode{History: true, Receipts: true, TxIndex: true}
 
 func (m StorageMode) ToString() string {
 	modeString := ""
 	if m.History {
 		modeString += "h"
-	}
-	if m.Preimages {
-		modeString += "p"
 	}
 	if m.Receipts {
 		modeString += "r"
@@ -43,8 +39,6 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 			mode.Receipts = true
 		case 't':
 			mode.TxIndex = true
-		case 'p':
-			mode.Preimages = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
@@ -63,25 +57,19 @@ func GetStorageModeFromDB(db Database) (StorageMode, error) {
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.History = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModePreImages)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
-		return StorageMode{}, err
-	}
-	sm.Preimages = len(v) > 0
+	sm.History = len(v) == 1 && v[0] == 1
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.Receipts = len(v) > 0
+	sm.Receipts = len(v) == 1 && v[0] == 1
 
 	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return StorageMode{}, err
 	}
-	sm.TxIndex = len(v) > 0
+	sm.TxIndex = len(v) == 1 && v[0] == 1
 
 	return sm, nil
 }
@@ -91,11 +79,6 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 		err error
 	)
 	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
-	if err != nil {
-		return err
-	}
-
-	err = setModeOnEmpty(db, dbutils.StorageModePreImages, sm.Preimages)
 	if err != nil {
 		return err
 	}
@@ -119,7 +102,7 @@ func setModeOnEmpty(db Database, key []byte, currentValue bool) error {
 		return err
 	}
 	if errors.Is(err, ErrKeyNotFound) {
-		val := []byte{}
+		val := []byte{2}
 		if currentValue {
 			val = []byte{1}
 		}

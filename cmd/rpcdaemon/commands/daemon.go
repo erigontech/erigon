@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
@@ -44,6 +43,8 @@ type EthAPI interface {
 	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
+	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]ethapi.Account) (hexutil.Bytes, error)
+	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -53,33 +54,9 @@ type APIImpl struct {
 	chainContext core.ChainContext
 }
 
-// PrivateDebugAPI
-type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
-	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
-	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-}
-
-// APIImpl is implementation of the EthAPI interface based on remote Db access
-type PrivateDebugAPIImpl struct {
-	db           ethdb.KV
-	dbReader     ethdb.Getter
-	chainContext core.ChainContext
-}
-
 // NewAPI returns APIImpl instance
 func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
 	return &APIImpl{
-		db:           db,
-		dbReader:     dbReader,
-		chainContext: chainContext,
-	}
-}
-
-// NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
-	return &PrivateDebugAPIImpl{
 		db:           db,
 		dbReader:     dbReader,
 		chainContext: chainContext,
@@ -246,7 +223,7 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainReader, header *types.Head
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
@@ -316,25 +293,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	return response, err
 }
 
-// StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, stateReader, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
-	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
-}
-
-// computeIntraBlockState retrieves the state database associated with a certain block.
-// If no state is locally available for the given block, a number of blocks are
-// attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
-	// If we have the state fully available, use that
-	dbstate := state.NewDbState(api.db, block.NumberU64())
-	statedb := state.New(dbstate)
-	return statedb, dbstate
-}
-
 // rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
 func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
 	fields, err := ethapi.RPCMarshalBlock(b, inclTx, fullTx)
@@ -382,14 +340,18 @@ func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
 }
 
 func daemon(cmd *cobra.Command, cfg Config) {
-	vhosts := splitAndTrim(cfg.rpcVirtualHost)
-	cors := splitAndTrim(cfg.rpcCORSDomain)
-	enabledApis := splitAndTrim(cfg.rpcAPI)
+	vhosts := splitAndTrim(cfg.httpVirtualHost)
+	cors := splitAndTrim(cfg.httpCORSDomain)
+	enabledApis := splitAndTrim(cfg.API)
 
 	var db ethdb.KV
 	var err error
-	if cfg.remoteDbAddress != "" {
-		db, err = ethdb.NewRemote().Path(cfg.remoteDbAddress).Open()
+	if cfg.privateApiAddr != "" {
+		db, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		if err != nil {
+			log.Error("Could not connect to remoteDb", "error", err)
+			return
+		}
 	} else if cfg.chaindata != "" {
 		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
 			db = database.KV()
@@ -399,6 +361,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	} else {
 		err = fmt.Errorf("either remote db or bolt db must be specified")
 	}
+
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
@@ -406,7 +369,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 
 	var rpcAPI = GetAPI(db, enabledApis)
 
-	httpEndpoint := fmt.Sprintf("%s:%d", cfg.rpcListenAddress, cfg.rpcPort)
+	httpEndpoint := fmt.Sprintf("%s:%d", cfg.httpListenAddress, cfg.httpPort)
 
 	// register apis and create handler stack
 	srv := rpc.NewServer()
