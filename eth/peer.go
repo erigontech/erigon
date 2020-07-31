@@ -228,6 +228,8 @@ func (p *peer) announceTransactions() {
 	// Making sure that we don't announce transactions too early.
 	// It this lock is set, it means that we are in process of exchanging latest block headers.
 	p.HandshakeOrderMux.Lock()
+	// this causes a false-positive SA2001: empty critical section, so we intentionally ignore it
+	//nolint: staticcheck
 	p.HandshakeOrderMux.Unlock()
 
 	for {
