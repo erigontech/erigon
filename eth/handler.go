@@ -459,7 +459,6 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		p.Log().Debug("Sending pooled tx hashes failed", "err", err)
 		return err
 	}
-
 	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
 	if pm.checkpointHash != (common.Hash{}) {
 		// Request the peer's checkpoint header for chain height/weight validation

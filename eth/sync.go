@@ -68,10 +68,7 @@ func (pm *ProtocolManager) syncTransactions(p *peer) error {
 		for i, tx := range txs {
 			hashes[i] = tx.Hash()
 		}
-		if err := p.sendPooledTransactionHashes(hashes); err != nil {
-			log.Error("Sending pooled transaction hashes", "error", err)
-			return err
-		}
+		p.AsyncSendPooledTransactionHashes(hashes)
 		return nil
 	}
 	// Out of luck, peer is running legacy protocols, drop the txs over
