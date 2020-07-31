@@ -427,23 +427,24 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		td      = pm.blockchain.GetTd(hash, number)
 	)
 
-	// this mutex ensures that we don't try to reply to other messages from
-	// the app, until we handled the handshake
-	p.HandshakeMutex.Lock()
 	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
+
+	// Make sure that we first exchange headers and only then announce transactions
+	p.HandshakeOrderMux.Lock()
 	// Register the peer locally
 	if err := pm.peers.Register(p); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
+		p.HandshakeOrderMux.Lock()
 		return err
 	}
 	defer pm.removePeer(p.id)
-	fmt.Println("handle: after register")
 
 	// Register the peer in the downloader. If the downloader considers it banned, we disconnect
 	if err := pm.downloader.RegisterPeer(p.id, p.version, p); err != nil {
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 	pm.chainSync.handlePeerEvent(p)
@@ -453,16 +454,19 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// Send request for the head header
 	peerHeadHash, _ := p.Head()
 	if err := p.RequestHeadersByHash(peerHeadHash, 1, 0, false); err != nil {
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 
-	p.HandshakeMutex.Unlock()
+	// Allow to handle transaction ordering
+	p.HandshakeOrderMux.Unlock()
 
 	pm.syncTransactions(p)
 

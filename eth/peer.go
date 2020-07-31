@@ -109,7 +109,7 @@ type peer struct {
 
 	term chan struct{} // Termination channel to stop the broadcaster
 
-	HandshakeMutex sync.Mutex
+	HandshakeOrderMux sync.Mutex // This mutex enforces the order of operations when registering new peer on eth65+
 }
 
 func newPeer(version int, p *p2p.Peer, rw p2p.MsgReadWriter, getPooledTx func(hash common.Hash) *types.Transaction) *peer {
@@ -224,10 +224,11 @@ func (p *peer) announceTransactions() {
 		done  chan struct{}         // Non-nil if background announcer is running
 		fail  = make(chan error, 1) // Channel used to receive network error
 	)
-	fmt.Println("AT: locking")
-	p.HandshakeMutex.Lock()
-	p.HandshakeMutex.Unlock()
-	fmt.Println("AT: un-locking")
+
+	// Making sure that we don't announce transactions too early.
+	// It this lock is set, it means that we are in process of exchanging latest block headers.
+	p.HandshakeOrderMux.Lock()
+	p.HandshakeOrderMux.Unlock()
 
 	for {
 		// If there's no in-flight announce running, check if a new one is needed
