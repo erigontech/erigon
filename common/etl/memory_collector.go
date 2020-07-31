@@ -46,13 +46,6 @@ func (m *MemoryCollector) Put(k, v []byte) {
 	m.pos += m.entrySize
 }
 
-// Last retrieves the last key-value put
-func (m *MemoryCollector) Last() (k []byte, v []byte) {
-	k = m.buffer[m.pos : m.pos+m.lenK]
-	v = m.buffer[m.pos+m.lenK : m.pos+m.entrySize]
-	return
-}
-
 // Commit commits what the collector collected in a bucket in ordered sequence to the Database
 func (m *MemoryCollector) Commit(db ethdb.Database, bucket []byte) error {
 	batch := db.NewBatch()

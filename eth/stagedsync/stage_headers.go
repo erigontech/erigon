@@ -84,7 +84,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collection *etl.MemoryCollector, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, collector *etl.MemoryCollector, blockNumber *uint64, origin uint64, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -153,10 +153,12 @@ Error: %v
 			return false, 0, err
 		}
 	}
-	localTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	if localTd == nil {
-		return false, 0, errors.New("unknown parent")
+	headHash := rawdb.ReadHeadHeaderHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		headNumber = blockNumber
 	}
+	localTd := rawdb.ReadTd(db, headHash, *headNumber)
 	lastHeader := headers[len(headers)-1]
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
@@ -164,9 +166,9 @@ Error: %v
 	newCanonical := externTd.Cmp(localTd) > 0
 
 	if !newCanonical && externTd.Cmp(localTd) == 0 {
-		if lastHeader.Number.Uint64() < *blockNumber {
+		if lastHeader.Number.Uint64() < *headNumber {
 			newCanonical = true
-		} else if lastHeader.Number.Uint64() == *blockNumber {
+		} else if lastHeader.Number.Uint64() == *headNumber {
 			newCanonical = mrand.Float64() < 0.5
 		}
 	}
@@ -205,7 +207,7 @@ Error: %v
 			encoded = dbutils.EncodeBlockNumber(number)
 		)
 
-		collection.Put(hash[:], encoded)
+		collector.Put(hash[:], encoded)
 
 		// Write the encoded header
 		data, err := rlp.EncodeToBytes(header)
@@ -228,22 +230,16 @@ Error: %v
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	}
-	reorg := newCanonical && forkBlockNumber < *blockNumber
+	reorg := newCanonical && forkBlockNumber < *headNumber
 	if reorg {
 		// Delete any canonical number assignments above the new head
-		for i := lastHeader.Number.Uint64() + 1; i <= *blockNumber; i++ {
+		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
 			rawdb.DeleteCanonicalHash(batch, i)
 		}
 	}
 	if newCanonical {
 		*blockNumber = lastHeader.Number.Uint64()
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
-		hash, encoded := collection.Last()
-		fmt.Println(hash)
-		fmt.Println(encoded)
-		if err := batch.Put(dbutils.HeaderNumberPrefix, common.CopyBytes(hash), common.CopyBytes(encoded)); err != nil {
-			log.Crit("Failed to store header", "err", err)
-		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return false, 0, fmt.Errorf("write header markers into disk: %w", err)

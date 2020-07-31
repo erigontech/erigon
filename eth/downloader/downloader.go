@@ -703,6 +703,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			// Make sure the peer actually gave something valid
 			headers := packet.(*headerPack).headers
 			if len(headers) != 1 {
+				fmt.Println("lol")
 				p.log.Debug("Multiple headers for single request", "headers", len(headers))
 				return 0, errBadPeer
 			}
@@ -805,7 +806,6 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
 	}
-	fmt.Println(localHeight)
 	p.log.Debug("Looking for common ancestor", "local", localHeight, "remote", remoteHeight)
 
 	// Recap floor value for binary search
@@ -1113,7 +1113,13 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 					if d.mode == LightSync {
 						head = d.lightchain.CurrentHeader().Number.Uint64()
 					} else if d.mode == StagedSync {
-						head = d.headerNumber
+						headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
+						headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
+						if headNumber == nil {
+							head = d.headerNumber
+						} else {
+							head = *headNumber
+						}
 					} else {
 						head = d.blockchain.CurrentFastBlock().NumberU64()
 						if full := d.blockchain.CurrentBlock().NumberU64(); head < full {
@@ -1479,11 +1485,11 @@ func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight fun
 	if err != nil {
 		return err
 	}
-	collection := etl.NewMemoryCollector(32, 8, int((height-d.headerNumber+maxExtraHeaders)*40)) // The additional blocks are in case new blocks added exceed length
+	collector := etl.NewMemoryCollector(32, 8, int(height-d.headerNumber+maxExtraHeaders)) // The additional blocks are in case new blocks added exceed length
 	start := d.headerNumber
 	defer func() {
 		if d.mode == StagedSync {
-			err := collection.Commit(d.stateDB, dbutils.HeaderNumberPrefix)
+			err := collector.Commit(d.stateDB, dbutils.HeaderNumberPrefix)
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -1601,7 +1607,7 @@ func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight fun
 					if d.mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), collection, &d.headerNumber, start, frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), collector, &d.headerNumber, start, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
@@ -1910,4 +1916,8 @@ func (d *Downloader) GetSyncStatsChainHeight() uint64 {
 	h := d.syncStatsChainHeight
 	d.syncStatsLock.RUnlock()
 	return h
+}
+
+func (d *Downloader) GetHeadNumber() uint64 {
+	return d.headerNumber
 }
