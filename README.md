@@ -12,6 +12,8 @@ Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) w
 
 The current version is currently based on Go-Ethereum 1.9.15.
 
+The current version requires about 350 GB of free disk space for the initial sync with default settings (for storing the state and temporary files).
+
 Usage:
 
 ```sh
