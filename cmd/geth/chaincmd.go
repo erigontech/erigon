@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -424,7 +423,7 @@ func copyDb(ctx *cli.Context) error {
 	start := time.Now()
 
 	currentHeader := hc.CurrentHeader()
-	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, vm.NewDestsCache(10000), nil, func() error { return nil }); err != nil {
+	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, nil, func() error { return nil }); err != nil {
 		return err
 	}
 	for dl.Synchronising() {

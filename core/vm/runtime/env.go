@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
-func NewEnv(cfg *Config, dests vm.Cache) *vm.EVM {
+func NewEnv(cfg *Config) *vm.EVM {
 	context := vm.Context{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
@@ -35,5 +35,5 @@ func NewEnv(cfg *Config, dests vm.Cache) *vm.EVM {
 		GasPrice:    cfg.GasPrice,
 	}
 
-	return vm.NewEVM(context, cfg.State, cfg.ChainConfig, cfg.EVMConfig, dests)
+	return vm.NewEVM(context, cfg.State, cfg.ChainConfig, cfg.EVMConfig, false /* skipAnalysis */)
 }

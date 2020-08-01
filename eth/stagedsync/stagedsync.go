@@ -25,7 +25,6 @@ func PrepareStagedSync(
 	datadir string,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
-	dests vm.Cache,
 	txPool *core.TxPool,
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
@@ -81,7 +80,7 @@ func PrepareStagedSync(
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, dests, storageMode.Receipts, changeSetHook)
+				return SpawnExecuteBlocksStage(s, stateDB, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, storageMode.Receipts, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, stateDB, storageMode.Receipts)

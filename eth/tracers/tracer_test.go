@@ -53,9 +53,9 @@ type dummyStatedb struct {
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func runTrace(tracer *Tracer) (json.RawMessage, error) {
-	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer}, nil)
+	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer}, false /* skipAnalysis */)
 
-	contract := vm.NewContract(account{}, account{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract := vm.NewContract(account{}, account{}, uint256.NewInt(), 10000, false /* skipAnalysis */)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
 	_, err := env.Interpreter().Run(contract, []byte{}, false)
@@ -168,8 +168,8 @@ func TestHaltBetweenSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer}, nil)
-	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(), 0, vm.NewDestsCache(50000))
+	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer}, false /* skipAnalysis */)
+	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(), 0, false /* skipAnalysis */)
 
 	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
 	timeout := errors.New("stahp")

@@ -119,7 +119,7 @@ func (dl *downloadTester) sync(id string, td *big.Int, mode SyncMode) error {
 	dl.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := dl.downloader.synchronise(id, hash, number, mode, vm.NewDestsCache(100), nil, func() error { return nil })
+	err := dl.downloader.synchronise(id, hash, number, mode, nil, func() error { return nil })
 	select {
 	case <-dl.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle
@@ -1051,7 +1051,6 @@ func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 	defer tester.terminate()
 	defer tester.peerDb.Close()
 	chain := testChainBase.shorten(1)
-	dests := vm.NewDestsCache(100)
 
 	for i, tt := range tests {
 		// Register a new peer and ensure its presence
@@ -1065,7 +1064,7 @@ func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 		// Simulate a synchronisation and check the required result
 		tester.downloader.synchroniseMock = func(string, common.Hash) error { return tt.result }
 
-		_ = tester.downloader.Synchronise(id, tester.genesis.Hash(), tester.genesis.NumberU64(), FullSync, dests, nil, func() error { return nil })
+		_ = tester.downloader.Synchronise(id, tester.genesis.Hash(), tester.genesis.NumberU64(), FullSync, nil, func() error { return nil })
 		if _, ok := tester.peers[id]; !ok != tt.drop {
 			t.Errorf("test %d: peer drop mismatch for %v: have %v, want %v", i, tt.result, !ok, tt.drop)
 		}

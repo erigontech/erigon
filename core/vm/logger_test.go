@@ -53,13 +53,12 @@ func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
 	var (
-		dests    = NewDestsCache(100)
-		env      = NewEVM(Context{}, &dummyStatedb{}, params.TestChainConfig, Config{}, dests)
+		env      = NewEVM(Context{}, &dummyStatedb{}, params.TestChainConfig, Config{}, false /* skipAnalysis */)
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
 		rstack   = stack.NewReturnStack()
 		stack    = stack.New()
-		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, NewDestsCache(10))
+		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */)
 	)
 	stack.Push(uint256.NewInt().SetOne())
 	stack.Push(uint256.NewInt())

@@ -162,7 +162,7 @@ func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 		GasPrice:    t.json.Exec.GasPrice,
 	}
 	vmconfig.NoRecursion = true
-	return vm.NewEVM(context, state, params.MainnetChainConfig, vmconfig, nil)
+	return vm.NewEVM(context, state, params.MainnetChainConfig, vmconfig, false /* skipAnalysis */)
 }
 
 func vmTestBlockHash(n uint64) common.Hash {

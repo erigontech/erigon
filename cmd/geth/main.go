@@ -464,7 +464,7 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 			log.Warn("The flag --minerthreads is deprecated and will be removed in the future, please use --miner.threads")
 		}
 
-		if err := ethereum.StartMining(threads, ethereum.BlockChain().DestsCache); err != nil {
+		if err := ethereum.StartMining(threads); err != nil {
 			utils.Fatalf("Failed to start mining: %v", err)
 		}
 	}

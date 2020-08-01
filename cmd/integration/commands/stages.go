@@ -221,7 +221,7 @@ func stage4(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, blockchain.GetVMConfig(), block, ch, blockchain.DestsCache, false, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, blockchain.GetVMConfig(), block, ch, false, nil)
 }
 
 func stage5(ctx context.Context) error {
@@ -351,7 +351,7 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 		panic(err)
 	}
 
-	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, bc.DestsCache, nil, func() error { return nil }, hook)
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, "integration_test", ethdb.DefaultStorageMode, "", quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
@@ -368,7 +368,7 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 }
 
 func newBlockChain(db *ethdb.ObjectDatabase) (*params.ChainConfig, *core.BlockChain, error) {
-	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1
 	}
