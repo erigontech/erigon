@@ -17,7 +17,6 @@
 package node
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -78,7 +77,10 @@ func DefaultDataDir() string {
 			}
 			return filepath.Join(appdata, dirname)
 		default:
-			return filepath.Join(home, fmt.Sprintf(".%s", strings.ToLower(dirname)))
+			if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
+				return filepath.Join(xdgDataDir, strings.ToLower(dirname))
+			}
+			return filepath.Join(home, ".local/share", strings.ToLower(dirname))
 		}
 	}
 	// As we cannot guess a stable location, return empty and handle later

@@ -12,9 +12,12 @@ Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) w
 
 The current version is currently based on Go-Ethereum 1.9.15.
 
+The current version requires about 630 GB of free disk space for the state storage (more info [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) and about 200GB for temp files during the initial sync with default settings.
+
 Usage:
 
 ```sh
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git && cd turbo-geth
 > make tg
 > ./build/bin/tg
 ```
@@ -70,10 +73,10 @@ Examples of stages are:
 In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
-it can run from a snapshot of a database for read-only calls.
-
+it can run from a snapshot of a database for read-only calls. [Docs](./cmd/rpcdaemon/Readme.md)
 
 **For local DB**
+
 ```
 > make rpcdaemon
 > ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug
@@ -93,37 +96,27 @@ Run RPC daemon
 
 ---
 
-Currently supported JSON-RPC calls:
+Currently supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
 
-* `eth_call`
-
-* `eth_getBlockByHash`
-
-* `eth_getBlock`
-
-* `eth_blockNumber`
-
-* `eth_getBalance`
-
-* `eth_getLogs`
-
-* `eth_estimateGas`
-
-* `debug_storageRangeAt`
-
-* `debug_traceTransaction`
-
-* `debug_accountRange`
-
-* `debug_getModifiedAccountsByNumber`
-
-* `debug_getModifiedAccountsByHash`
-
+```
+eth_call
+eth_getBlockByHash
+eth_getBlock
+eth_blockNumber
+eth_getBalance
+eth_getLogs
+eth_estimateGas
+debug_storageRangeAt
+debug_traceTransaction
+debug_accountRange
+debug_getModifiedAccountsByNumber
+debug_getModifiedAccountsByHash
+```
 
 #### 4. REST API Daemon
 
 Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
-turbo-geth remote DB functionality.
+turbo-geth remote DB functionality. [Docs](./cmd/rpcdaemon/Readme.md)
 
 Run turbo-geth in one terminal window
 
@@ -144,6 +137,14 @@ GET /api/v1/accounts/<accountAddress>
 GET /api/v1/storage/?prefix=PREFIX
 ```
 
+#### 5. Run all components by docker-compose
+
+Next command starts: turbo-geth on port 30303, rpcdaemon 8545, restapi 8080, debug-web-ui 3001, prometheus 9090, grafana 3000
+
+```
+docker-compose build
+XDG_DATA_HOME=/preferred/data/folder docker-compose up
+```
 
 ## Getting in touch
 
