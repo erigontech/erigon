@@ -137,7 +137,7 @@ GET /api/v1/storage/?prefix=PREFIX
 
 #### 5. Run all components by docker-compose
 
-Next command starts: turbo-geth, rpcdaemon, restapi, debug-web-ui, prometheus, grafana.
+Next command starts: turbo-geth on port 30303, rpcdaemon 8545, restapi 8080, debug-web-ui 3001, prometheus 9090, grafana 3000
 
 ```
 docker-compose build
