@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-const LMDBMapSize = 4 << 40 // 4TB
+const LMDBMapSize = 2 * 1024 * 1024 * 1024 * 1024 // 2TB
 
 type lmdbOpts struct {
 	path     string
