@@ -2,10 +2,16 @@ package etl
 
 import (
 	"bytes"
+	"errors"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+)
+
+var (
+	errInvalidKey   = errors.New("Key's size is invalid")
+	errInvalidValue = errors.New("Key's size is invalid")
 )
 
 // MemoryCollector collects key-value pairs into memory and then pushes them to database sorted by key
@@ -39,15 +45,22 @@ func (m MemoryCollector) Swap(i, j int) {
 	copy(m.buffer[m.entrySize*j:m.entrySize*j+m.entrySize], tmp)
 }
 
-// Put puts key-value pairs into the buffer
-func (m *MemoryCollector) Put(k, v []byte) {
+// Collect puts key-value pairs into the buffer
+func (m *MemoryCollector) Collect(k, v []byte) error {
+	if len(k) != m.lenK {
+		return errInvalidKey
+	}
+	if len(v) != m.lenV {
+		return errInvalidValue
+	}
 	copy(m.buffer[m.pos:], k)
 	copy(m.buffer[m.pos+m.lenK:], v)
 	m.pos += m.entrySize
+	return nil
 }
 
-// Commit commits what the collector collected in a bucket in ordered sequence to the Database
-func (m *MemoryCollector) Commit(db ethdb.Database, bucket []byte) error {
+// Load commits what the collector collected in a bucket in ordered sequence to the Database
+func (m *MemoryCollector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, args TransformArgs) error {
 	batch := db.NewBatch()
 	sort.Sort(m)
 	zero := make([]byte, 40)
@@ -57,7 +70,7 @@ func (m *MemoryCollector) Commit(db ethdb.Database, bucket []byte) error {
 			continue
 		}
 		w++
-		if err := batch.Put(bucket, common.CopyBytes(m.buffer[i:i+m.lenK]), common.CopyBytes(m.buffer[i+m.lenK:i+m.entrySize])); err != nil {
+		if err := batch.Put(toBucket, common.CopyBytes(m.buffer[i:i+m.lenK]), common.CopyBytes(m.buffer[i+m.lenK:i+m.entrySize])); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= batch.IdealBatchSize() {

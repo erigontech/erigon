@@ -472,8 +472,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			d.mux.Post(FailedEvent{err})
 		} else {
-			hash := rawdb.ReadHeadHeaderHash(d.stateDB)
-			rawdb.ReadHeader(d.stateDB, hash, d.headerNumber)
+			latest := d.lightchain.CurrentHeader()
+			d.mux.Post(DoneEvent{latest})
 		}
 	}()
 	if p.version < 62 {
@@ -566,15 +566,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	d.headerNumber = origin
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
-		func() error {
-			return d.processHeaders(origin+1, pivot, blockNumber, func() (uint64, error) {
-				latest, err := d.fetchHeight(p)
-				if err != nil {
-					return 0, err
-				}
-				return latest, nil
-			})
-		},
+		func() error { return d.processHeaders(origin+1, pivot, blockNumber, height) },
 	}
 
 	// Turbo-Geth's staged sync goes here
@@ -979,7 +971,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 					break
 				}
 				header := rawdb.ReadHeader(d.stateDB, h, check)
-				if d.mode == StagedSync && header == nil { // Replace Number with Difficulty
+				if d.mode == StagedSync && header == nil {
 					p.log.Debug("Received non requested header", "number", n, "hash", header.Hash(), "request", check)
 					return 0, errBadPeer
 				} else if d.mode != StagedSync {
@@ -1477,18 +1469,14 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64, fetchHeight func() (uint64, error)) error {
+func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64, height uint64) error {
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
-	height, err := fetchHeight()
-	if err != nil {
-		return err
-	}
 	collector := etl.NewMemoryCollector(32, 8, int(height-d.headerNumber+maxExtraHeaders)) // The additional blocks are in case new blocks added exceed length
 	start := d.headerNumber
 	defer func() {
 		if d.mode == StagedSync {
-			err := collector.Commit(d.stateDB, dbutils.HeaderNumberPrefix)
+			err := collector.Load(d.stateDB, dbutils.HeaderNumberPrefix, nil, etl.TransformArgs{})
 			if err != nil {
 				log.Error(err.Error())
 			}

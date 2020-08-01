@@ -115,10 +115,11 @@ Error: %v
 		return false, 0, nil
 	}
 
-	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	if parentTd == nil {
+	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
 		return false, 0, errors.New("unknown parent")
 	}
+	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
@@ -207,7 +208,9 @@ Error: %v
 			encoded = dbutils.EncodeBlockNumber(number)
 		)
 
-		collector.Put(hash[:], encoded)
+		if err := collector.Collect(hash[:], encoded); err != nil {
+			log.Crit("Failed to store header number", "err", err)
+		}
 
 		// Write the encoded header
 		data, err := rlp.EncodeToBytes(header)
