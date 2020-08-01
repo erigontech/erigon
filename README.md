@@ -17,7 +17,7 @@ The current version requires about 630 GB of free disk space for the state stora
 Usage:
 
 ```sh
-> git clone --recurse-submodules -j8 git@github.com:ledgerwatch/turbo-geth.git && cd turbo-geth
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git && cd turbo-geth
 > make tg
 > ./build/bin/tg
 ```
