@@ -11,10 +11,10 @@ ADD . /app
 RUN cd /app && make restapi
 
 # Pull Geth into a second stage deploy alpine container
-FROM alpine:latest
+FROM alpine:3
 
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/build/bin/restapi /usr/local/bin/
 
-EXPOSE 8545 30303 30303/udp 9090 6060
+EXPOSE 8080
 ENTRYPOINT ["restapi"]

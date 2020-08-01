@@ -10,7 +10,7 @@ ADD . /app
 RUN cd /app && make tg
 
 # Pull Geth into a second stage deploy alpine container
-FROM alpine:latest
+FROM alpine:3
 
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/build/bin/tg /usr/local/bin/

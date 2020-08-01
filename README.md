@@ -70,10 +70,10 @@ Examples of stages are:
 In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
-it can run from a snapshot of a database for read-only calls.
-
+it can run from a snapshot of a database for read-only calls. [Docs](./cmd/rpcdaemon/Readme.md)
 
 **For local DB**
+
 ```
 > make rpcdaemon
 > ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug
@@ -93,7 +93,7 @@ Run RPC daemon
 
 ---
 
-Currently supported JSON-RPC calls:
+Currently supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
 
 * `eth_call`
 
@@ -123,7 +123,7 @@ Currently supported JSON-RPC calls:
 #### 4. REST API Daemon
 
 Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
-turbo-geth remote DB functionality.
+turbo-geth remote DB functionality. [Docs](./cmd/rpcdaemon/Readme.md)
 
 Run turbo-geth in one terminal window
 
