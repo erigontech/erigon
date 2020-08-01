@@ -100,13 +100,13 @@ ios:
 	@echo "Done building."
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
-test: semantics/z3/build/libz3.a
+test:
 	$(GORUN) build/ci.go test
 
-test-lmdb: semantics/z3/build/libz3.a
+test-lmdb:
 	TEST_DB=lmdb $(GORUN) build/ci.go test
 
-test-badger: semantics/z3/build/libz3.a
+test-badger:
 	TEST_DB=badger $(GORUN) build/ci.go test
 
 test-bolt: semantics/z3/build/libz3.a
@@ -114,7 +114,7 @@ test-bolt: semantics/z3/build/libz3.a
 
 lint: lintci
 
-lintci: semantics/z3/build/libz3.a
+lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \

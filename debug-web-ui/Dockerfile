@@ -4,7 +4,7 @@ WORKDIR /app
 
 # next 2 lines helping utilize docker cache
 COPY package.json yarn.lock /app/
-RUN yarn install
+RUN yarn install --production
 
 ADD . .
 

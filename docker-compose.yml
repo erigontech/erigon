@@ -5,7 +5,7 @@ services:
   turbo-geth:
     image: turbo-geth
     build: .
-    command: --nousb --metrics --pprof.addr=0.0.0.0 --pprof.port=6060 --private.api.addr=0.0.0.0:9090
+    command: --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090"
     stop_grace_period: 2m
     volumes:
       - ${XDG_DATA_HOME:-~}/.turbogeth:/root/.turbogeth/
@@ -36,7 +36,7 @@ services:
     build:
       context: .
       dockerfile: ./cmd/restapi/Dockerfile
-    command: --http.addr="0.0.0.0:8080" --private.api.addr=turbo-geth:9090
+    command: --http.addr="0.0.0.0:8080" --private.api.addr="turbo-geth:9090"
     ports:
       - 8080:8080
 
@@ -45,7 +45,7 @@ services:
     build:
       context: .
       dockerfile: ./cmd/rpcdaemon/Dockerfile
-    command: --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug"
+    command: --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug"
     ports:
       - 8545:8545
 
