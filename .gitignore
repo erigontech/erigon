@@ -51,3 +51,5 @@ profile.cov
 /timings.txt
 right_*.txt
 root_*.txt
+
+docker-compose.dev.yml

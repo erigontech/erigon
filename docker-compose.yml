@@ -1,0 +1,66 @@
+version: '2.2'
+
+services:
+
+  turbo-geth:
+    image: turbo-geth
+    build:
+      context: .
+      cache_from:
+        - turbo-geth:builder
+    command: --nousb --metrics --pprof.addr=0.0.0.0 --pprof.port=6060 --private.api.addr=0.0.0.0:9090
+    stop_grace_period: 2m
+    volumes:
+      - ${XDG_DATA_HOME:-~}/.turbogeth:/root/.turbogeth/
+    ports:
+      - 30303:30303
+
+  prometheus:
+    image: prom/prometheus
+    command: --log.level=warn
+    ports:
+      - 9090:9090
+    volumes:
+      - ./cmd/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ${XDG_DATA_HOME:-./cmd/prometheus}/tg-prometheus:/prometheus
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - 3000:3000
+    volumes:
+      - ./cmd/prometheus/grafana.ini:/etc/grafana/grafana.ini
+      - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
+      - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
+      - ${XDG_DATA_HOME:-./cmd/prometheus}/tg-grafana:/var/lib/grafana
+
+  restapi:
+    image: turbo-geth:restapi
+    build:
+      context: .
+      dockerfile: ./cmd/restapi/Dockerfile
+      cache_from:
+        - turbo-geth:builder
+    command: --http.addr="0.0.0.0:8080" --private.api.addr=turbo-geth:9090
+    ports:
+      - 8080:8080
+
+  rpcdaemon:
+    image: turbo-geth:rpcdaemon
+    build:
+      context: .
+      dockerfile: ./cmd/rpcdaemon/Dockerfile
+      cache_from:
+        - turbo-geth:builder
+    command: --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug"
+    ports:
+      - 8545:8545
+
+  debugui:
+    image: turbo-geth:debugui
+    build: ./debug-web-ui/
+    stdin_open: true
+    ports:
+      - 3001:3000
+
+

@@ -144,6 +144,19 @@ GET /api/v1/accounts/<accountAddress>
 GET /api/v1/storage/?prefix=PREFIX
 ```
 
+#### 5. Run all components by docker-compose
+
+```
+docker-compose build --parallel
+docker-compose up
+```
+
+It starts: turbo-geth, rpcdaemon, restapi, debug-web-ui, prometheus, grafana.
+Customizable by:
+```
+cp docker-compose.yml docker-compose.dev.yml
+docker-compose up -f docker-compose.dev.yml
+```
 
 ## Getting in touch
 

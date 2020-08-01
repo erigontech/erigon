@@ -1,19 +1,20 @@
-FROM golang:1.13-alpine as builder
+FROM golang:1.14-alpine as builder
 
 RUN apk add --no-cache make gcc musl-dev linux-headers git
 
+# expecting build context: whole turbo-geth repo
 # next 2 lines helping utilize docker cache
-COPY go.mod go.sum /go-ethereum/
-RUN cd /go-ethereum && go mod download
+COPY go.mod go.sum /app/
+RUN cd /app && go mod download
 
-ADD . /go-ethereum
-RUN cd /go-ethereum && make restapi
+ADD . /app
+RUN cd /app && make restapi
 
 # Pull Geth into a second stage deploy alpine container
 FROM alpine:latest
 
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /go-ethereum/build/bin/restapi /usr/local/bin/
+COPY --from=builder /app/build/bin/restapi /usr/local/bin/
 
-EXPOSE 8080
+EXPOSE 8545 30303 30303/udp 9090 6060
 ENTRYPOINT ["restapi"]
