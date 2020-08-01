@@ -184,11 +184,10 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	heighter := func() uint64 {
 		if manager.mode == downloader.StagedSync {
 			return manager.downloader.GetHeadNumber()
-		} else {
-			headHash := rawdb.ReadHeadHeaderHash(chaindb)
-			headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
-			return *headNumber
 		}
+		headHash := rawdb.ReadHeadHeaderHash(chaindb)
+		headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
+		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import

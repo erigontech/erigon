@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	errInvalidKey   = errors.New("Key's size is invalid")
-	errInvalidValue = errors.New("Key's size is invalid")
+	errInvalidKey   = errors.New("key's size is invalid")
+	errInvalidValue = errors.New("value's size is invalid")
 )
 
 // MemoryCollector collects key-value pairs into memory and then pushes them to database sorted by key
