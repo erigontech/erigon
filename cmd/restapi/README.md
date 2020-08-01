@@ -8,8 +8,8 @@ make restapi
 
 ## Running
 
-* Running node with `--private.api.addr` (e.g `./build/bin/geth --private.api.addr localhost:9999`).
-* Running Restapi: `./build/bin/restapi` (Default Port: 8080)
+* TurboGeth with `--private.api.addr`: `./build/bin/geth --private.api.addr="localhost:9999"`
+* Restapi: `./build/bin/restapi` (Default Port: 8080)
 
 ## API
 
