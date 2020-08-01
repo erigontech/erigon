@@ -17,39 +17,7 @@
 package vm
 
 import (
-	"github.com/hashicorp/golang-lru"
-	"github.com/ledgerwatch/turbo-geth/common"
 )
-
-type Cache interface {
-	Len() int
-	Set(hash common.Hash, v []uint64)
-	Get(hash common.Hash) ([]uint64, bool)
-}
-
-type DestsCache struct {
-	*lru.Cache
-}
-
-func NewDestsCache(maxSize int) *DestsCache {
-	c, _ := lru.New(maxSize)
-	return &DestsCache{c}
-}
-
-func (d *DestsCache) Set(hash common.Hash, v []uint64) {
-	d.Add(hash, v)
-}
-
-func (d DestsCache) Get(hash common.Hash) ([]uint64, bool) {
-	if v, ok := d.Cache.Get(hash); ok {
-		return v.([]uint64), true
-	}
-	return nil, false
-}
-
-func (d *DestsCache) Len() int {
-	return d.Cache.Len()
-}
 
 // codeBitmap collects data locations in code.
 func codeBitmap(code []byte) []uint64 {

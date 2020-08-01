@@ -1384,7 +1384,7 @@ func makeCreators(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: ct, Debug: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -1401,7 +1401,7 @@ func makeCreators(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -1975,7 +1975,7 @@ func makeSha3Preimages(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{EnablePreimageRecording: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -2000,7 +2000,7 @@ func makeSha3Preimages(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}

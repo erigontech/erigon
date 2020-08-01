@@ -26,7 +26,7 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 	}
 
 	bc := &blockGetter{db}
-	_, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0, nil)
+	_, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +39,7 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 
 		header := rawdb.ReadHeader(db, hash, *number)
-		receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{}, nil)
+		receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}

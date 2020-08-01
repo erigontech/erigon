@@ -186,9 +186,9 @@ func TestForkIDSplit(t *testing.T) {
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 
 		txCacherNoFork  = core.NewTxSenderCacher(runtime.NumCPU())
-		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil, txCacherNoFork)
+		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, txCacherNoFork)
 		txCacherProFork = core.NewTxSenderCacher(runtime.NumCPU())
-		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil, txCacherProFork)
+		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, txCacherProFork)
 
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false /* intermediateHashes */)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false /* intermediateHashes */)

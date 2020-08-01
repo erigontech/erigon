@@ -111,7 +111,7 @@ func (api *APIImpl) doCall(ctx context.Context, args ethapi.CallArgs, blockNrOrH
 
 	evmCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, api.dbReader)
 
-	evm := vm.NewEVM(evmCtx, state, params.MainnetChainConfig, vm.Config{}, nil)
+	evm := vm.NewEVM(evmCtx, state, params.MainnetChainConfig, vm.Config{})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)

@@ -417,7 +417,7 @@ func TestClique(t *testing.T) {
 		engine.fakeDiff = true
 
 		txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil, txCacher)
+		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, txCacher)
 		if err != nil {
 			t.Errorf("test %d: failed to create test chain: %v", i, err)
 			continue

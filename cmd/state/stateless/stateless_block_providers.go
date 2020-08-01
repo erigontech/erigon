@@ -66,7 +66,7 @@ func NewBlockProviderFromDB(path string, createDBFunc CreateDbFunc) (BlockProvid
 	chainConfig := params.MainnetChainConfig
 	engine := ethash.NewFullFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, nil, txCacher)
+	chain, err := core.NewBlockChain(ethDB, nil, chainConfig, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		return nil, err
 	}

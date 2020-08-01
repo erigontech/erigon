@@ -325,7 +325,7 @@ func initialState1() error {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		return err
 	}

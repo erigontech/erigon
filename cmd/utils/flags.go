@@ -1822,7 +1822,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *
 	vmcfg := vm.Config{EnablePreimageRecording: ctx.GlobalBool(VMEnableDebugFlag.Name)}
 
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, vm.NewDestsCache(10000), txCacher)
+	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, txCacher)
 	if err != nil {
 		Fatalf("Can't create BlockChain: %v", err)
 	}

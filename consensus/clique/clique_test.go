@@ -59,7 +59,7 @@ func TestReimportMirroredState(t *testing.T) {
 
 	// Generate a batch of blocks, each properly signed
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, txCacher)
+	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
 	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -97,7 +97,7 @@ func TestReimportMirroredState(t *testing.T) {
 	genspec.MustCommit(db)
 
 	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	chain1, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, txCacher1)
+	chain1, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher1)
 	defer chain1.Stop()
 
 	if _, err := chain1.InsertChain(context.Background(), blocks[:2]); err != nil {
@@ -111,7 +111,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
 	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
-	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, nil, txCacher2)
+	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
 	defer chain2.Stop()
 
 	if _, err := chain2.InsertChain(context.Background(), blocks[2:]); err != nil {

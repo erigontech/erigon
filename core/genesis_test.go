@@ -129,7 +129,7 @@ func TestSetupGenesis(t *testing.T) {
 				genesis := oldcustomg.MustCommit(db)
 
 				txCacher := NewTxSenderCacher(runtime.NumCPU())
-				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, vm.NewDestsCache(100), txCacher)
+				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, txCacher)
 				defer bc.Stop()
 
 				blocks, _, err := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)

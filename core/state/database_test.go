@@ -75,7 +75,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// Reload blockchain from the database
 	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +729,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// Reload blockchain from the database
 	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain2, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher2)
+	blockchain2, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +786,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -953,7 +953,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,7 +1094,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1186,7 +1186,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1257,7 +1257,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	// Reload blockchain from the database
 	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1317,7 +1317,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}

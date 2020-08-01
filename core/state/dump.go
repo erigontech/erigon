@@ -152,6 +152,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		if len(k) > 32 {
 			return true, nil
 		}
+		fmt.Printf("Got account %x\n", k)
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
@@ -170,6 +171,8 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		numberOfResults++
 		return true, nil
 	})
+
+	fmt.Printf("Number of accounts: %d\n", numberOfResults)
 
 	if err != nil {
 		return nil, err
@@ -215,6 +218,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
 			}
+			fmt.Printf("Got walk storage for : %x\n", storagePrefix)
 		}
 		c.onAccount(addrHash, *account)
 	}
