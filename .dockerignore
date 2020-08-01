@@ -1,7 +1,9 @@
-**/*_test.go
+.git
 
+**/*_test.go
 build/_workspace
 build/_bin
-tests/testdata
+build/bin
+tests
 debug-web-ui
 cmd/prometheus
