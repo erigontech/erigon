@@ -567,7 +567,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
 		func() error {
-			return d.processHeaders(pivot, origin+1, func() (uint64, error) {
+			return d.processHeaders(origin+1, pivot, blockNumber, func() (uint64, error) {
 				latest, err := d.fetchHeight(p)
 				if err != nil {
 					return 0, err
@@ -703,7 +703,6 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			// Make sure the peer actually gave something valid
 			headers := packet.(*headerPack).headers
 			if len(headers) != 1 {
-				fmt.Println("lol")
 				p.log.Debug("Multiple headers for single request", "headers", len(headers))
 				return 0, errBadPeer
 			}
@@ -795,13 +794,13 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 	case FastSync:
 		localHeight = d.blockchain.CurrentFastBlock().NumberU64()
 	case StagedSync:
-		if d.headerNumber == 0 {
-			headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
-			headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
+		headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
+		headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
+		if headNumber == nil {
+			localHeight = d.headerNumber
+		} else {
 			localHeight = *headNumber
 			d.headerNumber = localHeight
-		} else {
-			localHeight = d.headerNumber
 		}
 	default:
 		localHeight = d.lightchain.CurrentHeader().Number.Uint64()
@@ -1478,7 +1477,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight func() (uint64, error)) error {
+func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64, fetchHeight func() (uint64, error)) error {
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
 	height, err := fetchHeight()
@@ -1530,7 +1529,6 @@ func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight fun
 		case headers := <-d.headerProcCh:
 			// Terminate header processing if we synced up
 			if len(headers) == 0 {
-
 				// Notify everyone that headers are fully processed
 				if d.mode != StagedSync {
 					for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
@@ -1554,7 +1552,7 @@ func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight fun
 				// R: Nothing to give
 				if d.mode != LightSync && d.mode != StagedSync {
 					head := d.blockchain.CurrentBlock()
-					if !gotHeaders && height > head.NumberU64() {
+					if !gotHeaders && blockNumber > head.NumberU64() {
 						return errStallingPeer
 					}
 				}
@@ -1567,7 +1565,7 @@ func (d *Downloader) processHeaders(pivot uint64, origin uint64, fetchHeight fun
 				// peer gave us something useful, we're already happy/progressed (above check).
 				if d.mode == FastSync || d.mode == LightSync {
 					head := d.lightchain.CurrentHeader()
-					if height > head.Number.Uint64() {
+					if blockNumber > head.Number.Uint64() {
 						return errStallingPeer
 					}
 				}
