@@ -4,9 +4,7 @@ services:
 
   turbo-geth:
     image: turbo-geth:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.alltools
+    build: .
     command: tg --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090"
     volumes:
       - ${XDG_DATA_HOME:-~}/.turbogeth:/root/.turbogeth/
