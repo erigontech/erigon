@@ -7,13 +7,11 @@ COPY go.mod go.sum /app/
 RUN cd /app && go mod download
 
 ADD . /app
-RUN cd /app && make tg
+RUN cd /app && make all
 
-# Pull Geth into a second stage deploy alpine container
 FROM alpine:3
 
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /app/build/bin/tg /usr/local/bin/
+COPY --from=builder /app/build/bin/* /usr/local/bin/
 
-EXPOSE 8545 30303 30303/udp 9090 6060
-ENTRYPOINT ["tg"]
+EXPOSE 8545 8546 8547 30303 30303/udp 8080 9090

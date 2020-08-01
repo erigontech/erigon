@@ -15,6 +15,7 @@ The current version is currently based on Go-Ethereum 1.9.15.
 Usage:
 
 ```sh
+> git clone --recurse-submodules -j8 git@github.com:ledgerwatch/turbo-geth.git && cd turbo-geth
 > make tg
 > ./build/bin/tg
 ```
@@ -95,30 +96,20 @@ Run RPC daemon
 
 Currently supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
 
-* `eth_call`
-
-* `eth_getBlockByHash`
-
-* `eth_getBlock`
-
-* `eth_blockNumber`
-
-* `eth_getBalance`
-
-* `eth_getLogs`
-
-* `eth_estimateGas`
-
-* `debug_storageRangeAt`
-
-* `debug_traceTransaction`
-
-* `debug_accountRange`
-
-* `debug_getModifiedAccountsByNumber`
-
-* `debug_getModifiedAccountsByHash`
-
+```
+eth_call
+eth_getBlockByHash
+eth_getBlock
+eth_blockNumber
+eth_getBalance
+eth_getLogs
+eth_estimateGas
+debug_storageRangeAt
+debug_traceTransaction
+debug_accountRange
+debug_getModifiedAccountsByNumber
+debug_getModifiedAccountsByHash
+```
 
 #### 4. REST API Daemon
 
@@ -146,16 +137,11 @@ GET /api/v1/storage/?prefix=PREFIX
 
 #### 5. Run all components by docker-compose
 
-```
-docker-compose build --parallel
-docker-compose up
-```
+Next command starts: turbo-geth, rpcdaemon, restapi, debug-web-ui, prometheus, grafana.
 
-It starts: turbo-geth, rpcdaemon, restapi, debug-web-ui, prometheus, grafana.
-Customizable by:
 ```
-cp docker-compose.yml docker-compose.dev.yml
-docker-compose up -f docker-compose.dev.yml
+docker-compose build
+XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ```
 
 ## Getting in touch

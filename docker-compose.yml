@@ -3,10 +3,11 @@ version: '2.2'
 services:
 
   turbo-geth:
-    image: turbo-geth
-    build: .
-    command: --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090"
-    stop_grace_period: 2m
+    image: turbo-geth:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.alltools
+    command: tg --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090"
     volumes:
       - ${XDG_DATA_HOME:-~}/.turbogeth:/root/.turbogeth/
     ports:
@@ -32,20 +33,14 @@ services:
       - ${XDG_DATA_HOME:-./cmd/prometheus}/tg-grafana:/var/lib/grafana
 
   restapi:
-    image: turbo-geth:restapi
-    build:
-      context: .
-      dockerfile: ./cmd/restapi/Dockerfile
-    command: --http.addr="0.0.0.0:8080" --private.api.addr="turbo-geth:9090"
+    image: turbo-geth:latest
+    command: restapi --http.addr="0.0.0.0:8080" --private.api.addr="turbo-geth:9090"
     ports:
       - 8080:8080
 
   rpcdaemon:
-    image: turbo-geth:rpcdaemon
-    build:
-      context: .
-      dockerfile: ./cmd/rpcdaemon/Dockerfile
-    command: --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug"
+    image: turbo-geth:latest
+    command: rpcdaemon --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug"
     ports:
       - 8545:8545
 
