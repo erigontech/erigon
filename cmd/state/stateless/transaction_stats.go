@@ -213,7 +213,7 @@ func transactionStats(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			tt.ResetCounters()
 			tt.currentBlock = blockNum
 			tt.measureCreate = tx.To() == nil

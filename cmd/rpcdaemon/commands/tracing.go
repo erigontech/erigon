@@ -79,7 +79,7 @@ func (api *PrivateDebugAPIImpl) traceTx(ctx context.Context, message core.Messag
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer}, false /* skipAnalysis */)
+	vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
 
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
 	if err != nil {
@@ -138,7 +138,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 			return msg, EVMcontext, statedb, reader, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{}, false /* skipAnalysis */)
+		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}

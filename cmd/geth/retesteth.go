@@ -687,7 +687,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), api.blockchain, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{}, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{})
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				return AccountRangeResult{}, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
 			}

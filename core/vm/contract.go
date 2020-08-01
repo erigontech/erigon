@@ -75,21 +75,23 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 	return c
 }
 
-func (c *Contract) validJumpdest(dest *uint256.Int) bool {
+// First result tells us if the destination is valid
+// Second result tells us if the code bitmap was used
+func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	udest, overflow := dest.Uint64WithOverflow()
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
-		return false
+		return false, false
 	}
 	// Only JUMPDESTs allowed for destinations
 	if OpCode(c.Code[udest]) != JUMPDEST {
-		return false
+		return false, false
 	}
 	if c.skipAnalysis {
-		return true
+		return true, false
 	}
-	return c.isCode(udest)
+	return c.isCode(udest), true
 }
 
 func (c *Contract) validJumpSubdest(udest uint64) bool {

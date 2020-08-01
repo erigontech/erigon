@@ -481,7 +481,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 		msg, _ := tx.AsMessage(signer)
 		vmctx := core.NewEVMContext(msg, block.Header(), api.eth.blockchain, nil)
 
-		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vm.Config{}, false /* skipAnalysis */)
+		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
 			failed = err
 			break
@@ -574,7 +574,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 			}
 		}
 		// Execute the transaction and flush any traces to disk
-		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vmConf, false /* skipAnalysis */)
+		vmenv := vm.NewEVM(vmctx, statedb, api.eth.blockchain.Config(), vmConf)
 		_, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()))
 		if writer != nil {
 			writer.Flush()
@@ -673,7 +673,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, state, api.eth.blockchain.Config(), vm.Config{Debug: true, Tracer: tracer}, false /* skipAnalysis */)
+	vmenv := vm.NewEVM(vmctx, state, api.eth.blockchain.Config(), vm.Config{Debug: true, Tracer: tracer})
 
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
 	if err != nil {
@@ -739,7 +739,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 			return msg, EVMcontext, statedb, dbstate, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{}, false /* skipAnalysis */)
+		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}

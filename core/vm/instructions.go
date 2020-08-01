@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -536,7 +537,10 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	pos := callContext.stack.Pop()
-	if !callContext.contract.validJumpdest(&pos) {
+	if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
+		if usedBitmap && interpreter.cfg.TraceJumpDest {
+			log.Warn("Code Bitmap used for detecting invalid jump", "tx", interpreter.evm.Context.TxHash)
+		}
 		return nil, ErrInvalidJump
 	}
 	*pc = pos.Uint64()
@@ -547,7 +551,10 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	pos, cond := callContext.stack.Pop(), callContext.stack.Pop()
 	if !cond.IsZero() {
-		if !callContext.contract.validJumpdest(&pos) {
+		if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
+			if usedBitmap && interpreter.cfg.TraceJumpDest {
+				log.Warn("Code Bitmap used for detecting invalid jump", "tx", interpreter.evm.Context.TxHash)
+			}
 			return nil, ErrInvalidJump
 		}
 		*pc = pos.Uint64()

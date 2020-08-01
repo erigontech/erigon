@@ -196,7 +196,7 @@ func speculativeExecution(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb1, chainConfig, vmConfig1, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb1, chainConfig, vmConfig1)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -221,7 +221,7 @@ func speculativeExecution(blockNum uint64) {
 			msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data(), false)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb2, chainConfig, vmConfig2, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb2, chainConfig, vmConfig2)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -240,7 +240,7 @@ func speculativeExecution(blockNum uint64) {
 			msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data(), false)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb3, chainConfig, vmConfig3, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb3, chainConfig, vmConfig3)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -263,7 +263,7 @@ func speculativeExecution(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb4, chainConfig, vmConfig2, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb4, chainConfig, vmConfig2)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}

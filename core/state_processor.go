@@ -221,9 +221,13 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	ctx := config.WithEIPsFlags(context.Background(), header.Number)
 	// Create a new context to be used in the EVM environment
 	context := NewEVMContext(msg, header, bc, author)
+	if cfg.TraceJumpDest {
+		context.TxHash = tx.Hash()
+	}
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmenv := vm.NewEVM(context, statedb, config, cfg, SkipAnalysis(config, header.Number.Uint64()))
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
+	vmenv := vm.NewEVM(context, statedb, config, cfg)
 	// Apply the transaction to the current state (included in the env)
 	result, err := ApplyMessage(vmenv, msg, gp)
 	if err != nil {

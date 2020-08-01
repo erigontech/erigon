@@ -163,7 +163,7 @@ func makeTokens(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, false /* skipAnalysis */)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -255,7 +255,7 @@ func makeTokenBalances() {
 		vmConfig := vm.Config{EnablePreimageRecording: true}
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, false /* skipAnalysis */)
+		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)
@@ -479,7 +479,7 @@ func makeTokenAllowances() {
 		vmConfig := vm.Config{EnablePreimageRecording: true}
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, false /* skipAnalysis */)
+		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)

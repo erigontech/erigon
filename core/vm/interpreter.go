@@ -33,6 +33,8 @@ type Config struct {
 	Tracer                  Tracer // Opcode logger
 	NoRecursion             bool   // Disables call, callcode, delegate call and create
 	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
+	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
+	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
 
 	EWASMInterpreter string // External EWASM interpreter options
 	EVMInterpreter   string // External EVM interpreter options
