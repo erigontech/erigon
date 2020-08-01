@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"fmt"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -539,7 +540,7 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	pos := callContext.stack.Pop()
 	if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
 		if usedBitmap && interpreter.cfg.TraceJumpDest {
-			log.Warn("Code Bitmap used for detecting invalid jump", "tx", interpreter.evm.Context.TxHash)
+			log.Warn("Code Bitmap used for detecting invalid jump", "tx", fmt.Sprintf("0x%x", interpreter.evm.Context.TxHash))
 		}
 		return nil, ErrInvalidJump
 	}
@@ -553,7 +554,7 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 	if !cond.IsZero() {
 		if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
 			if usedBitmap && interpreter.cfg.TraceJumpDest {
-				log.Warn("Code Bitmap used for detecting invalid jump", "tx", interpreter.evm.Context.TxHash)
+				log.Warn("Code Bitmap used for detecting invalid jump", "tx", fmt.Sprintf("0x%x", interpreter.evm.Context.TxHash))
 			}
 			return nil, ErrInvalidJump
 		}

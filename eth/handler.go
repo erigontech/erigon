@@ -188,35 +188,6 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
-		// FIXME: Workaround for staged sync, just do no-op
-		if manager.blockchain == nil || manager.blockchain.CurrentBlock() == nil {
-			log.Info("Workaround for staged sync: IIIAAAIII")
-			return 0, err
-		}
-
-		// If sync hasn't reached the checkpoint yet, deny importing weird blocks.
-		//
-		// Ideally we would also compare the head block's timestamp and similarly reject
-		// the propagated block if the head is too old. Unfortunately there is a corner
-		// case when starting new networks, where the genesis might be ancient (0 unix)
-		// which would prevent full nodes from accepting it.
-		if manager.blockchain.CurrentBlock().NumberU64() < manager.checkpointNumber {
-			log.Warn("Unsynced yet, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
-			return 0, nil
-		}
-		// If fast sync is running, deny importing weird blocks. This is a problematic
-		// clause when starting up a new network, because fast-syncing miners might not
-		// accept each others' blocks until a restart. Unfortunately we haven't figured
-		// out a way yet where nodes can decide unilaterally whether the network is new
-		// or not. This should be fixed if we figure out a solution.
-		if atomic.LoadUint32(&manager.fastSync) == 1 {
-			log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
-			return 0, nil
-		}
-		//n, err := manager.blockchain.InsertChain(context.Background(), blocks)
-		if err == nil {
-			atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
-		}
 		return 0, err
 	}
 	if manager.blockFetcher == nil {
