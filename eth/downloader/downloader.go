@@ -68,7 +68,7 @@ var (
 	maxHeadersProcess        = 16536                        // Number of header download results to import at once into the chain
 	maxResultsProcess        = 16536                        // Number of content download results to import at once into the chain
 	maxForkAncestry   uint64 = params.ImmutabilityThreshold // Maximum chain reorganisation (locally redeclared so tests can reduce it)
-	maxExtraHeaders   uint64 = 100000
+	maxExtraHeaders   uint64 = 1000000
 
 	reorgProtThreshold   = 48 // Threshold number of recent blocks to disable mini reorg protection
 	reorgProtHeaderDelay = 2  // Number of headers to delay delivering to cover mini reorgs
@@ -1473,7 +1473,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 	// Keep a count of uncertain headers to roll back
 	var rollback []*types.Header
 	collector := etl.NewMemoryCollector(32, 8, int(height-d.headerNumber+maxExtraHeaders)) // The additional blocks are in case new blocks added exceed length
-	start := d.headerNumber
 	defer func() {
 		if d.mode == StagedSync {
 			err := collector.Load(d.stateDB, dbutils.HeaderNumberPrefix, nil, etl.TransformArgs{})
@@ -1593,7 +1592,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					if d.mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), collector, &d.headerNumber, start, frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), collector, &d.headerNumber, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
