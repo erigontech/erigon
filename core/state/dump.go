@@ -141,11 +141,12 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 	if d.hashedState {
 		stateBucket = dbutils.CurrentStateBucket
 	}
+	fmt.Println("stateBucket", string(stateBucket))
 	t:=time.Now()
 	tt:=time.Now()
 	err = WalkAsOf(d.db, stateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		defer func() {
-			fmt.Println(common.Bytes2Hex(k), time.Since(tt))
+			fmt.Println(common.Bytes2Hex(k),numberOfResults, maxResults, time.Since(tt))
 			tt=time.Now()
 		}()
 		if maxResults > 0 && numberOfResults >= maxResults {
@@ -214,7 +215,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		if !excludeStorage {
 			t:=trie.New(common.Hash{})
 			err = WalkAsOf(d.db,
-				dbutils.PlainStateBucket,
+				stateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
 				8*(common.AddressLength+common.IncarnationLength),

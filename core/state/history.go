@@ -6,6 +6,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"os"
+	"runtime/trace"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -211,7 +214,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 }
 
 func WalkAsOf(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
+	fmt.Printf("WalkAsOf %s %s %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
 	if !(bytes.Equal(bucket, dbutils.PlainStateBucket) || bytes.Equal(bucket, dbutils.CurrentStateBucket)) {
 		return fmt.Errorf("unsupported state bucket: %s", string(bucket))
 	}
@@ -249,7 +252,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		if executedTo > generatedTo+MaxChangesetsSearch {
 			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
 		}
-
+		fmt.Println("walkAsOfThinStorage csBucket", string(csBucket))
 		csB := tx.Bucket(csBucket)
 		if csB == nil {
 			return fmt.Errorf("storageChangeBucket not found")
@@ -397,7 +400,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 		if executedTo > generatedTo+MaxChangesetsSearch {
 			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
 		}
-
+		fmt.Println("walkAsOfThinAccounts csBucket", string(csBucket))
 		csB := tx.Bucket(csBucket)
 		if csB == nil {
 			return fmt.Errorf("accountChangeBucket not found")
@@ -445,7 +448,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 		if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 			return err2
 		}
-
+		var counter uint64
 		goOn := true
 		var err error
 		for goOn {
@@ -462,18 +465,24 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 				break
 			}
 			if cmp < 0 {
+				fmt.Println("walker cmp<0", counter, common.Bytes2Hex(hK))
+				counter=0
 				goOn, err = walker(k, v)
 			} else {
 				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 					return err2
 				}
 				if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
+					fmt.Println("walker hV>0", counter, common.Bytes2Hex(hK))
+					counter=0
 					goOn, err = walker(hK, hV)
 				} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
+					fmt.Println("walker nih", counter, common.Bytes2Hex(hK))
+					counter=0
 					goOn, err = walker(k, v)
 				}
 			}
-
+			counter++
 			if goOn {
 				if cmp <= 0 {
 					k, v, err1 = mainCursor.Next()
@@ -521,9 +530,37 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byt
 		if !set {
 			// Extract value from the changeSet
 			csKey := dbutils.EncodeTimestamp(changeSetBlock)
-			changeSetData, _ := csGetter(csKey)
+			if bytes.Equal(hK, common.Hex2Bytes("000056c2e8f8e8e7c47f8f919a5d3d4190e83765")) {
+				f, err := os.Create("trace.out")
+				if err != nil {
+					log.Error("failed to create trace output file", "err", err)
+				}
+				defer func() {
+					if err := f.Close(); err != nil {
+						log.Error("failed to close trace file", "err", err)
+					}
+				}()
+
+				if err := trace.Start(f); err != nil {
+					log.Error("failed to start trace", "err", err)
+				}
+				defer trace.Stop()
+			}
+			fmt.Println("before csGetter", timestamp, changeSetBlock, common.Bytes2Hex(hK), common.Bytes2Hex(hV))
+			var changeSetData []byte
+			var err error
+			if bytes.Equal(hK, common.Hex2Bytes("000056c2e8f8e8e7c47f8f919a5d3d4190e83765")) {
+				changeSetData, err = csGetter(csKey)
+			} else {
+				changeSetData, err = csGetter(csKey)
+			}
+
+			if err!=nil {
+				log.Error("Can't get", "err", err)
+			}
+			fmt.Println("after csGetter", timestamp, changeSetBlock, common.Bytes2Hex(hK), common.Bytes2Hex(hV))
 			if changeSetData == nil {
-				return nil, false, fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
+				return nil, false, fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d) key %s, csKey %s", changeSetBlock, timestamp, common.Bytes2Hex(hK), common.Bytes2Hex(csKey))
 			}
 
 			data, err2 := adapter(changeSetData).Find(hK)

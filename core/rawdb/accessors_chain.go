@@ -76,7 +76,11 @@ func ReadAllHashes(db DatabaseReader, number uint64) []common.Hash {
 
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db DatabaseReader, hash common.Hash) *uint64 {
-	data, _ := db.Get(dbutils.HeaderNumberPrefix, hash.Bytes())
+	data, err := db.Get(dbutils.HeaderNumberPrefix, hash.Bytes())
+	if err!=nil {
+		log.Error("ReadHeaderNumber", "err", err, "hash", hash.String())
+	}
+
 	if len(data) != 8 {
 		return nil
 	}
@@ -345,7 +349,10 @@ func ReadTdRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue 
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
 func ReadTd(db DatabaseReader, hash common.Hash, number uint64) *big.Int {
-	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash))
+	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash))
+	if err!=nil {
+		log.Error("ReadTd", "err", err, "number", number, "hash", hash.String())
+	}
 	if len(data) == 0 {
 		return nil
 	}

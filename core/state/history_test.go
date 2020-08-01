@@ -2310,3 +2310,41 @@ func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changes
 		t.Fatal("block result is incorrect")
 	}
 }
+
+func TestName(t *testing.T) {
+	db:=ethdb.MustOpen("/media/b00ris/nvme/tgstaged/tg/chaindata")
+	k:="000056c2e8f8e8e7c47f8f919a5d3d4190e83765"
+	//number=10450678
+	//		 10450641
+	//blockNumber, _, err := stages.GetStageProgress(db, stages.Execution)
+	//if err!=nil {
+	//	t.Log(err)
+	//}
+	//t.Log("td",rawdb.ReadTd(db, common.HexToHash("0xcf240ffd7102fef3dcf58bac102f0b1a51b47985b5c95357546fa3ffe7673959"), 10450641))
+	//
+	//t.Log("blockNumber", blockNumber)
+	//err=db.Walk(dbutils.StorageHistoryBucket, common.Hex2Bytes(k), common.AddressLength*8, func(k, v []byte) (bool, error) {
+	//	fmt.Println(common.Bytes2Hex(k))
+	//	return true, nil
+	//})
+	////err:=db.Walk(dbutils.AccountsHistoryBucket, common.Hex2Bytes(k), common.AddressLength, func(k, v []byte) (bool, error) {
+	////	fmt.Println(dbutils.WrapHistoryIndex(v).Decode())
+	////	return true, nil
+	////})
+	////if err!=nil {
+	////	t.Fatal(err)
+	////
+	//}
+
+	fmt.Println("80297d75")
+	fmt.Println( dbutils.DecodeTimestamp(common.Hex2Bytes("80297d75")))
+	fmt.Println(common.Bytes2Hex(dbutils.EncodeTimestamp(2401516)))
+	v2,err:=db.Get(dbutils.PlainAccountChangeSetBucket,dbutils.EncodeTimestamp(2401516))
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println(changeset.AccountChangeSetPlainBytes(v2).Find(common.Hex2Bytes(k)))
+	//changeset.DecodeAccountsPlain(v2))
+//
+}

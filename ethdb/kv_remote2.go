@@ -38,7 +38,7 @@ type Remote2KV struct {
 type remote2Tx struct {
 	ctx     context.Context
 	db      *Remote2KV
-	cursors []remote2Cursor
+	cursors []*remote2Cursor
 }
 
 type remote2Bucket struct {
@@ -162,7 +162,13 @@ func (tx *remote2Tx) Commit(ctx context.Context) error {
 func (tx *remote2Tx) Rollback() {
 	for _, c := range tx.cursors {
 		if c.stream != nil {
-			_ = c.stream.CloseSend()
+			err := c.stream.CloseSend()
+			if err == nil {
+				fmt.Println("Close stream", string(c.bucket.name), " Rollback")
+			} else {
+				fmt.Println("errr close ", err)
+			}
+
 			c.stream = nil
 		}
 	}
@@ -204,7 +210,24 @@ func (b *remote2Bucket) Clear() error {
 }
 
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
-	k, v, err := b.Cursor().Seek(key)
+	c:=b.Cursor()
+	defer func() {
+		if v,ok:=c.(*remote2Cursor); ok {
+			if v.stream==nil {
+				return
+			}
+			err:=v.stream.CloseSend()
+			if err!=nil {
+				fmt.Println("Errr close", err)
+			} else {
+				fmt.Println("Close stream", string(v.bucket.name), "Get")
+			}
+		}
+
+	}()
+	fmt.Println("ethdb/kv_remote2.go:224 seek before")
+	k, v, err := c.Seek(key)
+	fmt.Println("ethdb/kv_remote2.go:226 seek after")
 	if err != nil {
 		fmt.Printf("errr3: %s\n", err)
 		return nil, err
@@ -224,7 +247,9 @@ func (b *remote2Bucket) Delete(key []byte) error {
 }
 
 func (b *remote2Bucket) Cursor() Cursor {
-	return &remote2Cursor{bucket: b, ctx: b.tx.ctx}
+	c:=&remote2Cursor{bucket: b, ctx: b.tx.ctx}
+	b.tx.cursors=append(b.tx.cursors, c)
+	return c
 }
 
 func (c *remote2Cursor) Put(key []byte, value []byte) error {
@@ -244,15 +269,22 @@ func (c *remote2Cursor) First() ([]byte, []byte, error) {
 }
 
 // Seek - doesn't start streaming (because much of code does only several .Seek cals without reading sequenceof data)
-// .Next() - does request streaming (if configured by user)
+// .Next() - does request streaming (if coxnfigured by user)
 func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
-		_ = c.stream.CloseSend()
+
+		err := c.stream.CloseSend()
+		if err!=nil {
+			fmt.Println("Errr close", err)
+		} else {
+			fmt.Println("Close stream", string(c.bucket.name), " Seek ")
+		}
 		c.stream = nil
 	}
 	c.initialized = true
 
 	var err error
+	fmt.Println("Create stream", string(c.bucket.name))
 	c.stream, err = c.bucket.tx.db.remoteKV.Seek(c.ctx)
 	if err != nil {
 		fmt.Printf("errr2: %s\n", err)

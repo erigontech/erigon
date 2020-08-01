@@ -2,6 +2,7 @@ package remotedbserver
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -50,7 +51,7 @@ func StartGrpc(kv ethdb.KV, addr string) {
 		grpc.NumStreamWorkers(2),   // reduce amount of goroutines
 		grpc.WriteBufferSize(1024), // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(16), // to force clients reduce concurency level
+		grpc.MaxConcurrentStreams(10), // to force clients reduce concurency level
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	)
@@ -77,7 +78,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 	if recvErr != nil {
 		return recvErr
 	}
-
+	fmt.Println("kvServer Seek", string(in.BucketName), common.Bytes2Hex(in.SeekKey), in.StartSreaming, common.Bytes2Hex(in.Prefix))
 	tx, err := s.kv.Begin(context.Background(), false)
 	if err != nil {
 		return err
@@ -93,12 +94,14 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 
 	t := time.Now()
 	i := 0
+	fmt.Println("seek in.SeekKey", common.Bytes2Hex(in.SeekKey))
 	// send all items to client, if k==nil - stil send it to client and break loop
 	for k, v, err := c.Seek(in.SeekKey); ; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
 
+		fmt.Println("ethdb/remote/remotedbserver/server2.go:103 seek", common.Bytes2Hex(k))
 		err = stream.Send(&remote.Pair{Key: common.CopyBytes(k), Value: common.CopyBytes(v)})
 		if err != nil {
 			return err
