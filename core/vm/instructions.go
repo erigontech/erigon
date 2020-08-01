@@ -541,9 +541,9 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
 		if usedBitmap && interpreter.cfg.TraceJumpDest {
 			log.Warn("Code Bitmap used for detecting invalid jump",
-			"tx", fmt.Sprintf("0x%x", interpreter.evm.Context.TxHash),
-			"block number", interpreter.evm.Context.BlockNumber,
-		)
+				"tx", fmt.Sprintf("0x%x", interpreter.evm.Context.TxHash),
+				"block number", interpreter.evm.Context.BlockNumber,
+			)
 		}
 		return nil, ErrInvalidJump
 	}

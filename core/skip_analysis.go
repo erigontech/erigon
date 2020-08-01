@@ -30,13 +30,13 @@ import (
 // 0x86e55d1818b5355424975de9633a57c40789ca08552297b726333a9433949c92 (block 6426298)
 // 0x3666640316df11865abd1352f4c0b4c5126f8ac1d858ef2a0c6e744a4865bca2 (block 5800596)
 
-const MAINNET_CHECKED_UPTO uint64 = 10573804
+const MainnetNotCheckedFrom uint64 = 10573804
 
 func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
 	if config != params.MainnetChainConfig {
 		return false
 	}
-	if blockNumber >= MAINNET_CHECKED_UPTO { // We have not checked beyond that block
+	if blockNumber >= MainnetNotCheckedFrom { // We have not checked beyond that block
 		return false
 	}
 	if blockNumber == 6426298 || blockNumber == 6426432 || blockNumber == 5800596 {
