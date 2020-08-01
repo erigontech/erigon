@@ -257,7 +257,7 @@ simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
 
 prometheus:
-	@cd ./cmd/prometheus && docker-compose up prometheus grafana
+	docker-compose up prometheus grafana
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
