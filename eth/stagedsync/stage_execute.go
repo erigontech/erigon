@@ -72,13 +72,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		stageProgress = blockNum
 
-		block, _, err := rawdb.ReadBlockWithSenders(stateDB, blockNum)
-		if err != nil {
-			return err
-		}
+		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
+		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
 		if block == nil {
 			break
 		}
+		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
+		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets

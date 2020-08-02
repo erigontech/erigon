@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -40,17 +39,6 @@ func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(data)
-}
-
-func readCanonicalHash(tx ethdb.Tx, number uint64) (common.Hash, error) {
-	data, err := tx.Bucket(dbutils.HeaderPrefix).Get(dbutils.HeaderHashKey(number))
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if len(data) == 0 {
-		return common.Hash{}, nil
-	}
-	return common.BytesToHash(data), nil
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
@@ -183,14 +171,6 @@ func ReadHeaderRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawVa
 	return data
 }
 
-func readHeaderRLP(tx ethdb.Tx, hash common.Hash, number uint64) (rlp.RawValue, error) {
-	data, err := tx.Bucket(dbutils.HeaderPrefix).Get(dbutils.HeaderKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
 // HasHeader verifies the existence of a block header corresponding to the hash.
 func HasHeader(db DatabaseReader, hash common.Hash, number uint64) bool {
 	if has, err := db.Has(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash)); !has || err != nil {
@@ -211,22 +191,6 @@ func ReadHeader(db DatabaseReader, hash common.Hash, number uint64) *types.Heade
 		return nil
 	}
 	return header
-}
-
-func readHeader(tx ethdb.Tx, hash common.Hash, number uint64) (*types.Header, error) {
-	data, err := readHeaderRLP(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	header := new(types.Header)
-	if err := rlp.Decode(bytes.NewReader(data), header); err != nil {
-		log.Error("Invalid block header RLP", "hash", hash, "err", err)
-		return nil, err
-	}
-	return header, nil
 }
 
 // WriteHeader stores a block header into the database and also stores the hash-
@@ -284,21 +248,6 @@ func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValu
 	return data
 }
 
-func readBodyRLP(tx ethdb.Tx, hash common.Hash, number uint64) (rlp.RawValue, error) {
-	data, err := tx.Bucket(dbutils.BlockBodyPrefix).Get(dbutils.BlockBodyKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
-	if debug.IsBlockCompressionEnabled() && len(data) > 0 {
-		var err error
-		data, err = snappy.Decode(nil, data)
-		if err != nil {
-			log.Warn("err on decode block", "err", err)
-		}
-	}
-	return data, nil
-}
-
 // WriteBodyRLP stores an RLP encoded block body into the database.
 func WriteBodyRLP(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if common.IsCanceled(ctx) {
@@ -334,22 +283,6 @@ func ReadBody(db DatabaseReader, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func readBody(tx ethdb.Tx, hash common.Hash, number uint64) (*types.Body, error) {
-	data, err := readBodyRLP(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	body := new(types.Body)
-	if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
-		log.Error("Invalid block body RLP", "hash", hash, "err", err)
-		return nil, err
-	}
-	return body, nil
-}
-
 func ReadSenders(db DatabaseReader, hash common.Hash, number uint64) []common.Address {
 	data, _ := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
 	senders := make([]common.Address, len(data)/common.AddressLength)
@@ -357,18 +290,6 @@ func ReadSenders(db DatabaseReader, hash common.Hash, number uint64) []common.Ad
 		copy(senders[i][:], data[i*common.AddressLength:])
 	}
 	return senders
-}
-
-func readSenders(tx ethdb.Tx, hash common.Hash, number uint64) ([]common.Address, error) {
-	data, err := tx.Bucket(dbutils.Senders).Get(dbutils.BlockBodyKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
-	senders := make([]common.Address, len(data)/common.AddressLength)
-	for i := 0; i < len(senders); i++ {
-		copy(senders[i][:], data[i*common.AddressLength:])
-	}
-	return senders, nil
 }
 
 // WriteBody storea a block body into the database.
@@ -569,24 +490,6 @@ func ReadBlock(db DatabaseReader, hash common.Hash, number uint64) *types.Block 
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func readBlock(tx ethdb.Tx, hash common.Hash, number uint64) (*types.Block, error) {
-	header, err := readHeader(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, nil
-	}
-	body, err := readBody(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if body == nil {
-		return nil, nil
-	}
-	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles), nil
-}
-
 // WriteBlock serializes a block into the database, header and body separately.
 func WriteBlock(ctx context.Context, db DatabaseWriter, block *types.Block) {
 	WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
@@ -668,37 +571,6 @@ func FindCommonAncestor(db DatabaseReader, a, b *types.Header) *types.Header {
 		}
 	}
 	return a
-}
-
-func ReadBlockWithSenders(db DatabaseReader, number uint64) (*types.Block, common.Hash, error) {
-	kv := db.(ethdb.HasKV).KV()
-	var block *types.Block
-	var hash common.Hash
-	if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
-		var err error
-		hash, err = readCanonicalHash(tx, number)
-		if err != nil {
-			return err
-		}
-		block, err := readBlock(tx, hash, number)
-		if err != nil {
-			return err
-		}
-		if block == nil {
-			return nil
-		}
-		senders, err := readSenders(tx, hash, number)
-		if err != nil {
-			return err
-		}
-		block.Body().SendersToTxs(senders)
-
-		return nil
-	}); err != nil {
-		return nil, common.Hash{}, err
-	}
-
-	return block, hash, nil
 }
 
 func ReadBlockByNumber(db DatabaseReader, number uint64) *types.Block {
