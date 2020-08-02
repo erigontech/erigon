@@ -133,7 +133,9 @@ debug_getModifiedAccountsByHash
 #### REST API Daemon
 
 Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
-turbo-geth remote DB functionality. [Docs](./cmd/rpcdaemon/Readme.md)
+turbo-geth remote DB functionality. 
+
+<code>🔬 See [REST API docs](./cmd/restapi/README.md)</code>
 
 Run turbo-geth in one terminal window
 
