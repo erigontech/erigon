@@ -309,6 +309,10 @@ func (tx *lmdbTx) Rollback() {
 	tx.tx.Abort()
 }
 
+func (tx *lmdbTx) get(dbi lmdb.DBI, key []byte) ([]byte, error) {
+	return tx.tx.Get(dbi, key)
+}
+
 func (tx *lmdbTx) closeCursors() {
 	for _, c := range tx.cursors {
 		if c != nil {
@@ -342,7 +346,7 @@ func (b lmdbBucket) Get(key []byte) ([]byte, error) {
 		return b.getDupSort(key)
 	}
 
-	val, err := b.tx.tx.Get(b.dbi, key)
+	val, err := b.tx.get(b.dbi, key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil
@@ -358,7 +362,7 @@ func (b lmdbBucket) getDupSort(key []byte) ([]byte, error) {
 		return nil, err
 	}
 	if len(key) == b.dupFrom {
-		_, v, err := c.cursor.Get(key[:b.dupTo], key[b.dupTo:], lmdb.GetBothRange)
+		_, v, err := c.dupBothRange(key[:b.dupTo], key[b.dupTo:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
 				return nil, nil
@@ -371,15 +375,16 @@ func (b lmdbBucket) getDupSort(key []byte) ([]byte, error) {
 		return v[b.dupFrom-b.dupTo:], nil
 	}
 
-	_, v, err := c.cursor.Get(key, nil, lmdb.Set)
+	val, err := b.tx.get(b.dbi, key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return v, nil
+	return val, nil
 }
+
 func (b *lmdbBucket) Put(key []byte, value []byte) error {
 	return b.Cursor().Put(key, value)
 }
@@ -454,7 +459,7 @@ func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if len(seek) == 0 {
 		k, v, err = c.cursor.Get(nil, nil, lmdb.First)
 	} else {
-		k, v, err = c.cursor.Get(seek, nil, lmdb.SetRange)
+		k, v, err = c.setRange(seek)
 	}
 	if err != nil {
 		if lmdb.IsNotFound(err) {
@@ -492,7 +497,7 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	} else {
 		seek1 = seek
 	}
-	k, v, err = c.cursor.Get(seek1, nil, lmdb.SetRange)
+	k, v, err = c.setRange(seek1)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
@@ -502,9 +507,9 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	}
 
 	if seek2 != nil && bytes.Equal(seek1, k) {
-		k, v, err = c.cursor.Get(seek1, seek2, lmdb.GetBothRange)
+		k, v, err = c.dupBothRange(seek1, seek2)
 		if err != nil && lmdb.IsNotFound(err) {
-			k, v, err = c.cursor.Get(nil, nil, lmdb.Next)
+			k, v, err = c.next()
 			if err != nil {
 				if lmdb.IsNotFound(err) {
 					return nil, nil, nil
@@ -663,7 +668,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 		return c.putDupSort(key, value)
 	}
 
-	return c.cursor.Put(key, value, 0)
+	return c.put(key, value)
 }
 
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
@@ -673,48 +678,67 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != b.dupFrom {
-		_, _, err := c.cursor.Get(key, nil, lmdb.Set)
+		_, _, err := c.setExact(key)
 		if err != nil {
 			if lmdb.IsNotFound(err) {
-				return c.cursor.Put(key, value, 0)
+				return c.put(key, value)
 			}
 			return err
 		}
 
-		// From docs of .Put(MDB_CURRENT) flag:
-		// If using sorted duplicates (#MDB_DUPSORT) the data item must still
-		// sort into the same place. This is intended to be used when the
-		// new data is the same size as the old.
-		//
-		// It's not achivable, then just delete and insert
-		// maybe can be optimized in future
-		return c.cursor.Put(key, value, lmdb.Current)
+		return c.putCurrent(key, value)
 	}
 
 	newValue := make([]byte, 0, b.dupFrom-b.dupTo+len(value))
 	newValue = append(append(newValue, key[b.dupTo:]...), value...)
 
 	key = key[:b.dupTo]
-	_, v, err := c.cursor.Get(key, newValue[:b.dupFrom-b.dupTo], lmdb.GetBothRange)
+	_, v, err := c.dupBothRange(key, newValue[:b.dupFrom-b.dupTo])
 	if err != nil { // if key not found, or found another one - then just insert
 		if lmdb.IsNotFound(err) {
-			return c.cursor.Put(key, newValue, 0)
+			return c.put(key, newValue)
 		}
 		return err
 	}
 
 	if bytes.Equal(v[:b.dupFrom-b.dupTo], newValue[:b.dupFrom-b.dupTo]) {
 		if len(v) == len(newValue) { // in DupSort case lmdb.Current works only with values of same length
-			return c.cursor.Put(key, newValue, lmdb.Current)
+			return c.putCurrent(key, newValue)
 		}
-		err = c.cursor.Del(0)
+		err = c.delCurrent()
 		if err != nil {
 			return err
 		}
-		return c.cursor.Put(key, newValue, 0)
+		return c.put(key, newValue)
 	}
 
-	return c.cursor.Put(key, newValue, 0)
+	return c.put(key, newValue)
+}
+
+func (c *LmdbCursor) setExact(key []byte) ([]byte, []byte, error) {
+	return c.cursor.Get(key, nil, lmdb.Set)
+}
+func (c *LmdbCursor) setRange(key []byte) ([]byte, []byte, error) {
+	return c.cursor.Get(key, nil, lmdb.SetRange)
+}
+func (c *LmdbCursor) next() ([]byte, []byte, error) {
+	return c.cursor.Get(nil, nil, lmdb.Next)
+}
+
+func (c *LmdbCursor) dupBothRange(key []byte, value []byte) ([]byte, []byte, error) {
+	return c.cursor.Get(key, value, lmdb.GetBothRange)
+}
+
+func (c *LmdbCursor) delCurrent() error {
+	return c.cursor.Del(0)
+}
+
+func (c *LmdbCursor) put(key []byte, value []byte) error {
+	return c.cursor.Put(key, value, 0)
+}
+
+func (c *LmdbCursor) putCurrent(key []byte, value []byte) error {
+	return c.cursor.Put(key, value, lmdb.Current)
 }
 
 // Append - speedy feature of lmdb which is not part of KV interface.
