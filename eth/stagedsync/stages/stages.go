@@ -31,6 +31,7 @@ type SyncStage byte
 
 const (
 	Headers             SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BlockHashes                          // Headers Number are written, fills blockHash => number bucket
 	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders                              // "From" recovered from signatures, bodies re-written
 	Execution                            // Executing each block w/o buildinf a trie

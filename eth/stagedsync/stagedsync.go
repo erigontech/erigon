@@ -43,6 +43,16 @@ func PrepareStagedSync(
 			},
 		},
 		{
+			ID:          stages.BlockHashes,
+			Description: "Write block hashes",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnBlockHashStage(s, stateDB, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+		},
+		{
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
