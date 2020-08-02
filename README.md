@@ -27,7 +27,7 @@ Usage:
 See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html).
 It is being updated on recurring basis.
 
-#### 1. More Efficient State Storage
+#### More Efficient State Storage
 
 **Flat KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
 a simple way. **See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).**
@@ -42,7 +42,7 @@ DB inserts sometimes are orders of magnitude quicker.
 accounts and the storage.
 
 
-#### 2. Faster Initial Sync
+#### Faster Initial Sync
 
 Turbo-Geth uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
@@ -68,7 +68,7 @@ Examples of stages are:
 
 * And more...
 
-#### 3. JSON-RPC daemon
+#### JSON-RPC daemon
 
 In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
@@ -113,7 +113,7 @@ debug_getModifiedAccountsByNumber
 debug_getModifiedAccountsByHash
 ```
 
-#### 4. REST API Daemon
+#### REST API Daemon
 
 Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
 turbo-geth remote DB functionality. [Docs](./cmd/rpcdaemon/Readme.md)
@@ -137,7 +137,7 @@ GET /api/v1/accounts/<accountAddress>
 GET /api/v1/storage/?prefix=PREFIX
 ```
 
-#### 5. Run all components by docker-compose
+#### Or run all components by docker-compose
 
 Next command starts: turbo-geth on port 30303, rpcdaemon 8545, restapi 8080, debug-web-ui 3001, prometheus 9090, grafana 3000
 
