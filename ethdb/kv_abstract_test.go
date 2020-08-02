@@ -24,19 +24,19 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases()
 	defer closeAll()
 
-	bucketID := 0
-	if len(dbutils.DupSortConfig) > 0 {
-		defaultConfig := dbutils.DupSortConfig[0]
-		defer func() {
-			dbutils.DupSortConfig[0] = defaultConfig
-		}()
+	defaultConfig := dbutils.BucketsCfg
+	defer func() {
+		dbutils.BucketsCfg = defaultConfig
+	}()
 
-		dbutils.DupSortConfig[0].ToLen = 4
-		dbutils.DupSortConfig[0].FromLen = 6
-		bucketID = dbutils.DupSortConfig[0].ID
-	}
+	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
+	dbutils.BucketsCfg[string(bucket1)].IsDupsort = true
+	dbutils.BucketsCfg[string(bucket1)].DupFromLen = 6
+	dbutils.BucketsCfg[string(bucket1)].DupToLen = 4
+	dbutils.BucketsCfg[string(bucket2)].IsDupsort = false
+
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
