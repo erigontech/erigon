@@ -18,7 +18,7 @@ Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) w
 
 The current version is currently based on Go-Ethereum 1.9.15.
 
-## System Requirements
+#### System Requirements
 
 About 830 GB of free disk storage (630 GB state storage, 200GB temp files)
 
@@ -26,7 +26,7 @@ About 830 GB of free disk storage (630 GB state storage, 200GB temp files)
 
 <code>🔬 more info on disk storage is here [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
-Usage:
+#### Usage:
 
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git && cd turbo-geth
