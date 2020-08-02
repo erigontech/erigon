@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/exp/lmdbpool"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -82,11 +81,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	db := &LmdbKV{
-		opts:       opts,
-		env:        env,
-		log:        logger,
-		lmdbTxPool: lmdbpool.NewTxnPool(env),
-		wg:         &sync.WaitGroup{},
+		opts: opts,
+		env:  env,
+		log:  logger,
+		wg:   &sync.WaitGroup{},
 	}
 
 	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
@@ -155,7 +153,6 @@ type LmdbKV struct {
 	env                 *lmdb.Env
 	log                 log.Logger
 	buckets             []lmdb.DBI
-	lmdbTxPool          *lmdbpool.TxnPool // pool of lmdb.Txn objects
 	stopStaleReadsCheck context.CancelFunc
 	wg                  *sync.WaitGroup
 }
@@ -167,10 +164,6 @@ func NewLMDB() lmdbOpts {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if db.lmdbTxPool != nil {
-		db.lmdbTxPool.Close()
-	}
-
 	if db.env != nil {
 		db.wg.Wait()
 	}
@@ -266,9 +259,9 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 	t := &lmdbTx{db: db, ctx: ctx}
-	return db.lmdbTxPool.View(func(tx *lmdb.Txn) error {
+	return db.env.View(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
-		tx.Pooled, tx.RawRead = true, true
+		tx.RawRead = true
 		t.tx = tx
 		return f(t)
 	})

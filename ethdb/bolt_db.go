@@ -20,32 +20,10 @@ package ethdb
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"math/rand"
-	"net/http"
-	"net/http/pprof"
-	"os"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
-
-func init() {
-	// go tool pprof -http=:8081 http://localhost:6060/
-	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
-	go func() {
-		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
-		randomPort := func(min, max int) int {
-			return r.Intn(max-min) + min
-		}
-		port := randomPort(6000, 7000)
-
-		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "\\?seconds\\=20")
-		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "debug/pprof/heap")
-		fmt.Fprintf(os.Stderr, "%s\n", http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil))
-	}()
-}
 
 // Type which expecting sequence of triplets: dbi, key, value, ....
 // It sorts entries by dbi name, then inside dbi clusters sort by keys
