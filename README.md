@@ -48,7 +48,7 @@ Turbo-Geth uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
 "stages".
 
-See more detailed explanation in the [Staged Sync Readme](./docs/stagedsync/)
+See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/)
 
 It uses the same network primitives and is compatible with regular go-ethereum
 nodes that are using full sync, you do not need any special sync capabilities
