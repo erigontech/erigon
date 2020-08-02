@@ -21,9 +21,6 @@ import (
 )
 
 func TestManagedTx(t *testing.T) {
-	writeDBs, readDBs, closeAll := setupDatabases()
-	defer closeAll()
-
 	defaultConfig := dbutils.BucketsCfg
 	defer func() {
 		dbutils.BucketsCfg = defaultConfig
@@ -36,6 +33,9 @@ func TestManagedTx(t *testing.T) {
 	dbutils.BucketsCfg[string(bucket1)].DupFromLen = 6
 	dbutils.BucketsCfg[string(bucket1)].DupToLen = 4
 	dbutils.BucketsCfg[string(bucket2)].IsDupsort = false
+
+	writeDBs, readDBs, closeAll := setupDatabases()
+	defer closeAll()
 
 	ctx := context.Background()
 

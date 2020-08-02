@@ -726,7 +726,11 @@ func (c *LmdbCursor) next() ([]byte, []byte, error) {
 }
 
 func (c *LmdbCursor) dupBothRange(key []byte, value []byte) ([]byte, []byte, error) {
-	return c.cursor.Get(key, value, lmdb.GetBothRange)
+	k, v, err := c.cursor.Get(key, value, lmdb.GetBothRange)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	return k, v, nil
 }
 
 func (c *LmdbCursor) delCurrent() error {
