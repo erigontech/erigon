@@ -55,7 +55,7 @@ Each stage consists of 2 functions `ExecFunc` that progesses the stage forward a
 
 Some of the stages can theoretically work offline though it isn't implemented in the current version.
 
-### Stage 1: Download Headers Stage
+### Stage 1: [Download Headers Stage](/eth/stagedsync/stage_headers.go)
 
 During this stage we download all the headers between the local HEAD and our peer's head.
 
@@ -65,13 +65,13 @@ Most of the unwinds are initiated on this stage due to the chain reorgs.
 
 This stage promotes local HEAD pointer.
 
-### Stage 2: Download Block Bodies Stage
+### Stage 2: [Download Block Bodies Stage](/eth/stagedsync/stage_bodies.go)
 
 At that stage, we download bodies for block headers that we already downloaded.
 
 That is the most intensive stage for the network connection, the vast majority of data is downloaded here.
 
-### Stage 3: Recover Senders Stage
+### Stage 3: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
 
 This stage recovers and stores senders for each transaction in each downloaded block.
 
@@ -79,7 +79,7 @@ This is also a CPU intensive stage and also benefits from multi-core CPUs.
 
 This stage doesn't use any network connection.
 
-### Stage 4: Execute Blocks Stage
+### Stage 4: [Execute Blocks Stage](/eth/stagedsync/stage_execute.go)
 
 During this stage, we execute block-by-block everything that we downloaded before.
 
@@ -93,7 +93,7 @@ This stage is disk intensive.
 
 This stage can spawn unwinds if the block execution fails.
 
-### Stage 5: Compute State Root Stage
+### Stage 5: [Compute State Root Stage](/eth/stagedsync/stage_interhashes.go)
 
 This stage build the Merkle trie and checks the root hash for the current state.
 
@@ -107,7 +107,7 @@ If the root hash doesn't match, it initiates an unwind one block backwards.
 
 This stage doesn't use a network connection.
 
-### Stage 6: Generate Hashed State Stage
+### Stage 6: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
 
 Turbo-Geth during execution uses Plain state storage.
 
@@ -119,7 +119,7 @@ If the hashed state is not empty, then we are looking at the History ChangeSets 
 
 This stage doesn't use a network connection.
 
-### Stages 7, 8, 9: Generate Indexes Stages
+### Stages 7, 8, 9: Generate Indexes Stages [7](/eth/stagedsync/stage_txlookup.go), [8, 9](/eth/stagedsync/stage_indexes.go)
 
 There are 3 indexes that are generated during sync.
 
@@ -139,7 +139,7 @@ This index stores the mapping from the account address to the list of blocks whe
 
 This index stores the mapping from the storage item address to the list of blocks where this storage item was changed in some way.
 
-### Stage 10: Update transaction pool Stage
+### Stage 10: [Transaction Pool Stage](/eth/stagedsync/stage_txpool.go)
 
 During this stage we start the transaction pool or update its state. For instance, we remove the transactions from the blocks we have downloaded from the pool.
 
