@@ -97,7 +97,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 				if createErr != nil {
 					return createErr
 				}
-				db.buckets[dbutils.BucketsIndex[string(name)]] = dbi
+				db.buckets[dbutils.BucketsCfg[string(name)].ID] = dbi
 			}
 			return nil
 		}); err != nil {
@@ -129,15 +129,12 @@ func (opts lmdbOpts) Open() (KV, error) {
 
 func createBucket(tx *lmdb.Txn, db *LmdbKV, id int) error {
 	var flags uint = lmdb.Create
-	for _, c := range dbutils.DupSortConfig {
-		if c.ID != id {
-			continue
-		}
+	name := string(dbutils.Buckets[id])
+	cfg := dbutils.BucketsCfg[name]
+	if cfg.IsDupsort {
 		flags |= lmdb.DupSort
-		break
 	}
-
-	dbi, err := tx.OpenDBI(string(dbutils.Buckets[id]), flags)
+	dbi, err := tx.OpenDBI(name, flags)
 	if err != nil {
 		return err
 	}
@@ -206,8 +203,8 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
-	if id, ok := dbutils.BucketsIndex[string(bucket)]; ok {
-		return db.buckets[id]
+	if cfg, ok := dbutils.BucketsCfg[string(bucket)]; ok {
+		return db.buckets[cfg.ID]
 	}
 	panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
 }
@@ -293,23 +290,12 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
-	id, ok := dbutils.BucketsIndex[string(name)]
+	cfg, ok := dbutils.BucketsCfg[string(name)]
 	if !ok {
 		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
 	}
 
-	b := &lmdbBucket{tx: tx, id: id, dbi: tx.db.buckets[id]}
-	for _, c := range dbutils.DupSortConfig {
-		if c.ID != id {
-			continue
-		}
-		b.isDupsort = true
-		b.dupTo = c.ToLen
-		b.dupFrom = c.FromLen
-		break
-	}
-
-	return b
+	return &lmdbBucket{tx: tx, id: cfg.ID, dbi: tx.db.buckets[cfg.ID], isDupsort: cfg.IsDupsort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -481,7 +467,7 @@ func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		err = fmt.Errorf("failed LmdbKV cursor.Seek(): %w, bucket: %d %s, isDupsort: %t, key: %x, dupsortConfig: %+v", err, c.bucket.id, dbutils.Buckets[c.bucket.id], c.bucket.isDupsort, seek, dbutils.DupSortConfig)
+		err = fmt.Errorf("failed LmdbKV cursor.Seek(): %w, bucket: %d %s, isDupsort: %t, key: %x", err, c.bucket.id, dbutils.Buckets[c.bucket.id], c.bucket.isDupsort, seek)
 		return []byte{}, nil, err
 	}
 	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {

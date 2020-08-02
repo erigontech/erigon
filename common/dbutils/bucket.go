@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"sort"
 
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -155,7 +156,7 @@ var (
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsIndex - can be used to find index in sorted version of Buckets list by name
+// BucketsCfg - can be used to find index in sorted version of Buckets list by name
 var Buckets = [][]byte{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
@@ -200,7 +201,14 @@ var Buckets = [][]byte{
 	Senders,
 }
 
-var BucketsIndex = map[string]int{}
+var BucketsCfg = map[string]*BucketConfigItem{}
+
+type BucketConfigItem struct {
+	ID         int
+	IsDupsort  bool
+	DupToLen   int
+	DupFromLen int
+}
 
 type dupSortConfigEntry struct {
 	Bucket  []byte
@@ -209,7 +217,7 @@ type dupSortConfigEntry struct {
 	ToLen   int
 }
 
-var DupSortConfig = []dupSortConfigEntry{
+var dupSortConfig = []dupSortConfigEntry{
 	{
 		Bucket:  CurrentStateBucket,
 		ToLen:   40,
@@ -220,24 +228,6 @@ var DupSortConfig = []dupSortConfigEntry{
 		ToLen:   28,
 		FromLen: 60,
 	},
-	// just lazy to re-generate Senders now, but no problems with it
-	//{
-	//	Bucket:  Senders,
-	//	ToLen:   8,
-	//	FromLen: 40,
-	//},
-
-	// Here I found problem. LMDB has limitation of keys size and 2nd key of DupFixed bucket has same restrictions... need find solution
-	//{
-	//	Bucket:  AccountsHistoryBucket,
-	//	ToLen:   20,
-	//	FromLen: 28,
-	//},
-	//{
-	//	Bucket:  StorageHistoryBucket,
-	//	ToLen:   20,
-	//	FromLen: 60,
-	//},
 }
 
 func init() {
@@ -246,11 +236,26 @@ func init() {
 	})
 
 	for i := range Buckets {
-		BucketsIndex[string(Buckets[i])] = i
-	}
+		BucketsCfg[string(Buckets[i])] = &BucketConfigItem{ID: i}
 
-	for i := range DupSortConfig {
-		DupSortConfig[i].ID = BucketsIndex[string(DupSortConfig[i].Bucket)]
+		for _, cfg := range dupSortConfig {
+			if cfg.ID != i {
+				continue
+			}
+			bucketCfg, ok := BucketsCfg[string(cfg.Bucket)]
+			if !ok {
+				continue
+			}
+			cfg.FromLen = bucketCfg.DupFromLen
+			cfg.ToLen = bucketCfg.DupToLen
+
+			if bytes.Equal(cfg.Bucket, CurrentStateBucket) {
+				bucketCfg.IsDupsort = debug.IsHashedStateDupsortEnabled()
+			}
+			if bytes.Equal(cfg.Bucket, PlainStateBucket) {
+				bucketCfg.IsDupsort = debug.IsPlainStateDupsortEnabled()
+			}
+		}
 	}
 
 }
