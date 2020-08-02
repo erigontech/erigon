@@ -8,6 +8,9 @@
 keep it stable and make no breaking changes but we don't guarantee anything.
 Things can and will break.**
 
+NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
+
+
 Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
 
 The current version is currently based on Go-Ethereum 1.9.15.
@@ -24,13 +27,14 @@ Usage:
 
 ## Key features 
 
-See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html).
-It is being updated on recurring basis.
+<code>🔬 See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It is being updated on recurring basis.</code>
 
 #### More Efficient State Storage
 
 **Flat KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
-a simple way. **See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).**
+a simple way. 
+
+<code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
 
 **Preprocessing**. For some operations, turbo-geth uses temporary files to preprocess data before
 inserting it into the main DB. That reduces write amplification and 
@@ -48,7 +52,7 @@ Turbo-Geth uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
 "stages".
 
-See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/)
+<code>🔬 See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/)</code>
 
 It uses the same network primitives and is compatible with regular go-ethereum
 nodes that are using full sync, you do not need any special sync capabilities
@@ -75,7 +79,9 @@ Examples of stages are:
 In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
-it can run from a snapshot of a database for read-only calls. [Docs](./cmd/rpcdaemon/Readme.md)
+it can run from a snapshot of a database for read-only calls. 
+
+<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/Readme.md)</code>
 
 **For local DB**
 
