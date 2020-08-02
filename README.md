@@ -8,6 +8,12 @@
 keep it stable and make no breaking changes but we don't guarantee anything.
 Things can and will break.**
 
+---
+
+NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
+
+---
+
 Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
 
 The current version is currently based on Go-Ethereum 1.9.15.
@@ -24,13 +30,14 @@ Usage:
 
 ## Key features 
 
-See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html).
-It is being updated on recurring basis.
+<code>🔬 See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It is being updated on recurring basis.</code>
 
-#### 1. More Efficient State Storage
+#### More Efficient State Storage
 
 **Flat KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
-a simple way. **See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).**
+a simple way. 
+
+<code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
 
 **Preprocessing**. For some operations, turbo-geth uses temporary files to preprocess data before
 inserting it into the main DB. That reduces write amplification and 
@@ -42,11 +49,13 @@ DB inserts sometimes are orders of magnitude quicker.
 accounts and the storage.
 
 
-#### 2. Faster Initial Sync
+#### Faster Initial Sync
 
 Turbo-Geth uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
 "stages".
+
+<code>🔬 See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/)</code>
 
 It uses the same network primitives and is compatible with regular go-ethereum
 nodes that are using full sync, you do not need any special sync capabilities
@@ -68,12 +77,14 @@ Examples of stages are:
 
 * And more...
 
-#### 3. JSON-RPC daemon
+#### JSON-RPC daemon
 
 In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
-it can run from a snapshot of a database for read-only calls. [Docs](./cmd/rpcdaemon/Readme.md)
+it can run from a snapshot of a database for read-only calls. 
+
+<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/Readme.md)</code>
 
 **For local DB**
 
@@ -113,7 +124,7 @@ debug_getModifiedAccountsByNumber
 debug_getModifiedAccountsByHash
 ```
 
-#### 4. REST API Daemon
+#### REST API Daemon
 
 Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
 turbo-geth remote DB functionality. [Docs](./cmd/rpcdaemon/Readme.md)
@@ -137,7 +148,7 @@ GET /api/v1/accounts/<accountAddress>
 GET /api/v1/storage/?prefix=PREFIX
 ```
 
-#### 5. Run all components by docker-compose
+#### Or run all components by docker-compose
 
 Next command starts: turbo-geth on port 30303, rpcdaemon 8545, restapi 8080, debug-web-ui 3001, prometheus 9090, grafana 3000
 

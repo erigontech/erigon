@@ -5,9 +5,9 @@ services:
   turbo-geth:
     image: turbo-geth:latest
     build: .
-    command: tg --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090"
+    command: tg --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090" --ipcdisable
     volumes:
-      - ${XDG_DATA_HOME:-~}/turbogeth:/root/.turbogeth/
+      - ${XDG_DATA_HOME:-~/.local/share}/turbogeth:/root/.turbogeth/
     ports:
       - 30303:30303
 
@@ -18,7 +18,7 @@ services:
       - 9090:9090
     volumes:
       - ./cmd/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ${XDG_DATA_HOME:-./cmd/prometheus}/tg-prometheus:/prometheus
+      - ${XDG_DATA_HOME:-~/.local/share}/tg-prometheus:/prometheus
 
   grafana:
     image: grafana/grafana:7.1.1
@@ -28,7 +28,7 @@ services:
       - ./cmd/prometheus/grafana.ini:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
-      - ${XDG_DATA_HOME:-./cmd/prometheus}/tg-grafana:/var/lib/grafana
+      - ${XDG_DATA_HOME:-~/.local/share}/tg-grafana:/var/lib/grafana
 
   restapi:
     image: turbo-geth:latest

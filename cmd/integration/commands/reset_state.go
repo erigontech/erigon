@@ -185,6 +185,7 @@ func copyCompact() error {
 	if err := env.Open(from, lmdb.Readonly, 0644); err != nil {
 		return err
 	}
+	_ = os.RemoveAll(to)
 	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
