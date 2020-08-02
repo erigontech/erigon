@@ -8,8 +8,11 @@
 keep it stable and make no breaking changes but we don't guarantee anything.
 Things can and will break.**
 
+---
+
 NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 
+---
 
 Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
 
