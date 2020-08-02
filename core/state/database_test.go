@@ -179,7 +179,7 @@ func TestCreate2Revive(t *testing.T) {
 	var check2 uint256.Int
 	st.GetState(create2address, &key2, &check2)
 	if check2.Uint64() != 0x42 {
-		t.Errorf("expected 0x42 in position 2, got: %x", check2)
+		t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
 	}
 
 	// BLOCK 3
@@ -214,7 +214,7 @@ func TestCreate2Revive(t *testing.T) {
 	var check4 uint256.Int
 	st.GetState(create2address, &key4, &check4)
 	if check4.Uint64() != 0x42 {
-		t.Errorf("expected 0x42 in position 4, got: %x", check4)
+		t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
 	}
 	// We expect number 0x0 in the position [2], because it is the block number 4
 	st.GetState(create2address, &key2, &check2)

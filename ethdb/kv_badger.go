@@ -227,7 +227,7 @@ func (db *badgerKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 }
 
 func (tx *badgerTx) Bucket(name []byte) Bucket {
-	b := badgerBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
+	b := badgerBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[string(name)].ID}
 	b.prefix = name
 	return b
 }

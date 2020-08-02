@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"sort"
 
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -155,7 +156,7 @@ var (
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsIndex - can be used to find index in sorted version of Buckets list by name
+// BucketsCfg - can be used to find index in sorted version of Buckets list by name
 var Buckets = [][]byte{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
@@ -200,7 +201,34 @@ var Buckets = [][]byte{
 	Senders,
 }
 
-var BucketsIndex = map[string]int{}
+var BucketsCfg = map[string]*BucketConfigItem{}
+
+type BucketConfigItem struct {
+	ID         int
+	IsDupsort  bool
+	DupToLen   int
+	DupFromLen int
+}
+
+type dupSortConfigEntry struct {
+	Bucket  []byte
+	ID      int
+	FromLen int
+	ToLen   int
+}
+
+var dupSortConfig = []dupSortConfigEntry{
+	{
+		Bucket:  CurrentStateBucket,
+		ToLen:   40,
+		FromLen: 72,
+	},
+	{
+		Bucket:  PlainStateBucket,
+		ToLen:   28,
+		FromLen: 60,
+	},
+}
 
 func init() {
 	sort.SliceStable(Buckets, func(i, j int) bool {
@@ -208,6 +236,26 @@ func init() {
 	})
 
 	for i := range Buckets {
-		BucketsIndex[string(Buckets[i])] = i
+		BucketsCfg[string(Buckets[i])] = &BucketConfigItem{ID: i}
+
+		for _, cfg := range dupSortConfig {
+			if cfg.ID != i {
+				continue
+			}
+			bucketCfg, ok := BucketsCfg[string(cfg.Bucket)]
+			if !ok {
+				continue
+			}
+			cfg.FromLen = bucketCfg.DupFromLen
+			cfg.ToLen = bucketCfg.DupToLen
+
+			if bytes.Equal(cfg.Bucket, CurrentStateBucket) {
+				bucketCfg.IsDupsort = debug.IsHashedStateDupsortEnabled()
+			}
+			if bytes.Equal(cfg.Bucket, PlainStateBucket) {
+				bucketCfg.IsDupsort = debug.IsPlainStateDupsortEnabled()
+			}
+		}
 	}
+
 }
