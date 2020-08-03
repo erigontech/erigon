@@ -31,7 +31,7 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 		i++
 		return true, nil
 	})
-
+	require.NoError(err)
 	require.Equal(1, i)
 
 	_, err = db.Get(dbutils.SyncStageProgress, []byte{byte(stages.Execution)})
@@ -45,8 +45,11 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
+	err := db.KV().CreateBuckets(dbutils.SyncStageUnwindOld1)
+	require.NoError(err)
+
 	// pretend that execution stage is at block 42
-	err := db.Put(dbutils.SyncStageUnwind, []byte{byte(stages.Execution)}, dbutils.EncodeBlockNumber(42))
+	err = db.Put(dbutils.SyncStageUnwindOld1, []byte{byte(stages.Execution)}, dbutils.EncodeBlockNumber(42))
 	require.NoError(err)
 
 	migrator := NewMigrator()
@@ -59,7 +62,7 @@ func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 		i++
 		return true, nil
 	})
-
+	require.NoError(err)
 	require.Equal(1, i)
 
 	_, err = db.Get(dbutils.SyncStageUnwind, []byte{byte(stages.Execution)})

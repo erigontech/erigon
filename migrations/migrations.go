@@ -16,28 +16,28 @@ import (
 // Idempotency is expected
 // Best practices to achieve Idempotency:
 // - in dbutils/bucket.go add suffix for existing bucket variable, create new bucket with same variable name.
-//		Example:
-//			- SyncStageProgress = []byte("SSP1")
-//			+ SyncStageProgressOld1 = []byte("SSP1")
-//			+ SyncStageProgress = []byte("SSP2")
-// - clear new bucket in the begining of transaction, drop old bucket in the end (not defer!).
-//		Example:
-//			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-//				if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil { // clear new bucket
-//					return err
-//				}
+//	Example:
+//		- SyncStageProgress = []byte("SSP1")
+//		+ SyncStageProgressOld1 = []byte("SSP1")
+//		+ SyncStageProgress = []byte("SSP2")
+// - clear new bucket in the beginning of transaction, drop old bucket in the end (not defer!).
+//	Example:
+//		Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+//			if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil { // clear new bucket
+//				return err
+//			}
 //
-//				extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-//					... // migration logic
-//				}
-//              if err := etl.Transform(...); err != nil {
-//					return err
-//				}
+//			extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+//				... // migration logic
+//			}
+//			if err := etl.Transform(...); err != nil {
+//				return err
+//			}
 //
-//				if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
-//					return err
-//				}
-//			},
+//			if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
+//				return err
+//			}
+//		},
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test for new transaction
 var migrations = []Migration{
@@ -66,12 +66,15 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 	}
 
 	applied := map[string]bool{}
-	db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
+	if err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
 		applied[string(common.CopyBytes(k))] = true
 		return true, nil
-	})
+	}); err != nil {
+		return err
+	}
 
-	for _, v := range m.Migrations {
+	for i := range m.Migrations {
+		v := m.Migrations[i]
 		if _, ok := applied[v.Name]; ok {
 			continue
 		}

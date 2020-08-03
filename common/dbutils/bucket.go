@@ -198,6 +198,7 @@ var Buckets = [][]byte{
 	Migrations,
 }
 
+// DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = [][]byte{
 	SyncStageProgressOld1,
 	SyncStageUnwindOld1,

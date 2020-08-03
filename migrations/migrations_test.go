@@ -16,15 +16,13 @@ func TestApplyWithInit(t *testing.T) {
 		{
 			"one",
 			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-				OnLoadCommit(db, nil, true)
-				return nil
+				return OnLoadCommit(db, nil, true)
 			},
 		},
 		{
 			"two",
 			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-				OnLoadCommit(db, nil, true)
-				return nil
+				return OnLoadCommit(db, nil, true)
 			},
 		},
 	}
@@ -60,8 +58,7 @@ func TestApplyWithoutInit(t *testing.T) {
 		{
 			"two",
 			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-				OnLoadCommit(db, nil, true)
-				return nil
+				return OnLoadCommit(db, nil, true)
 			},
 		},
 	}
@@ -95,8 +92,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		{
 			"one",
 			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-				OnLoadCommit(db, nil, true)
-				return nil
+				return OnLoadCommit(db, nil, true)
 			},
 		},
 		{

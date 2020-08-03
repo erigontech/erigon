@@ -158,7 +158,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
 	}
 
-	if err := migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir); err != nil {
+	err = migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir)
+	if err != nil {
 		return nil, err
 	}
 
