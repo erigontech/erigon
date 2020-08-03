@@ -65,43 +65,39 @@ func main() {
 	genesis := makeGenesis(faucets)
 
 	var (
-		nodes  []*node.Node
+		nodes  []*eth.Ethereum
 		enodes []*enode.Node
 	)
 	for i := 0; i < n; i++ {
 		// Start the node and wait until it's up
-		node, err := makeMiner(genesis)
+		stack, ethBackend, err := makeMiner(genesis)
 		if err != nil {
 			panic(err)
 		}
-		defer node.Close()
+		defer stack.Close()
 
-		for node.Server().NodeInfo().Ports.Listener == 0 {
+		for stack.Server().NodeInfo().Ports.Listener == 0 {
 			time.Sleep(250 * time.Millisecond)
 		}
-		// Connect the node to al the previous ones
+		// Connect the node to all the previous ones
 		for _, n := range enodes {
-			node.Server().AddPeer(n)
+			stack.Server().AddPeer(n)
 		}
-		// Start tracking the node and it's enode
-		nodes = append(nodes, node)
-		enodes = append(enodes, node.Server().Self())
+		// Start tracking the node and its enode
+		nodes = append(nodes, ethBackend)
+		enodes = append(enodes, stack.Server().Self())
 
 		// Inject the signer key and start sealing with it
-		store := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+		store := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
 		if _, err := store.NewAccount(""); err != nil {
 			panic(err)
 		}
 	}
-	// Iterate over all the nodes and start signing with them
-	time.Sleep(3 * time.Second)
 
+	// Iterate over all the nodes and start mining
+	time.Sleep(3 * time.Second)
 	for _, node := range nodes {
-		var ethereum *eth.Ethereum
-		if err := node.Service(&ethereum); err != nil {
-			panic(err)
-		}
-		if err := ethereum.StartMining(1); err != nil {
+		if err := node.StartMining(1); err != nil {
 			panic(err)
 		}
 	}
@@ -110,19 +106,16 @@ func main() {
 	// Start injecting transactions from the faucets like crazy
 	nonces := make([]uint64, len(faucets))
 	for {
+		// Pick a random mining node
 		index := rand.Intn(len(faucets))
+		backend := nodes[index%len(nodes)]
 
-		// Fetch the accessor for the relevant signer
-		var ethereum *eth.Ethereum
-		if err := nodes[index%len(nodes)].Service(&ethereum); err != nil {
-			panic(err)
-		}
 		// Create a self transaction and inject into the pool
 		tx, err := types.SignTx(types.NewTransaction(nonces[index], crypto.PubkeyToAddress(faucets[index].PublicKey), new(big.Int), 21000, big.NewInt(100000000000+rand.Int63n(65536)), nil), types.HomesteadSigner{}, faucets[index])
 		if err != nil {
 			panic(err)
 		}
-		if err := ethereum.TxPool().AddLocal(tx); err != nil {
+		if err := backend.TxPool().AddLocal(tx); err != nil {
 			panic(err)
 		}
 		nonces[index]++
@@ -153,7 +146,7 @@ func makeGenesis(faucets []*ecdsa.PrivateKey) *core.Genesis {
 	return genesis
 }
 
-func makeMiner(genesis *core.Genesis) (*node.Node, error) {
+func makeMiner(genesis *core.Genesis) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 	datadir, _ := ioutil.TempDir("", "")
 
@@ -169,13 +162,12 @@ func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 		NoUSB:             true,
 		UseLightweightKDF: true,
 	}
-	// Start the node and configure a full Ethereum node on it
+	// Create the node and configure a full Ethereum node on it
 	stack, err := node.New(config)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	ethConfig := &eth.Config{
+	ethBackend, err := eth.New(stack, &eth.Config{
 		Genesis:         genesis,
 		NetworkID:       genesis.Config.ChainID.Uint64(),
 		SyncMode:        downloader.FullSync,
@@ -193,10 +185,13 @@ func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 		BlocksBeforePruning: 100,
 		BlocksToPrune:       10,
 		PruningTimeout:      time.Second,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
-	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		return eth.New(ctx, ethConfig)
+	err = stack.Start()
+	return stack, ethBackend, err
 	}); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("cannot register stress test miner. config %v", ethConfig))
 	}
