@@ -105,6 +105,14 @@ func NewRemote() remoteOpts {
 	return remoteOpts{Remote: remote.DefaultOpts}
 }
 
+func (db *RemoteKV) CreateBuckets(buckets ...[]byte) error {
+	panic("not implemented")
+}
+
+func (db *RemoteKV) DropBuckets(buckets ...[]byte) error {
+	panic("not supported")
+}
+
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *RemoteKV) Close() {

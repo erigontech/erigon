@@ -1,23 +1,29 @@
 package migrations
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyWithInit(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewMemDatabase()
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
+			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				OnLoadCommit(db, nil, true)
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
+			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				OnLoadCommit(db, nil, true)
 				return nil
 			},
 		},
@@ -25,52 +31,102 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err := migrator.Apply(db, false, false, false, false)
-	if err != nil {
-		t.Fatal()
-	}
-	v, err := db.Get(dbutils.DatabaseInfoBucket, dbutils.LastAppliedMigration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(v) != migrations[1].Name {
-		t.Fatal()
-	}
+	err := migrator.Apply(db, "")
+	require.NoError(err)
+
+	applied := map[string]bool{}
+	err = db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
+		applied[string(common.CopyBytes(k))] = true
+		return true, nil
+	})
+	require.NoError(err)
+
+	_, ok := applied[migrations[0].Name]
+	require.True(ok)
+	_, ok = applied[migrations[1].Name]
+	require.True(ok)
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewMemDatabase()
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
+			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, history, receipts, txIndex, preImages bool) error {
+			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				OnLoadCommit(db, nil, true)
 				return nil
 			},
 		},
 	}
-	err := db.Put(dbutils.DatabaseInfoBucket, dbutils.LastAppliedMigration, []byte(migrations[0].Name))
-	if err != nil {
-		t.Fatal()
-	}
+	err := db.Put(dbutils.Migrations, []byte(migrations[0].Name), []byte{1})
+	require.NoError(err)
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err = migrator.Apply(db, false, false, false, false)
-	if err != nil {
-		t.Fatal()
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	i := 0
+	applied := map[string]bool{}
+	err = db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
+		i++
+		applied[string(common.CopyBytes(k))] = true
+		return true, nil
+	})
+	require.NoError(err)
+
+	require.Equal(2, i)
+	_, ok := applied[migrations[1].Name]
+	require.True(ok)
+	_, ok = applied[migrations[0].Name]
+	require.True(ok)
+}
+
+func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
+	require, db := require.New(t), ethdb.NewMemDatabase()
+	migrations = []Migration{
+		{
+			"one",
+			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				OnLoadCommit(db, nil, true)
+				return nil
+			},
+		},
+		{
+			"two",
+			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				t.Fatal("shouldn't been executed")
+				return nil
+			},
+		},
 	}
-	v, err := db.Get(dbutils.DatabaseInfoBucket, dbutils.LastAppliedMigration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(v) != migrations[1].Name {
-		t.Fatal()
-	}
+	err := db.Put(dbutils.Migrations, []byte(migrations[1].Name), []byte{1}) // apply non-first migration
+	require.NoError(err)
+
+	migrator := NewMigrator()
+	migrator.Migrations = migrations
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	i := 0
+	applied := map[string]bool{}
+	err = db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
+		i++
+		applied[string(common.CopyBytes(k))] = true
+		return true, nil
+	})
+	require.NoError(err)
+
+	require.Equal(2, i)
+	_, ok := applied[migrations[1].Name]
+	require.True(ok)
+	_, ok = applied[migrations[0].Name]
+	require.True(ok)
 }
