@@ -29,7 +29,7 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan stru
 			return false, err
 		}
 		if batch.BatchSize() > batch.IdealBatchSize() || bytes.Equal(hash, headHash) {
-			if err := s.UpdateWithStageData(batch, progress, k[8:]); err != nil {
+			if err := s.UpdateWithStageData(batch, progress, hash); err != nil {
 				return false, err
 			}
 			log.Info("Committed block hashes", "number", progress)
