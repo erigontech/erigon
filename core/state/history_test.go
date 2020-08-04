@@ -1376,12 +1376,12 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, []byte{byte(stages.StorageHistoryIndex)}, b)
+	err := db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.StorageHistoryIndex], b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
+	err = db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution], b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1531,12 +1531,12 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, []byte{byte(stages.StorageHistoryIndex)}, b)
+	err := db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.StorageHistoryIndex], b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
+	err = db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution], b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1686,12 +1686,12 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, []byte{byte(stages.AccountHistoryIndex)}, b)
+	err := db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.AccountHistoryIndex], b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
+	err = db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution], b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1849,12 +1849,12 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, []byte{byte(stages.AccountHistoryIndex)}, b)
+	err := db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.AccountHistoryIndex], b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, []byte{byte(stages.Execution)}, b)
+	err = db.Put(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution], b)
 	if err != nil {
 		t.Fatal(err)
 	}

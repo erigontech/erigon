@@ -330,16 +330,14 @@ func (db *ObjectDatabase) Delete(bucket, key []byte) error {
 }
 
 func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
-	for _, bucket := range buckets {
-		bucket := bucket
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			return tx.Bucket(bucket).Clear()
-		}); err != nil {
-			return err
-		}
+	if err := db.kv.DropBuckets(buckets...); err != nil {
+		return nil
 	}
+	return db.kv.CreateBuckets(buckets...)
+}
 
-	return nil
+func (db *ObjectDatabase) DropBuckets(buckets ...[]byte) error {
+	return db.kv.DropBuckets(buckets...)
 }
 
 func (db *ObjectDatabase) Close() {
