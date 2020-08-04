@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -125,4 +126,22 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.True(ok)
 	_, ok = applied[migrations[0].Name]
 	require.True(ok)
+}
+
+func TestMarshalStages(t *testing.T) {
+	require, db := require.New(t), ethdb.NewMemDatabase()
+
+	err := stages.SaveStageProgress(db, stages.Execution, 42, []byte{})
+	require.NoError(err)
+
+	data, err := MarshalMigrationPayload(db)
+	require.NoError(err)
+
+	res, err := UnmarshalMigrationPayload(data)
+	require.NoError(err)
+
+	require.Equal(1, len(res))
+	v, ok := res[string(stages.DBKeys[stages.Execution])]
+	require.True(ok)
+	require.NotNil(v)
 }

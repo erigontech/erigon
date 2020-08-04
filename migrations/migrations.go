@@ -1,12 +1,15 @@
 package migrations
 
 import (
+	"bytes"
+	"errors"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ugorji/go/codec"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
@@ -83,7 +86,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			if !isDone {
 				return nil // don't save partial progress
 			}
-			stagesProgress, err := stages.MarshalAllStages(db)
+			stagesProgress, err := MarshalMigrationPayload(db)
 			if err != nil {
 				return err
 			}
@@ -99,4 +102,43 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		log.Info("Applied migration", "name", v.Name)
 	}
 	return nil
+}
+
+func MarshalMigrationPayload(db ethdb.Getter) ([]byte, error) {
+	s := map[string][]byte{}
+
+	buf := bytes.NewBuffer(nil)
+	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
+
+	for i := range stages.DBKeys {
+		v, err := db.Get(dbutils.SyncStageProgress, stages.DBKeys[i])
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil, err
+		}
+		if len(v) > 0 {
+			s[string(stages.DBKeys[i])] = common.CopyBytes(v)
+		}
+
+		v, err = db.Get(dbutils.SyncStageUnwind, stages.DBKeys[i])
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil, err
+		}
+		if len(v) > 0 {
+			s["unwind_"+string(stages.DBKeys[i])] = common.CopyBytes(v)
+		}
+	}
+
+	if err := encoder.Encode(s); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func UnmarshalMigrationPayload(data []byte) (map[string][]byte, error) {
+	s := map[string][]byte{}
+
+	if err := codec.NewDecoder(bytes.NewReader(data), &codec.CborHandle{}).Decode(&s); err != nil {
+		return nil, err
+	}
+	return s, nil
 }

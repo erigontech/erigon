@@ -17,7 +17,6 @@
 package stages
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -25,7 +24,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ugorji/go/codec"
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
@@ -87,31 +85,6 @@ func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 // SaveStageUnwind saves the progress of the given stage in the database
 func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64, stageData []byte) error {
 	return db.Put(dbutils.SyncStageUnwind, DBKeys[stage], marshalData(invalidation, stageData))
-}
-
-func MarshalAllStages(db ethdb.Getter) ([]byte, error) {
-	buf := bytes.NewBuffer(nil)
-	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
-	s := map[string][]byte{}
-
-	for i := range DBKeys {
-		v, err := db.Get(dbutils.SyncStageProgress, DBKeys[i])
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return nil, err
-		}
-		s[string(DBKeys[i])] = common.CopyBytes(v)
-
-		v, err = db.Get(dbutils.SyncStageUnwind, DBKeys[i])
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return nil, err
-		}
-		s["unwind_"+string(DBKeys[i])] = common.CopyBytes(v)
-	}
-
-	if err := encoder.Encode(s); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 func marshalData(blockNumber uint64, stageData []byte) []byte {
