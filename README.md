@@ -206,3 +206,30 @@ Thanks to:
 ---
 
 Happy testing! 🥤
+
+### Known issues
+
+#### `htop` shows incorrect memory usage
+
+TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
+([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
+
+`htop` on column `res` shows memory of "App + OS used to hold page cache for given App", 
+but it's not informative, because if `htop` says that app using 90% of memory you still 
+can run 3 more instances of app on the same machine - because most of that `90%` is "OS pages cache".  
+OS automatically free this cache any time it needs memory. 
+Smaller "page cache size" may not impact performance of TurboGeth at all. 
+
+Next tools show correct memory usage of TurboGeth: 
+- `vmmap -summary PID | grep -i "Physical footprint"`. 
+Without `grep` you can see details - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size` shows OS pages cache size. 
+- `cat /proc/<PID>/smaps`
+- `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
+
+TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work.
+
+**Warning:** Multiple instances of TG on same machine will touch Disk concurrently, 
+it impacts performance - one of main TG optimisations: "reduce Disk random access". 
+"Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
+We do not recommend run multiple genesis syncs on same Disk. 
+If genesis sync passed, then it's fine to run multiple TG on same Disk.  
