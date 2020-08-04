@@ -47,7 +47,7 @@ type Getter interface {
 	// Only the keys whose first fixedbits match those of startkey are iterated over.
 	// walker is called for each eligible entry.
 	// If walker returns false or an error, the walk stops.
-	Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error
+	Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
 
 	// MultiWalk is similar to multiple Walk calls folded into one.
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error
@@ -116,7 +116,8 @@ type HasNetInterface interface {
 }
 
 type NonTransactional interface {
-	ClearBuckets(buckets ...[]byte) error
+	ClearBuckets(buckets ...[]byte) error // makes them empty
+	DropBuckets(buckets ...[]byte) error  // drops them, use of them after drop will panic
 }
 
 var errNotSupported = errors.New("not supported")

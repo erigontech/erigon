@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -154,8 +155,12 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 	if ctx.Config.PrivateApiAddr != "" {
-		//remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.PrivateApiAddr)
 		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
+	}
+
+	err = migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir)
+	if err != nil {
+		return nil, err
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)

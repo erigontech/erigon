@@ -215,6 +215,14 @@ func NewBolt() boltOpts {
 	return o
 }
 
+func (db *BoltKV) DropBuckets(buckets ...[]byte) error {
+	panic("not implemented")
+}
+
+func (db *BoltKV) CreateBuckets(buckets ...[]byte) error {
+	panic("not implemented")
+}
+
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *BoltKV) Close() {

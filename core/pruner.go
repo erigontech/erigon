@@ -125,7 +125,7 @@ func (p *BasicPruner) Stop() {
 }
 
 func (p *BasicPruner) ReadLastPrunedBlockNum() uint64 {
-	data, _ := p.db.Get(dbutils.LastPrunedBlockKey, dbutils.LastPrunedBlockKey)
+	data, _ := p.db.Get(dbutils.DatabaseInfoBucket, dbutils.LastPrunedBlockKey)
 	if len(data) == 0 {
 		return 0
 	}
@@ -136,7 +136,7 @@ func (p *BasicPruner) ReadLastPrunedBlockNum() uint64 {
 func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, num)
-	if err := p.db.Put(dbutils.LastPrunedBlockKey, dbutils.LastPrunedBlockKey, b); err != nil {
+	if err := p.db.Put(dbutils.DatabaseInfoBucket, dbutils.LastPrunedBlockKey, b); err != nil {
 		log.Crit("Failed to store last pruned block's num", "err", err)
 	}
 }
