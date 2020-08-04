@@ -123,9 +123,7 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090
 ```
 
----
-
-Currently supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
+Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
 
 ```
 eth_call
@@ -216,8 +214,6 @@ Thanks to:
 * All contributors of Go-Ethereum
 
 * Our special respect and graditude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep up the great job!
-
----
 
 Happy testing! 🥤
 
