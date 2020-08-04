@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
-// Buckets
+// The fields below define the low level database schema prefixing.
 var (
 	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
 
@@ -91,6 +91,18 @@ var (
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = []byte("DatabaseVersion")
 
+	// headHeaderKey tracks the latest know header's hash.
+	HeadHeaderKey = []byte("LastHeader")
+
+	// headBlockKey tracks the latest know full block's hash.
+	HeadBlockKey = []byte("LastBlock")
+
+	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
+	HeadFastBlockKey = []byte("LastFast")
+
+	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
+	FastTrieProgressKey = []byte("TrieSync")
+
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefix       = []byte("h") // headerPrefix + num (uint64 big endian) + hash -> header
 	HeaderTDSuffix     = []byte("t") // headerPrefix + num (uint64 big endian) + hash + headerTDSuffix -> td
@@ -107,55 +119,39 @@ var (
 	ConfigPrefix   = []byte("ethereum-config-") // config prefix for the db
 
 	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
-	BloomBitsIndexPrefix = []byte("iB") // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefix      = []byte("iB")      // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefixShead = []byte("iBshead") // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
-	// Progress of sync stages: stageName -> stageData
-	SyncStageProgress     = []byte("SSP2")
-	SyncStageProgressOld1 = []byte("SSP")
-	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind     = []byte("SSU2")
-	SyncStageUnwindOld1 = []byte("SSU")
+	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
+	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
 
-	CliqueBucket = []byte("clique-")
-
-	// this bucket stored in separated database
-	InodesBucket = []byte("inodes")
-
-	// Transaction senders - stored separately from the block bodies
-	Senders = []byte("txSenders")
-
-	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
-	FastTrieProgressKey = []byte("TrieSync")
-	// headBlockKey tracks the latest know full block's hash.
-	HeadBlockKey = []byte("LastBlock")
-	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
-	HeadFastBlockKey = []byte("LastFast")
-	// headHeaderKey tracks the latest know header's hash.
-	HeadHeaderKey = []byte("LastHeader")
-
-	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
-	// it stores stages progress to understand in which context was executed migration
-	// in case of bug-report developer can ask content of this bucket
-	Migrations = []byte("migrations")
-)
-
-// Keys
-var (
 	// last block that was pruned
 	// it's saved one in 5 minutes
 	LastPrunedBlockKey = []byte("LastPrunedBlock")
+
+	// LastAppliedMigration keep the name of tle last applied migration.
+	LastAppliedMigration = []byte("lastAppliedMigration")
+
 	//StorageModeHistory - does node save history.
 	StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
 	StorageModeTxIndex = []byte("smTxIndex")
-)
+	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
+	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
 
-// Metrics
-var (
-	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
-	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
+	// Progress of sync stages
+	SyncStageProgress = []byte("SSP")
+	// Position to where to unwind sync stages
+	SyncStageUnwind = []byte("SSU")
+	CliqueBucket    = []byte("clique-")
+
+	// this bucket stored in separated database
+	InodesBucket = []byte("inodes")
+
+	// Transaction senders - stored separately from the block bodies
+	Senders = []byte("txSenders")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -171,7 +167,13 @@ var Buckets = [][]byte{
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
 	DatabaseVerisionKey,
+	HeadHeaderKey,
+	HeadBlockKey,
+	HeadFastBlockKey,
+	FastTrieProgressKey,
 	HeaderPrefix,
+	HeaderTDSuffix,
+	HeaderHashSuffix,
 	HeaderNumberPrefix,
 	BlockBodyPrefix,
 	BlockReceiptsPrefix,
@@ -180,8 +182,14 @@ var Buckets = [][]byte{
 	PreimagePrefix,
 	ConfigPrefix,
 	BloomBitsIndexPrefix,
+	BloomBitsIndexPrefixShead,
+	LastPrunedBlockKey,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
+	LastAppliedMigration,
+	StorageModeHistory,
+	StorageModeReceipts,
+	StorageModeTxIndex,
 	CliqueBucket,
 	SyncStageProgress,
 	SyncStageUnwind,
@@ -191,17 +199,6 @@ var Buckets = [][]byte{
 	PlainStorageChangeSetBucket,
 	InodesBucket,
 	Senders,
-	FastTrieProgressKey,
-	HeadBlockKey,
-	HeadFastBlockKey,
-	HeadHeaderKey,
-	Migrations,
-}
-
-// DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
-var DeprecatedBuckets = [][]byte{
-	SyncStageProgressOld1,
-	SyncStageUnwindOld1,
 }
 
 var BucketsCfg = map[string]*BucketConfigItem{}
@@ -239,32 +236,26 @@ func init() {
 	})
 
 	for i := range Buckets {
-		BucketsCfg[string(Buckets[i])] = createBucketConfig(i, Buckets[i])
-	}
+		BucketsCfg[string(Buckets[i])] = &BucketConfigItem{ID: i}
 
-	for i := range DeprecatedBuckets {
-		BucketsCfg[string(DeprecatedBuckets[i])] = createBucketConfig(len(Buckets)+i, DeprecatedBuckets[i])
-	}
-}
+		for _, cfg := range dupSortConfig {
+			if cfg.ID != i {
+				continue
+			}
+			bucketCfg, ok := BucketsCfg[string(cfg.Bucket)]
+			if !ok {
+				continue
+			}
+			cfg.FromLen = bucketCfg.DupFromLen
+			cfg.ToLen = bucketCfg.DupToLen
 
-func createBucketConfig(id int, name []byte) *BucketConfigItem {
-	cfg := &BucketConfigItem{ID: id}
-
-	for _, dupCfg := range dupSortConfig {
-		if !bytes.Equal(dupCfg.Bucket, name) {
-			continue
-		}
-
-		cfg.DupFromLen = dupCfg.FromLen
-		cfg.DupToLen = dupCfg.ToLen
-
-		if bytes.Equal(dupCfg.Bucket, CurrentStateBucket) {
-			cfg.IsDupsort = debug.IsHashedStateDupsortEnabled()
-		}
-		if bytes.Equal(dupCfg.Bucket, PlainStateBucket) {
-			cfg.IsDupsort = debug.IsPlainStateDupsortEnabled()
+			if bytes.Equal(cfg.Bucket, CurrentStateBucket) {
+				bucketCfg.IsDupsort = debug.IsHashedStateDupsortEnabled()
+			}
+			if bytes.Equal(cfg.Bucket, PlainStateBucket) {
+				bucketCfg.IsDupsort = debug.IsPlainStateDupsortEnabled()
+			}
 		}
 	}
 
-	return cfg
 }
