@@ -94,10 +94,9 @@ func (opts lmdbOpts) Open() (KV, error) {
 		buckets: map[string]lmdb.DBI{},
 	}
 
-	if err := db.CreateBuckets(dbutils.Buckets...); err != nil {
+	if err := db.CreateBuckets(dbutils.Buckets...); err != nil { // don't create deprecated buckets
 		return nil, err
 	}
-	// don't create deprecated buckets
 
 	if err := env.View(func(tx *lmdb.Txn) error {
 		for _, name := range dbutils.DeprecatedBuckets {
