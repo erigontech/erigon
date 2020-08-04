@@ -357,11 +357,11 @@ func (b lmdbBucket) Get(key []byte) ([]byte, error) {
 }
 
 func (b lmdbBucket) getDupSort(key []byte) ([]byte, error) {
-	c := b.Cursor().(*LmdbCursor)
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	if len(key) == b.dupFrom {
+		c := b.Cursor().(*LmdbCursor)
+		if err := c.initCursor(); err != nil {
+			return nil, err
+		}
 		_, v, err := c.dupBothRange(key[:b.dupTo], key[b.dupTo:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
