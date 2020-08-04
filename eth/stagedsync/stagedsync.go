@@ -88,7 +88,7 @@ func PrepareStagedSync(
 		},
 		{
 			ID:          stages.IntermediateHashes,
-			Description: "Generate intermediate hashes and compiting state root",
+			Description: "Generate intermediate hashes and computing state root",
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
 			},
