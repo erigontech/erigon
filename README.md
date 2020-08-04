@@ -234,8 +234,8 @@ Smaller "page cache size" may not impact performance of TurboGeth at all.
 Next tools show correct memory usage of TurboGeth: 
 - `vmmap -summary PID | grep -i "Physical footprint"`. 
 Without `grep` you can see details - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size` shows OS pages cache size. 
-- `cat /proc/<PID>/smaps`
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
+- `cat /proc/<PID>/smaps`
 
 TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
 
