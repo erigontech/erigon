@@ -11,6 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func migrationsInDB(db ethdb.Database) (map[string]bool, error) {
+	applied := map[string]bool{}
+	err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
+		applied[string(common.CopyBytes(k))] = true
+		return true, nil
+	})
+	return applied, err
+}
+
 func TestApplyWithInit(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 	migrations = []Migration{
@@ -33,17 +42,21 @@ func TestApplyWithInit(t *testing.T) {
 	err := migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied := map[string]bool{}
-	err = db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
-		applied[string(common.CopyBytes(k))] = true
-		return true, nil
-	})
+	applied, err := migrationsInDB(db)
 	require.NoError(err)
 
 	_, ok := applied[migrations[0].Name]
 	require.True(ok)
 	_, ok = applied[migrations[1].Name]
 	require.True(ok)
+
+	// apply again
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	applied2, err := migrationsInDB(db)
+	require.NoError(err)
+	require.Equal(applied, applied2)
 }
 
 func TestApplyWithoutInit(t *testing.T) {
@@ -71,20 +84,22 @@ func TestApplyWithoutInit(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	i := 0
-	applied := map[string]bool{}
-	err = db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
-		i++
-		applied[string(common.CopyBytes(k))] = true
-		return true, nil
-	})
+	applied, err := migrationsInDB(db)
 	require.NoError(err)
 
-	require.Equal(2, i)
+	require.Equal(2, len(applied))
 	_, ok := applied[migrations[1].Name]
 	require.True(ok)
 	_, ok = applied[migrations[0].Name]
 	require.True(ok)
+
+	// apply again
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	applied2, err := migrationsInDB(db)
+	require.NoError(err)
+	require.Equal(applied, applied2)
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
@@ -112,20 +127,22 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	i := 0
-	applied := map[string]bool{}
-	err = db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
-		i++
-		applied[string(common.CopyBytes(k))] = true
-		return true, nil
-	})
+	applied, err := migrationsInDB(db)
 	require.NoError(err)
 
-	require.Equal(2, i)
+	require.Equal(2, len(applied))
 	_, ok := applied[migrations[1].Name]
 	require.True(ok)
 	_, ok = applied[migrations[0].Name]
 	require.True(ok)
+
+	// apply again
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	applied2, err := migrationsInDB(db)
+	require.NoError(err)
+	require.Equal(applied, applied2)
 }
 
 func TestMarshalStages(t *testing.T) {
