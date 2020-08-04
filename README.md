@@ -1,24 +1,34 @@
 # Turbo-Geth
 
-[GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
+Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance. [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
 
-[![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
+Table of contents
+=================
+
+<!--ts-->
+   * [System Requirements](#system-requirements)
+   * [Usage](#usage)
+   * [Key features](#key-features)
+   * [Getting in touch](#getting-in-touch)
+   * [Team](#team)
+   * [Known issues](#known-issues)
+   * [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
+<!--te-->
+
+
+
+NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 
 **Disclaimer: this software is currenly a tech preview. We will do our best to
 keep it stable and make no breaking changes but we don't guarantee anything.
 Things can and will break.**
 
----
 
-NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
-
----
-
-Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
 
 The current version is currently based on Go-Ethereum 1.9.15.
 
-#### System Requirements
+System Requirements
+===================
 
 About 830 GB of free disk storage (630 GB state storage, 200GB temp files)
 
@@ -26,7 +36,8 @@ About 830 GB of free disk storage (630 GB state storage, 200GB temp files)
 
 <code>🔬 more info on disk storage is here [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
-#### Usage:
+Usage
+=====
 
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git && cd turbo-geth
@@ -34,7 +45,8 @@ About 830 GB of free disk storage (630 GB state storage, 200GB temp files)
 > ./build/bin/tg
 ```
 
-## Key features 
+Key features
+============ 
 
 <code>🔬 See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It is being updated on recurring basis.</code>
 
@@ -111,9 +123,7 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090
 ```
 
----
-
-Currently supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
+Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
 
 ```
 eth_call
@@ -165,7 +175,8 @@ docker-compose build
 XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ```
 
-## Getting in touch
+Getting in touch
+================
 
 #### Turbo-Geth Discord Server
 
@@ -177,7 +188,8 @@ a brief explanation of why you want to join the Discord, and how you heard about
 
 Send an email to `security [at] torquem.ch`.
 
-## Team
+Team
+=======
 
 Core contributors:
 
@@ -203,6 +215,32 @@ Thanks to:
 
 * Our special respect and graditude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep up the great job!
 
----
-
 Happy testing! 🥤
+
+Known issues
+============
+
+#### `htop` shows incorrect memory usage
+
+TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
+([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
+
+`htop` on column `res` shows memory of "App + OS used to hold page cache for given App", 
+but it's not informative, because if `htop` says that app using 90% of memory you still 
+can run 3 more instances of app on the same machine - because most of that `90%` is "OS pages cache".  
+OS automatically free this cache any time it needs memory. 
+Smaller "page cache size" may not impact performance of TurboGeth at all. 
+
+Next tools show correct memory usage of TurboGeth: 
+- `vmmap -summary PID | grep -i "Physical footprint"`. 
+Without `grep` you can see details - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size` shows OS pages cache size. 
+- `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
+- `cat /proc/<PID>/smaps`
+
+TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
+
+**Warning:** Multiple instances of TG on same machine will touch Disk concurrently, 
+it impacts performance - one of main TG optimisations: "reduce Disk random access". 
+"Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
+We do not recommend run multiple genesis syncs on same Disk. 
+If genesis sync passed, then it's fine to run multiple TG on same Disk.  
