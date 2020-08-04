@@ -329,6 +329,10 @@ func (db *ObjectDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
+func (db *ObjectDatabase) BucketExists(name []byte) (bool, error) {
+	return db.kv.BucketExists(name)
+}
+
 func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
 	if err := db.kv.DropBuckets(buckets...); err != nil {
 		return nil

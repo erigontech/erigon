@@ -215,6 +215,10 @@ func NewBolt() boltOpts {
 	return o
 }
 
+func (db *BoltKV) BucketExists(name []byte) (bool, error) {
+	panic("not implemented")
+}
+
 func (db *BoltKV) DropBuckets(buckets ...[]byte) error {
 	panic("not implemented")
 }

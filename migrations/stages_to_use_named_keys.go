@@ -10,6 +10,12 @@ import (
 var stagesToUseNamedKeys = Migration{
 	Name: "stages_to_use_named_keys",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
+			return err
+		} else if !exists {
+			return nil
+		}
+
 		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
 			return err
 		}
@@ -48,6 +54,12 @@ var stagesToUseNamedKeys = Migration{
 var unwindStagesToUseNamedKeys = Migration{
 	Name: "unwind_stages_to_use_named_keys",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageUnwindOld1); err != nil {
+			return err
+		} else if !exists {
+			return nil
+		}
+
 		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageUnwind); err != nil {
 			return err
 		}

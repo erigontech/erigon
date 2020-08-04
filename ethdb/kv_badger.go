@@ -127,6 +127,10 @@ func (db *badgerKV) vlogGCLoop(ctx context.Context, gcTicker *time.Ticker) {
 	}
 }
 
+func (db *badgerKV) BucketExists(name []byte) (bool, error) {
+	panic("not implemented")
+}
+
 func (db *badgerKV) DropBuckets(buckets ...[]byte) error {
 	panic("not implemented")
 }

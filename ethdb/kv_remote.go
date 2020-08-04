@@ -105,6 +105,10 @@ func NewRemote() remoteOpts {
 	return remoteOpts{Remote: remote.DefaultOpts}
 }
 
+func (db *RemoteKV) BucketExists(name []byte) (bool, error) {
+	panic("not implemented")
+}
+
 func (db *RemoteKV) CreateBuckets(buckets ...[]byte) error {
 	panic("not implemented")
 }

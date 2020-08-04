@@ -13,6 +13,7 @@ type KV interface {
 	IdealBatchSize() int
 	DropBuckets(buckets ...[]byte) error
 	CreateBuckets(buckets ...[]byte) error
+	BucketExists(name []byte) (bool, error)
 }
 
 type Tx interface {

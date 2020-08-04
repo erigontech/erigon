@@ -116,8 +116,9 @@ type HasNetInterface interface {
 }
 
 type NonTransactional interface {
-	ClearBuckets(buckets ...[]byte) error // makes them empty
-	DropBuckets(buckets ...[]byte) error  // drops them, use of them after drop will panic
+	BucketExists(bucket []byte) (bool, error) // makes them empty
+	ClearBuckets(buckets ...[]byte) error     // makes them empty
+	DropBuckets(buckets ...[]byte) error      // drops them, use of them after drop will panic
 }
 
 var errNotSupported = errors.New("not supported")
