@@ -190,7 +190,7 @@ a brief explanation of why you want to join the Discord, and how you heard about
 
 Send an email to `security [at] torquem.ch`.
 
-## Team
+Team
 =======
 
 Core contributors:
