@@ -4,21 +4,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/require"
 )
-
-func migrationsInDB(db ethdb.Database) (map[string]bool, error) {
-	applied := map[string]bool{}
-	err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
-		applied[string(common.CopyBytes(k))] = true
-		return true, nil
-	})
-	return applied, err
-}
 
 func TestApplyWithInit(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
@@ -42,7 +32,7 @@ func TestApplyWithInit(t *testing.T) {
 	err := migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied, err := migrationsInDB(db)
+	applied, err := AppliedMigrations(db, false)
 	require.NoError(err)
 
 	_, ok := applied[migrations[0].Name]
@@ -54,7 +44,7 @@ func TestApplyWithInit(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied2, err := migrationsInDB(db)
+	applied2, err := AppliedMigrations(db, false)
 	require.NoError(err)
 	require.Equal(applied, applied2)
 }
@@ -84,7 +74,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied, err := migrationsInDB(db)
+	applied, err := AppliedMigrations(db, false)
 	require.NoError(err)
 
 	require.Equal(2, len(applied))
@@ -97,7 +87,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied2, err := migrationsInDB(db)
+	applied2, err := AppliedMigrations(db, false)
 	require.NoError(err)
 	require.Equal(applied, applied2)
 }
@@ -127,7 +117,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied, err := migrationsInDB(db)
+	applied, err := AppliedMigrations(db, false)
 	require.NoError(err)
 
 	require.Equal(2, len(applied))
@@ -140,7 +130,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	applied2, err := migrationsInDB(db)
+	applied2, err := AppliedMigrations(db, false)
 	require.NoError(err)
 	require.Equal(applied, applied2)
 }

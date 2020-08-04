@@ -63,16 +63,26 @@ type Migrator struct {
 	Migrations []Migration
 }
 
+func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, error) {
+	applied := map[string][]byte{}
+	err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, v []byte) (bool, error) {
+		if withPayload {
+			applied[string(common.CopyBytes(k))] = common.CopyBytes(v)
+		} else {
+			applied[string(common.CopyBytes(k))] = []byte{}
+		}
+		return true, nil
+	})
+	return applied, err
+}
+
 func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
 
-	applied := map[string]bool{}
-	if err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, _ []byte) (bool, error) {
-		applied[string(common.CopyBytes(k))] = true
-		return true, nil
-	}); err != nil {
+	applied, err := AppliedMigrations(db, false)
+	if err != nil {
 		return err
 	}
 
