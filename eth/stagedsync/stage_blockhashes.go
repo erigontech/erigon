@@ -23,10 +23,12 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan stru
 		if len(k) != 40 {
 			return true, nil
 		}
-		if err := batch.Put(dbutils.HeaderNumberPrefix, k[8:], k[:8]); err != nil {
+		hash := common.CopyBytes(k[8:])
+		number := common.CopyBytes(k[:8])
+		if err := batch.Put(dbutils.HeaderNumberPrefix, hash, number); err != nil {
 			return false, err
 		}
-		if batch.BatchSize() > batch.IdealBatchSize() || bytes.Equal(k[8:], headHash) {
+		if batch.BatchSize() > batch.IdealBatchSize() || bytes.Equal(hash, headHash) {
 			if err := s.UpdateWithStageData(batch, progress, k[8:]); err != nil {
 				return false, err
 			}
@@ -35,11 +37,10 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan stru
 			if err != nil {
 				return false, err
 			}
-			if bytes.Equal(k[8:], headHash) {
+			if bytes.Equal(hash, headHash) {
 				return true, nil
 			}
 		}
-		progress++
 		return true, nil
 	}); err != nil {
 		return err
@@ -53,7 +54,6 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan stru
 		return err
 	}
 	s.Done()
-	log.Info("Committed block hashes", "number", progress)
 	// Write here code
 	return nil
 }
