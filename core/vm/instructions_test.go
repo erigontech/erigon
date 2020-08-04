@@ -95,8 +95,7 @@ func init() {
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 
 	var (
-		dests          = NewDestsCache(100)
-		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		pc             = uint64(0)
@@ -194,8 +193,7 @@ func TestSAR(t *testing.T) {
 // getResult is a convenience function to generate the expected values
 func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 	var (
-		dests       = NewDestsCache(100)
-		env         = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		env         = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack      = stack.NewReturnStack()
 		stack       = stack.New()
 		pc          = uint64(0)
@@ -246,8 +244,7 @@ func TestJsonTestcases(t *testing.T) {
 
 func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 	var (
-		dests          = NewDestsCache(100)
-		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
@@ -481,8 +478,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 
 func TestOpMstore(t *testing.T) {
 	var (
-		dests          = NewDestsCache(100)
-		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		mem            = NewMemory()
@@ -509,8 +505,7 @@ func TestOpMstore(t *testing.T) {
 
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
-		dests          = NewDestsCache(100)
-		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		mem            = NewMemory()
@@ -533,8 +528,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 func BenchmarkOpSHA3(bench *testing.B) {
 	var (
-		dests          = NewDestsCache(100)
-		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{}, dests)
+		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()
 		stack          = stack.New()
 		mem            = NewMemory()

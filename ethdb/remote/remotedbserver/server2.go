@@ -47,10 +47,10 @@ func StartGrpc(kv ethdb.KV, addr string) {
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 
 	grpcServer := grpc.NewServer(
-		grpc.NumStreamWorkers(2),   // reduce amount of goroutines
+		grpc.NumStreamWorkers(20),  // reduce amount of goroutines
 		grpc.WriteBufferSize(1024), // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(16), // to force clients reduce concurency level
+		grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	)

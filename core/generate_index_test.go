@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"os"
 	"reflect"
 	"sort"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -33,7 +34,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			addrs, expecedIndexes := generateTestData(t, db, csBucket, blocksNum)
 
 			ig.ChangeSetBufSize = 16 * 1024
-			err := ig.GenerateIndex(0, uint64(blocksNum), csBucket)
+			err := ig.GenerateIndex(0, uint64(blocksNum), csBucket, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +70,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		mp := changeset.Mapper[string(csbucket)]
 		indexBucket := mp.IndexBucket
 		ig := NewIndexGenerator(db, make(chan struct{}))
-		err := ig.GenerateIndex(0, uint64(2100), csbucket)
+		err := ig.GenerateIndex(0, uint64(2100), csbucket, "")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -33,7 +33,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, ibs, _, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex, nil)
+	msg, vmctx, ibs, _, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (api *PrivateDebugAPIImpl) traceTx(ctx context.Context, message core.Messag
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer}, nil /* jumpDest cache */)
+	vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
 
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
 	if err != nil {
@@ -104,7 +104,7 @@ func (api *PrivateDebugAPIImpl) traceTx(ctx context.Context, message core.Messag
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainKV ethdb.KV, blockHash common.Hash, txIndex uint64, dests vm.Cache) (core.Message, vm.Context, *state.IntraBlockState, *StateReader, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainKV ethdb.KV, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *StateReader, error) {
 	// Create the parent state database
 	block := blockGetter.GetBlockByHash(blockHash)
 	if block == nil {
@@ -138,7 +138,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 			return msg, EVMcontext, statedb, reader, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{}, dests)
+		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}

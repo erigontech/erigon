@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -69,7 +68,7 @@ type Miner struct {
 	shouldStart int32 // should start indicates whether we should start after sync
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(block *types.Block) bool, dests vm.Cache) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(block *types.Block) bool) *Miner {
 	miner := &Miner{
 		eth:      eth,
 		mux:      mux,
@@ -78,7 +77,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		worker:   newWorker(config, chainConfig, engine, eth, mux, hooks{isLocalBlock: isLocalBlock}, false),
 		canStart: 1,
 	}
-	go miner.update(dests)
+	go miner.update()
 
 	return miner
 }
@@ -87,7 +86,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 // It's entered once and as soon as `Done` or `Failed` has been broadcasted the events are unregistered and
 // the loop is exited. This to prevent a major security vuln where external parties can DOS you with blocks
 // and halt your mining operation for as long as the DOS continues.
-func (miner *Miner) update(dests vm.Cache) {
+func (miner *Miner) update() {
 	events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
 	defer events.Unsubscribe()
 
@@ -111,7 +110,7 @@ func (miner *Miner) update(dests vm.Cache) {
 				atomic.StoreInt32(&miner.canStart, 1)
 				atomic.StoreInt32(&miner.shouldStart, 0)
 				if shouldStart {
-					miner.Start(miner.coinbase, dests)
+					miner.Start(miner.coinbase)
 				}
 				// stop immediately and ignore all further pending events
 				return
@@ -122,7 +121,7 @@ func (miner *Miner) update(dests vm.Cache) {
 	}
 }
 
-func (miner *Miner) Start(coinbase common.Address, dests vm.Cache) {
+func (miner *Miner) Start(coinbase common.Address) {
 	atomic.StoreInt32(&miner.shouldStart, 1)
 	miner.SetEtherbase(coinbase)
 
@@ -130,7 +129,7 @@ func (miner *Miner) Start(coinbase common.Address, dests vm.Cache) {
 		log.Info("Network syncing, will start miner afterwards")
 		return
 	}
-	miner.worker.start(dests)
+	miner.worker.start()
 }
 
 func (miner *Miner) Stop() {

@@ -20,8 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -605,7 +603,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	blockDb := ethdb.MustOpen(chaindata)
 	defer blockDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(err)
 	defer bcb.Stop()
 	if fromScratch {
@@ -618,7 +616,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */, true /* overwrite */)
 	check(err)
 	bcTxCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, bcTxCacher)
+	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, bcTxCacher)
 	check(err)
 	defer bc.Stop()
 	tds, err := bc.GetTrieDbState()
@@ -675,7 +673,7 @@ func extractTrie(block int) {
 	stateDb := ethdb.MustOpen("statedb")
 	defer stateDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	baseBlock := bc.GetBlockByNumber(uint64(block))
@@ -695,7 +693,7 @@ func testRewind(chaindata string, block, rewind int) {
 	ethDb := ethdb.MustOpen(chaindata)
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
@@ -758,7 +756,7 @@ func testStartup() {
 	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
@@ -2006,57 +2004,6 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	return nil
 }
 
-func runDosBlock(chaindata string) error {
-	fmt.Printf("Running dos tx in a block\n")
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	engine := ethash.NewFaker()
-	bcb, err := core.NewBlockChain(db, nil, params.MainnetChainConfig, engine, vm.Config{}, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-	start := time.Now()
-	batch := db.NewBatch()
-	stateReader := state.NewPlainStateReader(db)
-	stateWriter := state.NewPlainStateWriter(batch, 10000000)
-	ibs := state.New(stateReader)
-	var receipts types.Receipts
-	usedGas := new(uint64)
-	gp := new(core.GasPool).AddGas(11000000)
-	noop := state.NewNoopWriter()
-	header := &types.Header{Number: big.NewInt(10000000), Difficulty: big.NewInt(10)}
-	tx := types.NewContractCreation(0, uint256.NewInt(), 10000000, uint256.NewInt(), []byte{
-		byte(vm.JUMPDEST),
-		byte(vm.GAS),
-		byte(vm.EXTCODEHASH),
-		byte(vm.PUSH1), 0x0,
-		byte(vm.JUMP),
-	})
-
-	receipt, err := core.ApplyTransaction(params.MainnetChainConfig, bcb, nil, gp, ibs, noop, header, tx, usedGas, vm.Config{}, nil)
-	if err != nil {
-		return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
-	}
-	fmt.Printf("Receipt: status %d, gas used: %d\n", receipt.Status, receipt.GasUsed)
-	receipts = append(receipts, receipt)
-	types.DeriveSha(receipts)
-
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(params.MainnetChainConfig, header, ibs, types.Transactions{tx}, []*types.Header{}, receipts); err != nil {
-		return fmt.Errorf("finalize of block ailed: %v", err)
-	}
-
-	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
-		return fmt.Errorf("committing block failed: %v", err)
-	}
-
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return fmt.Errorf("writing changesets failed: %v", err)
-	}
-	fmt.Printf("Took %s\n", time.Since(start))
-	return nil
-}
-
 func main() {
 	flag.Parse()
 
@@ -2219,11 +2166,6 @@ func main() {
 	}
 	if *action == "changeSetStats" {
 		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "dos" {
-		if err := runDosBlock(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

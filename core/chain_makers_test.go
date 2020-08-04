@@ -61,7 +61,7 @@ func ExampleGenerateChain() {
 	genesis := gspec.MustCommit(db)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer blockchain.Stop()
 
 	// This call generates a chain of 5 blocks. The function runs for

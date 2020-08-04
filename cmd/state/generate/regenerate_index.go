@@ -2,10 +2,11 @@ package generate
 
 import (
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"os"
 	"os/signal"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -41,7 +42,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 	startTime := time.Now()
 	log.Info("Index generation started", "start time", startTime)
-	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket)
+	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket, os.TempDir())
 	if err != nil {
 		return err
 	}
