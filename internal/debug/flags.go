@@ -314,7 +314,7 @@ func StartPProf(enablePprof bool, enableMetrics bool, address string) {
 		mux.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
 		// Start system runtime metrics collection
 		go metrics.CollectProcessMetrics(3 * time.Second)
-		log.Info("Starting metrics server", "addr", fmt.Sprintf("%s", address))
+		log.Info("Starting metrics server", "addr", address)
 	}
 
 	if enableMetrics || enablePprof {

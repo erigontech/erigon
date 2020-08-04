@@ -1,10 +1,12 @@
 # Turbo-Geth
 
+Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance. [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
+
 Table of contents
 =================
 
 <!--ts-->
-   * [Table of contents](#table-of-contents)
+   * [System Requirements](#system-requirements)
    * [Usage](#usage)
    * [Key features](#key-features)
    * [Getting in touch](#getting-in-touch)
@@ -13,7 +15,7 @@ Table of contents
    * [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
 <!--te-->
 
-[![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
+
 
 NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -22,7 +24,6 @@ keep it stable and make no breaking changes but we don't guarantee anything.
 Things can and will break.**
 
 
-Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
 
 The current version is currently based on Go-Ethereum 1.9.15.
 
