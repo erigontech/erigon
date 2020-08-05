@@ -69,10 +69,6 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 }
 
 func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	toStateStageData := func(k []byte) []byte {
-		return append([]byte{0xFF}, k...)
-	}
-
 	err := etl.Transform(
 		db,
 		dbutils.PlainStateBucket,
@@ -86,10 +82,6 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string,
 	)
 	if err != nil {
 		return err
-	}
-
-	toCodeStageData := func(k []byte) []byte {
-		return append([]byte{0xCD}, k...)
 	}
 
 	return etl.Transform(
