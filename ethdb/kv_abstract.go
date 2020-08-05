@@ -2,6 +2,12 @@ package ethdb
 
 import (
 	"context"
+	"errors"
+)
+
+var (
+	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 )
 
 type KV interface {
@@ -11,9 +17,6 @@ type KV interface {
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
 	IdealBatchSize() int
-	DropBuckets(buckets ...[]byte) error
-	CreateBuckets(buckets ...[]byte) error
-	BucketExists(name []byte) (bool, error)
 }
 
 type Tx interface {
@@ -30,6 +33,14 @@ type Bucket interface {
 	Cursor() Cursor
 
 	Size() (uint64, error)
+}
+
+// Interface used for buckets migration, don't use it in usual app code
+type BucketMigrator interface {
+	Drop() error
+	Create() error
+	Exists() bool
+	Clear() error
 }
 
 type Cursor interface {

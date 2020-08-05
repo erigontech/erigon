@@ -127,18 +127,6 @@ func (db *badgerKV) vlogGCLoop(ctx context.Context, gcTicker *time.Ticker) {
 	}
 }
 
-func (db *badgerKV) BucketExists(name []byte) (bool, error) {
-	panic("not implemented")
-}
-
-func (db *badgerKV) DropBuckets(buckets ...[]byte) error {
-	panic("not implemented")
-}
-
-func (db *badgerKV) CreateBuckets(buckets ...[]byte) error {
-	panic("not implemented")
-}
-
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *badgerKV) Close() {

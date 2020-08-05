@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"testing"
@@ -14,7 +15,9 @@ import (
 func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().CreateBuckets(dbutils.SyncStageProgressOld1)
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.SyncStageProgressOld1).(ethdb.BucketMigrator).Create()
+	})
 	require.NoError(err)
 
 	// pretend that execution stage is at block 42
@@ -45,7 +48,9 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().CreateBuckets(dbutils.SyncStageUnwindOld1)
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.SyncStageUnwindOld1).(ethdb.BucketMigrator).Create()
+	})
 	require.NoError(err)
 
 	// pretend that execution stage is at block 42

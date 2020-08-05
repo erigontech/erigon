@@ -432,7 +432,6 @@ var (
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
 * h - write history to the DB
-* p - write preimages to the DB
 * r - write receipts to the DB
 * t - write tx lookup index to the DB`,
 		Value: ethdb.DefaultStorageMode.ToString(),

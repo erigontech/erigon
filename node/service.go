@@ -61,9 +61,8 @@ func (ctx *ServiceContext) OpenDatabase(name string) (*ethdb.ObjectDatabase, err
 		return ethdb.Open(ctx.Config.ResolvePath(name + "_bolt"))
 	}
 
-	path := ctx.Config.ResolvePath(name)
-	log.Info("Opening Database (LMDB)", "path", path)
-	return ethdb.Open(path)
+	log.Info("Opening Database (LMDB)")
+	return ethdb.Open(ctx.Config.ResolvePath(name))
 	/*
 		if err != nil {
 			return nil, err
