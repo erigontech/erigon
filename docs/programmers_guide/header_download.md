@@ -49,3 +49,4 @@ further Proof Of Work verification on the ancestors will be performed. Another p
 segment, the chain segments will merge, and the anchor simply disappears, superseeded by the anchor of another chain segment.
 There is also a potential optimisation, whereby the extension of a chain segment from the tip shall also decrease the `powDepth` value of its anchor.
 However, we currently leave this for future editions.
+Another attribute of an anchor is `totalDifficulty`. 
