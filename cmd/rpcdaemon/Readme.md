@@ -27,7 +27,7 @@ Run RPC daemon
 
 Try `eth_blockNumber` call. In another console/tab, use `curl` to make RPC call:
 ````
-curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber", "params": [], "id":1}' localhost:854
+curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber", "params": [], "id":1}' localhost:8545
 ````
 It should return something like this (depending on how far your turbo-geth node has synced):
 ````

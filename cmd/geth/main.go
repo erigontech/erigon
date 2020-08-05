@@ -42,10 +42,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
-
-	"net/http"
-	//nolint:gosec
-	_ "net/http/pprof"
 )
 
 const (
@@ -113,6 +109,7 @@ var (
 		utils.StorageModeFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
+		utils.LMDBMapSizeFlag,
 		utils.PrivateApiAddr,
 		utils.CacheNoPrefetchFlag,
 		utils.ListenPortFlag,
@@ -263,9 +260,6 @@ func init() {
 }
 
 func main() {
-	go func() {
-		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
-	}()
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

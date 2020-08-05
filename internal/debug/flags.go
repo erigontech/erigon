@@ -302,7 +302,9 @@ func StartPProf(enablePprof bool, enableMetrics bool, address string) {
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+		cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "?seconds=20")
+		heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
+		log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 	}
 
 	if enableMetrics {
@@ -312,7 +314,7 @@ func StartPProf(enablePprof bool, enableMetrics bool, address string) {
 		mux.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
 		// Start system runtime metrics collection
 		go metrics.CollectProcessMetrics(3 * time.Second)
-		log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+		log.Info("Starting metrics server", "addr", address)
 	}
 
 	if enableMetrics || enablePprof {

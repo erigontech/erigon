@@ -2,6 +2,12 @@ package ethdb
 
 import (
 	"context"
+	"errors"
+)
+
+var (
+	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 )
 
 type KV interface {
@@ -27,6 +33,13 @@ type Bucket interface {
 	Cursor() Cursor
 
 	Size() (uint64, error)
+}
+
+// Interface used for buckets migration, don't use it in usual app code
+type BucketMigrator interface {
+	Drop() error
+	Create() error
+	Exists() bool
 	Clear() error
 }
 
@@ -62,7 +75,6 @@ type DbProvider uint8
 
 const (
 	Bolt DbProvider = iota
-	Badger
 	Remote
 	Lmdb
 )

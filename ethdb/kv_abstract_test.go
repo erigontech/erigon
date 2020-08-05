@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
@@ -89,46 +88,30 @@ func TestManagedTx(t *testing.T) {
 func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(),
-		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
-		ethdb.NewBadger().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(), // for remote2 db
 	}
 
-	serverIn, clientOut := io.Pipe()
-	clientIn, serverOut := io.Pipe()
 	conn := bufconn.Listen(1024 * 1024)
 
 	readDBs = []ethdb.KV{
 		writeDBs[0],
-		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(),
-		writeDBs[2],
-		writeDBs[3],
+		writeDBs[1],
 		ethdb.NewRemote2().InMem(conn).MustOpen(),
 	}
 
-	serverCtx, serverCancel := context.WithCancel(context.Background())
-	go func() {
-		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
-	}()
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[4]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[2]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
 
 	return writeDBs, readDBs, func() {
-		serverIn.Close()
-		serverOut.Close()
-		clientIn.Close()
-		clientOut.Close()
 		grpcServer.Stop()
 
 		conn.Close()
-
-		serverCancel()
 
 		for _, db := range readDBs {
 			db.Close()
