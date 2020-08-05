@@ -651,11 +651,6 @@ func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 		return ethdb.NewMemDatabase(), nil
 	}
 
-	if n.config.BadgerDB {
-		log.Info("Opening Database (Badger)")
-		return ethdb.Open(n.config.ResolvePath(name + "_badger"))
-	}
-
 	if n.config.Bolt {
 		log.Info("Opening Database (Bolt)")
 		return ethdb.Open(n.config.ResolvePath(name + "_bolt"))

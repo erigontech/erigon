@@ -70,8 +70,6 @@ func Open(path string) (*ObjectDatabase, error) {
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
-	case testDB == "badger" || strings.HasSuffix(path, "_badger"):
-		kv, err = NewBadger().Path(path).Open()
 	case testDB == "bolt" || strings.HasSuffix(path, "_bolt"):
 		kv, err = NewBolt().Path(path).Open()
 	default:
@@ -421,8 +419,6 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	case *BoltKV:
 		mem = NewObjectDatabase(NewBolt().InMem().MustOpen())
-	case *badgerKV:
-		mem = NewObjectDatabase(NewBadger().InMem().MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
