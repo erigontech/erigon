@@ -75,7 +75,6 @@ type DbProvider uint8
 
 const (
 	Bolt DbProvider = iota
-	Badger
 	Remote
 	Lmdb
 )

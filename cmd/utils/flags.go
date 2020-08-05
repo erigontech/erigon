@@ -443,7 +443,7 @@ var (
 	}
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
-		Usage: "Which database software to use? Currently supported values: badger & bolt & lmdb",
+		Usage: "Which database software to use? Currently supported values: bolt & lmdb",
 		Value: "lmdb",
 	}
 	PrivateApiAddr = cli.StringFlag{
@@ -1279,8 +1279,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	}
 
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
-	cfg.BadgerDB = strings.EqualFold(databaseFlag, "badger") //case insensitive
-	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb")       //case insensitive
+	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb") //case insensitive
 	if cfg.LMDB && ctx.GlobalString(LMDBMapSizeFlag.Name) != "" {
 		var size datasize.ByteSize
 		err := size.UnmarshalText([]byte(ctx.GlobalString(LMDBMapSizeFlag.Name)))

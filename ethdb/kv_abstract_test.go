@@ -90,7 +90,6 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
-		ethdb.NewBadger().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(), // for remote2 db
 	}
@@ -103,7 +102,6 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 		writeDBs[0],
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(),
 		writeDBs[2],
-		writeDBs[3],
 		ethdb.NewRemote2().InMem(conn).MustOpen(),
 	}
 
@@ -113,7 +111,7 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	}()
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[4]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[3]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
