@@ -10,15 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+)
 
-	"github.com/c2h5oh/datasize"
+const (
+	NonExistingDBI = 999_999_999
 )
 
 var (
-	LMDBMapSize = 4 * datasize.TB
+	LMDBMapSize = 2 * datasize.TB
 )
 
 type lmdbOpts struct {
@@ -85,30 +88,18 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	db := &LmdbKV{
-		opts: opts,
-		env:  env,
-		log:  logger,
-		wg:   &sync.WaitGroup{},
+		opts:    opts,
+		env:     env,
+		log:     logger,
+		wg:      &sync.WaitGroup{},
+		buckets: map[string]lmdb.DBI{},
 	}
 
-	db.buckets = make([]lmdb.DBI, len(dbutils.Buckets))
+	// Open or create buckets
 	if opts.readOnly {
-		if err := env.View(func(tx *lmdb.Txn) error {
-			for _, name := range dbutils.Buckets {
-				dbi, createErr := tx.OpenDBI(string(name), 0)
-				if createErr != nil {
-					return createErr
-				}
-				db.buckets[dbutils.BucketsCfg[string(name)].ID] = dbi
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := env.Update(func(tx *lmdb.Txn) error {
-			for id := range dbutils.Buckets {
-				if err := createBucket(tx, db, id); err != nil {
+		if err := db.View(context.Background(), func(tx Tx) error {
+			for i := range dbutils.Buckets {
+				if err := tx.Bucket(dbutils.Buckets[i]).(BucketMigrator).Create(); err != nil {
 					return err
 				}
 			}
@@ -116,6 +107,36 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}); err != nil {
 			return nil, err
 		}
+	} else {
+		if err := db.Update(context.Background(), func(tx Tx) error {
+			for i := range dbutils.Buckets {
+				if err := tx.Bucket(dbutils.Buckets[i]).(BucketMigrator).Create(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// Open deprecated buckets if they exist, don't create
+	if err := env.View(func(tx *lmdb.Txn) error {
+		for _, name := range dbutils.DeprecatedBuckets {
+			dbi, createErr := tx.OpenDBI(string(name), 0)
+			if createErr != nil {
+				if lmdb.IsNotFound(createErr) {
+					db.buckets[string(name)] = NonExistingDBI // some non-existing DBI
+					continue                                  // if deprecated bucket couldn't be open - then it's deleted and it's fine
+				} else {
+					return createErr
+				}
+			}
+			db.buckets[string(name)] = dbi
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	if !opts.inMem {
@@ -127,21 +148,6 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	return db, nil
-}
-
-func createBucket(tx *lmdb.Txn, db *LmdbKV, id int) error {
-	var flags uint = lmdb.Create
-	name := string(dbutils.Buckets[id])
-	cfg := dbutils.BucketsCfg[name]
-	if cfg.IsDupsort {
-		flags |= lmdb.DupSort
-	}
-	dbi, err := tx.OpenDBI(name, flags)
-	if err != nil {
-		return err
-	}
-	db.buckets[id] = dbi
-	return nil
 }
 
 func (opts lmdbOpts) MustOpen() KV {
@@ -156,7 +162,7 @@ type LmdbKV struct {
 	opts                lmdbOpts
 	env                 *lmdb.Env
 	log                 log.Logger
-	buckets             []lmdb.DBI
+	buckets             map[string]lmdb.DBI
 	stopStaleReadsCheck context.CancelFunc
 	wg                  *sync.WaitGroup
 }
@@ -199,13 +205,6 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
-func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
-	if cfg, ok := dbutils.BucketsCfg[string(bucket)]; ok {
-		return db.buckets[cfg.ID]
-	}
-	panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(bucket)))
-}
-
 func (db *LmdbKV) IdealBatchSize() int {
 	return 50 * 1024 * 1024 // 50 Mb
 }
@@ -240,10 +239,10 @@ type lmdbTx struct {
 }
 
 type lmdbBucket struct {
-	id        int
 	isDupsort bool
 	dupFrom   int
 	dupTo     int
+	name      []byte
 	tx        *lmdbTx
 	dbi       lmdb.DBI
 }
@@ -286,13 +285,72 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	})
 }
 
+func (b *lmdbBucket) Create() error {
+	var flags uint = 0
+	if !b.tx.db.opts.readOnly {
+		flags |= lmdb.Create
+	}
+	if b.isDupsort {
+		flags |= lmdb.DupSort
+	}
+	dbi, err := b.tx.tx.OpenDBI(string(b.name), flags)
+	if err != nil {
+		return err
+	}
+	b.tx.db.buckets[string(b.name)] = dbi
+	b.dbi = dbi
+	return nil
+}
+
+func (b *lmdbBucket) dropEvenIfBucketIsNotDeprecated() error {
+	// if bucket was not open on db start, then it's may be deprecated
+	// try to open it now without `Create` flag, and if fail then nothing to drop
+	if b.dbi == NonExistingDBI {
+		var err error
+		b.dbi, err = b.tx.tx.OpenDBI(string(b.name), 0)
+		if err != nil {
+			if lmdb.IsNotFound(err) {
+				return nil // DBI doesn't exists means no drop needed
+			}
+			return err
+		}
+	}
+	if err := b.tx.tx.Drop(b.dbi, true); err != nil {
+		return err
+	}
+	b.tx.db.buckets[string(b.name)] = NonExistingDBI
+	b.dbi = NonExistingDBI
+	return nil
+}
+
+func (b *lmdbBucket) Clear() error {
+	if err := b.dropEvenIfBucketIsNotDeprecated(); err != nil {
+		return nil
+	}
+	return b.Create()
+}
+
+func (b *lmdbBucket) Drop() error {
+	for i := range dbutils.Buckets {
+		if bytes.Equal(dbutils.Buckets[i], b.name) {
+			return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, b.name)
+		}
+	}
+
+	return b.dropEvenIfBucketIsNotDeprecated()
+}
+
+func (b *lmdbBucket) Exists() bool {
+	return b.dbi != NonExistingDBI
+}
+
 func (tx *lmdbTx) Bucket(name []byte) Bucket {
 	cfg, ok := dbutils.BucketsCfg[string(name)]
 	if !ok {
-		panic(fmt.Errorf("unknown bucket: %s. add it to dbutils.Buckets", string(name)))
+		panic(fmt.Errorf("%w: %s", ErrUnknownBucket, string(name)))
 	}
 
-	return &lmdbBucket{tx: tx, id: cfg.ID, dbi: tx.db.buckets[cfg.ID], isDupsort: cfg.IsDupsort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen}
+	return &lmdbBucket{tx: tx, dbi: tx.db.buckets[string(name)], isDupsort: cfg.IsDupsort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen, name: name}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -405,16 +463,6 @@ func (b *lmdbBucket) Size() (uint64, error) {
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
-func (b *lmdbBucket) Clear() error {
-	if err := b.tx.tx.Drop(b.dbi, true); err != nil {
-		return err
-	}
-	if err := createBucket(b.tx.tx, b.tx.db, b.id); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (b *lmdbBucket) Cursor() Cursor {
 	return &LmdbCursor{bucket: b, ctx: b.tx.ctx}
 }
@@ -469,7 +517,7 @@ func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		err = fmt.Errorf("failed LmdbKV cursor.Seek(): %w, bucket: %d %s, isDupsort: %t, key: %x", err, c.bucket.id, dbutils.Buckets[c.bucket.id], c.bucket.isDupsort, seek)
+		err = fmt.Errorf("failed LmdbKV cursor.Seek(): %w, bucket: %s, isDupsort: %t, key: %x", err, c.bucket.name, c.bucket.isDupsort, seek)
 		return []byte{}, nil, err
 	}
 	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
@@ -623,7 +671,7 @@ func (c *LmdbCursor) Delete(key []byte) error {
 func (c *LmdbCursor) deleteDupSort(key []byte) error {
 	b := c.bucket
 	if len(key) != b.dupFrom && len(key) >= b.dupTo {
-		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", dbutils.Buckets[b.id], b.dupFrom, b.dupTo, key)
+		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", b.name, b.dupFrom, b.dupTo, key)
 	}
 
 	if len(key) == b.dupFrom {
@@ -660,7 +708,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 	}
 
 	if len(key) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucket.name)
 	}
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
@@ -678,7 +726,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	b := c.bucket
 	if len(key) != b.dupFrom && len(key) >= b.dupTo {
-		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", dbutils.Buckets[b.id], b.dupFrom, b.dupTo, key)
+		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", b.name, b.dupFrom, b.dupTo, key)
 	}
 
 	if len(key) != b.dupFrom {
@@ -754,7 +802,7 @@ func (c *LmdbCursor) putCurrent(key []byte, value []byte) error {
 // Danger: if provided data will not sorted (or bucket have old records which mess with new in sorting manner) - db will corrupt.
 func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	if len(key) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", dbutils.Buckets[c.bucket.id])
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucket.name)
 	}
 
 	if c.cursor == nil {
@@ -765,7 +813,7 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	b := c.bucket
 	if b.isDupsort {
 		if len(key) != b.dupFrom && len(key) >= b.dupTo {
-			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", dbutils.Buckets[b.id], b.dupFrom, b.dupTo, key)
+			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", b.name, b.dupFrom, b.dupTo, key)
 		}
 
 		if len(key) == b.dupFrom {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/spf13/cobra"
 	"os"
 	"os/signal"
@@ -18,6 +20,14 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
+		}
+
+		if len(chaindata) > 0 {
+			db := ethdb.MustOpen(chaindata)
+			defer db.Close()
+			if err := migrations.NewMigrator().Apply(db, ""); err != nil {
+				panic(err)
+			}
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

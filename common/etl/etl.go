@@ -53,7 +53,7 @@ func NextKey(key []byte) ([]byte, error) {
 // loaded from files into a DB
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
-type LoadCommitHandler func(ethdb.Putter, []byte, bool) error
+type LoadCommitHandler func(db ethdb.Putter, key []byte, isDone bool) error
 
 type TransformArgs struct {
 	ExtractStartKey []byte
