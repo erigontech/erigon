@@ -113,6 +113,7 @@ var (
 		utils.StorageModeFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
+		utils.LMDBMapSizeFlag,
 		utils.PrivateApiAddr,
 		utils.CacheNoPrefetchFlag,
 		utils.ListenPortFlag,
