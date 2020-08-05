@@ -10,19 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/c2h5oh/datasize"
 )
 
 const (
-	LMDBMapSize    = 2 * 1024 * 1024 * 1024 * 1024 // 2TB
 	NonExistingDBI = 999_999_999
 )
 
 var (
-	LMDBMapSize = 4 * datasize.TB
+	LMDBMapSize = 2 * datasize.TB
 )
 
 type lmdbOpts struct {
