@@ -28,4 +28,10 @@ Newly found bad block headers need to be immediately written to the database, be
 ### Chain segment
 At any point in time, the headers that have been downloaded and placed into the buffer or into one of the files, can be viewed as a collection of chain
 segments like this:
-
+![header_download_1](header_download_1.png)
+The reason why we may need to maintain multiple chain segments instead of just one, is this potential optimisation. If we have some hindsight knowledge
+about the header chain that is being downloaded, we can hard-code the hashes of block headers at some intermediate block heights. For example, at every
+height which is multiple of 4096. Assuming that the maximum height is on the order of tens of millions, we only need to hard-code around a thousand
+32-byte values (block hash), together with total difficulty number (maximum 32 byte), which is trivial. Having these hard-coded anchors, we can
+download different chain segments from different peers to better utilise the network connectivity.
+Each segment has exactly one anchor
