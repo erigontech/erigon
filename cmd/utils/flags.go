@@ -33,6 +33,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
@@ -756,6 +757,13 @@ var (
 		Usage: "External EVM configuration (default = built-in interpreter)",
 		Value: "",
 	}
+
+	// LMDB flags
+	LMDBMapSizeFlag = cli.StringFlag{
+		Name:  "lmdb.mapSize",
+		Usage: "Sets Memory map size. Lower it if you have issues with opening the DB",
+		Value: ethdb.LMDBMapSize.String(),
+	}
 )
 
 // MakeDataDir retrieves the currently requested data directory, terminating
@@ -1274,7 +1282,27 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.BadgerDB = strings.EqualFold(databaseFlag, "badger") //case insensitive
 	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb")       //case insensitive
-	cfg.Bolt = strings.EqualFold(databaseFlag, "bolt")       //case insensitive
+	if cfg.LMDB && ctx.GlobalString(LMDBMapSizeFlag.Name) != "" {
+		var size datasize.ByteSize
+		err := size.UnmarshalText([]byte(ctx.GlobalString(LMDBMapSizeFlag.Name)))
+		if err != nil {
+			log.Error("Invalid LMDB map size provided. Will use defaults",
+				"lmdb.mapSize", ethdb.LMDBMapSize.HumanReadable(),
+				"err", err,
+			)
+		} else {
+			if size < 1*datasize.GB {
+				log.Error("Invalid LMDB map size provided. Will use defaults",
+					"lmdb.mapSize", ethdb.LMDBMapSize.HumanReadable(),
+					"err", "the value should be at least 1 GB",
+				)
+			} else {
+				ethdb.LMDBMapSize = size
+				log.Info("Set LMDB map size", "lmdb.mapSize", ethdb.LMDBMapSize.HumanReadable())
+			}
+		}
+	}
+	cfg.Bolt = strings.EqualFold(databaseFlag, "bolt") //case insensitive
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
