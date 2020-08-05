@@ -23,26 +23,33 @@ import (
 //		- SyncStageProgress = []byte("SSP1")
 //		+ SyncStageProgressOld1 = []byte("SSP1")
 //		+ SyncStageProgress = []byte("SSP2")
-// - clear new bucket in the beginning of transaction, drop old bucket in the end (not defer!).
+// - in the beginning of migration: check that old bucket exists, clear new bucket
+// - in the end:drop old bucket (not in defer!).
 //	Example:
-//		Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-//			if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil { // clear new bucket
-//				return err
-//			}
+//	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+//		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
+//			return err
+//		} else if !exists {
+//			return nil
+//		}
 //
-//			extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-//				... // migration logic
-//			}
-//			if err := etl.Transform(...); err != nil {
-//				return err
-//			}
+//		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
+//			return err
+//		}
 //
-//			if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
-//				return err
-//			}
-//		},
+//		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+//			... // migration logic
+//		}
+//		if err := etl.Transform(...); err != nil {
+//			return err
+//		}
+//
+//		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
+//			return err
+//		}
+//	},
 // - if you need migrate multiple buckets - create separate migration for each bucket
-// - write test for new transaction
+// - write test where apply migration twice
 var migrations = []Migration{
 	stagesToUseNamedKeys,
 	unwindStagesToUseNamedKeys,
