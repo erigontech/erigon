@@ -1,5 +1,5 @@
 # Block header download process
-This process is a collectin of data structures and algorithms to perform the task of obtaining a consistent and verified header chain from peers over the network.
+This process is a collection of data structures and algorithms to perform the task of obtaining a consistent and verified header chain from peers over the network.
 ## Data structures
 All data structures, except for the files, are kept in operating memory (RAM), and do not survive an interruption, a crash, or a powerdown. Therefore,
 there is `RECOVER` algorithm described later, which initialises all transitent data structures from the files.
@@ -28,7 +28,9 @@ Newly found bad block headers need to be immediately written to the database, be
 ### Chain segment
 At any point in time, the headers that have been downloaded and placed into the buffer or into one of the files, can be viewed as a collection of chain
 segments like this:
+
 ![header_download_1](header_download_1.png)
+
 The reason why we may need to maintain multiple chain segments instead of just one, is this potential optimisation. If we have some hindsight knowledge
 about the header chain that is being downloaded, we can hard-code the hashes of block headers at some intermediate block heights. For example, at every
 height which is multiple of 4096. Assuming that the maximum height is on the order of tens of millions, we only need to hard-code around a thousand
