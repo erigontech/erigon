@@ -189,7 +189,7 @@ func copyCompact() error {
 	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
-	if err := env.SetMapSize(ethdb.LMDBMapSize); err != nil {
+	if err := env.SetMapSize(int64(ethdb.LMDBMapSize.Bytes())); err != nil {
 		return err
 	}
 
