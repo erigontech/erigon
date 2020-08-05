@@ -148,6 +148,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.CacheNoPrefetchFlag,
 			utils.TrieCacheGenFlag,
 			utils.DatabaseFlag,
+			utils.LMDBMapSizeFlag,
 		},
 	},
 	{

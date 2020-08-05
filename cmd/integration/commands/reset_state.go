@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -161,11 +162,14 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 func printStages(db *ethdb.ObjectDatabase) error {
 	var err error
 	var progress uint64
+	w := new(tabwriter.Writer)
+	defer w.Flush()
+	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
 		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
-		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+		fmt.Fprintf(w, "%s \t %d\n", string(stages.DBKeys[stage]), progress)
 	}
 	return nil
 }
@@ -189,7 +193,7 @@ func copyCompact() error {
 	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
-	if err := env.SetMapSize(ethdb.LMDBMapSize); err != nil {
+	if err := env.SetMapSize(int64(ethdb.LMDBMapSize.Bytes())); err != nil {
 		return err
 	}
 
