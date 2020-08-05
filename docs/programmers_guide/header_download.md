@@ -36,4 +36,16 @@ about the header chain that is being downloaded, we can hard-code the hashes of 
 height which is multiple of 4096. Assuming that the maximum height is on the order of tens of millions, we only need to hard-code around a thousand
 32-byte values (block hash), together with total difficulty number (maximum 32 byte), which is trivial. Having these hard-coded anchors, we can
 download different chain segments from different peers to better utilise the network connectivity.
-Each segment has exactly one anchor
+Each segment has exactly one anchor. Every anchor maintains an integer attribute `powDepth`, meaning how "deep" after this anchor the ancestral block headers
+need their Proof Of Work verified. Value `0` means that there is no need to verify Proof Of Work on any ancestral block headers. All hard-coded anchors come
+with `powDepth=0`. Other anchors (created by announced blocks or block hashes), start with `powDepth` equal to some configured value (for example, `65536`,
+which is equivalent to rought 16 days of block time), and every time the chain segement is extended by moving its anchor "down", the `powDepth` is also
+decreased by the height of the extension.
+
+![header_download_2](header_download_2.png)
+
+Eventually, the growing chain segement can reach the configured size, at which point the `powDepth` attribute of its anchor will drop to `0`, and no
+further Proof Of Work verification on the ancestors will be performed. Another possibility is that the anchor will match with a tip of another chain
+segment, the chain segments will merge, and the anchor simply disappears, superseeded by the anchor of another chain segment.
+There is also a potential optimisation, whereby the extension of a chain segment from the tip shall also decrease the `powDepth` value of its anchor.
+However, we currently leave this for future editions.
