@@ -112,14 +112,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if blockNum-s.BlockNumber == 100000 {
 				// Flush the CPU profiler
 				pprof.StopCPUProfile()
-
-				// And the memory profiler
-				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
-				runtime.GC()
-				if err = pprof.WriteHeapProfile(f); err != nil {
-					log.Error("could not save memory profile", "error", err)
-				}
-				f.Close()
 			}
 		}
 
