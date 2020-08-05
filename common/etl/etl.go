@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -120,12 +121,15 @@ func extractBucketIntoFiles(
 	return collector.flushBuffer(nil, true)
 }
 func disposeProviders(providers []dataProvider) {
+	totalSize := uint64(0)
 	for _, p := range providers {
-		err := p.Dispose()
+		providerSize, err := p.Dispose()
 		if err != nil {
 			log.Warn("promoting hashed state, error while disposing provider", "provier", p, "err", err)
 		}
+		totalSize += providerSize
 	}
+	log.Info("etl: temp files removed successfully", "total size", datasize.ByteSize(totalSize).HumanReadable())
 }
 
 type bucketState struct {

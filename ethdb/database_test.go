@@ -40,13 +40,6 @@ func newTestBoltDB() (Database, func()) {
 	}
 }
 
-func newTestBadgerDB() (Database, func()) {
-	db := NewObjectDatabase(NewBadger().InMem().MustOpen())
-	return db, func() {
-		db.Close()
-	}
-}
-
 func newTestLmdb() *ObjectDatabase {
 	return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 }
@@ -64,13 +57,6 @@ func TestBoltDB_PutGet(t *testing.T) {
 func TestMemoryDB_PutGet(t *testing.T) {
 	db := NewMemDatabase()
 	defer db.Close()
-	testPutGet(db, t)
-	testNoPanicAfterDbClosed(db, t)
-}
-
-func TestBadgerDB_PutGet(t *testing.T) {
-	db, remove := newTestBadgerDB()
-	defer remove()
 	testPutGet(db, t)
 	testNoPanicAfterDbClosed(db, t)
 }
@@ -218,12 +204,6 @@ func TestLMDB_ParallelPutGet(t *testing.T) {
 	testParallelPutGet(db)
 }
 
-func TestBadgerDB_ParallelPutGet(t *testing.T) {
-	db, remove := newTestBadgerDB()
-	defer remove()
-	testParallelPutGet(db)
-}
-
 func testParallelPutGet(db MinDatabase) {
 	const n = 8
 	var pending sync.WaitGroup
@@ -288,12 +268,6 @@ func TestMemoryDB_Walk(t *testing.T) {
 
 func TestBoltDB_Walk(t *testing.T) {
 	db, remove := newTestBoltDB()
-	defer remove()
-	testWalk(db, t)
-}
-
-func TestBadgerDB_Walk(t *testing.T) {
-	db, remove := newTestBadgerDB()
 	defer remove()
 	testWalk(db, t)
 }

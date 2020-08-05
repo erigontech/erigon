@@ -14,7 +14,7 @@ import (
 
 type dataProvider interface {
 	Next(decoder Decoder) ([]byte, []byte, error)
-	Dispose() error
+	Dispose() (uint64, error)
 }
 
 type fileDataProvider struct {
@@ -74,16 +74,20 @@ func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 	return readElementFromDisk(decoder)
 }
 
-func (p *fileDataProvider) Dispose() error {
+func (p *fileDataProvider) Dispose() (uint64, error) {
+	info, errStat := os.Stat(p.file.Name())
 	errClose := p.file.Close()
 	errRemove := os.Remove(p.file.Name())
 	if errClose != nil {
-		return errClose
+		return 0, errClose
 	}
 	if errRemove != nil {
-		return errRemove
+		return 0, errRemove
 	}
-	return nil
+	if errStat != nil {
+		return 0, errStat
+	}
+	return uint64(info.Size()), nil
 }
 
 func (p *fileDataProvider) String() string {
@@ -119,8 +123,8 @@ func (p *memoryDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 	return entry.key, entry.value, nil
 }
 
-func (p *memoryDataProvider) Dispose() error {
-	return nil
+func (p *memoryDataProvider) Dispose() (uint64, error) {
+	return 0 /* doesn't take space on disk */, nil
 }
 
 func (p *memoryDataProvider) String() string {
