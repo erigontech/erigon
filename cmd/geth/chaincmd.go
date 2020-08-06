@@ -231,8 +231,7 @@ func initGenesis(ctx *cli.Context) error {
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
-
-	// Open an initialise both full and light databases
+	// Open and initialise both full and light databases
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
@@ -365,7 +364,8 @@ func importPreimages(ctx *cli.Context) error {
 	if len(ctx.Args()) < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
-	stack, _ := makeFullNode(ctx)
+
+	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
 	diskdb := utils.MakeChainDatabase(ctx, stack)
@@ -383,7 +383,8 @@ func exportPreimages(ctx *cli.Context) error {
 	if len(ctx.Args()) < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
-	stack, _ := makeFullNode(ctx)
+
+	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
 	diskdb := utils.MakeChainDatabase(ctx, stack)
@@ -405,7 +406,7 @@ func copyDb(ctx *cli.Context) error {
 		utils.Fatalf("Source ancient chain directory path argument missing")
 	}
 	// Initialize a new chain for the running node to sync into
-	stack, _ := makeFullNode(ctx)
+	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
 	chainConfig, chain, chainDb := utils.MakeChain(ctx, stack, false)
@@ -503,7 +504,7 @@ func confirmAndRemoveDB(database string, kind string) {
 }
 
 func dump(ctx *cli.Context) error {
-	stack, _ := makeFullNode(ctx)
+	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
 	_, chain, chainDb := utils.MakeChain(ctx, stack, true)
