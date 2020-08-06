@@ -108,7 +108,19 @@ func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 
 ### Buffer Types
 
-Before the data is being flushed into temp files, 
+Before the data is being flushed into temp files, it is getting collected into
+a buffer until if overflows (`etl.ExtractArgs.BufferSize`).
+
+There are different types of buffers available with different behaviour.
+
+* `SortableSliceBuffer` -- just append `(k, v1)`, `(k, v2)` onto a slice. Duplicate keys
+    will lead to duplicate entries: `[(k, v1) (k, v2)]`.
+
+* `SortableAppendBuffer` -- on duplicate keys: merge. `(k, v1)`, `(k, v2)`
+    will lead to `k: [v1 v2]`
+
+* `SortableOldestAppearedBuffer` -- on duplicate keys: keep the oldest. `(k,
+    v1)`, `(k v2)` will lead to `k: v1`
 
 ### Transforming Objects
 
