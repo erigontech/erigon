@@ -129,7 +129,9 @@ func disposeProviders(providers []dataProvider) {
 		}
 		totalSize += providerSize
 	}
-	log.Info("etl: temp files removed successfully", "total size", datasize.ByteSize(totalSize).HumanReadable())
+	if totalSize > 0 {
+		log.Info("etl: temp files removed successfully", "total size", datasize.ByteSize(totalSize).HumanReadable())
+	}
 }
 
 type bucketState struct {
