@@ -12,6 +12,10 @@ const (
 	absStackLen = 32
 )
 
+const (
+	DEBUG = true
+)
+
 type AbsElmType int
 
 const (
@@ -118,8 +122,10 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 		}
 	}
 
-	fmt.Printf("\nResolve: %v %v\n", pc0, stmt)
-	printEdges(edges)
+	if DEBUG {
+		fmt.Printf("\nResolve: %v %v\n", pc0, stmt)
+		printEdges(edges)
+	}
 
 	return edges
 }
@@ -210,11 +216,19 @@ func getStmts(prog *Contract) []stmt {
 	return stmts
 }
 
-func printEdges(edges []edge) {
+func reverseSortEdges(edges []edge) {
+	sort.SliceStable(edges, func(i, j int) bool {
+		return edges[i].pc0 > edges[j].pc0
+	})
+}
+
+func sortEdges(edges []edge) {
 	sort.SliceStable(edges, func(i, j int) bool {
 		return edges[i].pc0 < edges[j].pc0
 	})
+}
 
+func printEdges(edges []edge) {
 	for _, edge := range edges {
 		fmt.Printf("%v\n", edge)
 	}
@@ -269,25 +283,29 @@ func AbsIntCfgHarness(prog *Contract) error {
 	D[startPC] = startSt()
 
 	stmts := getStmts(prog)
-	printStmts(stmts)
+	if DEBUG { printStmts(stmts) }
 
+	i := 0
 	workList := resolve(prog, startPC, D[startPC], stmts[startPC])
 	for len(workList) > 0 {
-		print("\n\n")
-		fmt.Println("worklist:")
-		printEdges(workList)
+		//sortEdges(workList)
+
+		if DEBUG { fmt.Printf("\n\n%v worklist:\n", i); printEdges(workList) }
 
 		var e edge
 		e, workList = workList[0], workList[1:]
-		fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0])
+
+		if DEBUG { fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0]) }
 		post1 := post(D[e.pc0], e.stmt)
-		fmt.Printf("post\t\t%v\n", post1)
-		fmt.Printf("D\t\t%v\n", D[e.pc1])
+		if DEBUG { fmt.Printf("post\t\t%v\n", post1); fmt.Printf("D\t\t%v\n", D[e.pc1]) }
+
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
-			fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1])
+			if DEBUG { fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1]) }
 			workList = append(workList, resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])...)
 		}
+
+		i++
 	}
 
 	print("\nFinal resolve....")
@@ -297,12 +315,11 @@ func AbsIntCfgHarness(prog *Contract) error {
 	}
 	//need to run a DFS from the entry point to pick only reachable stmts
 
-	if edges != nil {
-		edges = getEntryReachableEdges(0, edges)
-	}
+	reachableEdges := getEntryReachableEdges(0, edges)
 
-	fmt.Printf("\n# of edges: %v\n", len(edges))
-	printEdges(edges)
+	fmt.Printf("\n# of unreachable edges: %v\n", len(edges) - len(reachableEdges))
+	fmt.Printf("\n# of total edges: %v\n", len(edges))
+	//printEdges(edges)
 
 	println("done")
 
