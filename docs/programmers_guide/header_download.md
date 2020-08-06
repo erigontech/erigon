@@ -1,9 +1,14 @@
 # Block header download process
+
 This process is a collection of data structures and algorithms to perform the task of obtaining a consistent and verified header chain from peers over the network.
+
 ## Data structures
+
 All data structures, except for the files, are kept in operating memory (RAM), and do not survive an interruption, a crash, or a powerdown. Therefore,
 there is `RECOVER` algorithm described later, which initialises all transitent data structures from the files.
+
 ### The buffer
+
 It is an append-only collection of headers, without any extra indices. The buffer is of a limited configurable size.
 Apart from block headers, the buffer may contain another type of entries that we will call "tombstones". The tombstones mark certain block hashes as
 undesirable (usually because they are part of of a fake chain produced for the purpose of frustrating the download process). Like ordinary header entries,
@@ -12,12 +17,16 @@ when the buffer is full and needs to be flushed into a file. Presence of tombsto
 persisting them into the files. This happens when an undesirable header is detected before its decendants were flushed into a file.
 Otherwise, it is possible that some undesirable headers will get into the files, and they will need to be ignored when the files are getting processed and
 entries committed to the database.
+
 ### The files
+
 Once the buffer reaches its maximum size (such that adding anorher header would cause the buffer to exceed its size limit), the entries in the buffer are
 sorted by the block height (and in the case of ties, by the block hash), in ascending order. Once sorted, the content of the buffer is flushed into a new
 file, and the buffer is cleared. The files are supposed to persist in the event of an interruption, a crash, or a powerdown. The files are deleted once
 the block headers have been successfully committed to the database, or they can be deleted manually in case of a corruption.
+
 ### Bad headers
+
 Set of block hashes that are known to correspond to invalid or prohibited block headers. The bad headers set can be initialised with hard-coded values.
 Not every invalid header needs to be added to the bad headers set. If the invalidity of a block header can be found just by examining at the header
 itself (for example, malformed structure, excessive size, wrong Proof Of Work), such block header must not be added to the bad headers set. Only if
@@ -25,7 +34,9 @@ the evidence of the invalidity is not trivial to obtain, should a block header b
 it is a part of a header chain that leads to a wrong genesis block. Another example is a blocl header with correct Proof Of Work, but incorrect
 State Root hash.
 Newly found bad block headers need to be immediately written to the database, because the cost of discovering their invalidity again needs to be avoided.
+
 ### Chain segment (anchors)
+
 At any point in time, the headers that have been downloaded and placed into the buffer or into one of the files, can be viewed as a collection of chain
 segments like this:
 
@@ -61,10 +72,12 @@ When a chain segment gets appended to an existing anchor, there are a few condit
 needs to match the hash of the attaching tip. Secondly, the difficulty calculation formula for the anchor yields the anchor's difficulty. In Ethereum, difficulty of a child block header is calculated from various attributes of that child block header (`timestamp`) and the parent block header
 (`timestamp`, `difficulty`, `blockHeight`). Therefore, anchors need to have two other attributes, `difficulty` and `timestamp`, so that the correctness
 of the calculating `difficulty` from its parent header can be verified.
-To conclude, the anchors data structure (which is a part of "the chain segments" data structure) is a mapping of anchor hashes to objects with the
-attributes `powDepth`, `totalDifficulty`, `tips`, `difficulty`, and `timestamp`.
+To conclude, the anchors data structure (which is a part of "the chain segments" data structure) is a mapping of anchor parentHashes (not hashes of
+anchors themsevles) to a collection of objects with attributes `powDepth`, `totalDifficulty`, `tips`, `difficulty`, and `timestamp`. We are talking
+about collection of objects rather than objects because there may be multiple anchor headers having the same value of Parent Hash.
 
 ### Chain segment (tips)
+
 A chain segment can contain any number of headers, all connected to one another via the value of their `ParentHash` attribute, and, ultimately,
 such tree of headers is connect to the anchor of that chain segment. Some headers in a chain segment are selected as the tips of that chain segment.
 Description of how the headers are the headers are selected to be the tips requires the definition of cumulative difficulty. Every tip (once selected)
@@ -90,4 +103,28 @@ We will call the sorted mapping of cumulative difficulties to tip hashes "the ti
 ### Working chain segements
 The anchors, the tips, and the tip limiter describe a collection of chain segements. We will this collection "working chain segments" for the
 future reference in the description of the algorithms.
+
+## Principles and invariants
+
+### When a new anchor can be created
+
+A new chain segment can only be introduced in the following 3 ways and according to specified conditions:
+1. Hard-coded anchors
+2. Anchors recovered from the files during the restrt after an interruption, a crash, or a powerdown
+3. Block announced by a peer, or a block header received from a peer, if the Proof Of Work is valid, and if the timestamp of such block or
+block header is withing a configured range from the current time measured locally. In other words, with a timestamp not too far in the past
+and not too far in the future.
+
+The condition on the block header timestamp in the point (3) is required to prevent a potential malicious peer from being able to reuse the
+same pre-generated fake chain segements again and again over a long period of time. The tips of such pre-generated fake chain segments would
+need large cumulative difficulty to be able to force genuine tips from the tip limiter. But even if they are generated at a cost of significant
+work (to pass Proof Of Work verification), they will only be useful for a limited period of time. According to the limitation in the point (3),
+we will refuse to create a new anchor and therefore ignore any of its ancestral headers (see the next principle below).
+
+### When a chain segment can be processed
+
+A chain segment constructed from a message received from a peer, can only be appended to an existing anchor of some "working chain segment.
+In other words, we would only allow appending new ancestral chain segements to existing children (or "progeny").
+Part of the new chain segment that ends up "above" the attachment point is discarded, as shown on the diagram below. If there is no anchor
+to which any header in the new segment can be appended, the entire new chain segment is discarded.
 
