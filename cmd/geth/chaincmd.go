@@ -387,7 +387,6 @@ func exportPreimages(ctx *cli.Context) error {
 	return nil
 }
 
-// TODO [Issue 144] support BadgerDB
 func copyDb(ctx *cli.Context) error {
 	// Ensure we have a source chain directory to copy
 	if len(ctx.Args()) < 1 {

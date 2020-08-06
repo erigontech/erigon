@@ -22,6 +22,14 @@ If the app is restarted in between stages, it restarts from the first stage.
 
 If the app is restared in the middle of the stage execution, it restarts from that stage, giving it the opportunity to complete.
 
+### How long do the stages take?
+
+Here is a pie chart showing the proportional time spent on each stage (it was
+taken from the full sync). It is by all means just an estimation, but it gives
+an idea.
+
+![](/docs/stagedsync_proportions.png)
+
 ## Reorgs / Unwinds
 
 Sometimes the chain makes a reorg and we need to "undo" some parts of our sync.

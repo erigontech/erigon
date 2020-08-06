@@ -51,11 +51,6 @@ func (ctx *ServiceContext) OpenDatabase(name string) (*ethdb.ObjectDatabase, err
 		return ethdb.NewMemDatabase(), nil
 	}
 
-	if ctx.Config.BadgerDB {
-		log.Info("Opening Database (Badger)")
-		return ethdb.Open(ctx.Config.ResolvePath(name + "_badger"))
-	}
-
 	if ctx.Config.Bolt {
 		log.Info("Opening Database (Bolt)")
 		return ethdb.Open(ctx.Config.ResolvePath(name + "_bolt"))

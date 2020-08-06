@@ -127,7 +127,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		var lastChangesetBlock, lastIndexBlock uint64
 		stageBucket := tx.Bucket(dbutils.SyncStageProgress)
 		if stageBucket != nil {
-			v1, err1 := stageBucket.Get([]byte{byte(stages.Execution)})
+			v1, err1 := stageBucket.Get(stages.DBKeys[stages.Execution])
 			if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
 				return nil, err1
 			}
@@ -135,9 +135,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 				lastChangesetBlock = binary.BigEndian.Uint64(v1[:8])
 			}
 			if storage {
-				v1, err1 = stageBucket.Get([]byte{byte(stages.AccountHistoryIndex)})
+				v1, err1 = stageBucket.Get(stages.DBKeys[stages.AccountHistoryIndex])
 			} else {
-				v1, err1 = stageBucket.Get([]byte{byte(stages.StorageHistoryIndex)})
+				v1, err1 = stageBucket.Get(stages.DBKeys[stages.StorageHistoryIndex])
 			}
 			if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
 				return nil, err1
@@ -559,14 +559,14 @@ func returnCorrectWalker(bucket, hBucket []byte) func(v []byte) changeset.Walker
 
 func getIndexGenerationProgress(tx ethdb.Tx, stage stages.SyncStage) (generatedTo uint64, executedTo uint64, err error) {
 	b := tx.Bucket(dbutils.SyncStageProgress)
-	v, err := b.Get([]byte{byte(stage)})
+	v, err := b.Get(stages.DBKeys[stage])
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, 0, err
 	}
 	if len(v) >= 8 {
 		generatedTo = binary.BigEndian.Uint64(v[:8])
 	}
-	v, err = b.Get([]byte{byte(stages.Execution)})
+	v, err = b.Get(stages.DBKeys[stages.Execution])
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, 0, err
 	}

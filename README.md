@@ -61,6 +61,8 @@ a simple way.
 inserting it into the main DB. That reduces write amplification and 
 DB inserts sometimes are orders of magnitude quicker.
 
+<code> 🔬 See our detailed ETL explanation [here](/common/etl/).</code>
+
 **Plain state**.
 
 **Single accounts/state trie**. Turbo-Geth uses a single Merkle trie for both

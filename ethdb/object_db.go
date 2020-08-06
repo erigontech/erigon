@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -69,8 +70,6 @@ func Open(path string) (*ObjectDatabase, error) {
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
-	case testDB == "badger" || strings.HasSuffix(path, "_badger"):
-		kv, err = NewBadger().Path(path).Open()
 	case testDB == "bolt" || strings.HasSuffix(path, "_bolt"):
 		kv, err = NewBolt().Path(path).Open()
 	default:
@@ -329,16 +328,57 @@ func (db *ObjectDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
+func (db *ObjectDatabase) BucketExists(name []byte) (bool, error) {
+	exists := false
+	if err := db.kv.View(context.Background(), func(tx Tx) error {
+		migrator, ok := tx.Bucket(name).(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
+		}
+		exists = migrator.Exists()
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
-	for _, bucket := range buckets {
-		bucket := bucket
+	for i := range buckets {
+		name := buckets[i]
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			return tx.Bucket(bucket).Clear()
+			migrator, ok := tx.Bucket(name).(BucketMigrator)
+			if !ok {
+				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
+			}
+			if err := migrator.Clear(); err != nil {
+				return err
+			}
+			return nil
 		}); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func (db *ObjectDatabase) DropBuckets(buckets ...[]byte) error {
+	for i := range buckets {
+		name := buckets[i]
+		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+			migrator, ok := tx.Bucket(name).(BucketMigrator)
+			if !ok {
+				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
+			}
+			if err := migrator.Drop(); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -379,8 +419,6 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	case *BoltKV:
 		mem = NewObjectDatabase(NewBolt().InMem().MustOpen())
-	case *badgerKV:
-		mem = NewObjectDatabase(NewBadger().InMem().MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
