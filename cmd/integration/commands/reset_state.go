@@ -22,7 +22,7 @@ import (
 
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
-	Short: "Reset StateStages (4,5,6,7,8,9) and buckets",
+	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		err := resetState(ctx)

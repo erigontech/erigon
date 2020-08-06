@@ -46,6 +46,7 @@ const (
 
 var DBKeys = map[SyncStage][]byte{
 	Headers:             []byte("Headers"),
+	BlockHashes:         []byte("BlockHashes"),
 	Bodies:              []byte("Bodies"),
 	Senders:             []byte("Senders"),
 	Execution:           []byte("Execution"),

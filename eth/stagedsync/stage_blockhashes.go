@@ -1,61 +1,56 @@
 package stagedsync
 
 import (
-	"bytes"
-	"encoding/binary"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	if len(k) != 40 {
+		return nil
+	}
+	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+}
+
 func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan struct{}) error {
-	progress := s.BlockNumber
-	batch := stateDB.NewBatch()
-	firstHash := s.StageData
-	headHash := rawdb.ReadHeadHeaderHash(stateDB).Bytes()
-	if err := stateDB.Walk(dbutils.HeaderPrefix, dbutils.HeaderKey(progress, common.BytesToHash(firstHash)), 0, func(k []byte, _ []byte) (bool, error) {
-		if err := common.Stopped(quit); err != nil {
-			return true, err
-		}
-
-		if len(k) != 40 {
-			return true, nil
-		}
-		hash := common.CopyBytes(k[8:])
-		number := common.CopyBytes(k[:8])
-		if err := batch.Put(dbutils.HeaderNumberPrefix, hash, number); err != nil {
-			return false, err
-		}
-		if batch.BatchSize() > batch.IdealBatchSize() || bytes.Equal(hash, headHash) {
-			progress = binary.BigEndian.Uint64(number)
-			if err := s.UpdateWithStageData(batch, progress, hash); err != nil {
-				return false, err
-			}
-			log.Info("Committed block hashes", "number", progress)
-			_, err := batch.Commit()
-			if err != nil {
-				return false, err
-			}
-			if bytes.Equal(hash, headHash) {
-				return true, nil
-			}
-		}
-		return true, nil
-	}); err != nil {
-		return err
+	firstHash := common.BytesToHash(s.StageData)
+	number := rawdb.ReadHeaderNumber(stateDB, firstHash)
+	var startKey []byte
+	if number == nil {
+		startKey = nil
+	} else {
+		startKey = dbutils.HeaderKey(*number, firstHash)
 	}
 
-	if err := s.UpdateWithStageData(batch, progress, headHash); err != nil {
-		return err
+	headHash := rawdb.ReadHeadHeaderHash(stateDB)
+	headNumber := rawdb.ReadHeaderNumber(stateDB, headHash)
+	endKey := dbutils.HeaderKey(*headNumber, headHash)
+
+	onLoadCommit := func(db ethdb.Putter, key []byte, isDone bool) error {
+		if len(key) == 0 {
+			return nil
+		}
+		return s.UpdateWithStageData(db, 0, key)
 	}
-	_, err := batch.Commit()
-	if err != nil {
+	if err := etl.Transform(
+		stateDB,
+		dbutils.HeaderPrefix,
+		dbutils.HeaderNumberPrefix,
+		".",
+		extractHeaders,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			ExtractStartKey: startKey,
+			ExtractEndKey:   endKey,
+			Quit:            quit,
+			OnLoadCommit:    onLoadCommit,
+		},
+	); err != nil {
 		return err
 	}
 	s.Done()
-	// Write here code
 	return nil
 }
