@@ -1,0 +1,1100 @@
+commit f5382591874220287de253bfc08b10afd5244927
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jul 27 14:53:53 2020 +0300
+
+    params: release Geth v1.9.18
+
+commit b1be9794431e513eaa95fa44ca36c134eaf04b9b
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Mon Jul 27 17:57:15 2020 +0800
+
+    params: upgrade CHTs (#21376)
+
+commit e997f92caf7f817388e6be29645f88c7639c6629
+Merge: 6793ffa12 56434bfa8
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Jul 24 15:02:52 2020 +0300
+
+    Merge pull request #21368 from holiman/update_uint256
+    
+    deps: update uint256 to v1.1.1
+
+commit 56434bfa8936c12304a4134a1a0aac421403f76d
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Jul 24 14:00:08 2020 +0200
+
+    deps: update uint256 to v1.1.1
+
+commit 6793ffa12b7d4e86ee2f66afa1647dd3f0680ea0
+Merge: 105922180 5413df1df
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Jul 24 11:14:42 2020 +0300
+
+    Merge pull request #21300 from rjl493456442/txpool-fix-queued-evictions
+    
+    core: fix queued transaction eviction
+
+commit 5413df1dfa5452053e6e4418cd4d021c4dc002cb
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Jul 8 16:27:04 2020 +0800
+
+    core: fix heartbeat in txpool
+    
+    core: address comment
+
+commit c374447401f3c33653fa4327fa9633042f09091c
+Author: villanuevawill <hello@willvillanueva.com>
+Date:   Fri May 22 21:15:01 2020 -0400
+
+    core: fix queued transaction eviction
+    
+    Solves issue#20582. Non-executable transactions should not be evicted on each tick if there are no promote transactions or if a pending/reset empties the pending list. Tests and logging expanded to handle these cases in the future.
+    
+    core/tx_pool: use a ts for each tx in the queue, but only update the heartbeat on promotion or pending replaced
+    
+    queuedTs proper naming
+
+commit 105922180fd97ed34e090a395c62e0288a6aa424
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Jul 24 09:46:26 2020 +0200
+
+    eth/downloader: refactor downloader + queue (#21263)
+    
+    * eth/downloader: refactor downloader + queue
+    
+    downloader, fetcher: throttle-metrics, fetcher filter improvements, standalone resultcache
+    
+    downloader: more accurate deliverytime calculation, less mem overhead in state requests
+    
+    downloader/queue: increase underlying buffer of results, new throttle mechanism
+    
+    eth/downloader: updates to tests
+    
+    eth/downloader: fix up some review concerns
+    
+    eth/downloader/queue: minor fixes
+    
+    eth/downloader: minor fixes after review call
+    
+    eth/downloader: testcases for queue.go
+    
+    eth/downloader: minor change, don't set progress unless progress...
+    
+    eth/downloader: fix flaw which prevented useless peers from being dropped
+    
+    eth/downloader: try to fix tests
+    
+    eth/downloader: verify non-deliveries against advertised remote head
+    
+    eth/downloader: fix flaw with checking closed-status causing hang
+    
+    eth/downloader: hashing avoidance
+    
+    eth/downloader: review concerns + simplify resultcache and queue
+    
+    eth/downloader: add back some locks, address review concerns
+    
+    downloader/queue: fix remaining lock flaw
+    
+    * eth/downloader: nitpick fixes
+    
+    * eth/downloader: remove the *2*3/4 throttling threshold dance
+    
+    * eth/downloader: print correct throttle threshold in stats
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 3a57eecc69447766ab51b6b290ff6d8656e16b3f
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Jul 23 19:15:40 2020 +0200
+
+    mobile: fix build on iOS (#21362)
+    
+    This fixes the iOS framework build by naming the second parameter of the
+    Signer interface method. The name is important because it becomes part
+    of the objc method signature.
+    
+    Fixes #21340
+
+commit 997b55236ebb5c35a87fa25dd5ec89fe6240d801
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Jul 23 12:34:08 2020 +0200
+
+    build: fix GOBIN for gomobile commands (#21361)
+
+commit 4c268e65a083e43ec5a2b96b9c93819dedd97acf
+Author: meowsbits <b5c6@protonmail.com>
+Date:   Wed Jul 22 22:47:34 2020 -0500
+
+    cmd/utils: implement configurable developer (--dev) account options (#21301)
+    
+    * geth,utils: implement configurable developer account options
+    
+    Prior to this change --dev (developer) mode
+    generated one account with an empty password,
+    irrespective of existing --password and --miner.etherbase
+    options.
+    
+    This change makes --dev mode compatible with these
+    existing flags.
+    
+    --dev mode may now be used in conjunction with
+    --password and --miner.etherbase flags to configure
+    the developer faucet using an existing keystore or
+    in creating a new account.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * main: remove key/pass flags from usage developer section
+    
+    These flags are included already in other sections,
+    and it is not desired to duplicate them.
+    
+    They were originally included in this section
+    along with added support for these flags in the
+    developer mode.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+
+commit 0b53e485d84db1dd25330622dab6ed24818f162e
+Merge: 123864fc0 9e22e912e
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Jul 22 17:39:08 2020 +0300
+
+    Merge pull request #21352 from karalabe/dev-noinit-genesis
+    
+    cmd/utils: reuse existing genesis in persistent dev mode
+
+commit 9e22e912e3781556bf85364bb51099f369ad7632
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Jul 21 15:53:47 2020 +0300
+
+    cmd/utils: reuse existing genesis in persistent dev mode
+
+commit 123864fc055482279fa61ce063b7e2aad48c0609
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Tue Jul 21 10:53:06 2020 +0200
+
+    whisper/whisperv6: improve test error messages (#21348)
+
+commit 7163a6664ee664df81b9028ab3ba13b9d65a7196
+Author: Sammy Libre <7374093+sammy007@users.noreply.github.com>
+Date:   Tue Jul 21 13:51:15 2020 +0500
+
+    ethclient: serialize negative block number as "pending" (#21177)
+    
+    Fixes #21175
+    
+    Co-authored-by: sammy007 <sammy007@users.noreply.github.com>
+    Co-authored-by: Adam Schmideg <adamschmideg@users.noreply.github.com>
+
+commit 4366c45e4ef0bbd6caa30522aa032430194c3ed1
+Author: Binacs <bin646891055@gmail.com>
+Date:   Tue Jul 21 16:23:40 2020 +0800
+
+    les: make clientPool.connectedBias configurable (#21305)
+
+commit 3a52c4dcf25bacd086abc8944175483683b79ab7
+Merge: 722b74278 508891e64
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Jul 21 10:53:12 2020 +0300
+
+    Merge pull request #21336 from karalabe/tiny-ref-optimization
+    
+    core/vm: use pointers to operations vs. copy by value
+
+commit 722b742780617a1b8e1dedb3958273e5c226cd5e
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jul 20 15:58:33 2020 +0300
+
+    params: begin v1.9.18 release cycle
+
+commit 748f22c192d24082723f935afd0b0b63e7fd50f4
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jul 20 15:56:42 2020 +0300
+
+    params: release Geth v1.9.17
+
+commit 43e2e58cbda97c22ddbb616cb74a03c7bc916833
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Mon Jul 20 20:52:42 2020 +0800
+
+    accounts, internal: fix funding check when estimating gas (#21346)
+    
+    * internal, accounts: fix funding check when estimate gas
+    
+    * accounts, internal: address comments
+
+commit 35ddf362299d05a683f2addee0c3157c288e8f98
+Merge: 9e88224eb 0fef66c73
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jul 20 11:47:13 2020 +0300
+
+    Merge pull request #21347 from karalabe/ethstats-fixes
+    
+    ethstats: fix reconnection issue, implement primus pings
+
+commit 0fef66c739c4a359ac438414d502d21ff1510fd2
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jul 20 11:11:38 2020 +0300
+
+    ethstats: fix reconnection issue, implement primus pings
+
+commit 508891e64bb1fd5165062393299597c57f5e6025
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Jul 16 15:32:01 2020 +0300
+
+    core/vm: use pointers to operations vs. copy by value
+
+commit 9e88224eb86c92c78f5f03ffcd0793704a8b4309
+Author: Nikola Madjarevic <nikola.madjarevic@gmail.com>
+Date:   Thu Jul 16 14:08:38 2020 +0200
+
+     core: raise gas limit in --dev mode, seed blake precompile (#21323)
+    
+    * Set gasLimit in --dev mode to be 9m.
+    
+    * core: Set gasLimit to 11.5 milion and add 1 wei allocation for BLAKE2b
+
+commit 295693759e5ded05fec0b2fb39359965b60da785
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Jul 16 14:06:19 2020 +0200
+
+    core/vm: less allocations for various call variants  (#21222)
+    
+    * core/vm/runtime/tests: add more benchmarks
+    
+    * core/vm: initial work on improving alloc count for calls to precompiles
+    
+    name                                  old time/op    new time/op    delta
+    SimpleLoop/identity-precompile-10M-6     117ms ±75%      43ms ± 1%  -63.09%  (p=0.008 n=5+5)
+    SimpleLoop/loop-10M-6                   79.6ms ± 4%    70.5ms ± 1%  -11.42%  (p=0.008 n=5+5)
+    
+    name                                  old alloc/op   new alloc/op   delta
+    SimpleLoop/identity-precompile-10M-6    24.4MB ± 0%     4.9MB ± 0%  -79.94%  (p=0.008 n=5+5)
+    SimpleLoop/loop-10M-6                   13.2kB ± 0%    13.2kB ± 0%     ~     (p=0.357 n=5+5)
+    
+    name                                  old allocs/op  new allocs/op  delta
+    SimpleLoop/identity-precompile-10M-6      382k ± 0%      153k ± 0%  -59.99%  (p=0.000 n=5+4)
+    SimpleLoop/loop-10M-6                     40.0 ± 0%      40.0 ± 0%     ~     (all equal)
+    
+    * core/vm: don't allocate big.int for touch
+    
+    name                                  old time/op    new time/op    delta
+    SimpleLoop/identity-precompile-10M-6    43.3ms ± 1%    42.4ms ± 7%     ~     (p=0.151 n=5+5)
+    SimpleLoop/loop-10M-6                   70.5ms ± 1%    76.7ms ± 1%   +8.67%  (p=0.008 n=5+5)
+    
+    name                                  old alloc/op   new alloc/op   delta
+    SimpleLoop/identity-precompile-10M-6    4.90MB ± 0%    2.46MB ± 0%  -49.83%  (p=0.008 n=5+5)
+    SimpleLoop/loop-10M-6                   13.2kB ± 0%    13.2kB ± 1%     ~     (p=0.571 n=5+5)
+    
+    name                                  old allocs/op  new allocs/op  delta
+    SimpleLoop/identity-precompile-10M-6      153k ± 0%       76k ± 0%  -49.98%  (p=0.029 n=4+4)
+    SimpleLoop/loop-10M-6                     40.0 ± 0%      40.0 ± 0%     ~     (all equal)
+    
+    * core/vm: reduce allocs in staticcall
+    
+    name                                  old time/op    new time/op    delta
+    SimpleLoop/identity-precompile-10M-6    42.4ms ± 7%    37.5ms ± 6%  -11.68%  (p=0.008 n=5+5)
+    SimpleLoop/loop-10M-6                   76.7ms ± 1%    69.1ms ± 1%   -9.82%  (p=0.008 n=5+5)
+    
+    name                                  old alloc/op   new alloc/op   delta
+    SimpleLoop/identity-precompile-10M-6    2.46MB ± 0%    0.02MB ± 0%  -99.35%  (p=0.008 n=5+5)
+    SimpleLoop/loop-10M-6                   13.2kB ± 1%    13.2kB ± 0%     ~     (p=0.143 n=5+5)
+    
+    name                                  old allocs/op  new allocs/op  delta
+    SimpleLoop/identity-precompile-10M-6     76.4k ± 0%      0.1k ± 0%     ~     (p=0.079 n=4+5)
+    SimpleLoop/loop-10M-6                     40.0 ± 0%      40.0 ± 0%     ~     (all equal)
+    
+    * trie: better use of hasher keccakState
+    
+    * core/state/statedb: reduce allocations in getDeletedStateObject
+    
+    * core/vm: reduce allocations in all call derivates
+    
+    * core/vm: reduce allocations in call variants
+    
+    - Make returnstack `uint32`
+    - Use a `sync.Pool` of `stack`s
+    
+    * core/vm: fix tests
+    
+    * core/vm: goimports
+    
+    * core/vm: tracer fix + staticcall gas fix
+    
+    * core/vm: add back snapshot to staticcall
+    
+    * core/vm: review concerns + make returnstack pooled + enable returndata in traces
+    
+    * core/vm: fix some test tracer method signatures
+    
+    * core/vm: run gencodec, minor comment polish
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 240d1851db25f3cca3b324bd9fb7c6edcb2a4e8e
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Wed Jul 15 10:00:04 2020 +0200
+
+    trie: quell linter in commiter.go (#21329)
+
+commit 6c9f040ebeafcc680b0c457e6f4886e2bca32527
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Jul 14 21:42:32 2020 +0200
+
+    core: transaction pool optimizations (#21328)
+    
+    * core: added local tx pool test case
+    
+    * core, crypto: various allocation savings regarding tx handling
+    
+    * core/txlist, txpool: save a reheap operation, avoid some bigint allocs
+    
+    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
+
+commit 5b081ab214d8d6373cbfdd9464f2503934b9bb68
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Tue Jul 14 10:35:32 2020 +0200
+
+    cmd/clef: change --rpcport to --http.port and update flags in docs (#21318)
+
+commit 6ef4495a8fbda46c888b8f746fa006b0dfcdcc4f
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Jul 13 22:25:45 2020 +0200
+
+    p2p/discover: require table nodes to have an IP (#21330)
+    
+    This fixes a corner case in discv5. The issue cannot happen in discv4
+    because it performs IP checks on all incoming node information.
+
+commit 79addac698d4f066b29bb90140885c815be55a07
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Tue Jul 14 02:43:30 2020 +0800
+
+    core/rawdb: better log messages for ancient failure (#21327)
+
+commit 7d5267e3a2acf273215105f04a69870e79d80d77
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Mon Jul 13 16:20:20 2020 +0200
+
+    .github: Change Code Owners (#21326)
+    
+    * modify code owners
+    
+    * add marius
+
+commit 4edbc1f2bb7892f8e77d7eb2a676e0fc7c029be0
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Mon Jul 13 18:45:39 2020 +0800
+
+    internal/ethapi: cap txfee for SignTransaction and Resend (#21231)
+
+commit 6cf6e1d7536adf5b8d3f130720848af9d820b358
+Author: Tien <Tiendo1011@gmail.com>
+Date:   Mon Jul 13 16:22:30 2020 +0700
+
+     README.md: point Go API reference link to pkg.go.dev (#21321)
+
+commit 2e08dad9e6b3b0f675d144cd41cbbef43439a8b7
+Author: libotony <liboliqi@gmail.com>
+Date:   Mon Jul 13 17:20:47 2020 +0800
+
+    p2p/discv5: unset pingEcho on pong timeout (#21324)
+
+commit af258efdb995914394b02e75b7caa952887054a5
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Jul 13 11:17:49 2020 +0200
+
+    light: goimports -w (#21325)
+
+commit 6eef141aef618afa6bfad885b544f25b68f77cc2
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Mon Jul 13 17:02:54 2020 +0800
+
+    les: historical data garbage collection (#19570)
+    
+    This change introduces garbage collection for the light client. Historical
+    chain data is deleted periodically. If you want to disable the GC, use
+    the --light.nopruning flag.
+
+commit b8dd0890b3dbc5d3c1b71a0f5de026b46993a851
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Jul 10 12:40:31 2020 +0200
+
+    params: begin v1.9.17 release cycle
+
+commit ea3b00ad75aebaf1790fe0f8afc9fb7852c87716
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Jul 10 12:38:48 2020 +0200
+
+    params: go-ethereum v1.9.16 stable
+
+commit feb40e3a4d68cee2e999c8191e78be33ba09fe5d
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Fri Jul 10 17:33:31 2020 +0800
+
+    accounts/external: remove dependency on internal/ethapi (#21319)
+    
+    Fixes #20535
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit beabf95ad7fd80db83944400348c1e42ac3b8c35
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Thu Jul 9 17:48:40 2020 +0200
+
+    cmd/geth, cmd/puppeth: replace deprecated rpc and ws flags in tests and docs (#21317)
+
+commit 6ccce0906a8391668779e1bb60f718711cc5a2c3
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Jul 9 17:45:49 2020 +0200
+
+    common/math: use math/bits intrinsics for Safe* (#21316)
+    
+    This is a resubmit of ledgerwatch/turbo-geth#556. The performance
+    benefit of this change is negligible, but it does remove a TODO.
+
+commit bcb308745010675671991522ad2a9e811938d7fb
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Jul 9 14:02:03 2020 +0200
+
+    Revert "core, txpool: less allocations when handling transactions (#21232)"
+    
+    Reverting because this change started handling account balances as
+    uint64 in the transaction pool, which is incorrect.
+    
+    This reverts commit af5c97aebe1d37486635521ef553cb8bd4bada13.
+
+commit 967d8de77aa0ee3119c209bdf47836519e46673c
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Jul 8 23:08:08 2020 +0200
+
+    eth/downloader: fix peer idleness tracking when restarting state sync (#21260)
+    
+    This fixes two issues with state sync restarts:
+    
+    When sync restarts with a new root, some peers can have in-flight requests.
+    Since all peers with active requests were marked idle when exiting sync,
+    the new sync would schedule more requests for those peers. When the
+    response for the earlier request arrived, the new sync would reject it and
+    mark the peer idle again, rendering the peer useless until it disconnected.
+    
+    The other issue was that peers would not be marked idle when they had
+    delivered a response, but the response hadn't been processed before
+    restarting the state sync. This also made the peer useless because it
+    would be permanently marked busy.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 7a556abe1504e5a698f3871d435256ad6038f1cc
+Author: ucwong <ucwong@126.com>
+Date:   Wed Jul 8 20:06:53 2020 +0800
+
+    go.mod: upgrade to github.com/golang/snappy with arm64 asm (#21304)
+
+commit 5b1cfdef898e3ce1b2e063fba23f04c9f7d1008d
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Jul 8 11:50:26 2020 +0200
+
+    eth: increase timeout in TestBroadcastBlock (#21299)
+
+commit c16967c26771ce16411aabf36fe3213da7a500a1
+Author: chris-j-h <39617426+chris-j-h@users.noreply.github.com>
+Date:   Tue Jul 7 21:23:23 2020 +0100
+
+    cmd/clef: Fix broken link in README and other minor fixes (#21303)
+
+commit 6a48ae37b27de9211165450617e73dd0d52daec6
+Author: Adam Schmideg <adamschmideg@users.noreply.github.com>
+Date:   Tue Jul 7 14:37:33 2020 +0200
+
+    cmd/devp2p: add discv4 test suite (#21163)
+    
+    This adds a test suite for discovery v4. The test suite is a port of the Hive suite for
+    discovery, and will replace the current suite on Hive soon-ish. The tests can be
+    run locally with this command:
+    
+        devp2p discv4 test -remote enode//...
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit e5871b928fb0a4caf65153b552187c5c103e24d7
+Author: chris-j-h <39617426+chris-j-h@users.noreply.github.com>
+Date:   Tue Jul 7 10:12:38 2020 +0100
+
+    cmd/clef: Update README with external v6.0.0 & internal v7.0.1 APIs (#21298)
+    
+    Changes include:
+    * Updates response docs for `account_new`, `account_list`, `account_signTransaction`
+    * Removes `account_import`, `account_export` docs
+    * Adds `account_version` docs
+    * Updates request docs for `ui_approveListing`, `ui_approveSignData`, `ui_showInfo`, `ui_showError`, `ui_onApprovedTx`
+    * Adds `ui_approveNewAccount`, `ui_onInputRequired` docs
+
+commit 6d8e51ab8850770925f3aaf79186f0398f24a702
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Tue Jul 7 04:09:30 2020 +0800
+
+    cmd, node: dump empty value config (#21296)
+
+commit 6315b6fcc04033167c8cde0b1a55fea280258fd4
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Jul 6 11:17:09 2020 +0200
+
+    rlp: reduce allocations for big.Int and byte array encoding (#21291)
+    
+    This change further improves the performance of RLP encoding by removing
+    allocations for big.Int and [...]byte types. I have added a new benchmark
+    that measures RLP encoding of types.Block to verify that performance is
+    improved.
+
+commit fa01117498a580f8de35e026f7e0ab38313868dd
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Sat Jul 4 20:10:48 2020 +0200
+
+    build/ci: handle split up listing (#21293)
+
+commit 490b380a04437d7eb780635e941fc8fa017413e7
+Author: meowsbits <b5c6@protonmail.com>
+Date:   Fri Jul 3 12:12:22 2020 -0500
+
+    cmd/geth: allow configuring metrics HTTP server on separate endpoint (#21290)
+    
+    Exposing /debug/metrics and /debug/metrics/prometheus was dependent
+    on --pprof, which also exposes other HTTP APIs. This change makes it possible
+    to run the metrics server on an independent endpoint without enabling pprof.
+
+commit 61270e5e1c7986427fb1a80789344daafd4bda3f
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Fri Jul 3 20:50:35 2020 +0800
+
+    eth/gasprice: lighter gas price oracle for light client (#20409)
+    
+    This PR reduces the bandwidth used by the light client to compute the
+    recommended gas price. The current mechanism for suggesting the price is:
+    
+    - retrieve recent 20 blocks
+    - get the lowest gas price of these blocks
+    - sort the price array and return the middle(60%) one
+    
+    This works for full nodes, which have all blocks available locally.
+    However, this is very expensive for the light client because the light
+    client needs to retrieve block bodies from the network.
+    
+    The PR changes the default options for light client. With the new config,
+    the light client only retrieves the two latest blocks, but in order to
+    collect more sample transactions, the 3 lowest prices are collected from
+    each block.
+    
+    This PR also changes the behavior for empty blocks. If the block is empty,
+    the lastest price is reused for sampling.
+
+commit 07a95ce571b2a8c183e9986040032a7049bb24f4
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Jul 2 10:15:11 2020 +0200
+
+    les/checkpointoracle: don't lookup checkpoint more than once per minute (#21285)
+    
+    * les/checkpointoracle: don't lookup checkpoint more than once per second
+    
+    * les/checkpoint/oracle: change oracle checktime to 1 minute
+
+commit 04c4e50d72e1277526df419acfb6c09cd8760233
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Jul 2 10:00:18 2020 +0200
+
+    ethapi: don't crash when keystore-specific methods are called but external signer used (#21279)
+    
+    * console: prevent importRawKey from getting into CLI history
+    
+    * internal/ethapi: error on keystore-methods when no keystore is present
+
+commit 7451fc637d0b6f1e6c32381e80c6a2fff665b6bf
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Jul 2 09:43:42 2020 +0200
+
+    internal/ethapi: default gas to maxgascap, not max int64 (#21284)
+
+commit 12867d152c3776041727aebb02f373f01318adf8
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Jul 1 19:54:21 2020 +0200
+
+    rpc, internal/ethapi: default rpc gascap at 25M + better error message (#21229)
+    
+    * rpc, internal/ethapi: default rpc gascap at 50M + better error message
+    
+    * eth,internal: make globalgascap uint64
+    
+    * core/tests: fix compilation failure
+    
+    * eth/config: gascap at 25M + minor review concerns
+
+commit af5c97aebe1d37486635521ef553cb8bd4bada13
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Jul 1 19:35:26 2020 +0200
+
+    core, txpool: less allocations when handling transactions (#21232)
+    
+    * core: use uint64 for total tx costs instead of big.Int
+    
+    * core: added local tx pool test case
+    
+    * core, crypto: various allocation savings regarding tx handling
+    
+    * Update core/tx_list.go
+    
+    * core: added tx.GasPriceIntCmp for comparison without allocation
+    
+    adds a method to remove unneeded allocation in comparison to tx.gasPrice
+    
+    * core: handle pools full of locals better
+    
+    * core/tests: benchmark for tx_list
+    
+    * core/txlist, txpool: save a reheap operation, avoid some bigint allocs
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 8dfd66f701a04589586ca77a00da5abc6d31c286
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Jul 1 13:49:19 2020 +0200
+
+    rlp: avoid list header allocation in encoder (#21274)
+    
+    List headers made up 11% of all allocations during sync. This change
+    removes most of those allocations by keeping the list header values
+    cached in the encoder buffer instead. Since encoder buffers are pooled,
+    list headers are no longer allocated in the common case where an
+    encoder buffer is available for reuse.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit ec51cbb5fb004a63a746cf29ae44d1e07d408591
+Author: Adam Schmideg <adamschmideg@users.noreply.github.com>
+Date:   Wed Jul 1 10:31:11 2020 +0200
+
+    cmd/geth: LES priority client test (#20719)
+    
+    This adds a regression test for the LES priority client API.
+
+commit d671dbd5b79d2213b92c2c187b9016c4309881c9
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue Jun 30 19:43:29 2020 +0200
+
+    eth/downloader: fixes data race between synchronize and other methods (#21201)
+    
+    * eth/downloaded: fixed datarace between synchronize and Progress
+    
+    There was a race condition between `downloader.synchronize()` and `Progress` `syncWithPeer` `fetchHeight` `findAncestors` and `processHeaders`
+    This PR changes the behavior of the downloader a bit.
+    Previously the functions `Progress` `syncWithPeer` `fetchHeight` `findAncestors` and `processHeaders` read the syncMode anew within their loops. Now they read the syncMode at the start of their function and don't change it during their runtime.
+    
+    * eth/downloaded: comment
+    
+    * eth/downloader: added comment
+
+commit 1e635bd0bd6fe64c1f5539c7e73ced297173af67
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Tue Jun 30 16:05:59 2020 +0200
+
+    go.mod: updated crypto deps causing build failure (#21276)
+
+commit b86b1e6d43dccced25ba5cd81fe4dce8400121a0
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Jun 30 15:22:21 2020 +0200
+
+    go.mod: bump gopsutil version (#21275)
+
+commit ddeea1e0c68df82c1190d3ee71aae87ed3d92bfe
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue Jun 30 11:59:06 2020 +0200
+
+    core: types: less allocations when hashing and tx handling (#21265)
+    
+    * core, crypto: various allocation savings regarding tx handling
+    
+    * core: reduce allocs for gas price comparison
+    
+    This change reduces the allocations needed for comparing different transactions to each other.
+    A call to `tx.GasPrice()` copies the gas price as it has to be safe against modifications and
+    also needs to be threadsafe. For comparing and ordering different transactions we don't need
+    these guarantees
+    
+    * core: added tx.GasPriceIntCmp for comparison without allocation
+    
+    adds a method to remove unneeded allocation in comparison to tx.gasPrice
+    
+    * core/types: pool legacykeccak256 objects in rlpHash
+    
+    rlpHash is by far the most used function in core that allocates a legacyKeccak256 object on each call.
+    Since it is so widely used it makes sense to add pooling here so we relieve the GC.
+    On my machine these changes result in > 100 MILLION less allocations and > 30 GB less allocated memory.
+    
+    * reverted some changes
+    
+    * reverted some changes
+    
+    * trie: use crypto.KeccakState instead of replicating code
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit e376d2fb31a8fa131ab1f6b9f96ac8a41c94e007
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Jun 30 10:12:51 2020 +0200
+
+    cmd/evm: add state transition tool for testing (#20958)
+    
+    This PR implements the EVM state transition tool, which is intended
+    to be the replacement for our retesteth client implementation.
+    Documentation is present in the cmd/evm/README.md file.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit dd91c7ce6ab5f140e576caecc8efe8f12ab3a6b1
+Author: Binacs <bin646891055@gmail.com>
+Date:   Tue Jun 30 15:56:40 2020 +0800
+
+    cmd: abstract `getPassPhrase` functions into one (#21219)
+    
+    * [cmd] Abstract `getPassPhrase` functions into one.
+    
+    * cmd/ethkey: fix compilation failure
+    
+    Co-authored-by: rjl493456442 <garyrong0905@gmail.com>
+
+commit c13df1458118067cbfd74d5eff03bf3f7368f8cb
+Author: meowsbits <b5c6@protonmail.com>
+Date:   Tue Jun 30 02:05:25 2020 -0500
+
+    utils: fix ineffectual miner config flags (#21271)
+    
+    Without use of global, these flags didn't actually modify
+    miner configuration, since we weren't grabbing from the
+    proper context scope, which should be global (vs. subcommand).
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+
+commit 02cea2330d6b4822b43a7fbaeacc12ddc8e8b1db
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Fri Jun 26 10:19:31 2020 +0000
+
+    eth: returned revert reason in traceTx (#21195)
+    
+    * eth: returned revert reason in traceTx
+    
+    * eth: return result data
+
+commit 413358abb915dd2cfd948f2f9a58b5bff3e672fe
+Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
+Date:   Wed Jun 24 15:01:58 2020 -0500
+
+    cmd/geth: make import cmd exit with 1 if import errors occurred (#21244)
+    
+    The import command should not return a 0 status
+    code if the import finishes prematurely becaues
+    of an import error.
+    
+    Returning the error causes the program to exit with 1
+    if the err is non nil.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+
+commit 0c82928981028e8b32b5852c38b095d2e0d26b04
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Jun 24 19:58:28 2020 +0000
+
+    core/vm: fix incorrect computation of BLS discount (#21253)
+    
+    * core/vm: fix incorrect computation of discount
+    
+    During testing on Yolov1 we found that the way geth calculates the discount
+    is not in line with the specification. Basically what we did is calculate
+    128 * Bls12381GXMulGas * discount / 1000 whenever we received more than 128 pairs
+    of values. Correct would be to calculate k * Bls12381... for k > 128.
+    
+    * core/vm: better logic for discount calculation
+    
+    * core/vm: better calculation logic, added worstcase benchmarks
+    
+    * core/vm: better benchmarking logic
+
+commit b482423e61e1e40ee4170139f24435fd57012333
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Jun 24 19:56:27 2020 +0000
+
+    trie: reduce allocs in insertPreimage (#21261)
+
+commit 93142e50c3d4ced88ca1620b4cee2038c4c145ba
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Jun 24 18:54:13 2020 +0800
+
+    eth: don't block if transaction broadcast loop fails (#21255)
+    
+    * eth: don't block if transaction broadcast loop is returned
+    
+    * eth: kick out peer if we failed to send message
+    
+    * eth: address comment
+
+commit 23f1a0b783b351cc185dd46fd5f9992c74801469
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Jun 24 12:51:32 2020 +0200
+
+    crypto/secp256k1: enable 128-bit int code and endomorphism optimization (#21203)
+    
+    * crypto/secp256k1: enable use of __int128
+    
+    This speeds up scalar & field calculations a lot.
+    
+    * crypto/secp256k1: enable endomorphism optimization
+
+commit da180ba097e9ac5bc53b8868b76191cbfeeb6a51
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Jun 24 10:41:53 2020 +0200
+
+    cmd/devp2p: add commands for node key management (#21202)
+    
+    These commands mirror the key/URL generation functions of cmd/bootnode.
+    
+        $ devp2p key generate mynode.key
+        $ devp2p key to-enode mynode.key -ip 203.0.113.21 -tcp 30304
+        enode://78a7746089baf4b8615f54a5f0b67b22b1...
+
+commit c42d1390d31cc580f0966e3681cd9cb89bfa83d9
+Merge: dce533c24 42ccb2fdb
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Jun 24 09:44:23 2020 +0300
+
+    Merge pull request #21256 from karalabe/p2p-packet-metrics
+    
+    p2p: measure packet throughput too, not just bandwidth
+
+commit 42ccb2fdbda72b9ed9fa0fbb5594ee706fb8008c
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Jun 24 09:36:20 2020 +0300
+
+    p2p: measure packet throughput too, not just bandwidth
+
+commit dce533c246fe6e6543f87e1de220a55be64d79fc
+Author: ucwong <ucwong@126.com>
+Date:   Tue Jun 23 16:46:59 2020 +0800
+
+    whisper: fix time.sleep by time.ticker in whisper_test (#21251)
+
+commit 9a188c975dfae0b138a6553389f875a0c173f59f
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Jun 19 15:43:52 2020 +0200
+
+    common/fdlimit: build on DragonflyBSD (#21241)
+    
+    * common/fdlimit: build on DragonflyBSD
+    
+    * review feedback
+
+commit 3ebfeb09fe86a14c5dd4929b481ac67f51b13569
+Author: AusIV <code@ausiv.com>
+Date:   Fri Jun 19 02:51:37 2020 -0500
+
+    core/rawdb: fix high memory usage in freezer (#21243)
+    
+    The ancients variable in the freezer is a list of hashes, which
+    identifies all of the hashes to be frozen. The slice is being allocated
+    with a capacity of `limit`, which is the number of the last block
+    this batch will attempt to add to the freezer. That means we are
+    allocating memory for all of the blocks in the freezer, not just
+    the ones to be added.
+    
+    If instead we allocate `limit - f.frozen`, we will only allocate
+    enough space for the blocks we're about to add to the freezer. On
+    mainnet this reduces usage by about 320 MB.
+
+commit 5435e0d1a1ae187f638ba3c852996713aa27d370
+Author: ucwong <ucwong@126.com>
+Date:   Thu Jun 18 23:58:49 2020 +0800
+
+    whisper : use timer.Ticker instead of sleep (#21240)
+    
+    * whisper : use timer.Ticker instead of sleep
+    
+    * lint: Fix linter error
+    
+    Co-authored-by: Guillaume Ballet <gballet@gmail.com>
+
+commit e029cc6616750e4734e285cfa9fe24b80236777e
+Author: ucwong <ucwong@126.com>
+Date:   Thu Jun 18 19:01:49 2020 +0800
+
+    go.mod: update snappy dependency (#21237)
+
+commit 56a319b9daa5228a6b22ecb1d07f8183ebd98106
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Jun 17 15:46:31 2020 +0800
+
+    cmd, eth, internal, les: add txfee cap (#21212)
+    
+    * cmd, eth, internal, les: add gasprice cap
+    
+    * cmd/utils, eth: add default value for gasprice cap
+    
+    * all: use txfee cap
+    
+    * cmd, eth: add fix
+    
+    * cmd, internal: address comments
+
+commit bcf19bc4be7d37671831c4ca3b5fa527c13afdf2
+Author: zhangsoledad <787953403@qq.com>
+Date:   Wed Jun 17 15:41:07 2020 +0800
+
+    core/rawdb: swap tailId and itemOffset for deleted items in freezer (#21220)
+    
+    * fix(freezer): tailId filenum offset were misplaced
+    
+    * core/rawdb: assume first item in freezer always start from zero
+
+commit eb9d7d15ecf08cd5104e01a8af64489f01f700b0
+Merge: a981b60c2 8523ad450
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Jun 16 11:35:16 2020 +0300
+
+    Merge pull request #21170 from duanhao0814/fix-dup-ecrecover
+    
+    core: filter out txs with invalid signatures as soon as possible
+
+commit a981b60c25e6be35ec37cf9b9625017c5fa67fdc
+Author: sixdays <lj491685571@126.com>
+Date:   Mon Jun 15 20:46:27 2020 +0800
+
+    eth/downloader: don't use defer for unlock before return (#21227)
+    
+    Co-authored-by: linjing <linjingjing@baidu.com>
+
+commit 9371b2f70c70f887999d10750440fb09fe1e184f
+Author: HackyMiner <hackyminer@gmail.com>
+Date:   Thu Jun 11 22:41:43 2020 +0900
+
+    internal/web3ext: add missing params to debug.accountRange (#21208)
+
+commit c85fdb76eeff83133cbad23111684085582abf73
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Jun 11 06:27:43 2020 +0200
+
+    go.mod: update uint256 to 1.1.0 (#21206)
+
+commit e30c0af86127fd605281bd5b3de3ce2fb8ac95aa
+Author: Yang Hau <vulxj0j8j8@gmail.com>
+Date:   Thu Jun 11 04:25:32 2020 +0800
+
+    build, internal/ethapi, crypto/bls12381: fix typos (#21210)
+    
+    speicifc -> specific
+    assigened -> assigned
+    frobenious -> frobenius
+
+commit 4a19c0e7b81e553a9e2e4ec4d50e3c2cdb957e3a
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Jun 10 17:46:13 2020 +0800
+
+    core, eth, internal: include read storage entries in structlog output (#21204)
+    
+    * core, eth, internal: extend structLog tracer
+    
+    * core/vm, internal: add storage view
+    
+    * core, internal: add slots to storage directly
+    
+    * core: remove useless
+    
+    * core: address martin's comment
+    
+    * core/vm: fix tests
+
+commit e9ba536d85b591f3314c3fd983f2e294774416a7
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Jun 9 11:39:19 2020 +0200
+
+    eth/downloader: fix spuriously failing tests (#21149)
+    
+    * eth/downloader tests: fix spurious failing test due to race between receipts/headers
+    
+    * miner tests: fix travis failure on arm64
+    
+    * eth/downloader: tests - store td in ancients too
+
+commit 89043cba75e317c9bd7ba01a8ce5af44d4fa9ca1
+Author: Natsu Kagami <natsukagami@gmail.com>
+Date:   Tue Jun 9 04:26:56 2020 -0400
+
+    accounts/abi: make GetType public again (#21157)
+
+commit d5c267fd30535610184bed914e3541a57c962ff6
+Author: Pau <pau@dabax.net>
+Date:   Tue Jun 9 10:23:42 2020 +0200
+
+    accounts/keystore: fix typo in error message (#21200)
+
+commit a0797e37f880bcaa248127be9671b0c563f73bbf
+Merge: cf6674539 80e887d7b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jun 8 16:38:05 2020 +0300
+
+    Merge pull request #21192 from karalabe/fix-escape-analysis
+    
+    core/state: avoid escape analysis fault when accessing cached state
+
+commit 80e887d7bfbbb76fa57322d6b1121f127f3275cb
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jun 8 16:11:37 2020 +0300
+
+    core/state: avoid escape analysis fault when accessing cached state
+
+commit cf6674539c589f80031f3371a71c6a80addbe454
+Author: Paweł Bylica <chfast@gmail.com>
+Date:   Mon Jun 8 14:24:40 2020 +0200
+
+    core/vm: use uint256 in EVM implementation (#20787)
+    
+    * core/vm: use fixed uint256 library instead of big
+    
+    * core/vm: remove intpools
+    
+    * core/vm: upgrade uint256, fixes uint256.NewFromBig
+    
+    * core/vm: use uint256.Int by value in Stack
+    
+    * core/vm: upgrade uint256 to v1.0.0
+    
+    * core/vm: don't preallocate space for 1024 stack items (only 16)
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 39abd92ca82e0dd6828d0ba4af987f50b20b6aea
+Author: ucwong <ucwong@126.com>
+Date:   Mon Jun 8 19:27:08 2020 +0800
+
+    ethstats: use timer instead of time.sleep (#20924)
+
+commit 45b75351378430689f8dd7eaa65fc98763276bc4
+Author: libby kent <viskovitzzz@gmail.com>
+Date:   Mon Jun 8 18:55:51 2020 +0900
+
+    cmd/ethkey: support --passwordfile in generate command (#21183)
+
+commit da06519347cb548752c833a283c320fdabcf6603
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Jun 8 11:00:17 2020 +0200
+
+    params: begin v1.9.16 release cycle
+
+commit 8523ad450dcced0d16fbb2b9b90687f789d195a9
+Author: Hao Duan <duanhao0814@gmail.com>
+Date:   Wed Jun 3 11:55:14 2020 +0800
+
+    core: filter out txs with invalid signatures as soon as possible
+    
+    Once we detect an invalid transaction during recovering signatures, we should
+    directly exclude this transaction to avoid validating the signatures hereafter.
+    
+    This should optimize the validations times of transactions with invalid signatures
+    to only one time.
