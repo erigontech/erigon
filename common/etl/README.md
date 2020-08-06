@@ -122,7 +122,10 @@ There are different types of buffers available with different behaviour.
 * `SortableOldestAppearedBuffer` -- on duplicate keys: keep the oldest. `(k,
     v1)`, `(k v2)` will lead to `k: v1`
 
-### Transforming Objects
+### Transforming Structs 
+
+Both transform functions and next functions allow only byte arrays.
+If you need to pass a struct, you will need to marshal it.
 
 ### Loading Into Database
 
