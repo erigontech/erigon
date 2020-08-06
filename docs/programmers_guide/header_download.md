@@ -79,11 +79,11 @@ about collection of objects rather than objects because there may be multiple an
 ### Chain segment (tips)
 
 A chain segment can contain any number of headers, all connected to one another via the value of their `ParentHash` attribute, and, ultimately,
-such tree of headers is connect to the anchor of that chain segment. Some headers in a chain segment are selected as the tips of that chain segment.
+such tree of headers is connected to the anchor of that chain segment. Some headers in a chain segment are selected as the tips of that chain segment.
 Description of how the headers are the headers are selected to be the tips requires the definition of cumulative difficulty. Every tip (once selected)
-has some attributes associated with it. Firstly, the `anchor` attribute, which is the hash of the anchor that this tip is (transitively) connected
-to (in other words, the tip is in the "progeny", or in the "decendants" of that anchor). The `anchor` attribute of a tip can be viewed as the inverse
-of the anchor's `tips` attribute, and both need to be updated at the same time, when the anchor or one of the tips of a chain segment changes.
+has some attributes associated with it. Firstly, the `anchorParent` attribute, which is the `ParentHash` of the anchor that this tip is (transitively)
+connected to (in other words, the tip is in the "progeny", or in the "decendants" of that anchor). The `anchorParent` attribute of a tip can be viewed
+as the inverse of the anchor's `tips` attribute, and both need to be updated at the same time, when the anchor or one of the tips of a chain segment changes.
 Secondly, the `cumulativeDifficulty` attribute of a tip stores the sum of difficulties of all headers starting from the tip all the way down
 (and including) the anchor. The cumulative difficulty, combined with the anchor's `totalDifficulty` (minus the the `difficulty` of the anchor so
 that it is not counted twice), provides a way of calculating the total difficulty of a tip.
@@ -97,10 +97,10 @@ anchors, are exempt from the limiting, and therefore, are not placed into the so
 This sorted mapping is used whenever the number of tracked tips is about to exceed the (configurable) limit. Entries with the lowest cumulative
 difficulties are removed from the mapping, as well as from the tips data structure.
 The tips data structure (which is a part of "the chain segments" data structure) is a mapping of tip hashes to objects with the attributes
-`anchor`, `cumulativeDifficulty`, `timestamp`, `difficulty`, `blockHeight`.
+`anchorParent`, `cumulativeDifficulty`, `timestamp`, `difficulty`, `blockHeight`.
 We will call the sorted mapping of cumulative difficulties to tip hashes "the tip limited data structure.
 
-### Working chain segements
+### Working chain segments
 The anchors, the tips, and the tip limiter describe a collection of chain segements. We will this collection "working chain segments" for the
 future reference in the description of the algorithms.
 
@@ -128,3 +128,50 @@ In other words, we would only allow appending new ancestral chain segements to e
 Part of the new chain segment that ends up "above" the attachment point is discarded, as shown on the diagram below. If there is no anchor
 to which any header in the new segment can be appended, the entire new chain segment is discarded.
 
+![header_download_3](header_download_3.png)
+
+Note that this restriction is applied even before any Proof Of Work verification is performed on the received headers. The anchor to which the
+received chain segment is getting appended, determines whether, and for how many headers in the segment the Proof Of Work verificatin needs to
+be done (`powDepth` attribute). As mentioned previously, the new anchor's attribute `powDepth` is calculated from the existing anchor's
+`powDepth` and the length of the part of the new chain segment that had been appended.
+
+### Invariants (TODO)
+
+## Algorithms
+Currently, the algorithms are just listed without much explanation. Detailed explanation will be added after Proof Of Concept.
+
+### Handle BlockHeadersMsg
+**Input**: BlockHeaderMsg + peer handle. **Output**: chain segment or penalty for the peer handle
+
+### Handle NewBlockMsg
+**Input**: NewBlockMsg + peer handle. **Output**: chain segment or penalty for the peer handle
+
+### Prepend
+**Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no prepend point foind", or penalty for the handle (tombstone creation)
+We do not allow prepending to the hard-coded tips (therefore tips need an extra boolean attribute `noPrepend`)
+
+### Append
+**Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no append point found", or penalty for the handle (tombstone creation)
+
+### Create anchor
+**Input**: chain segment + peer handle. **Output**: updated structures (new working chain segment) or "anchor too far in the future" or "anchor too far in the past", or penalty for the peer (e.g. invalid PoW)
+
+### Recover from files
+**Input**: the files. **Output**: working chain segments
+
+### Request more headers
+**Input**: working chain segments. **Output**: GetBlockHeadersMsg requests
+For this algorithm we will require an extra data structure, which is a priority queue containing achor parent hashes, prioritising by latest request time.
+This is to ensure we can easily handle time outs and grow all chain segements evenly (in round-robin fashion).
+
+### Handle NewBlockHashMsg
+**Input**: NewBlockHashMsg + peer handle. **Output**: GetBlockHeadersMsg request.
+
+### Flush the buffer
+**Input**: The buffer. **Output**: the files
+
+### Initiate staged sync
+Detect when to start the staged sync. Whenever a new tip is added, we check that its attribute `anchorParent` is equal to pre-configured value `0x00..00` for sync from genesis, or the hash of the last block header we have processed in the stage 1 of the staged sync. If this condition is satisfied, we take
+the attribute `totalDifficulty` of the tip and compare it to a variable `highestTotalDifficulty` (initialised to zero in the beginning). If the tip's
+`totalDifficulty` is higher than `highestTotalDifficulty`, then we set `highestTotalDifficulty` to the new value, and initiate the staged sync from
+the tip's anchor to the tip
