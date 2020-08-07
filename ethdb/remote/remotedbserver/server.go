@@ -10,11 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ugorji/go/codec"
+
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ugorji/go/codec"
 )
 
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
@@ -25,7 +28,7 @@ const Version uint64 = 2
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, closer io.Closer) error {
+func Server(ctx context.Context, db ethdb.KV, txpool txPool, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if closer != nil {
 			if err1 := closer.Close(); err1 != nil {
@@ -445,17 +448,6 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 			if err := encodeKey(encoder, k, uint32(len(v))); err != nil {
 				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
 			}
-		case remote.CmdDBDiskSize:
-			size, err := db.(ethdb.HasStats).DiskSize(ctx)
-			if err != nil {
-				return fmt.Errorf("in CmdDBDiskSize: %w", err)
-			}
-			if err := encoder.Encode(remote.ResponseOk); err != nil {
-				return fmt.Errorf("could not encode responseCode for CmdCursorSeekKey: %w", err)
-			}
-			if err := encoder.Encode(size); err != nil {
-				return fmt.Errorf("could not encode remote.CmdDBDiskSize: %w", err)
-			}
 		default:
 			logger.Error("unknown", "remote.Command", c)
 			return fmt.Errorf("unknown remote.Command %d", c)
@@ -538,12 +530,12 @@ func StartDeprecated(db ethdb.KV, addr string) {
 	}
 
 	logger.Info("Listening on", "address", netAddr)
-	go Listen(tcpCtx, ln, db)
+	go Listen(tcpCtx, ln, db, nil)
 }
 
 // Listener starts listener that for each incoming connection
 // spawn a go-routine invoking Server
-func Listen(ctx context.Context, ln net.Listener, db ethdb.KV) {
+func Listen(ctx context.Context, ln net.Listener, db ethdb.KV, txpool *core.TxPool) {
 	defer func() {
 		if err := ln.Close(); err != nil {
 			logger.Error("Could not close listener", "err", err)
@@ -583,10 +575,14 @@ func Listen(ctx context.Context, ln net.Listener, db ethdb.KV) {
 				<-ch
 			}()
 
-			err := Server(ctx, db, conn, conn, conn)
+			err := Server(ctx, db, txpool, conn, conn, conn)
 			if err != nil {
 				logger.Warn("server error", "err", err)
 			}
 		}()
 	}
+}
+
+type txPool interface {
+	AddLocal(transaction *types.Transaction) error
 }

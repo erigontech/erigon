@@ -89,17 +89,18 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	clientIn, serverOut := io.Pipe()
 	conn := bufconn.Listen(1024 * 1024)
 
+	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(),
 		writeDBs[2],
 		writeDBs[3],
-		ethdb.NewRemote2().InMem(conn).MustOpen(),
+		rdb,
 	}
 
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	go func() {
-		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
+		_ = remotedbserver.Server(serverCtx, writeDBs[1], nil, serverIn, serverOut, nil)
 	}()
 	grpcServer := grpc.NewServer()
 	go func() {

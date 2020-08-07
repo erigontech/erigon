@@ -1,6 +1,8 @@
 package migrations
 
 import (
+	"errors"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -27,7 +29,7 @@ func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImage
 	}
 
 	lastApplied, err := db.Get(dbutils.DatabaseInfoBucket, dbutils.LastAppliedMigration)
-	if err != nil && err != ethdb.ErrKeyNotFound {
+	if errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 

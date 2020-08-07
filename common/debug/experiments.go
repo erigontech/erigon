@@ -55,8 +55,8 @@ func IsBlockCompressionEnabled() bool {
 }
 
 var (
-	trackWitnessSize       bool
-	getTrackWitnessSizeLen sync.Once
+	trackWitnessSize       bool      //nolint:deadcode,varcheck,unused
+	getTrackWitnessSizeLen sync.Once //nolint:deadcode,varcheck,unused
 )
 
 var (

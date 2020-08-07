@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/service"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/urfave/cli"
@@ -81,13 +82,19 @@ func localConsole(ctx *cli.Context) error {
 	prepare(ctx)
 	stack := makeFullNode(ctx)
 
+	var ethService *eth.Ethereum
+	if err := stack.Service(&ethService); err != nil {
+		utils.Fatalf("Failed to retrieve ethereum service: %v", err)
+	}
+
 	err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		diskdb, err := ctx.OpenDatabaseWithFreezer("chaindata", "")
 		if err != nil {
 			return nil, err
 		}
-		return service.New(diskdb), nil
+		return service.New(diskdb, ethService.TxPool()), nil
 	})
+
 	if err != nil {
 		panic(err)
 	}

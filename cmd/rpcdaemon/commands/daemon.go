@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -22,7 +24,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/spf13/cobra"
 )
 
 // splitAndTrim splits input separated by a comma
@@ -45,21 +46,28 @@ type EthAPI interface {
 	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
+
+	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	//SendTx(ctx context.Context, signedTx *types.Transaction) error
+	//SendTransaction(ctx context.Context, args sign.SendTxArgs, passwd string) (common.Hash, error)
+	//SendTransaction(ctx context.Context, args sign.SendTxArgs) (common.Hash, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	db           ethdb.KV
+	txpool       ethdb.Backend
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext, txpool ethdb.Backend) *APIImpl {
 	return &APIImpl{
 		db:           db,
 		dbReader:     dbReader,
 		chainContext: chainContext,
+		txpool:       txpool,
 	}
 }
 
@@ -307,12 +315,12 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
-	var rpcAPI = []rpc.API{}
+func GetAPI(db ethdb.KV, txpool ethdb.Backend, enabledApis []string) []rpc.API {
+	var rpcAPI []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(db, dbReader, chainContext)
+	apiImpl := NewAPI(db, dbReader, chainContext, txpool)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
 
 	for _, enabledAPI := range enabledApis {
@@ -345,9 +353,10 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	enabledApis := splitAndTrim(cfg.API)
 
 	var db ethdb.KV
+	var txPool ethdb.Backend
 	var err error
 	if cfg.privateApiAddr != "" {
-		db, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		db, txPool, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return
@@ -367,7 +376,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 		return
 	}
 
-	var rpcAPI = GetAPI(db, enabledApis)
+	var rpcAPI = GetAPI(db, txPool, enabledApis)
 
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.httpListenAddress, cfg.httpPort)
 

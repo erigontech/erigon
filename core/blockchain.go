@@ -261,9 +261,13 @@ func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConf
 	// The first thing the node will do is reconstruct the verification data for
 	// the head block (ethash cache or clique voting snapshot). Might as well do
 	// it in advance.
-	bc.engine.VerifyHeader(bc, bc.CurrentHeader(), true)
+	err = bc.engine.VerifyHeader(bc, bc.CurrentHeader(), true)
+	if err != nil {
+		log.Error("can't check the head block", "err", err)
+	}
 
-	if frozen, err := bc.db.Ancients(); err == nil && frozen > 0 {
+	var frozen uint64
+	if frozen, err = bc.db.Ancients(); err == nil && frozen > 0 {
 		var (
 			needRewind bool
 			low        uint64
@@ -304,8 +308,8 @@ func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConf
 			// make sure the headerByNumber (if present) is in our current canonical chain
 			if headerByNumber != nil && headerByNumber.Hash() == header.Hash() {
 				log.Error("Found bad hash, rewinding chain", "number", header.Number, "hash", header.ParentHash)
-				bc.SetHead(header.Number.Uint64() - 1)
-				log.Error("Chain rewind was successful, resuming normal operation")
+				err = bc.SetHead(header.Number.Uint64() - 1)
+				log.Error("Chain rewind was successful, resuming normal operation", "err", err)
 			}
 		}
 	}

@@ -190,6 +190,7 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
+//nolint:unused,deadcode,varcheck
 func (db *LmdbKV) dbi(bucket []byte) lmdb.DBI {
 	if id, ok := dbutils.BucketsIndex[string(bucket)]; ok {
 		return db.buckets[id]

@@ -331,7 +331,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	)
 }
@@ -373,7 +373,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	)
 }

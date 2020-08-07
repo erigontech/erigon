@@ -58,6 +58,10 @@ type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
 }
 
+type Backend interface {
+	AddLocal([]byte) ([]byte, error)
+}
+
 type DbProvider uint8
 
 const (
