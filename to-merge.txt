@@ -97,18 +97,4 @@ Date:   Fri Aug 7 11:15:41 2020 +0200
 
     ethstats: overwrite old errors
 
-commit 8f24097836b7e9265b73cfcdb586cd967e63d656
-Merge: 3bb8a4ed3 4b9c0ea76
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Aug 7 15:27:00 2020 +0300
-
-    Merge pull request #21427 from karalabe/fix-statesync-delivery-time
-    
-    eth/downloader: save the correct delivery time for state sync
-
-commit 4b9c0ea76dd721ebd4848c6d1d7c00f517831d90
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Aug 7 15:16:29 2020 +0300
-
-    eth/downloader: save the correct delivery time for state sync
 
