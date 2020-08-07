@@ -55,27 +55,3 @@ Date:   Mon Aug 10 10:42:33 2020 +0200
 
     eth/downloader: allow all timers to exit
 
-commit 48b484c5ac537d1759c9903ce81302c298f03a84
-Merge: 06125bff8 6a53ce29a
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Aug 7 19:40:28 2020 +0300
-
-    Merge pull request #21428 from holiman/ethstats_moar
-    
-    ethstats: overwrite old errors
-
-commit 06125bff89fd08ba16ff5b2fbb173ed22e9a7137
-Merge: e401f5ff1 9fea1a5cf
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Aug 7 16:36:33 2020 +0300
-
-    Merge pull request #21429 from holiman/timerfix
-    
-    eth/downloader: set deliverytime on drops and timeouts too
-
-commit 9fea1a5cf5a0f833f30a27ca0b60c0d71b71b062
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri Aug 7 15:31:17 2020 +0200
-
-    eth/downloader: set deliverytime on drops and timeouts too
-
