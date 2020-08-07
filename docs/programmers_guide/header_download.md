@@ -96,7 +96,7 @@ tracked tips from all chain segments into a sorted mapping, sorted by cumulative
 anchors, are exempt from the limiting, and therefore, are not placed into the sorted mapping.
 This sorted mapping is used whenever the number of tracked tips is about to exceed the (configurable) limit. Entries with the lowest cumulative
 difficulties are removed from the mapping, as well as from the tips data structure.
-The change segments that are created from the hard-coded anchors, are only allowed to be extended on the anchor's side, therefore their tips need
+The chain segments that are created from the hard-coded anchors, are only allowed to be extended on the anchor's side, therefore their tips need
 to be marked as non-prependable. This is the role of another boolean attribute of a tip, `noPrepend`.
 To conclude, the tips data structure (which is a part of "the chain segments" data structure) is a mapping of tip hashes to objects with the attributes
 `anchorParent`, `cumulativeDifficulty`, `timestamp`, `difficulty`, `blockHeight`, `noPrepend`.
@@ -150,6 +150,11 @@ in the message). Vertices without outgoing edges (because `ParentHash` points to
 and they gave rise to rooted trees. So rooted forest is a collection of rooted trees. This algorithm needs to transform this
 representation into another one, more useful, which groups all headers from the same rooted tree together, and in each group, the
 root is clearly identified.
+This algorithm also checks that no headers in the message is contained in the bad header set, any child header pointing to its parent header
+within the message agree on their numbering and difficulty calculation. It also does not allow a header appearing twice in the message.
+If any of these checks fail, the algorithm returns penalty object, which includes peer handle (the same as the one passed as an input),
+and type of fault (`BadHeader`, `DuplicateHeader`, etc.). The logic of deciding which fault results in which penalty is outside of this
+algorithm.
 
 ### Handle NewBlockMsg
 **Input**: NewBlockMsg + peer handle. **Output**: chain segment or penalty for the peer handle
