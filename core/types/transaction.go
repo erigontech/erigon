@@ -173,14 +173,14 @@ func (tx *Transaction) Data() []byte           { return common.CopyBytes(tx.data
 func (tx *Transaction) Gas() uint64            { return tx.data.GasLimit }
 func (tx *Transaction) GasPrice() *uint256.Int { return new(uint256.Int).Set(&tx.data.Price) }
 func (tx *Transaction) GasPriceCmp(other *Transaction) int {
-	return tx.data.Price.Cmp(other.data.Price)
+	return tx.data.Price.Cmp(&other.data.Price)
 }
-func (tx *Transaction) GasPriceIntCmp(other *big.Int) int {
+func (tx *Transaction) GasPriceIntCmp(other *uint256.Int) int {
 	return tx.data.Price.Cmp(other)
 }
-func (tx *Transaction) Value() *uint256.Int    { return new(uint256.Int).Set(&tx.data.Amount) }
-func (tx *Transaction) Nonce() uint64          { return tx.data.AccountNonce }
-func (tx *Transaction) CheckNonce() bool       { return true }
+func (tx *Transaction) Value() *uint256.Int { return new(uint256.Int).Set(&tx.data.Amount) }
+func (tx *Transaction) Nonce() uint64       { return tx.data.AccountNonce }
+func (tx *Transaction) CheckNonce() bool    { return true }
 
 // To returns the recipient address of the transaction.
 // It returns nil if the transaction is a contract creation.

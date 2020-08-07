@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"sort"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -281,9 +282,9 @@ func (l *txList) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Tran
 	old := l.txs.Get(tx.Nonce())
 	if old != nil {
 		// threshold = oldGP * (100 + priceBump) / 100
-		a := big.NewInt(100 + int64(priceBump))
+		a := uint256.NewInt().SetUint64(100 + priceBump)
 		a = a.Mul(a, old.GasPrice())
-		b := big.NewInt(100)
+		b := uint256.NewInt().SetUint64(100)
 		threshold := a.Div(a, b)
 		// Have to ensure that the new gas price is higher than the old gas
 		// price as well as checking the percentage threshold to ensure that
@@ -492,7 +493,8 @@ func (l *txPricedList) Cap(threshold *big.Int, local *accountSet) types.Transact
 			continue
 		}
 		// Stop the discards if we've reached the threshold
-		if tx.GasPriceIntCmp(threshold) >= 0 {
+		t, _ := uint256.FromBig(threshold)
+		if tx.GasPriceIntCmp(t) >= 0 {
 			save = append(save, tx)
 			break
 		}

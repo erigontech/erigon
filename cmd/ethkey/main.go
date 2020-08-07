@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/urfave/cli"
 )
 

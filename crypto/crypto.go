@@ -72,7 +72,7 @@ func Keccak256(data ...[]byte) []byte {
 	for _, b := range data {
 		d.Write(b)
 	}
-	d.Read(b)
+	d.Read(b) //nolint:errcheck
 	return b
 }
 
@@ -83,7 +83,7 @@ func Keccak256Hash(data ...[]byte) (h common.Hash) {
 	for _, b := range data {
 		d.Write(b)
 	}
-	d.Read(h[:])
+	d.Read(h[:]) //nolint:errcheck
 	return h
 }
 

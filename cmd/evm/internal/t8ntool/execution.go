@@ -17,23 +17,23 @@
 package t8ntool
 
 import (
+	"context"
 	"fmt"
 	"math/big"
-	"os"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/consensus/misc"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/consensus/misc"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -81,7 +81,7 @@ type stEnvMarshaling struct {
 // Apply applies a set of transactions to a pre-state
 func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	txs types.Transactions, miningReward int64,
-	getTracerFn func(txIndex int) (tracer vm.Tracer, err error)) (*state.StateDB, *ExecutionResult, error) {
+	getTracerFn func(txIndex int) (tracer vm.Tracer, err error)) (ethdb.KV, *ExecutionResult, error) {
 
 	// Capture errors for BLOCKHASH operation, if we haven't been supplied the
 	// required blockhashes
@@ -98,7 +98,8 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		return h
 	}
 	var (
-		statedb     = MakePreState(rawdb.NewMemoryDatabase(), pre.Pre)
+		db          = ethdb.NewMemDatabase()
+		ibs, tds    = MakePreState(db, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, new(big.Int).SetUint64(pre.Env.Number))
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -125,8 +126,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	if chainConfig.DAOForkSupport &&
 		chainConfig.DAOForkBlock != nil &&
 		chainConfig.DAOForkBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
-		misc.ApplyDAOHardFork(statedb)
+		misc.ApplyDAOHardFork(ibs)
 	}
+
+	tds.StartNewBuffer()
 
 	for i, tx := range txs {
 		msg, err := tx.AsMessage(signer)
@@ -141,16 +144,16 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		}
 		vmConfig.Tracer = tracer
 		vmConfig.Debug = (tracer != nil)
-		statedb.Prepare(tx.Hash(), blockHash, txIndex)
-		vmContext.GasPrice = msg.GasPrice()
+		ibs.Prepare(tx.Hash(), blockHash, txIndex)
+		vmContext.GasPrice = msg.GasPrice().ToBig()
 		vmContext.Origin = msg.From()
 
-		evm := vm.NewEVM(vmContext, statedb, chainConfig, vmConfig)
-		snapshot := statedb.Snapshot()
+		evm := vm.NewEVM(vmContext, ibs, chainConfig, vmConfig)
+		snapshot := ibs.Snapshot()
 		// (ret []byte, usedGas uint64, failed bool, err error)
 		msgResult, err := core.ApplyMessage(evm, msg, gaspool)
 		if err != nil {
-			statedb.RevertToSnapshot(snapshot)
+			ibs.RevertToSnapshot(snapshot)
 			log.Info("rejected tx", "index", i, "hash", tx.Hash(), "from", msg.From(), "error", err)
 			rejectedTxs = append(rejectedTxs, i)
 			continue
@@ -162,14 +165,11 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		gasUsed += msgResult.UsedGas
 		// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
 		{
-			var root []byte
 			if chainConfig.IsByzantium(vmContext.BlockNumber) {
-				statedb.Finalise(true)
-			} else {
-				root = statedb.IntermediateRoot(chainConfig.IsEIP158(vmContext.BlockNumber)).Bytes()
+				tds.StartNewBuffer()
 			}
 
-			receipt := types.NewReceipt(root, msgResult.Failed(), gasUsed)
+			receipt := types.NewReceipt(msgResult.Failed(), gasUsed)
 			receipt.TxHash = tx.Hash()
 			receipt.GasUsed = msgResult.UsedGas
 			// if the transaction created a contract, store the creation address in the receipt.
@@ -177,7 +177,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 				receipt.ContractAddress = crypto.CreateAddress(evm.Context.Origin, tx.Nonce())
 			}
 			// Set the receipt logs and create a bloom for filtering
-			receipt.Logs = statedb.GetLogs(tx.Hash())
+			receipt.Logs = ibs.GetLogs(tx.Hash())
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 			// These three are non-consensus fields
 			//receipt.BlockHash
@@ -187,7 +187,6 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		}
 		txIndex++
 	}
-	statedb.IntermediateRoot(chainConfig.IsEIP158(vmContext.BlockNumber))
 	// Add mining reward?
 	if miningReward > 0 {
 		// Add mining reward. The mining reward may be `0`, which only makes a difference in the cases
@@ -196,60 +195,75 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		// - there are only 'bad' transactions, which aren't executed. In those cases,
 		//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 		var (
-			blockReward = big.NewInt(miningReward)
-			minerReward = new(big.Int).Set(blockReward)
-			perOmmer    = new(big.Int).Div(blockReward, big.NewInt(32))
+			blockReward = uint256.NewInt().SetUint64(uint64(miningReward))
+			minerReward = uint256.NewInt().Set(blockReward)
+			perOmmer    = uint256.NewInt().Div(blockReward, uint256.NewInt().SetUint64(32))
 		)
 		for _, ommer := range pre.Env.Ommers {
 			// Add 1/32th for each ommer included
 			minerReward.Add(minerReward, perOmmer)
 			// Add (8-delta)/8
-			reward := big.NewInt(8)
-			reward.Sub(reward, big.NewInt(0).SetUint64(ommer.Delta))
+			reward := uint256.NewInt().SetUint64(8)
+			reward.Sub(reward, uint256.NewInt().SetUint64(ommer.Delta))
 			reward.Mul(reward, blockReward)
-			reward.Div(reward, big.NewInt(8))
-			statedb.AddBalance(ommer.Address, reward)
+			reward.Div(reward, uint256.NewInt().SetUint64(8))
+			ibs.AddBalance(ommer.Address, reward)
 		}
-		statedb.AddBalance(pre.Env.Coinbase, minerReward)
+		ibs.AddBalance(pre.Env.Coinbase, minerReward)
+	}
+
+	err := ibs.FinalizeTx(context.Background(), tds.TrieStateWriter())
+	if err != nil {
+		return nil, nil, err
 	}
 	// Commit block
-	root, err := statedb.Commit(chainConfig.IsEIP158(vmContext.BlockNumber))
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not commit state: %v", err)
-		return nil, nil, NewError(ErrorEVM, fmt.Errorf("could not commit state: %v", err))
+		return nil, nil, err
 	}
+	root := roots[len(roots)-1]
 	execRs := &ExecutionResult{
 		StateRoot:   root,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: types.DeriveSha(receipts),
 		Bloom:       types.CreateBloom(receipts),
-		LogsHash:    rlpHash(statedb.Logs()),
+		LogsHash:    rlpHash(ibs.Logs()),
 		Receipts:    receipts,
 		Rejected:    rejectedTxs,
 	}
-	return statedb, execRs, nil
+	return db.KV(), execRs, nil
 }
 
-func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) *state.StateDB {
-	sdb := state.NewDatabase(db)
-	statedb, _ := state.New(common.Hash{}, sdb, nil)
+func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) (*state.IntraBlockState, *state.TrieDbState) {
+	tds := state.NewTrieDbState(common.Hash{}, db, 0)
+	statedb := state.New(tds)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		statedb.SetBalance(addr, a.Balance)
+		b, o := uint256.FromBig(a.Balance)
+		if o {
+			panic(fmt.Errorf("unexpected overflow in MakePreState"))
+		}
+		statedb.SetBalance(addr, b)
 		for k, v := range a.Storage {
-			statedb.SetState(addr, k, v)
+			statedb.SetState(addr, &k, *uint256.NewInt().SetBytes(v.Bytes())) //nolint:scopelint
 		}
 	}
-	// Commit and re-open to start with a clean state.
-	root, _ := statedb.Commit(false)
-	statedb, _ = state.New(root, sdb, nil)
-	return statedb
+	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
+	if err != nil {
+		panic(err)
+	}
+	_, err = tds.ComputeTrieRoots()
+	if err != nil {
+		panic(err)
+	}
+
+	return statedb, tds
 }
 
 func rlpHash(x interface{}) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
-	rlp.Encode(hw, x)
+	rlp.Encode(hw, x) //nolint:errcheck
 	hw.Sum(h[:0])
 	return h
 }

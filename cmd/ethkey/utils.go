@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/urfave/cli"
 )

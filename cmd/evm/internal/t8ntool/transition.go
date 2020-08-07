@@ -23,15 +23,16 @@ import (
 	"math/big"
 	"os"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/tests"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/tests"
+
+	"github.com/urfave/cli"
 )
 
 const (
@@ -99,9 +100,9 @@ func Main(ctx *cli.Context) error {
 			if prevFile != nil {
 				prevFile.Close()
 			}
-			traceFile, err := os.Create(fmt.Sprintf("trace-%d.jsonl", txIndex))
-			if err != nil {
-				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err))
+			traceFile, err1 := os.Create(fmt.Sprintf("trace-%d.jsonl", txIndex))
+			if err1 != nil {
+				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err1))
 			}
 			prevFile = traceFile
 			return vm.NewJSONLogger(logConfig, traceFile), nil
@@ -126,46 +127,46 @@ func Main(ctx *cli.Context) error {
 
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
-		decoder.Decode(inputData)
+		decoder.Decode(inputData) //nolint:errcheck
 	}
 	if allocStr != stdinSelector {
-		inFile, err := os.Open(allocStr)
-		if err != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err))
+		inFile, err1 := os.Open(allocStr)
+		if err1 != nil {
+			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
-		if err := decoder.Decode(&inputData.Alloc); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("Failed unmarshaling alloc-file: %v", err))
+		if err = decoder.Decode(&inputData.Alloc); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
 	}
 
 	if envStr != stdinSelector {
-		inFile, err := os.Open(envStr)
-		if err != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %v", err))
+		inFile, err1 := os.Open(envStr)
+		if err1 != nil {
+			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %v", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
 		var env stEnv
-		if err := decoder.Decode(&env); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("Failed unmarshaling env-file: %v", err))
+		if err = decoder.Decode(&env); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %v", err))
 		}
 		inputData.Env = &env
 	}
 
 	if txStr != stdinSelector {
-		inFile, err := os.Open(txStr)
-		if err != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err))
+		inFile, err1 := os.Open(txStr)
+		if err1 != nil {
+			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
-		var txs types.Transactions
-		if err := decoder.Decode(&txs); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("Failed unmarshaling txs-file: %v", err))
+		var txs1 types.Transactions
+		if err = decoder.Decode(&txs1); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}
-		inputData.Txs = txs
+		inputData.Txs = txs1
 	}
 
 	prestate.Pre = inputData.Alloc
@@ -179,9 +180,9 @@ func Main(ctx *cli.Context) error {
 	}
 	// Construct the chainconfig
 	var chainConfig *params.ChainConfig
-	if cConf, extraEips, err := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err != nil {
-		return NewError(ErrorVMConfig, fmt.Errorf("Failed constructing chain configuration: %v", err))
-	} else {
+	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
+		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
+	} else { //nolint:golint
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
 	}
@@ -189,14 +190,18 @@ func Main(ctx *cli.Context) error {
 	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
 
 	// Run the test and aggregate the result
-	state, result, err := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
+	db, result, err := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
 	if err != nil {
 		return err
 	}
 	// Dump the excution result
 	//postAlloc := state.DumpGenesisFormat(false, false, false)
 	collector := make(Alloc)
-	state.DumpToCollector(collector, false, false, false, nil, -1)
+
+	dumper := state.NewDumper(db, 0)
+
+	dumper.DumpToCollector(collector, false, false, false, nil, -1) //nolint:errcheck
+
 	return dispatchOutput(ctx, result, collector)
 
 }
@@ -211,7 +216,7 @@ func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 	if dumpAccount.Storage != nil {
 		storage = make(map[common.Hash]common.Hash)
 		for k, v := range dumpAccount.Storage {
-			storage[k] = common.HexToHash(v)
+			storage[common.HexToHash(k)] = common.HexToHash(v)
 		}
 	}
 	genesisAccount := core.GenesisAccount{
@@ -229,7 +234,7 @@ func saveFile(filename string, data interface{}) error {
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
-	if err = ioutil.WriteFile(filename, b, 0644); err != nil {
+	if err = ioutil.WriteFile(filename, b, 0600); err != nil {
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
 	return nil

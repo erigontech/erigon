@@ -61,9 +61,9 @@ var (
 	qosConfidenceCap = 10   // Number of peers above which not to modify RTT confidence
 	qosTuningImpact  = 0.25 // Impact that a new tuning target has on the previous value
 
-	maxQueuedHeaders         = 32 * 1024                    // [eth/62] Maximum number of headers to queue for import (DOS protection)
-	maxHeadersProcess        = 16536                        // Number of header download results to import at once into the chain
-	maxResultsProcess        = 16536                        // Number of content download results to import at once into the chain
+	maxQueuedHeaders            = 32 * 1024                         // [eth/62] Maximum number of headers to queue for import (DOS protection)
+	maxHeadersProcess           = 16536                             // Number of header download results to import at once into the chain
+	maxResultsProcess           = 16536                             // Number of content download results to import at once into the chain
 	fullMaxForkAncestry  uint64 = params.FullImmutabilityThreshold  // Maximum chain reorganisation (locally redeclared so tests can reduce it)
 	lightMaxForkAncestry uint64 = params.LightImmutabilityThreshold // Maximum chain reorganisation (locally redeclared so tests can reduce it)
 
@@ -247,13 +247,13 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.Sync
 		lightchain = chain
 	}
 	dl := &Downloader{
-		mode:          FullSync,
+		mode:          uint32(StagedSync),
 		stateDB:       stateDB,
 		mux:           mux,
-		queue:          newQueue(blockCacheItems),
-		peers:          newPeerSet(),
-		rttEstimate:    uint64(rttMaxEstimate),
-		rttConfidence:  uint64(1000000),
+		queue:         newQueue(blockCacheItems),
+		peers:         newPeerSet(),
+		rttEstimate:   uint64(rttMaxEstimate),
+		rttConfidence: uint64(1000000),
 		chainConfig:   chainConfig,
 		blockchain:    chain,
 		lightchain:    lightchain,
@@ -469,7 +469,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 	mode := d.getMode()
 
-	log.Debug("Synchronising with the network", "peer", p.id, "eth", p.version, "head", hash, "blockNumber", blockNumber, "td", td, "mode", mode)
+	log.Debug("Synchronising with the network", "peer", p.id, "eth", p.version, "head", hash, "blockNumber", blockNumber, "mode", mode)
 	defer func(start time.Time) {
 		log.Debug("Synchronisation terminated", "elapsed", common.PrettyDuration(time.Since(start)))
 	}(time.Now())
@@ -558,7 +558,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 
 	// Turbo-Geth's staged sync goes here
-	if d.mode == StagedSync {
+	if mode == StagedSync {
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
 			d.chainConfig,
@@ -582,7 +582,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
 	fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) }) // Receipts are retrieved during fast sync
-	if d.mode == FullSync {
+	if mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
 	}
 	return d.spawnSync(fetchers)
@@ -645,10 +645,11 @@ func (d *Downloader) Terminate() {
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
 	common.SafeClose(d.quitCh)
-	}
+
 	if d.stateBloom != nil {
 		d.stateBloom.Close()
 	}
+
 	d.quitLock.Unlock()
 
 	// Cancel any pending download requests
@@ -661,7 +662,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 	p.log.Debug("Retrieving remote chain height")
 
 	// Request the advertised remote head block and wait for the response
-	if d.mode == StagedSync {
+	if d.getMode() == StagedSync {
 		_, headNumber := p.peer.Head()
 		return headNumber, nil
 	}
@@ -688,7 +689,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			headers := packet.(*headerPack).headers
 			if len(headers) != 1 {
 				p.log.Warn("Multiple headers for single request", "headers", len(headers))
-				return nil, fmt.Errorf("%w: multiple headers (%d) for single request", errBadPeer, len(headers))
+				return 0, fmt.Errorf("%w: multiple headers (%d) for single request", errBadPeer, len(headers))
 			}
 			head := headers[0]
 			if (mode == FastSync || mode == LightSync) && head.Number.Uint64() < d.checkpoint {
@@ -787,8 +788,12 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 	}
 	p.log.Debug("Looking for common ancestor", "local", localHeight, "remote", remoteHeight)
 
+	maxForkAncestry := fullMaxForkAncestry
+	if d.getMode() == LightSync {
+		maxForkAncestry = lightMaxForkAncestry
+	}
 	// Recap floor value for binary search
-	if localHeight >= maxForkAncestry && d.mode != StagedSync {
+	if localHeight >= maxForkAncestry && mode != StagedSync {
 		// We're above the max reorg threshold, find the earliest fork point
 		floor = int64(localHeight - maxForkAncestry)
 	}
@@ -1077,7 +1082,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 					var head uint64
 					if mode == LightSync {
 						head = d.lightchain.CurrentHeader().Number.Uint64()
-					} else if d.mode == StagedSync {
+					} else if mode == StagedSync {
 						headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
 						headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
 						head = *headNumber
@@ -1138,7 +1143,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 			d.dropPeer(p.id)
 
 			// Finish the sync gracefully instead of dumping the gathered data though
-			if d.mode != StagedSync {
+			if mode != StagedSync {
 				for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
 					select {
 					case ch <- false:
@@ -1458,13 +1463,13 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				hashes[i] = header.Hash()
 			}
 			lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
-			if d.mode != LightSync && d.mode != StagedSync {
+			if mode != LightSync && mode != StagedSync {
 				lastFastBlock = d.blockchain.CurrentFastBlock().Number()
 				lastBlock = d.blockchain.CurrentBlock().Number()
 			}
 			d.lightchain.Rollback(hashes)
 			curFastBlock, curBlock := common.Big0, common.Big0
-			if d.mode != LightSync && d.mode != StagedSync {
+			if mode != LightSync && mode != StagedSync {
 				curFastBlock = d.blockchain.CurrentFastBlock().Number()
 				curBlock = d.blockchain.CurrentBlock().Number()
 			}
@@ -1488,7 +1493,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 			// Terminate header processing if we synced up
 			if len(headers) == 0 {
 				// Notify everyone that headers are fully processed
-				if d.mode != StagedSync {
+				if mode != StagedSync {
 					for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
 						select {
 						case ch <- false:
@@ -1508,7 +1513,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				// L: Sync begins, and finds common ancestor at 11
 				// L: Request new headers up from 11 (R's TD was higher, it must have something)
 				// R: Nothing to give
-				if d.mode != LightSync && d.mode != StagedSync {
+				if mode != LightSync && mode != StagedSync {
 					head := d.blockchain.CurrentBlock()
 					if !gotHeaders && blockNumber > head.NumberU64() {
 						return errStallingPeer
@@ -1545,7 +1550,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				}
 				chunk := headers[:limit]
 				// In case of header only syncing, validate the chunk immediately
-				if d.mode == FastSync || d.mode == LightSync || d.mode == StagedSync {
+				if mode == FastSync || mode == LightSync || mode == StagedSync {
 					// Collect the yet unknown headers to mark them as uncertain
 					unknown := make([]*types.Header, 0, len(chunk))
 					for _, header := range chunk {
@@ -1560,7 +1565,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 					var n int
 					var err error
-					if d.mode == StagedSync {
+					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
 						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
@@ -1573,7 +1578,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
-					if err == nil && d.mode == StagedSync && d.headersState != nil {
+					if err == nil && mode == StagedSync && d.headersState != nil {
 						if err1 := d.headersState.Update(d.stateDB, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
@@ -1618,7 +1623,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 			d.setGreaterSyncStatsChainHeight(origin-1, origin)
 
 			// Signal the content downloaders of the availablility of new tasks
-			if d.mode != StagedSync {
+			if mode != StagedSync {
 				for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
 					select {
 					case ch <- true:
@@ -1689,7 +1694,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 		}
 		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
 	}
-	if d.mode == StagedSync && index > 0 && d.bodiesState != nil {
+	if d.getMode() == StagedSync && index > 0 && d.bodiesState != nil {
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
 			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
 		}

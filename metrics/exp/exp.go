@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/prometheus"
 	prometheus2 "github.com/prometheus/client_golang/prometheus"

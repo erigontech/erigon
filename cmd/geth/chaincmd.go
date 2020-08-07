@@ -311,12 +311,6 @@ func importChain(ctx *cli.Context) error {
 	chain.Stop()
 	fmt.Printf("Import done in %v.\n\n", time.Since(start))
 
-	ioStats, err := db.Stat("leveldb.iostats")
-	if err != nil {
-		utils.Fatalf("Failed to read database iostats: %v", err)
-	}
-	fmt.Println(ioStats)
-
 	// Print the memory statistics used by the importing
 	mem := new(runtime.MemStats)
 	runtime.ReadMemStats(mem)

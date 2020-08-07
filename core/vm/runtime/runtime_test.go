@@ -337,7 +337,7 @@ func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address
 	return nil
 }
 
-func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, rStack *vm.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
+func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	s.steps++
 	// Enable this for more output
 	//s.inner.CaptureState(env, pc, op, gas, cost, memory, stack, rStack, contract, depth, err)
@@ -600,25 +600,25 @@ func DisabledTestEipExampleCases(t *testing.T) {
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) {
+func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	cfg.State, _ = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	cfg.State = state.New(state.NewDbStateReader(ethdb.NewMemDatabase()))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))
 		vmenv       = NewEnv(cfg)
 		sender      = vm.AccountRef(cfg.Origin)
 	)
-	cfg.State.CreateAccount(destination)
+	cfg.State.CreateAccount(destination, true)
 	eoa := common.HexToAddress("E0")
 	{
-		cfg.State.CreateAccount(eoa)
+		cfg.State.CreateAccount(eoa, true)
 		cfg.State.SetNonce(eoa, 100)
 	}
 	reverting := common.HexToAddress("EE")
 	{
-		cfg.State.CreateAccount(reverting)
+		cfg.State.CreateAccount(reverting, true)
 		cfg.State.SetCode(reverting, []byte{
 			byte(vm.PUSH1), 0x00,
 			byte(vm.PUSH1), 0x00,
@@ -629,12 +629,12 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(destination, code)
-	vmenv.Call(sender, destination, nil, gas, cfg.Value)
+	vmenv.Call(sender, destination, nil, gas, cfg.Value) // nolint:errcheck
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			vmenv.Call(sender, destination, nil, gas, cfg.Value)
+			vmenv.Call(sender, destination, nil, gas, cfg.Value) // nolint:errcheck
 		}
 	})
 }

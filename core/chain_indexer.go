@@ -44,9 +44,6 @@ type ChainIndexerBackend interface {
 	// will ensure a sequential order of headers.
 	Process(ctx context.Context, header *types.Header) error
 
-	// Commit finalizes the section metadata and stores it into the database.
-	Commit() error
-
 	// Prune deletes the chain index older than the given threshold.
 	Commit(blockNr uint64) error
 }
@@ -465,11 +462,6 @@ func (c *ChainIndexer) AddChildIndexer(indexer *ChainIndexer) {
 	if sections > 0 {
 		indexer.newHead(sections*c.sectionSize-1, false)
 	}
-}
-
-// Prune deletes all chain data older than given threshold.
-func (c *ChainIndexer) Prune(threshold uint64) error {
-	return c.backend.Prune(threshold)
 }
 
 // loadValidSections reads the number of valid sections from the index database

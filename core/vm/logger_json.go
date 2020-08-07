@@ -47,7 +47,7 @@ func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Addr
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *Stack, rStack *ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
+func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
 	log := StructLog{
 		Pc:            pc,
 		Op:            op,
@@ -64,15 +64,12 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 	}
 	if !l.cfg.DisableStack {
 		//TODO(@holiman) improve this
-		logstack := make([]*big.Int, len(stack.Data()))
-		for i, item := range stack.Data() {
+		logstack := make([]*big.Int, len(stack.Data))
+		for i, item := range stack.Data {
 			logstack[i] = item.ToBig()
 		}
 		log.Stack = logstack
-		log.ReturnStack = rStack.data
-	}
-	if !l.cfg.DisableReturnData {
-		log.ReturnData = rData
+		log.ReturnStack = rStack.Data()
 	}
 	return l.encoder.Encode(log)
 }

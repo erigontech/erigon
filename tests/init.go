@@ -157,7 +157,7 @@ var Forks = map[string]*params.ChainConfig{
 
 // Returns the set of defined fork names
 func AvailableForks() []string {
-	var availableForks []string
+	var availableForks []string //nolint:prealloc
 	for k := range Forks {
 		availableForks = append(availableForks, k)
 	}

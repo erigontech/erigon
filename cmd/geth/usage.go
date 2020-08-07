@@ -24,6 +24,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/turbo-geth/internal/flags"
+
 	"github.com/urfave/cli"
 )
 
@@ -67,7 +69,6 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.UltraLightServersFlag,
 			utils.UltraLightFractionFlag,
 			utils.UltraLightOnlyAnnounceFlag,
-			utils.LightNoPruneFlag,
 		},
 	},
 	{

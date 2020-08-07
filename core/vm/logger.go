@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -69,7 +70,6 @@ type StructLog struct {
 	MemorySize    int                         `json:"memSize"`
 	Stack         []*big.Int                  `json:"stack"`
 	ReturnStack   []uint32                    `json:"returnStack"`
-	ReturnData    []byte                      `json:"returnData"`
 	Storage       map[common.Hash]common.Hash `json:"-"`
 	Depth         int                         `json:"depth"`
 	RefundCounter uint64                      `json:"refund"`
@@ -106,10 +106,10 @@ func (s *StructLog) ErrorString() string {
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
-	CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error
-	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *Stack, rStack *ReturnStack, rData []byte, contract *Contract, depth int, err error) error
-	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *Stack, rStack *ReturnStack, contract *Contract, depth int, err error) error
-	CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) error
+	CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error
+	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error
+	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *Contract, depth int, err error) error
+	CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error
 	CaptureCreate(creator common.Address, creation common.Address) error
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
@@ -148,27 +148,12 @@ func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Ad
 // CaptureState logs a new structured log message and pushes it out to the environment
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *Stack, rStack *ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
+func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
 	// check if already accumulated the specified number of logs
 	if l.cfg.Limit != 0 && l.cfg.Limit <= len(l.logs) {
 		return errTraceLimitReached
 	}
 
-	// initialise new changed values storage container for this contract
-	// if not present.
-	if l.changedValues[contract.Address()] == nil {
-		l.changedValues[contract.Address()] = make(Storage)
-	}
-
-	// capture SSTORE opcodes and determine the changed value and store
-	// it in the local storage container.
-	if op == SSTORE && stack.Len() >= 2 {
-		var (
-			value   = common.Hash(stack.data[stack.len()-2].Bytes32())
-			address = common.Hash(stack.data[stack.len()-1].Bytes32())
-		)
-		l.changedValues[contract.Address()][address] = value
-	}
 	// Copy a snapshot of the current memory state to a new buffer
 	var mem []byte
 	if !l.cfg.DisableMemory {
@@ -178,15 +163,15 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 	// Copy a snapshot of the current stack state to a new buffer
 	var stck []*big.Int
 	if !l.cfg.DisableStack {
-		stck = make([]*big.Int, len(stack.Data()))
-		for i, item := range stack.Data() {
+		stck = make([]*big.Int, len(stack.Data))
+		for i, item := range stack.Data {
 			stck[i] = new(big.Int).Set(item.ToBig())
 		}
 	}
 	var rstack []uint32
 	if !l.cfg.DisableStack && rStack != nil {
-		rstck := make([]uint32, len(rStack.data))
-		copy(rstck, rStack.data)
+		rstck := make([]uint32, len(rStack.Data()))
+		copy(rstck, rStack.Data())
 	}
 	// Copy a snapshot of the current storage to a new container
 	var storage Storage
@@ -197,18 +182,19 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 			l.storage[contract.Address()] = make(Storage)
 		}
 		// capture SLOAD opcodes and record the read entry in the local storage
-		if op == SLOAD && stack.len() >= 1 {
+		if op == SLOAD && stack.Len() >= 1 {
 			var (
-				address = common.Hash(stack.data[stack.len()-1].Bytes32())
-				value   = env.StateDB.GetState(contract.Address(), address)
+				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+				value   uint256.Int
 			)
-			l.storage[contract.Address()][address] = value
+			env.IntraBlockState.GetState(contract.Address(), &address, &value)
+			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
-		if op == SSTORE && stack.len() >= 2 {
+		if op == SSTORE && stack.Len() >= 2 {
 			var (
-				value   = common.Hash(stack.data[stack.len()-2].Bytes32())
-				address = common.Hash(stack.data[stack.len()-1].Bytes32())
+				value   = common.Hash(stack.Data[stack.Len()-2].Bytes32())
+				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
 			)
 			l.storage[contract.Address()][address] = value
 		}
@@ -299,10 +285,6 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 				fmt.Fprintf(writer, "%x: %x\n", h, item)
 			}
 		}
-		if len(log.ReturnData) > 0 {
-			fmt.Fprintln(writer, "ReturnData:")
-			fmt.Fprint(writer, hex.Dump(log.ReturnData))
-		}
 		fmt.Fprintln(writer)
 	}
 }
@@ -354,12 +336,12 @@ func (t *mdLogger) CaptureStart(from common.Address, to common.Address, create b
 	return nil
 }
 
-func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *Stack, rStack *ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
+func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
 	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d |", pc, op, cost)
 
 	if !t.cfg.DisableStack { // format stack
 		var a []string
-		for _, elem := range stack.GetData() {
+		for _, elem := range stack.Data {
 			a = append(a, fmt.Sprintf("%d", elem))
 		}
 		b := fmt.Sprintf("[%v]", strings.Join(a, ","))

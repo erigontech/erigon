@@ -22,7 +22,6 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 )
@@ -91,7 +90,9 @@ func Write(w io.Writer, val []byte) error {
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
 func EncodeToBytes(val interface{}) ([]byte, error) {
-	eb := &encbuf{sizebuf: make([]byte, 9)}
+	eb := encbufPool.Get().(*encbuf)
+	defer encbufPool.Put(eb)
+	eb.reset()
 	if err := eb.encode(val); err != nil {
 		return nil, err
 	}
@@ -449,6 +450,35 @@ func writeBigInt(i *big.Int, w *encbuf) error {
 	return nil
 }
 
+func writeUint256Ptr(val reflect.Value, w *encbuf) error {
+	ptr := val.Interface().(*uint256.Int)
+	if ptr == nil {
+		w.str = append(w.str, EmptyStringCode)
+		return nil
+	}
+	return writeUint256(ptr, w)
+}
+
+func writeUint256NoPtr(val reflect.Value, w *encbuf) error {
+	i := val.Interface().(uint256.Int)
+	return writeUint256(&i, w)
+}
+
+func writeUint256(i *uint256.Int, w *encbuf) error {
+	if i.IsZero() {
+		w.str = append(w.str, EmptyStringCode)
+	} else if i.LtUint64(0x80) {
+		w.str = append(w.str, byte(i.Uint64()))
+	} else {
+		n := i.ByteLen()
+		w.str = append(w.str, EmptyStringCode+byte(n))
+		pos := len(w.str)
+		w.str = append(w.str, make([]byte, n)...)
+		i.WriteToSlice(w.str[pos:])
+	}
+	return nil
+}
+
 func writeBytes(val reflect.Value, w *encbuf) error {
 	w.encodeString(val.Bytes())
 	return nil
@@ -470,7 +500,6 @@ func makeByteArrayWriter(typ reflect.Type) writer {
 		writeByteArrayCopy(length, val, w)
 		return nil
 	}
-	return writeUint256(ptr, w)
 }
 
 func writeLengthZeroByteArray(val reflect.Value, w *encbuf) error {
@@ -479,16 +508,11 @@ func writeLengthZeroByteArray(val reflect.Value, w *encbuf) error {
 }
 
 func writeLengthOneByteArray(val reflect.Value, w *encbuf) error {
-	if i.IsZero() {
 	b := byte(val.Index(0).Uint())
 	if b <= 0x7f {
 		w.str = append(w.str, b)
 	} else {
-		n := i.ByteLen()
 		w.str = append(w.str, 0x81, b)
-		pos := len(w.str)
-		w.str = append(w.str, make([]byte, n)...)
-		i.WriteToSlice(w.str[pos:])
 	}
 	return nil
 }
@@ -514,26 +538,8 @@ func writeNamedByteArray(val reflect.Value, w *encbuf) error {
 		val = copy
 	}
 	size := val.Len()
-	if size == 1 {
-		b := val.Index(0).Uint()
-		if b <= 0x7f {
-			w.str = append(w.str, byte(b))
-			return nil
-		}
-	}
-	w.encodeStringHeader(size)
-	pos := len(w.str)
-	w.str = append(w.str, make([]byte, size)...)
-	slice := w.str[pos:]
-	if val.CanAddr() {
-		sh := &reflect.SliceHeader{
-			Data: val.UnsafeAddr(),
-			Len:  size,
-			Cap:  size,
-		}
-		copy(slice, *(*[]byte)(unsafe.Pointer(sh)))
-	} else {
-		reflect.Copy(reflect.ValueOf(slice), val)
+	slice := val.Slice(0, size).Bytes()
+	w.encodeString(slice)
 	return nil
 }
 

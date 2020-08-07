@@ -44,10 +44,13 @@ const OwerwriteMaxForkAncestry = 3000
 
 // Reduce some of the parameters to make the tester faster.
 func init() {
-	maxForkAncestry = OwerwriteMaxForkAncestry
 	blockCacheItems = OwerwriteBlockCacheItems
 	fsHeaderSafetyNet = 256
 	fsHeaderContCheck = 50 * time.Millisecond
+	fullMaxForkAncestry = 10000
+	lightMaxForkAncestry = 10000
+	blockCacheItems = 1024
+	fsHeaderContCheck = 500 * time.Millisecond
 }
 
 // downloadTester is a test simulator for mocking out local block chain.
@@ -267,7 +270,7 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 
 	// Do a quick check, as the blockchain.InsertHeaderChain doesn't insert anything in case of errors
 	if dl.getHeaderByHash(headers[0].ParentHash) == nil {
-		return 0, fmt.Errorf("InsertHeaderChain: unknown parent at first position, parent of number %d", headers[0].Number)
+		return 0, fmt.Errorf("error in InsertHeaderChain: unknown parent at first position, parent of number %d", headers[0].Number)
 	}
 	var hashes []common.Hash
 	for i := 1; i < len(headers); i++ {
@@ -323,6 +326,7 @@ func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i
 		if err != nil {
 			panic(err)
 		}
+		td := dl.getTd(block.ParentHash())
 		dl.ownChainTd[block.Hash()] = new(big.Int).Add(td, block.Difficulty())
 	}
 	return len(blocks), nil
@@ -472,25 +476,6 @@ func (dlp *downloadTesterPeer) RequestBodies(hashes []common.Hash) error {
 func (dlp *downloadTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	receipts := dlp.chain.receipts(hashes)
 	go dlp.dl.downloader.DeliverReceipts(dlp.id, receipts)
-	return nil
-}
-
-// RequestNodeData constructs a getNodeData method associated with a particular
-// peer in the download tester. The returned function can be used to retrieve
-// batches of node state data from the particularly requested peer.
-func (dlp *downloadTesterPeer) RequestNodeData(hashes []common.Hash) error {
-	dlp.dl.lock.RLock()
-	defer dlp.dl.lock.RUnlock()
-
-	results := make([][]byte, 0, len(hashes))
-	for _, hash := range hashes {
-		if data, err := dlp.dl.peerDb.Get(hash.Bytes()); err == nil {
-			if !dlp.missingStates[hash] {
-				results = append(results, data)
-			}
-		}
-	}
-	go dlp.dl.downloader.DeliverNodeData(dlp.id, results)
 	return nil
 }
 
@@ -735,7 +720,7 @@ func testBoundedHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	}
 	assertOwnChain(t, tester, chainA.len())
 
-	tester.newPeer("heavy-rewriter", protocol, chainB)
+	tester.newPeer("heavy-rewriter", protocol, chainB) //nolint:errcheck
 	// Synchronise with the second peer and ensure that the fork is rejected to being too old
 	if err := tester.sync("heavy-rewriter", nil, mode); err != errInvalidAncestor {
 		t.Fatalf("sync failure mismatch: have %v, want %v", err, errInvalidAncestor)

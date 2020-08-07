@@ -172,7 +172,7 @@ func (p *peerConnection) FetchBodies(request *fetchRequest) error {
 		for _, header := range request.Headers {
 			hashes = append(hashes, header.Hash())
 		}
-		p.peer.RequestBodies(hashes)
+		p.peer.RequestBodies(hashes) //nolint:errcheck
 	}()
 
 	return nil
@@ -196,7 +196,7 @@ func (p *peerConnection) FetchReceipts(request *fetchRequest) error {
 		for _, header := range request.Headers {
 			hashes = append(hashes, header.Hash())
 		}
-		p.peer.RequestReceipts(hashes)
+		p.peer.RequestReceipts(hashes) //nolint:errcheck
 	}()
 
 	return nil

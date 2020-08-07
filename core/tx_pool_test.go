@@ -19,7 +19,6 @@ package core
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -313,20 +312,6 @@ func TestTransactionQueue2(t *testing.T) {
 	}
 	if pool.queue[from].Len() != 2 {
 		t.Error("expected len(queue) == 2, got", pool.queue[from].Len())
-	}
-}
-
-func TestTransactionNegativeValue(t *testing.T) {
-	t.Parallel()
-
-	pool, key := setupTxPool()
-	defer pool.Stop()
-
-	tx, _ := types.SignTx(types.NewTransaction(0, common.Address{}, big.NewInt(-1), 100, big.NewInt(1), nil), types.HomesteadSigner{}, key)
-	from, _ := deriveSender(tx)
-	pool.currentState.AddBalance(from, big.NewInt(1))
-	if err := pool.AddRemote(tx); err != ErrNegativeValue {
-		t.Error("expected", ErrNegativeValue, "got", err)
 	}
 }
 
@@ -921,72 +906,6 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	pending, queued = pool.Stats()
 	if pending != 0 {
 		t.Fatalf("pending transactions mismatched: have %d, want %d", pending, 0)
-	}
-	if nolocals {
-		if queued != 0 {
-			t.Fatalf("queued transactions mismatched: have %d, want %d", queued, 0)
-		}
-	} else {
-		if queued != 1 {
-			t.Fatalf("queued transactions mismatched: have %d, want %d", queued, 1)
-		}
-	}
-	if err := validateTxPoolInternals(pool); err != nil {
-		t.Fatalf("pool internal state corrupted: %v", err)
-	}
-
-	// remove current transactions and increase nonce to prepare for a reset and cleanup
-	statedb.SetNonce(crypto.PubkeyToAddress(remote.PublicKey), 2)
-	statedb.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 2)
-	<-pool.requestReset(nil, nil)
-
-	// make sure queue, pending are cleared
-	pending, queued = pool.Stats()
-	if pending != 0 {
-		t.Fatalf("pending transactions mismatched: have %d, want %d", pending, 0)
-	}
-	if queued != 0 {
-		t.Fatalf("queued transactions mismatched: have %d, want %d", queued, 0)
-	}
-	if err := validateTxPoolInternals(pool); err != nil {
-		t.Fatalf("pool internal state corrupted: %v", err)
-	}
-
-	// Queue gapped transactions
-	if err := pool.AddLocal(pricedTransaction(4, 100000, big.NewInt(1), local)); err != nil {
-		t.Fatalf("failed to add remote transaction: %v", err)
-	}
-	if err := pool.addRemoteSync(pricedTransaction(4, 100000, big.NewInt(1), remote)); err != nil {
-		t.Fatalf("failed to add remote transaction: %v", err)
-	}
-	time.Sleep(5 * evictionInterval) // A half lifetime pass
-
-	// Queue executable transactions, the life cycle should be restarted.
-	if err := pool.AddLocal(pricedTransaction(2, 100000, big.NewInt(1), local)); err != nil {
-		t.Fatalf("failed to add remote transaction: %v", err)
-	}
-	if err := pool.addRemoteSync(pricedTransaction(2, 100000, big.NewInt(1), remote)); err != nil {
-		t.Fatalf("failed to add remote transaction: %v", err)
-	}
-	time.Sleep(6 * evictionInterval)
-
-	// All gapped transactions shouldn't be kicked out
-	pending, queued = pool.Stats()
-	if pending != 2 {
-		t.Fatalf("pending transactions mismatched: have %d, want %d", pending, 2)
-	}
-	if queued != 2 {
-		t.Fatalf("queued transactions mismatched: have %d, want %d", queued, 3)
-	}
-	if err := validateTxPoolInternals(pool); err != nil {
-		t.Fatalf("pool internal state corrupted: %v", err)
-	}
-
-	// The whole life time pass after last promotion, kick out stale transactions
-	time.Sleep(2 * config.Lifetime)
-	pending, queued = pool.Stats()
-	if pending != 2 {
-		t.Fatalf("pending transactions mismatched: have %d, want %d", pending, 2)
 	}
 	if nolocals {
 		if queued != 0 {

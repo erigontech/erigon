@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 

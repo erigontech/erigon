@@ -25,7 +25,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -107,8 +109,8 @@ func makeBenchBlock() *Block {
 		Extra:      []byte("coolest block on chain"),
 	}
 	for i := range txs {
-		amount := math.BigPow(2, int64(i))
-		price := big.NewInt(300000)
+		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
+		price := uint256.NewInt().SetUint64(300000)
 		data := make([]byte, 100)
 		tx := NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
 		signedTx, err := SignTx(tx, signer, key)
@@ -116,7 +118,7 @@ func makeBenchBlock() *Block {
 			panic(err)
 		}
 		txs[i] = signedTx
-		receipts[i] = NewReceipt(make([]byte, 32), false, tx.Gas())
+		receipts[i] = NewReceipt(false, tx.Gas())
 	}
 	for i := range uncles {
 		uncles[i] = &Header{

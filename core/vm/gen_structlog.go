@@ -51,7 +51,6 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 			enc.ReturnStack[k] = math.HexOrDecimal64(v)
 		}
 	}
-	enc.ReturnData = s.ReturnData
 	enc.Storage = s.Storage
 	enc.Depth = s.Depth
 	enc.RefundCounter = s.RefundCounter
@@ -111,9 +110,6 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		for k, v := range dec.ReturnStack {
 			s.ReturnStack[k] = uint32(v)
 		}
-	}
-	if dec.ReturnData != nil {
-		s.ReturnData = dec.ReturnData
 	}
 	if dec.Storage != nil {
 		s.Storage = dec.Storage

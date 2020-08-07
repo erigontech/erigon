@@ -23,9 +23,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/v4test"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ethereum/go-ethereum/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
 	"github.com/ledgerwatch/turbo-geth/p2p/discover"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -215,7 +216,7 @@ func discv4Crawl(ctx *cli.Context) error {
 func discv4Test(ctx *cli.Context) error {
 	// Configure test package globals.
 	if !ctx.IsSet(remoteEnodeFlag.Name) {
-		return fmt.Errorf("Missing -%v", remoteEnodeFlag.Name)
+		return fmt.Errorf("missing -%v", remoteEnodeFlag.Name)
 	}
 	v4test.Remote = ctx.String(remoteEnodeFlag.Name)
 	v4test.Listen1 = ctx.String(testListen1Flag.Name)
@@ -228,7 +229,7 @@ func discv4Test(ctx *cli.Context) error {
 	}
 	results := utesting.RunTests(tests, os.Stdout)
 	if fails := utesting.CountFailures(results); fails > 0 {
-		return fmt.Errorf("%v/%v tests passed.", len(tests)-fails, len(tests))
+		return fmt.Errorf("passed %v/%v tests", len(tests)-fails, len(tests))
 	}
 	fmt.Printf("%v/%v passed\n", len(tests), len(tests))
 	return nil

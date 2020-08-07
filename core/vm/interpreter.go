@@ -18,7 +18,6 @@ package vm
 
 import (
 	"hash"
-	"sync"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -79,37 +78,6 @@ type callCtx struct {
 type keccakState interface {
 	hash.Hash
 	Read([]byte) (int, error)
-}
-
-var stackPool = NewStack()
-
-type Stack struct {
-	*sync.Pool
-}
-
-const maxCap = 1024 * 2
-
-func NewStack() *Stack {
-	return &Stack{
-		&sync.Pool{
-			New: func() interface{} {
-				return stack.New(maxCap)
-			},
-		},
-	}
-}
-
-func (p *Stack) Get() *stack.Stack {
-	return p.Pool.Get().(*stack.Stack)
-}
-
-func (p *Stack) Put(s *stack.Stack) {
-	if s == nil || s.Cap() == 0 || s.Cap() > maxCap {
-		return
-	}
-
-	s.Reset()
-	p.Pool.Put(s)
 }
 
 // EVMInterpreter represents an EVM interpreter
@@ -196,7 +164,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	var (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
-		locStack    = stackPool.Get()
+		locStack    = stack.New()
 		returns     = stack.NewReturnStack() // local returns stack
 		callContext = &callCtx{
 			memory:   mem,
@@ -219,8 +187,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
 	defer func() {
-		returnStack(stack)
-		returnRStack(returns)
+		stack.ReturnNormalStack(locStack)
+		stack.ReturnRStack(returns)
 	}()
 	contract.Input = input
 
@@ -228,7 +196,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, stack, returns, in.returnData, contract, in.evm.depth, err)
+					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
 				} else {
 					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
 				}
@@ -253,7 +221,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		operation := &in.jt[op]
+		operation := in.jt[op]
 
 		if operation == nil {
 			return nil, &ErrInvalidOpCode{opcode: op}
@@ -313,7 +281,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, stack, returns, in.returnData, contract, in.evm.depth, err)
+			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, returns, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
 

@@ -20,8 +20,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ethereum/go-ethereum/params"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/params"
+
+	"github.com/urfave/cli"
 )
 
 var (

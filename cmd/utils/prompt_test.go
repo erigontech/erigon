@@ -66,8 +66,8 @@ func TestGetPassPhraseWithList(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := GetPassPhraseWithList(tt.args.text, tt.args.confirmation, tt.args.index, tt.args.passwords); got != tt.want {
-				t.Errorf("GetPassPhraseWithList() = %v, want %v", got, tt.want)
+			if got := GetPassPhraseWithList(tt.args.text, tt.args.confirmation, tt.args.index, tt.args.passwords); got != tt.want { //nolint:scopelint
+				t.Errorf("GetPassPhraseWithList() = %v, want %v", got, tt.want) //nolint:scopelint
 			}
 		})
 	}

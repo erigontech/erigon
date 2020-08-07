@@ -20,17 +20,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/ethereum/go-ethereum/metrics/exp"
 	"github.com/fjl/memsize/memsizeui"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/metrics/exp"
+
 	colorable "github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/spf13/cobra"
+	"github.com/urfave/cli"
 )
 
 var Memsize memsizeui.Handler
@@ -139,6 +142,98 @@ func init() {
 	glogger = log.NewGlogHandler(ostream)
 }
 
+func SetupCobra(cmd *cobra.Command) error {
+	flags := cmd.Flags()
+	dbg, err := flags.GetBool(debugFlag.Name)
+	if err != nil {
+		return err
+	}
+	lvl, err := flags.GetInt(verbosityFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	vmodule, err := flags.GetString(vmoduleFlag.Name)
+	if err != nil {
+		return err
+	}
+	backtrace, err := flags.GetString(backtraceAtFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	// logging
+	log.PrintOrigins(dbg)
+	glogger.Verbosity(log.Lvl(lvl))
+	err = glogger.Vmodule(vmodule)
+	if err != nil {
+		return err
+	}
+	if backtrace != "" {
+		err = glogger.BacktraceAt(backtrace)
+		if err != nil {
+			return err
+		}
+	}
+	log.Root().SetHandler(glogger)
+
+	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
+	if err != nil {
+		return err
+	}
+	blockprofilerate, err := flags.GetInt(blockprofilerateFlag.Name)
+	if err != nil {
+		return err
+	}
+	traceFile, err := flags.GetString(traceFlag.Name)
+	if err != nil {
+		return err
+	}
+	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	// profiling, tracing
+	runtime.MemProfileRate = memprofilerate
+	Handler.SetBlockProfileRate(blockprofilerate)
+	if traceFile != "" {
+		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
+			return err2
+		}
+	}
+	if cpuFile != "" {
+		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
+			return err2
+		}
+	}
+
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+		<-c
+		Exit()
+	}()
+	pprof, err := flags.GetBool(pprofFlag.Name)
+	if err != nil {
+		return err
+	}
+	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
+	if err != nil {
+		return err
+	}
+	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	if pprof {
+		// metrics and pprof server
+		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), metrics.Enabled)
+	}
+	return nil
+}
+
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
@@ -206,7 +301,7 @@ func StartPProf(address string, withMetrics bool) {
 	// Hook go-metrics into expvar on any /debug/metrics request, load all vars
 	// from the registry into expvar, and execute regular expvar handler.
 	if withMetrics {
-		exp.Exp(metrics.DefaultRegistry)
+		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
 	}
 	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
 	log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))

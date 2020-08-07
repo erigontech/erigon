@@ -98,7 +98,7 @@ func (f *fetchResult) SetReceiptsDone() {
 	if v := atomic.LoadInt32(&f.pending); (v & (1 << receiptType)) != 0 {
 		atomic.AddInt32(&f.pending, -2)
 	}
-// Done checks if the given type is done already
+	// Done checks if the given type is done already
 }
 
 func (f *fetchResult) Done(kind uint) bool {
@@ -122,13 +122,13 @@ type queue struct {
 	headerContCh    chan bool                      // [eth/62] Channel to notify when header download finishes
 
 	// All data retrievals below are based on an already assembles header chain
-	blockTaskPool  map[common.Hash]struct{} // [eth/62] Pending block (body) retrieval tasks, mapping hashes to headers
-	blockTaskQueue *prque.Prque             // [eth/62] Priority queue of the headers to fetch the blocks (bodies) for
-	blockPendPool  map[string]*fetchRequest // [eth/62] Currently pending block (body) retrieval operations
+	blockTaskPool  map[common.Hash]*types.Header // [eth/62] Pending block (body) retrieval tasks, mapping hashes to headers
+	blockTaskQueue *prque.Prque                  // [eth/62] Priority queue of the headers to fetch the blocks (bodies) for
+	blockPendPool  map[string]*fetchRequest      // [eth/62] Currently pending block (body) retrieval operations
 
-	receiptTaskPool  map[common.Hash]struct{} // [eth/63] Pending receipt retrieval tasks, mapping hashes to headers
-	receiptTaskQueue *prque.Prque             // [eth/63] Priority queue of the headers to fetch the receipts for
-	receiptPendPool  map[string]*fetchRequest // [eth/63] Currently pending receipt retrieval operations
+	receiptTaskPool  map[common.Hash]*types.Header // [eth/63] Pending receipt retrieval tasks, mapping hashes to headers
+	receiptTaskQueue *prque.Prque                  // [eth/63] Priority queue of the headers to fetch the receipts for
+	receiptPendPool  map[string]*fetchRequest      // [eth/63] Currently pending receipt retrieval operations
 
 	resultCache *resultStore       // Downloaded but not yet delivered fetch results
 	resultSize  common.StorageSize // Approximate size of a block (exponential moving average)
@@ -165,11 +165,11 @@ func (q *queue) Reset(blockCacheLimit int) {
 	q.headerHead = common.Hash{}
 	q.headerPendPool = make(map[string]*fetchRequest)
 
-	q.blockTaskPool = make(map[common.Hash]struct{})
+	q.blockTaskPool = make(map[common.Hash]*types.Header)
 	q.blockTaskQueue.Reset()
 	q.blockPendPool = make(map[string]*fetchRequest)
 
-	q.receiptTaskPool = make(map[common.Hash]struct{})
+	q.receiptTaskPool = make(map[common.Hash]*types.Header)
 	q.receiptTaskQueue.Reset()
 	q.receiptPendPool = make(map[string]*fetchRequest)
 
@@ -301,7 +301,7 @@ func (q *queue) ScheduleBodies(from uint64, hashes []common.Hash, headers map[co
 			continue
 		}
 		// Queue the header for content retrieval
-		q.blockTaskPool[hash] = struct{}{}
+		q.blockTaskPool[hash] = header
 		q.blockTaskQueue.Push(header, -int64(from))
 
 		q.headerHead = hash
@@ -345,14 +345,6 @@ func (q *queue) Schedule(headers []*types.Header, from uint64) []*types.Header {
 				q.receiptTaskPool[hash] = header
 				q.receiptTaskQueue.Push(header, -int64(header.Number.Uint64()))
 			}
-		}
-		// Queue the header for content retrieval
-		q.blockTaskPool[hash] = struct{}{}
-		q.blockTaskQueue.Push(header, -int64(header.Number.Uint64()))
-
-		if q.mode == FastSync {
-			q.receiptTaskPool[hash] = struct{}{}
-			q.receiptTaskQueue.Push(header, -int64(header.Number.Uint64()))
 		}
 		inserts = append(inserts, header)
 		q.headerHead = hash
@@ -812,20 +804,6 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, uncleLi
 	}
 
 	reconstruct := func(index int, result *fetchResult) {
-		i := index
-		if types.DeriveSha(types.Transactions(txLists[i])) != header.TxHash || types.CalcUncleHash(uncleLists[i]) != header.UncleHash {
-			// Try to search for the right result
-			found := false
-			for i = 0; i < len(txLists); i++ {
-				if types.DeriveSha(types.Transactions(txLists[i])) == header.TxHash && types.CalcUncleHash(uncleLists[i]) == header.UncleHash {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false, nil
-			}
-		}
 		result.Transactions = txLists[index]
 		result.Uncles = uncleLists[index]
 		result.SetBodyDone()
@@ -842,8 +820,7 @@ func (q *queue) DeliverReceipts(id string, receiptList [][]*types.Receipt) (int,
 	defer q.lock.Unlock()
 	validate := func(index int, header *types.Header) error {
 		if types.DeriveSha(types.Receipts(receiptList[index])) != header.ReceiptHash {
-			fmt.Printf("INVALID receipt\n")
-			return false, errInvalidReceipt
+			return errInvalidReceipt
 		}
 		return nil
 	}
@@ -889,14 +866,12 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 	for _, header := range request.Headers {
 		// Short circuit assembly if no more fetch results are found
 		if i >= results {
-		// Validate the fields
+			// Validate the fields
 			break
 		}
 		if err := validate(i, header); err != nil {
 			failure = err
 			break
-		} else if !success {
-			continue
 		}
 		hashes = append(hashes, header.Hash())
 		i++

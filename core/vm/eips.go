@@ -49,7 +49,7 @@ func ValidEip(eipNum int) bool {
 	return ok
 }
 func ActivateableEips() []string {
-	var nums []string
+	var nums []string //nolint:prealloc
 	for k := range activators {
 		nums = append(nums, fmt.Sprintf("%d", k))
 	}
@@ -98,7 +98,7 @@ func enable1344(jt *JumpTable) {
 // opChainID implements CHAINID opcode
 func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.chainConfig.ChainID)
-	callContext.stack.push(chainId)
+	callContext.stack.Push(chainId)
 	return nil, nil
 }
 

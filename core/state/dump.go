@@ -133,7 +133,7 @@ func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) dump(c DumpCollector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
@@ -241,7 +241,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bo
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 	return *dump
 }
 
@@ -258,7 +258,7 @@ func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool)
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
@@ -267,7 +267,7 @@ func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimag
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
-	iterator.Next, err = d.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
 	return *iterator, err
 }
 

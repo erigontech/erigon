@@ -67,8 +67,7 @@ func init() {
 			commonParams[i*len(params)+j] = &twoOperandParams{x, y}
 		}
 	}
-	twoOpMethods = map[string]executionFunc{
-		"add":     opAdd,
+	twoOpMethods = map[string]executionFunc{"add": opAdd,
 		"sub":     opSub,
 		"mul":     opMul,
 		"div":     opDiv,
@@ -109,8 +108,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		stack.Push(x)
 		stack.Push(y)
 		opFn(&pc, evmInterpreter, &callCtx{nil, stack, rstack, nil})
-		if len(stack.data) != 1 {
-			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.data))
+		if len(stack.Data) != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.Data))
 		}
 		actual := stack.Pop()
 
@@ -196,7 +195,7 @@ func TestSAR(t *testing.T) {
 func TestAddMod(t *testing.T) {
 	var (
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
-		stack          = newstack()
+		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 		pc             = uint64(0)
 	)
@@ -220,11 +219,11 @@ func TestAddMod(t *testing.T) {
 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
 		z := new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.expected))
-		stack.push(z)
-		stack.push(y)
-		stack.push(x)
+		stack.Push(z)
+		stack.Push(y)
+		stack.Push(x)
 		opAddmod(&pc, evmInterpreter, &callCtx{nil, stack, nil, nil})
-		actual := stack.pop()
+		actual := stack.Pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
@@ -531,14 +530,12 @@ func TestOpMstore(t *testing.T) {
 	mem.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
-	stack.pushN(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)), *new(uint256.Int))
-	stack.Push(new(uint256.Int))
+	stack.PushN(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)), *new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
-	stack.Push(new(uint256.Int).SetOne())
-	stack.pushN(*new(uint256.Int).SetUint64(0x1), *new(uint256.Int))
+	stack.PushN(*new(uint256.Int).SetOne(), *new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
@@ -562,8 +559,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		stack.Push(value)
-		stack.pushN(*value, *memStart)
+		stack.PushN(*value, *memStart)
 		opMstore(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	}
 }
@@ -583,8 +579,7 @@ func BenchmarkOpSHA3(bench *testing.B) {
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		stack.pushN(*uint256.NewInt().SetUint64(32), *start)
-		stack.Push(start)
+		stack.PushN(*uint256.NewInt().SetUint64(32), *start)
 		opSha3(&pc, evmInterpreter, &callCtx{mem, stack, rstack, nil})
 	}
 }
