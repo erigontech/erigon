@@ -79,22 +79,3 @@ Date:   Fri Aug 7 15:31:17 2020 +0200
 
     eth/downloader: set deliverytime on drops and timeouts too
 
-commit e401f5ff10d7815f77d9fb587291f4fcf69cbdc8
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Fri Aug 7 21:33:00 2020 +0800
-
-    les: close all connected les-server when shutdown (#21426)
-    
-    * les: close all connected les-server when shutdown
-    
-    * les: linter nitpick
-    
-    Co-authored-by: Martin Holst Swende <martin@swende.se>
-
-commit 6a53ce29a468376ff9a8fc5c3e3bc2e0d765ee43
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri Aug 7 11:15:41 2020 +0200
-
-    ethstats: overwrite old errors
-
-
