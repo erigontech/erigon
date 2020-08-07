@@ -87,7 +87,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	bc, st, progress := newSync(ch, db, changeSetHook)
 	defer bc.Stop()
 
-	st.DisableStages(stages.Headers, stages.Bodies, stages.Senders, stages.TxPool)
+	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
