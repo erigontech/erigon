@@ -3,6 +3,7 @@ package migrations
 import (
 	"bytes"
 	"errors"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -53,6 +54,7 @@ import (
 var migrations = []Migration{
 	stagesToUseNamedKeys,
 	unwindStagesToUseNamedKeys,
+	stagedsyncToUseStageBlockhashes,
 }
 
 type Migration struct {
