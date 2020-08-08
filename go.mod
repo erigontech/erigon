@@ -31,7 +31,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.4.2
-	github.com/golang/snappy v0.0.2-0.20190904063534-ff6b7dc882cf
+	github.com/golang/snappy v0.0.2-0.20200707131729-196ae77b8a26
 	github.com/gorilla/websocket v1.4.1
 	github.com/graph-gophers/graphql-go v0.0.0-20191115155744-f33e81362277
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0

@@ -159,10 +159,10 @@ type stackWrapper struct {
 
 // peek returns the nth-from-the-top element of the stack.
 func (sw *stackWrapper) peek(idx int) *big.Int {
-	if len(sw.stack.GetData()) <= idx || idx < 0 {
+	if sw.stack.Len() <= idx || idx < 0 {
 		// TODO(karalabe): We can't js-throw from Go inside duktape inside Go. The Go
 		// runtime goes belly up https://github.com/golang/go/issues/15639.
-		log.Warn("Tracer accessed out of bound stack", "size", len(sw.stack.GetData()), "index", idx)
+		log.Warn("Tracer accessed out of bound stack", "size", sw.stack.Len(), "index", idx)
 		return new(big.Int)
 	}
 	return sw.stack.Back(idx).ToBig()
@@ -173,7 +173,7 @@ func (sw *stackWrapper) peek(idx int) *big.Int {
 func (sw *stackWrapper) pushObject(vm *duktape.Context) {
 	obj := vm.PushObject()
 
-	vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushInt(len(sw.stack.GetData())); return 1 })
+	vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushInt(sw.stack.Len()); return 1 })
 	vm.PutPropString(obj, "length")
 
 	// Generate the `peek` method which takes an int and returns a bigint
@@ -549,7 +549,7 @@ func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Addres
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, rdata []byte, contract *vm.Contract, depth int, err error) error {
 	if jst.err == nil {
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
