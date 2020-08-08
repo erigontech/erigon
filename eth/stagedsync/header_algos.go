@@ -58,6 +58,15 @@ func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header, peerHandle PeerH
 	return trees, nil, nil
 }
 
+// HandleNewBlockMsg converts message containing 1 header into one singleton chain segment
+func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle PeerHandle) ([]*ChainSegment, *PeerPenalty, error) {
+	headerHash := header.Hash()
+	if _, bad := hd.badHeaders[headerHash]; bad {
+		return nil, &PeerPenalty{peerHandle: peerHandle, penalty: BadBlockPenalty}, nil
+	}
+	return []*ChainSegment{&ChainSegment{headers: []*types.Header{header}}}, nil, nil
+}
+
 // Checks whether child-parent relationship between two headers is correct
 // (excluding Proof Of Work validity)
 func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, Penalty) {

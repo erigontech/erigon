@@ -170,3 +170,42 @@ func TestHandleHeadersMsg(t *testing.T) {
 		t.Errorf("handle header msg: %v", err)
 	}
 }
+
+func TestHandleNewBlockMsg(t *testing.T) {
+	hd := NewHeaderDownload("", 10, func(timestamp uint64, parent *types.Header) *big.Int {
+		// To get child difficulty, we just add 1000 to the parent difficulty
+		return big.NewInt(0).Add(parent.Difficulty, big.NewInt(1000))
+	})
+	peer := PeerHandle(1)
+	var h types.Header
+	h.Number = big.NewInt(5)
+	if chainSegments, peerPenalty, err := hd.HandleNewBlockMsg(&h, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if len(chainSegments) != 1 {
+			t.Errorf("expected 1 chainSegments, got %d", len(chainSegments))
+		}
+		if len(chainSegments[0].headers) != 1 {
+			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].headers))
+		}
+		if chainSegments[0].headers[0] != &h {
+			t.Errorf("expected h to be the root")
+		}
+	} else {
+		t.Errorf("handle header msg: %v", err)
+	}
+
+	// Same header with a bad hash
+	hd.badHeaders[h.Hash()] = struct{}{}
+	if chainSegments, peerPenalty, err := hd.HandleNewBlockMsg(&h, peer); err == nil {
+		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != BadBlockPenalty {
+			t.Errorf("expected BadBlock penalty, got %s", peerPenalty)
+		}
+		if chainSegments != nil {
+			t.Errorf("expected no chainSegments, got %d", len(chainSegments))
+		}
+	} else {
+		t.Errorf("handle header msg: %v", err)
+	}
+}

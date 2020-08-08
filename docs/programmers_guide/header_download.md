@@ -158,6 +158,11 @@ algorithm.
 
 ### Handle NewBlockMsg
 **Input**: NewBlockMsg + peer handle. **Output**: chain segment or penalty for the peer handle
+The message `NewBlockMsg` contains a block (with header and body), as well as its total difficulty. Since this correctness of this
+total difficulty cannot be verified just by looking at the block itself, the only use of it is to potentially penalise the peer
+if we find that the total difficulty reported was wrong. But this is of a very marginal use, if we do not trust this number anyway.
+Therefore, we will only be looking at the block header part of the message. This algorithm is a degenerate version of the algorithm
+"Handle BlockHeadersMsg", because it only creates one chain segment and there is only one header in that segment.
 
 ### Prepend
 **Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no prepend point foind", or penalty for the handle (tombstone creation)
