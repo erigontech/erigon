@@ -26,6 +26,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common/math"
+
 	"github.com/holiman/uint256"
 )
 
@@ -73,6 +75,8 @@ type encodableReader struct {
 func (e *encodableReader) Read(b []byte) (int, error) {
 	panic("called")
 }
+
+type namedByteType byte
 
 var (
 	_ = Encoder(&testEncoder{})
@@ -158,17 +162,33 @@ var encTests = []encTest{
 		output: "9C0100020003000400050006000700080009000A000B000C000D000E01",
 	},
 
-	// non-pointer uint256.Int
-	{val: *uint256.NewInt(), output: "80"},
-	{val: *uint256.NewInt().SetUint64(0xFFFFFF), output: "83FFFFFF"},
+	// named byte type arrays
+	{val: [0]namedByteType{}, output: "80"},
+	{val: [1]namedByteType{0}, output: "00"},
+	{val: [1]namedByteType{1}, output: "01"},
+	{val: [1]namedByteType{0x7F}, output: "7F"},
+	{val: [1]namedByteType{0x80}, output: "8180"},
+	{val: [1]namedByteType{0xFF}, output: "81FF"},
+	{val: [3]namedByteType{1, 2, 3}, output: "83010203"},
+	{val: [57]namedByteType{1, 2, 3}, output: "B839010203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},
 
-	// byte slices, strings
+	// byte slices
 	{val: []byte{}, output: "80"},
+	{val: []byte{0}, output: "00"},
 	{val: []byte{0x7E}, output: "7E"},
 	{val: []byte{0x7F}, output: "7F"},
 	{val: []byte{0x80}, output: "8180"},
 	{val: []byte{1, 2, 3}, output: "83010203"},
 
+	// named byte type slices
+	{val: []namedByteType{}, output: "80"},
+	{val: []namedByteType{0}, output: "00"},
+	{val: []namedByteType{0x7E}, output: "7E"},
+	{val: []namedByteType{0x7F}, output: "7F"},
+	{val: []namedByteType{0x80}, output: "8180"},
+	{val: []namedByteType{1, 2, 3}, output: "83010203"},
+
+	// strings
 	{val: "", output: "80"},
 	{val: "\x7E", output: "7E"},
 	{val: "\x7F", output: "7F"},
@@ -423,4 +443,37 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+var sink interface{}
+
+func BenchmarkIntsize(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		sink = intsize(0x12345678)
+	}
+}
+
+func BenchmarkPutint(b *testing.B) {
+	buf := make([]byte, 8)
+	for i := 0; i < b.N; i++ {
+		putint(buf, 0x12345678)
+		sink = buf
+	}
+}
+
+func BenchmarkEncodeBigInts(b *testing.B) {
+	ints := make([]*big.Int, 200)
+	for i := range ints {
+		ints[i] = math.BigPow(2, int64(i))
+	}
+	out := bytes.NewBuffer(make([]byte, 0, 4096))
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		out.Reset()
+		if err := Encode(out, ints); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

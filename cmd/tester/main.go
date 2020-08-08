@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	ff "github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -31,7 +32,7 @@ var (
 	gitCommit = ""
 	gitDate   = ""
 	// The app that holds all commands and flags.
-	app = utils.NewApp(gitCommit, gitDate, "Ethereum Tester")
+	app = ff.NewApp(gitCommit, gitDate, "Ethereum Tester")
 	// flags that configure the node
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",
