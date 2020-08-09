@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -32,7 +31,7 @@ type IndexGenerator struct {
 	quitCh           <-chan struct{}
 }
 
-func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte, datadir string) error {
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
 	v, ok := changeset.Mapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
@@ -64,7 +63,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	return nil
 }
 
-func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) error {
+func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) error {
 	vv, ok := changeset.Mapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
@@ -92,7 +91,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 
 	historyEffects := make(map[string][]byte)
 	keySize := vv.KeySize
-	if bytes.Equal(dbutils.StorageChangeSetBucket, changeSetBucket) || bytes.Equal(dbutils.PlainStorageChangeSetBucket, changeSetBucket) {
+	if dbutils.StorageChangeSetBucket == changeSetBucket || dbutils.PlainStorageChangeSetBucket == changeSetBucket {
 		keySize -= 8
 	}
 
@@ -138,7 +137,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 	return nil
 }
 
-func (ig *IndexGenerator) DropIndex(bucket []byte) error {
+func (ig *IndexGenerator) DropIndex(bucket string) error {
 	casted, ok := ig.db.(ethdb.NonTransactional)
 	if !ok {
 		return errors.New("imposible to drop")

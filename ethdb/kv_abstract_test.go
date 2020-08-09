@@ -123,7 +123,7 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	}
 }
 
-func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 []byte) {
+func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 	assert := assert.New(t)
 
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
@@ -179,7 +179,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 []byte) {
 	}
 
 }
-func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 []byte) {
+func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 string) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
@@ -198,7 +198,7 @@ func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 []byte) {
 	}
 }
 
-func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 []byte) {
+func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 string) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
@@ -278,7 +278,7 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 []byte) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 []byte) {
+func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 string) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {

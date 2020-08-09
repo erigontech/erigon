@@ -491,7 +491,7 @@ type Bucket struct {
 	out          io.Writer
 	bucketHandle uint64
 
-	name        []byte
+	name        string
 	initialized bool
 	tx          *Tx
 }
@@ -531,7 +531,7 @@ func (c *Cursor) NoValues() *Cursor {
 }
 
 // Bucket returns the handle to the bucket in remote DB
-func (tx *Tx) Bucket(name []byte) *Bucket {
+func (tx *Tx) Bucket(name string) *Bucket {
 	return &Bucket{tx: tx, ctx: tx.ctx, in: tx.in, out: tx.out, name: name}
 }
 

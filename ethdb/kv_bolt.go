@@ -79,7 +79,7 @@ func (opts boltOpts) Open() (KV, error) {
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
-				_, createErr := tx.CreateBucketIfNotExists(name, false)
+				_, createErr := tx.CreateBucketIfNotExists([]byte(name), false)
 				if createErr != nil {
 					return createErr
 				}
@@ -208,9 +208,9 @@ func (tx *boltTx) Yield() {
 	tx.bolt.Yield()
 }
 
-func (tx *boltTx) Bucket(name []byte) Bucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[string(name)].ID}
-	b.bolt = tx.bolt.Bucket(name)
+func (tx *boltTx) Bucket(name string) Bucket {
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[name].ID}
+	b.bolt = tx.bolt.Bucket([]byte(name))
 	return b
 }
 
@@ -238,11 +238,11 @@ func (b boltBucket) Size() (uint64, error) {
 }
 
 func (b boltBucket) Clear() error {
-	err := b.tx.bolt.DeleteBucket(dbutils.Buckets[b.id])
+	err := b.tx.bolt.DeleteBucket([]byte(dbutils.Buckets[b.id]))
 	if err != nil {
 		return err
 	}
-	_, err = b.tx.bolt.CreateBucket(dbutils.Buckets[b.id], false)
+	_, err = b.tx.bolt.CreateBucket([]byte(dbutils.Buckets[b.id]), false)
 	if err != nil {
 		return err
 	}
