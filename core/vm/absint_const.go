@@ -13,9 +13,7 @@ const (
 	absStackLen = 32
 )
 
-const (
-	DEBUG = false
-)
+var DEBUG = false
 
 type AbsElmType int
 
@@ -136,7 +134,9 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
 }
 
 func post(st0 state, stmt stmt) state {
-	st1 := st0
+	st1 := state{kind: value}
+	st1.stack = make([]AbsConst, len(st0.stack))
+	copy(st1.stack, st0.stack)
 
 	if stmt.opcode.IsPush() {
 		st1.Push(ConstValue(stmt.value))
@@ -366,21 +366,28 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	workList := resolution.edges
 	for len(workList) > 0 {
-		stmts := getStmts(prog)
 		//sortEdges(workList)
-
-		if DEBUG { fmt.Printf("\n\n%v worklist:\n", i); printEdges(workList) }
-
 		var e edge
 		e, workList = workList[0], workList[1:]
 
+		if e.pc0 == 76 {
+			fmt.Printf("---------------------------------------\n")
+			fmt.Printf("Verbose debugging for pc=%v\n", e.pc0)
+			DEBUG = true
+		}
+
 		if DEBUG { fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0]) }
 		post1 := post(D[e.pc0], e.stmt)
-		if DEBUG { fmt.Printf("post\t\t%v\n", post1); fmt.Printf("D\t\t%v\n", D[e.pc1]) }
+		if DEBUG {
+			fmt.Printf("post\t\t%v\n", post1);
+			fmt.Printf("Dprev\t\t%v\n", D[e.pc1])
+		}
 
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
-			if DEBUG { fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1]) }
+			if DEBUG {
+				fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1])
+			}
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 			if !resolution.resolved {
 				printAnlyState(stmts, allEdges, D, resolution.badJump)
@@ -393,6 +400,8 @@ func AbsIntCfgHarness(prog *Contract) error {
 			}
 			workList = append(workList, resolution.edges...)
 		}
+
+		DEBUG = false
 
 		i++
 	}
@@ -416,6 +425,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 	fmt.Printf("\n# of total edges: %v\n", len(finalEdges))
 	//printEdges(edges)
 
+	printAnlyState(stmts, allEdges, D, nil)
 	println("done")
 
 	return nil
