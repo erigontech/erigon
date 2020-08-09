@@ -1,7 +1,6 @@
 package migrations
 
 import (
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -19,12 +18,10 @@ var dupsortHashState = Migration{
 		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.CurrentStateBucket); err != nil {
 			return err
 		}
-
 		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			fmt.Printf("2 %x\n", k)
 			return next(k, k, v)
 		}
-		fmt.Printf("1\n")
+
 		if err := etl.Transform(
 			db,
 			dbutils.CurrentStateBucketOld1,

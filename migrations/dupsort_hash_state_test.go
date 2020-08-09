@@ -49,7 +49,4 @@ func TestDupsortHashState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
-	err = migrator.Apply(db, "")
-	require.NoError(err)
-
 }
