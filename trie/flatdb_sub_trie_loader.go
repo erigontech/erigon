@@ -770,7 +770,7 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 	return nil
 }
 
-// FilterCursor - skip all elements for which RetainDecider returns true
+// FilterCursor - call .filter() and if it returns false - skip element
 type FilterCursor struct {
 	c ethdb.Cursor
 
@@ -835,11 +835,7 @@ func (c *FilterCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
-func IHIsValid(nibbles []byte) bool {
-	return len(nibbles) != 0 && len(nibbles)%2 == 0
-}
-
-// IHCursor - manage 2 cursors - make it looks as 1
+// IHCursor - holds logic related to iteration over IH bucket
 type IHCursor struct {
 	c    *FilterCursor
 	prev []byte
