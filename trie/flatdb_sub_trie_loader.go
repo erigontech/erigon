@@ -837,8 +837,7 @@ func (c *FilterCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 
 // IHCursor - holds logic related to iteration over IH bucket
 type IHCursor struct {
-	c    *FilterCursor
-	prev []byte
+	c *FilterCursor
 }
 
 func IH(c *FilterCursor) *IHCursor {
