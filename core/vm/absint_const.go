@@ -55,6 +55,7 @@ func startSt() state {
 }
 
 type stmt struct {
+	pc int
 	opcode OpCode
 	operation operation
 	value uint256.Int
@@ -95,7 +96,7 @@ func (e edge) String() string {
 type ResolveResult struct {
 	edges []edge
 	resolved bool
-	badJump stmt
+	badJump *stmt
 }
 
 func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
@@ -113,10 +114,10 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
 				pc1 := int(jumpDest.value.Uint64())
 				edges = append(edges, edge{pc0, stmt, pc1})
 			} else {
-				return ResolveResult{resolved: false}
+				return ResolveResult{resolved: false, badJump: &stmt}
 			}
 		} else if jumpDest.kind == Top {
-			return ResolveResult{resolved: false}
+			return ResolveResult{resolved: false, badJump: &stmt}
 		}
 	}
 
@@ -189,6 +190,7 @@ func getStmts(prog *Contract) []stmt {
 	isData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
 		stmt := stmt{}
+		stmt.pc = pc
 		stmt.isData = isData[pc]
 
 		op := prog.GetOp(uint64(pc))
@@ -281,15 +283,20 @@ func getEntryReachableEdges(entry int, edges []edge) []edge {
 	return reachable
 }
 
-func printAnlyState(stmts []stmt, edges map[*edge]bool, D map[int]state) {
+func printAnlyState(stmts []stmt, edges map[*edge]bool, D map[int]state, badJump *stmt) {
 //	es := make([]edge, len(edges))
 //	copy(es, edges)
 //	sortEdges(es)
 
+	prev := make(map[int]map[int]bool)
 	covered := make(map[int]bool)
 	for e, _ := range edges {
 		covered[e.pc0] = true
 		covered[e.pc1] = true
+		if prev[e.pc1] == nil {
+			prev[e.pc1] = make(map[int]bool)
+		}
+		prev[e.pc1][e.pc0] = true
 	}
 
 	for pc, stmt := range stmts {
@@ -308,10 +315,24 @@ func printAnlyState(stmts []stmt, edges map[*edge]bool, D map[int]state) {
 			valueStr = fmt.Sprintf("%v", stmt.opcode)
 		}
 
-		if covered[pc] {
-			fmt.Printf("%3x\t %-25v %v\n", aurora.Green(pc), aurora.Green(valueStr), D[pc])
+		prevPCStr := ""
+		for prevPC, _ := range prev[pc] {
+			prevStmt := stmts[prevPC]
+			if prevPC + prevStmt.numBytes != pc {
+				prevPCs := make([]int, 0)
+				for prevPC0, _ := range prev[pc] {
+					prevPCs = append(prevPCs, prevPC0)
+				}
+				prevPCStr = fmt.Sprintf("%v", prevPCs)
+			}
+		}
+
+		if badJump != nil && badJump.pc == pc {
+			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Red(pc), aurora.Red(valueStr), prevPCStr, D[pc])
+		} else if covered[pc] {
+			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Green(pc), aurora.Green(valueStr), prevPCStr, D[pc])
 		} else {
-			fmt.Printf("%3x\t %-25v\n", pc, valueStr)
+			fmt.Printf("%3v\t %-25v\n", pc, valueStr)
 		}
 	}
 }
@@ -362,7 +383,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 			if DEBUG { fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1]) }
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 			if !resolution.resolved {
-				printAnlyState(stmts, allEdges, D)
+				printAnlyState(stmts, allEdges, D, resolution.badJump)
 				fmt.Printf("Unable to resolve at pc=%x\n", aurora.Magenta(e.pc1))
 				return nil
 			} else {
@@ -381,7 +402,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 	for pc := 0; pc < codeLen; pc++ {
 		resolution = resolve(prog, pc, D[pc], stmts[pc])
 		if !resolution.resolved {
-			printAnlyState(stmts, nil, D)
+			printAnlyState(stmts, nil, D, resolution.badJump)
 			fmt.Printf("Unable to resolve at pc=%x\n", pc)
 			return nil
 		}
