@@ -41,7 +41,8 @@ var (
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	CurrentStateBucket = "CST"
+	CurrentStateBucket     = "CST2"
+	CurrentStateBucketOld1 = "CST"
 
 	//current
 	//key - key + encoded timestamp(block number)
@@ -202,6 +203,7 @@ var Buckets = []string{
 var DeprecatedBuckets = []string{
 	SyncStageProgressOld1,
 	SyncStageUnwindOld1,
+	CurrentStateBucketOld1,
 }
 
 var BucketsCfg = map[string]*BucketConfigItem{}
@@ -226,11 +228,11 @@ var dupSortConfig = []dupSortConfigEntry{
 		ToLen:   40,
 		FromLen: 72,
 	},
-	{
-		Bucket:  PlainStateBucket,
-		ToLen:   28,
-		FromLen: 60,
-	},
+	//{
+	//	Bucket:  PlainStateBucket,
+	//	ToLen:   28,
+	//	FromLen: 60,
+	//},
 }
 
 func init() {
