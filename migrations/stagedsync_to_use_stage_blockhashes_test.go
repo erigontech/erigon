@@ -2,82 +2,57 @@ package migrations
 
 import (
 	"context"
-	"fmt"
-	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func generateFakeBlocks(from, to int) (*types.Header, []*types.Header) {
-	parentHash := types.EmptyRootHash
-	origin := &types.Header{
-		ParentHash: parentHash,
-		UncleHash:  types.EmptyUncleHash,
-		Root:       types.EmptyRootHash,
-		Difficulty: big.NewInt(int64(0)),
-		Number:     big.NewInt(int64(0)),
-		GasLimit:   6000,
-	}
-	parentHash = origin.Hash()
-	parent := origin
-	result := make([]*types.Header, 0)
-	for i := 1; i <= to; i++ {
-		time := uint64(i)
-		difficulty := ethash.CalcDifficulty(
-			params.AllEthashProtocolChanges,
-			time,
-			parent,
-		)
-
-		header := &types.Header{
-			ParentHash: parentHash,
-			UncleHash:  types.EmptyUncleHash,
-			Root:       types.EmptyRootHash,
-			Difficulty: difficulty,
-			Number:     big.NewInt(int64(i)),
-			GasLimit:   6000,
-			Time:       time,
-		}
-		parentHash = header.Hash()
-		parent = header
-		if i >= from {
-			result = append(result, header)
-		}
-	}
-	return origin, result
-}
 func TestStagedsyncToUseStageBlockhashes(t *testing.T) {
-	origin, headers := generateFakeBlocks(1, 4)
 
-	db := ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewMemDatabase()
+	var expected uint64 = 12
 
-	// prepare db so it works with our test
-	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
-	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
-	rawdb.WriteHeader(context.TODO(), db, origin)
-	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.SyncStageProgressOld2).(ethdb.BucketMigrator).Create()
+	})
 
-	_, _, err := stagedsync.InsertHeaderChain(db, headers, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
-	assert.NoError(t, err)
+	require.NoError(err)
+	err = db.Put(dbutils.SyncStageProgressOld2, stages.DBKeys[stages.Headers], dbutils.EncodeBlockNumber(expected))
+	require.NoError(err)
 
-	for _, h := range headers {
-		fmt.Println(h.Hash())
-		rawdb.WriteHeaderNumber(db, h.Hash(), h.Number.Uint64())
-	}
 	migrator := NewMigrator()
 	migrator.Migrations = []Migration{stagedsyncToUseStageBlockhashes}
 	err = migrator.Apply(db, "")
+	require.NoError(err)
 
-	_, err = db.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.BlockHashes])
+	actual, _, err := stages.GetStageProgress(db, stages.BlockHashes)
 	assert.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
+func TestUnwindStagedsyncToUseStageBlockhashes(t *testing.T) {
+
+	require, db := require.New(t), ethdb.NewMemDatabase()
+	var expected uint64 = 12
+
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.Bucket(dbutils.SyncStageUnwindOld2).(ethdb.BucketMigrator).Create()
+	})
+
+	require.NoError(err)
+	err = db.Put(dbutils.SyncStageUnwindOld2, stages.DBKeys[stages.Headers], dbutils.EncodeBlockNumber(expected))
+	require.NoError(err)
+
+	migrator := NewMigrator()
+	migrator.Migrations = []Migration{unwindStagedsyncToUseStageBlockhashes}
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	actual, _, err := stages.GetStageUnwind(db, stages.BlockHashes)
+	assert.NoError(t, err)
+	assert.Equal(t, expected, actual)
 }

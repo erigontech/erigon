@@ -110,10 +110,12 @@ var (
 	BloomBitsIndexPrefix = []byte("iB") // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
 	// Progress of sync stages: stageName -> stageData
-	SyncStageProgress     = []byte("SSP2")
+	SyncStageProgress     = []byte("SSP3")
+	SyncStageProgressOld2 = []byte("SSP2")
 	SyncStageProgressOld1 = []byte("SSP")
 	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind     = []byte("SSU2")
+	SyncStageUnwind     = []byte("SSU3")
+	SyncStageUnwindOld2 = []byte("SSU2")
 	SyncStageUnwindOld1 = []byte("SSU")
 
 	CliqueBucket = []byte("clique-")
@@ -201,7 +203,9 @@ var Buckets = [][]byte{
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = [][]byte{
 	SyncStageProgressOld1,
+	SyncStageProgressOld2,
 	SyncStageUnwindOld1,
+	SyncStageUnwindOld2,
 }
 
 var BucketsCfg = map[string]*BucketConfigItem{}
