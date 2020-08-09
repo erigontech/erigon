@@ -17,12 +17,13 @@ func testGenCfg() error {
 	//dfTest2()
 	//dfTest3()
 	//absIntTest1()
-	//absIntTestSimple00() //- PASSES
+	absIntTestSimple00() //- PASSES
 	//absIntTestRequires00() //- PASSES
-	absIntTestCall01()
-	//absIntTestEcrecoverLoop02() - FAILS
-	//absIntTestStorageVar03()
-	//absIntTestStaticLoop00()
+	//absIntTestCall01() // - PASSES
+	//absIntTestEcrecoverLoop02() //- FAILS - Infinite loop
+	//absIntTestStorageVar03() // - PASSES
+	//absIntTestStaticLoop00() //- FAILS - Infinite loop
+	//absIntTestStaticLoop01() //- FAILS - Infinite loop
 	//absIntTestDepositContract()
 	return nil
 }
@@ -214,6 +215,30 @@ func absIntTestStaticLoop00() {
 	}
 	 */
 	const s = "608060405260043610603f576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff168063fe0d94c1146044575b600080fd5b348015604f57600080fd5b50607960048036036020811015606457600080fd5b8101908080359060200190929190505050608f565b6040518082815260200191505060405180910390f35b600080829050600a8310151560a357600080fd5b60008090505b600381101560c2578082019150808060010191505060a9565b508091505091905056fea165627a7a72305820e9eae4d836605e8f28df860b8f590e6cd933ddcbf111d99767c764aa99f093900029"
+	decoded, err := hex.DecodeString(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract.Code = decoded
+	vm.AbsIntCfgHarness(contract)
+}
+
+func absIntTestStaticLoop01() {
+	/*
+		pragma solidity 0.5.0;
+		contract staticloop00 {
+		    function execute(uint a0) pure external returns(uint256) {
+		        uint sum = a0;
+		        for (uint i = 0; i < 1; i++) {
+		            sum += i;
+		        }
+		        return sum;
+		    }
+		}
+	*/
+	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c8063fe0d94c114602d575b600080fd5b605660048036036020811015604157600080fd5b8101908080359060200190929190505050606c565b6040518082815260200191505060405180910390f35b60008082905060008090505b6001811015609157808201915080806001019150506078565b508091505091905056fea26469706673582212206a12d74a991e3b9cbf04e5abed951fe8a0042780f7a9fe889fd798624b44be1264736f6c63430006060033"
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
 		log.Fatal(err)
