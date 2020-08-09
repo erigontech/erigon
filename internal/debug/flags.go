@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -304,8 +305,11 @@ func StartPProf(address string, withMetrics bool) {
 		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
 	}
 	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
-	log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
+	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
+	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 	go func() {
+		fmt.Printf("1\n")
 		if err := http.ListenAndServe(address, nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)
 		}
