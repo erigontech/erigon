@@ -774,11 +774,8 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 type FilterCursor struct {
 	c ethdb.Cursor
 
-	k, kHex, v        []byte
-	filter            func(k []byte) (bool, error)
-	seekAccCouner     int
-	seekStorageCouner int
-	nextCounter       int
+	k, kHex, v []byte
+	filter     func(k []byte) (bool, error)
 }
 
 func Filter(filter func(k []byte) (bool, error), c ethdb.Cursor) *FilterCursor {
@@ -786,12 +783,6 @@ func Filter(filter func(k []byte) (bool, error), c ethdb.Cursor) *FilterCursor {
 }
 
 func (c *FilterCursor) _seekTo(seek []byte) (err error) {
-	if len(seek) > 64 {
-		c.seekStorageCouner++
-	} else {
-		c.seekAccCouner++
-	}
-
 	c.k, c.v, err = c.c.Seek(seek)
 	if err != nil {
 		return err
@@ -811,7 +802,6 @@ func (c *FilterCursor) _seekTo(seek []byte) (err error) {
 }
 
 func (c *FilterCursor) _next() (err error) {
-	c.nextCounter++
 	c.k, c.v, err = c.c.Next()
 	if err != nil {
 		return err
@@ -830,7 +820,6 @@ func (c *FilterCursor) _next() (err error) {
 			return nil
 		}
 
-		c.nextCounter++
 		c.k, c.v, err = c.c.Next()
 		if err != nil {
 			return err
