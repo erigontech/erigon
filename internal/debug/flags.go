@@ -55,6 +55,13 @@ var (
 		Usage: "Request a stack trace at a specific logging statement (e.g. \"block.go:271\")",
 		Value: "",
 	}
+	metricsAddrFlag = cli.StringFlag{
+		Name: "metrics.addr",
+	}
+	metricsPortFlag = cli.UintFlag{
+		Name:  "metrics.port",
+		Value: 6060,
+	}
 	debugFlag = cli.BoolFlag{
 		Name:  "debug",
 		Usage: "Prepends log messages with call-site location (file and line number)",
@@ -228,9 +235,26 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
+	metricsAddr, err := flags.GetString(metricsAddrFlag.Name)
+	if err != nil {
+		return err
+	}
+	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	if metrics.Enabled && metricsAddr != "" {
+		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
+		log.Info("Enabling stand-alone metrics HTTP endpoint", "addr", address)
+		exp.Setup(address)
+	}
+
+	withMetrics := metrics.Enabled && metricsAddr == ""
+	fmt.Printf("1: %t %t %s\n", withMetrics, metrics.Enabled, metricsAddr)
 	if pprof {
 		// metrics and pprof server
-		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), metrics.Enabled)
+		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
 	}
 	return nil
 }
@@ -309,7 +333,6 @@ func StartPProf(address string, withMetrics bool) {
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
 	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 	go func() {
-		fmt.Printf("1\n")
 		if err := http.ListenAndServe(address, nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)
 		}
