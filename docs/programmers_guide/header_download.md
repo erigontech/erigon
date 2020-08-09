@@ -155,6 +155,7 @@ within the message agree on their numbering and difficulty calculation. It also 
 If any of these checks fail, the algorithm returns penalty object, which includes peer handle (the same as the one passed as an input),
 and type of fault (`BadHeader`, `DuplicateHeader`, etc.). The logic of deciding which fault results in which penalty is outside of this
 algorithm.
+**Invariant**: headers in the output chain segment must be topologically sorted, with the root being the first 
 
 ### Handle NewBlockMsg
 **Input**: NewBlockMsg + peer handle. **Output**: chain segment or penalty for the peer handle
@@ -165,7 +166,7 @@ Therefore, we will only be looking at the block header part of the message. This
 "Handle BlockHeadersMsg", because it only creates one chain segment and there is only one header in that segment.
 
 ### Prepend
-**Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no prepend point foind", or penalty for the handle (tombstone creation)
+**Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no prepend point found", or penalty for the handle (tombstone creation)
 We do not allow prepending to the hard-coded tips (therefore tips need an extra boolean attribute `noPrepend`)
 
 ### Append

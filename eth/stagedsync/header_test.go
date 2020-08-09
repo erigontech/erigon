@@ -209,3 +209,12 @@ func TestHandleNewBlockMsg(t *testing.T) {
 		t.Errorf("handle header msg: %v", err)
 	}
 }
+
+func TestPrepend(t *testing.T) {
+	hd := NewHeaderDownload("", 10, func(timestamp uint64, parent *types.Header) *big.Int {
+		// To get child difficulty, we just add 1000 to the parent difficulty
+		return big.NewInt(0).Add(parent.Difficulty, big.NewInt(1000))
+	})
+	peer := PeerHandle(1)
+
+}
