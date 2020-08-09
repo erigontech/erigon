@@ -47,6 +47,7 @@ require (
 	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
 	github.com/ledgerwatch/lmdb-go v1.13.0
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
+	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12
 	github.com/naoina/go-stringutil v0.1.0 // indirect

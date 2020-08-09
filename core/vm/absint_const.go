@@ -5,6 +5,7 @@ import (
 	"github.com/holiman/uint256"
 	"sort"
 	"strings"
+	"github.com/logrusorgru/aurora"
 )
 
 //////////////////////////////////////////////////
@@ -280,14 +281,15 @@ func getEntryReachableEdges(entry int, edges []edge) []edge {
 	return reachable
 }
 
-func printCfg(stmts []stmt, edges []edge) {
-	es := make([]edge, len(edges))
-	copy(es, edges)
-	sortEdges(es)
+func printAnlyState(stmts []stmt, edges map[*edge]bool, D map[int]state) {
+//	es := make([]edge, len(edges))
+//	copy(es, edges)
+//	sortEdges(es)
 
-	prev := make(map[int]int)
-	for _, edge := range(edges) {
-		prev[edge.pc1] = edge.pc1
+	covered := make(map[int]bool)
+	for e, _ := range edges {
+		covered[e.pc0] = true
+		covered[e.pc1] = true
 	}
 
 	for pc, stmt := range stmts {
@@ -295,17 +297,22 @@ func printCfg(stmts []stmt, edges []edge) {
 			continue
 		}
 
+		if stmt.opcode == JUMPDEST {
+			fmt.Println()
+		}
+
 		var valueStr string
 		if stmt.opcode.IsPush(){
-			valueStr = fmt.Sprintf("%v", stmt.value.Hex())
+			valueStr = fmt.Sprintf("%v %v", stmt.opcode, stmt.value.Hex())
+		} else {
+			valueStr = fmt.Sprintf("%v", stmt.opcode)
 		}
 
-		fallthru := " "
-		if prev[pc] == pc-1 {
-			fallthru = "|"
+		if covered[pc] {
+			fmt.Printf("%3x\t %-25v %v\n", aurora.Green(pc), aurora.Green(valueStr), D[pc])
+		} else {
+			fmt.Printf("%3x\t %-25v\n", pc, valueStr)
 		}
-
-		fmt.Printf("%x\t%v %v %v\n", pc, fallthru, stmt.opcode, valueStr)
 	}
 }
 
@@ -323,10 +330,17 @@ func AbsIntCfgHarness(prog *Contract) error {
 	D[startPC] = startSt()
 
 	i := 0
+
+	allEdges := make(map[*edge]bool)
+
 	resolution := resolve(prog, startPC, D[startPC], stmts[startPC])
 	if !resolution.resolved {
 		fmt.Printf("Unable to resolve at pc=%x\n", startPC)
 		return nil
+	} else {
+		for _, e := range resolution.edges {
+			allEdges[&e] = true
+		}
 	}
 
 	workList := resolution.edges
@@ -348,10 +362,13 @@ func AbsIntCfgHarness(prog *Contract) error {
 			if DEBUG { fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1]) }
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 			if !resolution.resolved {
-				printCfg(stmts, nil)
-				fmt.Printf("Unable to resolve at pc=%x\n", e.pc1)
-
+				printAnlyState(stmts, allEdges, D)
+				fmt.Printf("Unable to resolve at pc=%x\n", aurora.Magenta(e.pc1))
 				return nil
+			} else {
+				for _, e := range resolution.edges {
+					allEdges[&e] = true
+				}
 			}
 			workList = append(workList, resolution.edges...)
 		}
@@ -360,22 +377,22 @@ func AbsIntCfgHarness(prog *Contract) error {
 	}
 
 	print("\nFinal resolve....")
-	var edges []edge
+	var finalEdges []edge
 	for pc := 0; pc < codeLen; pc++ {
 		resolution = resolve(prog, pc, D[pc], stmts[pc])
 		if !resolution.resolved {
-			printCfg(stmts, nil)
+			printAnlyState(stmts, nil, D)
 			fmt.Printf("Unable to resolve at pc=%x\n", pc)
 			return nil
 		}
-		edges = append(edges, resolution.edges...)
+		finalEdges = append(finalEdges, resolution.edges...)
 	}
 	//need to run a DFS from the entry point to pick only reachable stmts
 
-	reachableEdges := getEntryReachableEdges(0, edges)
+	reachableEdges := getEntryReachableEdges(0, finalEdges)
 
-	fmt.Printf("\n# of unreachable edges: %v\n", len(edges) - len(reachableEdges))
-	fmt.Printf("\n# of total edges: %v\n", len(edges))
+	fmt.Printf("\n# of unreachable edges: %v\n", len(finalEdges) - len(reachableEdges))
+	fmt.Printf("\n# of total edges: %v\n", len(finalEdges))
 	//printEdges(edges)
 
 	println("done")

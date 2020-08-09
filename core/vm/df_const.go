@@ -46,7 +46,7 @@ const (
 )
 
 func (d AbsConstValueType) String() string {
-	return [...]string{"Bot", "Top", "Value"}[d]
+	return [...]string{"⊥", "⊤", "Value"}[d]
 }
 
 type AbsConst struct {
