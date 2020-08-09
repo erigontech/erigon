@@ -851,22 +851,24 @@ func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
 		return []byte{}, nil, false, err
 	}
 
-	// TODO: this feature not well tested yet
-	//if k != nil {
-	//	exactMatch := isSequence(seek, k)
-	//	//if exactMatch {
-	//	//	n, _ := dbutils.NextSubtree(c.prev)
-	//	//	if !bytes.Equal(n, seek) {
-	//	//		//fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
-	//	//	}
-	//	//}
-	//	exactMatch = false
-	//	if exactMatch {
-	//		return k, v, true, nil
-	//	}
-	//}
+	/*
+		TODO: this feature not well tested yet
+		if k != nil {
+			exactMatch := isSequence(seek, k)
+			//if exactMatch {
+			//	n, _ := dbutils.NextSubtree(c.prev)
+			//	if !bytes.Equal(n, seek) {
+			//		//fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
+			//	}
+			//}
+			exactMatch = false
+			if exactMatch {
+				return k, v, true, nil
+			}
+		}
+		c.prev = common.CopyBytes(k)
+	*/
 
-	c.prev = common.CopyBytes(k)
 	return k, v, false, nil
 }
 
