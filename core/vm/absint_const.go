@@ -13,7 +13,7 @@ const (
 )
 
 const (
-	DEBUG = true
+	DEBUG = false
 )
 
 type AbsElmType int
@@ -58,6 +58,7 @@ type stmt struct {
 	operation operation
 	value uint256.Int
 	numBytes int
+	isData bool
 }
 
 func (state state) String() string {
@@ -90,17 +91,19 @@ func (e edge) String() string {
 	return fmt.Sprintf("%v %v %v", e.pc0, e.pc1, e.stmt.opcode)
 }
 
-func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
+type ResolveResult struct {
+	edges []edge
+	resolved bool
+	badJump stmt
+}
+
+func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
 	if !stmt.operation.valid || stmt.operation.halts {
-		return nil
+		return ResolveResult{resolved: true}
 	}
 
 	codeLen := len(prog.Code)
 	var edges []edge
-
-	if stmt.operation.halts {
-		return edges
-	}
 
 	if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 		jumpDest := st0.stack[0]
@@ -109,10 +112,10 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 				pc1 := int(jumpDest.value.Uint64())
 				edges = append(edges, edge{pc0, stmt, pc1})
 			} else {
-				panic("Invalid program counter. Cannot resolve jump.")
+				return ResolveResult{resolved: false}
 			}
 		} else if jumpDest.kind == Top {
-			panic("Imprecise jump found. Cannot resolve jump.")
+			return ResolveResult{resolved: false}
 		}
 	}
 
@@ -127,7 +130,7 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) []edge {
 		printEdges(edges)
 	}
 
-	return edges
+	return ResolveResult{edges: edges, resolved: true}
 }
 
 func post(st0 state, stmt stmt) state {
@@ -182,8 +185,10 @@ func getStmts(prog *Contract) []stmt {
 
 	codeLen := len(prog.Code)
 	var stmts []stmt
+	isData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
 		stmt := stmt{}
+		stmt.isData = isData[pc]
 
 		op := prog.GetOp(uint64(pc))
 		stmt.opcode = op
@@ -204,6 +209,9 @@ func getStmts(prog *Contract) []stmt {
 			integer.SetBytes(prog.Code[startMin:endMin])
 			stmt.value = *integer
 			stmt.numBytes = pushByteSize + 1
+			for datapc := startMin; datapc < endMin; datapc++ {
+				isData[datapc] = true
+			}
 		} else {
 			stmt.numBytes = 1
 		}
@@ -272,8 +280,40 @@ func getEntryReachableEdges(entry int, edges []edge) []edge {
 	return reachable
 }
 
+func printCfg(stmts []stmt, edges []edge) {
+	es := make([]edge, len(edges))
+	copy(es, edges)
+	sortEdges(es)
+
+	prev := make(map[int]int)
+	for _, edge := range(edges) {
+		prev[edge.pc1] = edge.pc1
+	}
+
+	for pc, stmt := range stmts {
+		if stmt.isData {
+			continue
+		}
+
+		var valueStr string
+		if stmt.opcode.IsPush(){
+			valueStr = fmt.Sprintf("%v", stmt.value.Hex())
+		}
+
+		fallthru := " "
+		if prev[pc] == pc-1 {
+			fallthru = "|"
+		}
+
+		fmt.Printf("%x\t%v %v %v\n", pc, fallthru, stmt.opcode, valueStr)
+	}
+}
 
 func AbsIntCfgHarness(prog *Contract) error {
+
+	stmts := getStmts(prog)
+	if DEBUG { printStmts(stmts) }
+
 	startPC := 0
 	codeLen := len(prog.Code)
 	D := make(map[int]state)
@@ -282,12 +322,16 @@ func AbsIntCfgHarness(prog *Contract) error {
 	}
 	D[startPC] = startSt()
 
-	stmts := getStmts(prog)
-	if DEBUG { printStmts(stmts) }
-
 	i := 0
-	workList := resolve(prog, startPC, D[startPC], stmts[startPC])
+	resolution := resolve(prog, startPC, D[startPC], stmts[startPC])
+	if !resolution.resolved {
+		fmt.Printf("Unable to resolve at pc=%x\n", startPC)
+		return nil
+	}
+
+	workList := resolution.edges
 	for len(workList) > 0 {
+		stmts := getStmts(prog)
 		//sortEdges(workList)
 
 		if DEBUG { fmt.Printf("\n\n%v worklist:\n", i); printEdges(workList) }
@@ -302,7 +346,14 @@ func AbsIntCfgHarness(prog *Contract) error {
 		if !leq(post1, D[e.pc1]) {
 			D[e.pc1] = lub(post1, D[e.pc1])
 			if DEBUG { fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1]) }
-			workList = append(workList, resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])...)
+			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
+			if !resolution.resolved {
+				printCfg(stmts, nil)
+				fmt.Printf("Unable to resolve at pc=%x\n", e.pc1)
+
+				return nil
+			}
+			workList = append(workList, resolution.edges...)
 		}
 
 		i++
@@ -311,7 +362,13 @@ func AbsIntCfgHarness(prog *Contract) error {
 	print("\nFinal resolve....")
 	var edges []edge
 	for pc := 0; pc < codeLen; pc++ {
-		edges = append(edges, resolve(prog, pc, D[pc], stmts[pc])...)
+		resolution = resolve(prog, pc, D[pc], stmts[pc])
+		if !resolution.resolved {
+			printCfg(stmts, nil)
+			fmt.Printf("Unable to resolve at pc=%x\n", pc)
+			return nil
+		}
+		edges = append(edges, resolution.edges...)
 	}
 	//need to run a DFS from the entry point to pick only reachable stmts
 
