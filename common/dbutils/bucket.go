@@ -216,23 +216,26 @@ type BucketConfigItem struct {
 }
 
 type dupSortConfigEntry struct {
-	Bucket  string
-	ID      int
-	FromLen int
-	ToLen   int
+	Bucket    string
+	IsDupSort bool
+	ID        int
+	FromLen   int
+	ToLen     int
 }
 
 var dupSortConfig = []dupSortConfigEntry{
 	{
-		Bucket:  CurrentStateBucket,
-		ToLen:   40,
-		FromLen: 72,
+		Bucket:    CurrentStateBucket,
+		IsDupSort: true,
+		ToLen:     40,
+		FromLen:   72,
 	},
-	//{
-	//	Bucket:  PlainStateBucket,
-	//	ToLen:   28,
-	//	FromLen: 60,
-	//},
+	{
+		Bucket:    PlainStateBucket,
+		IsDupSort: debug.IsPlainStateDupsortEnabled(),
+		ToLen:     28,
+		FromLen:   60,
+	},
 }
 
 func init() {
@@ -259,13 +262,7 @@ func createBucketConfig(id int, name string) *BucketConfigItem {
 
 		cfg.DupFromLen = dupCfg.FromLen
 		cfg.DupToLen = dupCfg.ToLen
-
-		if dupCfg.Bucket == CurrentStateBucket {
-			cfg.IsDupsort = debug.IsHashedStateDupsortEnabled()
-		}
-		if dupCfg.Bucket == PlainStateBucket {
-			cfg.IsDupsort = debug.IsPlainStateDupsortEnabled()
-		}
+		cfg.IsDupsort = dupCfg.IsDupSort
 	}
 
 	return cfg
