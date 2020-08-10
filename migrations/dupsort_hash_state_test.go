@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -33,6 +34,7 @@ func TestDupsortHashState(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
+	// test high-level data access didn't change
 	i := 0
 	err = db.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
 		i++
@@ -49,4 +51,25 @@ func TestDupsortHashState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
+	// test low-level data layout
+	rawKV := db.KV().(*ethdb.LmdbKV)
+	env := rawKV.Env()
+	allDBI := rawKV.AllDBI()
+
+	tx, err := env.BeginTxn(nil, lmdb.Readonly)
+	require.NoError(err)
+	c, err := tx.OpenCursor(allDBI[string(dbutils.CurrentStateBucket)])
+	require.NoError(err)
+
+	k, v, err := c.Get([]byte(accKey), nil, lmdb.Set)
+	require.NoError(err)
+	require.Equal([]byte(accKey), k)
+	require.Equal([]byte{1}, v)
+
+	keyLen := common.HashLength + common.IncarnationLength
+	k, v, err = c.Get([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:], lmdb.GetBothRange)
+	require.NoError(err)
+	require.Equal([]byte(storageKey)[:keyLen], k)
+	require.Equal([]byte(storageKey)[keyLen:], v[:common.HashLength])
+	require.Equal([]byte{2}, v[common.HashLength:])
 }
