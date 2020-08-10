@@ -106,9 +106,6 @@ test: semantics/z3/build/libz3.a
 test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GORUN) build/ci.go test
 
-test-badger: semantics/z3/build/libz3.a
-	TEST_DB=badger $(GORUN) build/ci.go test
-
 test-bolt: semantics/z3/build/libz3.a
 	TEST_DB=bolt $(GORUN) build/ci.go test
 
@@ -257,7 +254,7 @@ simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
 
 prometheus:
-	@cd ./cmd/prometheus && docker-compose up prometheus grafana
+	docker-compose up prometheus grafana
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out

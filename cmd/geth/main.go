@@ -39,13 +39,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethclient"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
-
-	"net/http"
-	//nolint:gosec
-	_ "net/http/pprof"
 )
 
 const (
@@ -57,7 +54,7 @@ var (
 	gitCommit = ""
 	gitDate   = ""
 	// The app that holds all commands and flags.
-	app = utils.NewApp(gitCommit, gitDate, "the go-ethereum command line interface")
+	app = flags.NewApp(gitCommit, gitDate, "the go-ethereum command line interface")
 	// flags that configure the node
 	nodeFlags = []cli.Flag{
 		utils.IdentityFlag,
@@ -113,6 +110,7 @@ var (
 		utils.StorageModeFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
+		utils.LMDBMapSizeFlag,
 		utils.PrivateApiAddr,
 		utils.CacheNoPrefetchFlag,
 		utils.ListenPortFlag,
@@ -193,11 +191,14 @@ var (
 		utils.IPCPathFlag,
 		utils.InsecureUnlockAllowedFlag,
 		utils.RPCGlobalGasCap,
+		utils.RPCGlobalTxFeeCap,
 	}
 
 	metricsFlags = []cli.Flag{
 		utils.MetricsEnabledFlag,
 		utils.MetricsEnabledExpensiveFlag,
+		utils.MetricsHTTPFlag,
+		utils.MetricsPortFlag,
 		utils.MetricsEnableInfluxDBFlag,
 		utils.MetricsInfluxDBEndpointFlag,
 		utils.MetricsInfluxDBDatabaseFlag,
@@ -263,9 +264,6 @@ func init() {
 }
 
 func main() {
-	go func() {
-		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
-	}()
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -464,7 +462,7 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 			log.Warn("The flag --minerthreads is deprecated and will be removed in the future, please use --miner.threads")
 		}
 
-		if err := ethereum.StartMining(threads, ethereum.BlockChain().DestsCache); err != nil {
+		if err := ethereum.StartMining(threads); err != nil {
 			utils.Fatalf("Failed to start mining: %v", err)
 		}
 	}

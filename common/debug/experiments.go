@@ -55,11 +55,6 @@ func IsBlockCompressionEnabled() bool {
 }
 
 var (
-	trackWitnessSize       bool      //nolint:deadcode,varcheck,unused
-	getTrackWitnessSizeLen sync.Once //nolint:deadcode,varcheck,unused
-)
-
-var (
 	testDB    string
 	getTestDB sync.Once
 )
@@ -72,4 +67,28 @@ func TestDB() string {
 		}
 	})
 	return testDB
+}
+
+var (
+	dupsortPlain    bool
+	getDupsortPlain sync.Once
+)
+
+func IsPlainStateDupsortEnabled() bool {
+	getDupsortPlain.Do(func() {
+		_, dupsortPlain = os.LookupEnv("DUPSORT_PLAIN")
+	})
+	return dupsortPlain
+}
+
+var (
+	dupsortHashed    bool
+	getDupsortHashed sync.Once
+)
+
+func IsHashedStateDupsortEnabled() bool {
+	getDupsortHashed.Do(func() {
+		_, dupsortHashed = os.LookupEnv("DUPSORT_HASHED")
+	})
+	return dupsortHashed
 }

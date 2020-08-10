@@ -45,7 +45,7 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 		}
 		kv = database.KV()
 	} else {
-		err = fmt.Errorf("either remote db or bolt db must be specified")
+		err = fmt.Errorf("either remote or local db must be specified")
 	}
 	if err != nil {
 		return err

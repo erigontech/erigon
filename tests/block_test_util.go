@@ -122,7 +122,7 @@ func (t *BlockTest) Run(_ bool) error {
 		engine = ethash.NewShared()
 	}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, nil, txCacher)
+	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		return err
 	}

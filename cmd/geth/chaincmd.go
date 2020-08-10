@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -84,6 +83,8 @@ The dumpgenesis command dumps the genesis block configuration in JSON format to 
 			utils.CacheGCFlag,
 			utils.MetricsEnabledFlag,
 			utils.MetricsEnabledExpensiveFlag,
+			utils.MetricsHTTPFlag,
+			utils.MetricsPortFlag,
 			utils.MetricsEnableInfluxDBFlag,
 			utils.MetricsInfluxDBEndpointFlag,
 			utils.MetricsInfluxDBDatabaseFlag,
@@ -292,13 +293,17 @@ func importChain(ctx *cli.Context) error {
 	// Import the chain
 	start := time.Now()
 
+	var importErr error
+
 	if len(ctx.Args()) == 1 {
 		if err := utils.ImportChain(chain, ctx.Args().First()); err != nil {
+			importErr = err
 			log.Error("Import error", "err", err)
 		}
 	} else {
 		for _, arg := range ctx.Args() {
 			if err := utils.ImportChain(chain, arg); err != nil {
+				importErr = err
 				log.Error("Import error", "file", arg, "err", err)
 			}
 		}
@@ -315,7 +320,7 @@ func importChain(ctx *cli.Context) error {
 	fmt.Printf("Allocations:   %.3f million\n", float64(mem.Mallocs)/1000000)
 	fmt.Printf("GC pause:      %v\n\n", time.Duration(mem.PauseTotalNs))
 
-	return nil
+	return importErr
 }
 
 func exportChain(ctx *cli.Context) error {
@@ -388,7 +393,6 @@ func exportPreimages(ctx *cli.Context) error {
 	return nil
 }
 
-// TODO [Issue 144] support BadgerDB
 func copyDb(ctx *cli.Context) error {
 	// Ensure we have a source chain directory to copy
 	if len(ctx.Args()) < 1 {
@@ -424,7 +428,7 @@ func copyDb(ctx *cli.Context) error {
 	start := time.Now()
 
 	currentHeader := hc.CurrentHeader()
-	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, vm.NewDestsCache(10000), nil, func() error { return nil }); err != nil {
+	if err = dl.Synchronise("local", currentHeader.Hash(), currentHeader.Number.Uint64(), syncMode, nil, func() error { return nil }); err != nil {
 		return err
 	}
 	for dl.Synchronising() {

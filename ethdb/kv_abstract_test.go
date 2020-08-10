@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
@@ -21,12 +20,22 @@ import (
 )
 
 func TestManagedTx(t *testing.T) {
-	writeDBs, readDBs, closeAll := setupDatabases()
-	defer closeAll()
+	defaultConfig := dbutils.BucketsCfg
+	defer func() {
+		dbutils.BucketsCfg = defaultConfig
+	}()
 
 	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
+	dbutils.BucketsCfg[string(bucket1)].IsDupsort = true
+	dbutils.BucketsCfg[string(bucket1)].DupFromLen = 6
+	dbutils.BucketsCfg[string(bucket1)].DupToLen = 4
+	dbutils.BucketsCfg[string(bucket2)].IsDupsort = false
+
+	writeDBs, readDBs, closeAll := setupDatabases()
+	defer closeAll()
+
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
@@ -79,47 +88,31 @@ func TestManagedTx(t *testing.T) {
 func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(),
-		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
-		ethdb.NewBadger().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(), // for remote2 db
 	}
 
-	serverIn, clientOut := io.Pipe()
-	clientIn, serverOut := io.Pipe()
 	conn := bufconn.Listen(1024 * 1024)
 
 	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
-		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(),
-		writeDBs[2],
-		writeDBs[3],
-		rdb,
+		writeDBs[1],
+		ethdb.NewRemote2().InMem(conn).MustOpen(),
 	}
 
-	serverCtx, serverCancel := context.WithCancel(context.Background())
-	go func() {
-		_ = remotedbserver.Server(serverCtx, writeDBs[1], nil, serverIn, serverOut, nil)
-	}()
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[4]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[2]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
 
 	return writeDBs, readDBs, func() {
-		serverIn.Close()
-		serverOut.Close()
-		clientIn.Close()
-		clientOut.Close()
 		grpcServer.Stop()
 
 		conn.Close()
-
-		serverCancel()
 
 		for _, db := range readDBs {
 			db.Close()
@@ -334,6 +327,34 @@ func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 []byte) {
 		assert.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0, 0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0, 0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
+		assert.NoError(err)
+		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
+
+		k1, v1, err = c1.Next()
+		assert.NoError(err)
+		k2, v2, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal(k1, k2)
+		assert.Equal(v1, v2)
 		k1, v1, err = c1.Seek([]byte{2})
 		assert.NoError(err)
 		k2, v2, err = c2.Seek([]byte{2})
@@ -366,6 +387,7 @@ func TestMultipleBuckets(t *testing.T) {
 				for i := uint8(0); i < 12; i++ {
 					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
 				}
+
 				// delete from first bucket key 5, then will seek on it and expect to see key 6
 				if err := b.Delete([]byte{5}); err != nil {
 					return err

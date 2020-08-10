@@ -466,7 +466,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 		}
 	}
 	// Create a checkpoint aware protocol manager
-	blockchain, err := core.NewBlockChain(db, nil, config, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, config, ethash.NewFaker(), vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
@@ -557,7 +557,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
 	)
-	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
@@ -600,13 +600,16 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		select {
 		case <-doneCh:
 			received++
-
-		case <-time.After(time.Second):
+			if received > broadcastExpected {
+				// We can bail early here
+				t.Errorf("broadcast count mismatch: have %d > want %d", received, broadcastExpected)
+				return
+			}
+		case <-time.After(2 * time.Second):
 			if received != broadcastExpected {
 				t.Errorf("broadcast count mismatch: have %d, want %d", received, broadcastExpected)
 			}
 			return
-
 		case err = <-errCh:
 			t.Fatalf("broadcast failed: %v", err)
 		}
@@ -1341,7 +1344,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
 	)
-	blockchain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}

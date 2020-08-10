@@ -116,9 +116,6 @@ var bucketLabels = map[string]string{
 	string(dbutils.HeaderPrefix):           "Headers",
 	string(dbutils.ConfigPrefix):           "Config",
 	string(dbutils.BlockBodyPrefix):        "Block Bodies",
-	string(dbutils.HeadHeaderKey):          "Last Header",
-	string(dbutils.HeadFastBlockKey):       "Last Fast",
-	string(dbutils.HeadBlockKey):           "Last Block",
 	string(dbutils.HeaderNumberPrefix):     "Header Numbers",
 	string(dbutils.AccountChangeSetBucket): "Account Change Sets",
 	string(dbutils.StorageChangeSetBucket): "Storage Change Sets",
@@ -325,7 +322,7 @@ func initialState1() error {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		return err
 	}

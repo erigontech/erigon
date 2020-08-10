@@ -341,7 +341,6 @@ func doTest(cmdline []string) {
 	// and some tests run into timeouts under load.
 	gotest := goTool("test", buildFlags(env)...)
 	gotest.Args = append(gotest.Args, "-p", "1")
-	*verbose = true
 	if *coverage {
 		gotest.Args = append(gotest.Args, "-covermode=atomic", "-cover")
 	}
@@ -900,11 +899,12 @@ func gomobileTool(subcmd string, args ...string) *exec.Cmd {
 		"PATH=" + GOBIN + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "GOPATH=") || strings.HasPrefix(e, "PATH=") {
+		if strings.HasPrefix(e, "GOPATH=") || strings.HasPrefix(e, "PATH=") || strings.HasPrefix(e, "GOBIN=") {
 			continue
 		}
 		cmd.Env = append(cmd.Env, e)
 	}
+	cmd.Env = append(cmd.Env, "GOBIN="+GOBIN)
 	return cmd
 }
 
@@ -973,7 +973,7 @@ func doXCodeFramework(cmdline []string) {
 
 	if *local {
 		// If we're building locally, use the build folder and stop afterwards
-		bind.Dir, _ = filepath.Abs(GOBIN)
+		bind.Dir = GOBIN
 		build.MustRun(bind)
 		return
 	}

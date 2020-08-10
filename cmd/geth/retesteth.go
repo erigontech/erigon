@@ -408,7 +408,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	}
 	engine := &NoRewardEngine{inner: inner, rewardsOn: chainParams.SealEngine != "NoReward"}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, api.blockchain.DestsCache, txCacher)
+	blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		return false, err
 	}
@@ -418,9 +418,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	api.author = chainParams.Genesis.Author
 	api.extraData = chainParams.Genesis.ExtraData
 	api.ethDb = ethDb
-	if hasKV, ok := api.ethDb.(ethdb.HasKV); ok {
-		api.kv = hasKV.KV()
-	}
+	api.kv = ethDb.KV()
 	api.engine = engine
 	api.blockchain = blockchain
 	//api.db = state.NewDatabase(api.ethDb)
@@ -539,7 +537,6 @@ func (api *RetestethAPI) mineBlock() error {
 					statedb,
 					tds.TrieStateWriter(),
 					header, tx, &header.GasUsed, *api.blockchain.GetVMConfig(),
-					api.blockchain.DestsCache,
 				)
 				if err != nil {
 					statedb.RevertToSnapshot(snap)
@@ -690,7 +687,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), api.blockchain, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{}, api.blockchain.DestsCache)
+			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{})
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				return AccountRangeResult{}, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
 			}
@@ -790,7 +787,7 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 		dbstate = state.NewDbState(api.kv, header.Number.Uint64())
 	} else {
 		var err error
-		_, _, _, dbstate, err = eth.ComputeTxEnv(ctx, api.blockchain, api.blockchain.Config(), api.blockchain, api.kv, block.Hash(), txIndex, api.blockchain.DestsCache)
+		_, _, _, dbstate, err = eth.ComputeTxEnv(ctx, api.blockchain, api.blockchain.Config(), api.blockchain, api.kv, block.Hash(), txIndex)
 		if err != nil {
 			return StorageRangeResult{}, err
 		}

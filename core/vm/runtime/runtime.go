@@ -55,13 +55,20 @@ type Config struct {
 func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &params.ChainConfig{
-			ChainID:        big.NewInt(1),
-			HomesteadBlock: new(big.Int),
-			DAOForkBlock:   new(big.Int),
-			DAOForkSupport: false,
-			EIP150Block:    new(big.Int),
-			EIP155Block:    new(big.Int),
-			EIP158Block:    new(big.Int),
+			ChainID:             big.NewInt(1),
+			HomesteadBlock:      new(big.Int),
+			DAOForkBlock:        new(big.Int),
+			DAOForkSupport:      false,
+			EIP150Block:         new(big.Int),
+			EIP150Hash:          common.Hash{},
+			EIP155Block:         new(big.Int),
+			EIP158Block:         new(big.Int),
+			ByzantiumBlock:      new(big.Int),
+			ConstantinopleBlock: new(big.Int),
+			PetersburgBlock:     new(big.Int),
+			IstanbulBlock:       new(big.Int),
+			MuirGlacierBlock:    new(big.Int),
+			YoloV1Block:         nil,
 		}
 	}
 
@@ -109,7 +116,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
-		vmenv   = NewEnv(cfg, nil)
+		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 	)
 	cfg.State.CreateAccount(address, true)
@@ -141,7 +148,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
 	var (
-		vmenv  = NewEnv(cfg, nil)
+		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
 	)
 
@@ -163,7 +170,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
-	vmenv := NewEnv(cfg, nil)
+	vmenv := NewEnv(cfg)
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	// Call the code with the given configuration.

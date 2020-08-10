@@ -314,7 +314,7 @@ func (tx *boltTx) Yield() {
 }
 
 func (tx *boltTx) Bucket(name []byte) Bucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsIndex[string(name)]}
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[string(name)].ID}
 	b.bolt = tx.bolt.Bucket(name)
 	return b
 }

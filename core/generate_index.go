@@ -32,7 +32,7 @@ type IndexGenerator struct {
 	quitCh           <-chan struct{}
 }
 
-func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte) error {
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte, datadir string) error {
 	v, ok := changeset.Mapper[string(changeSetBucket)]
 	if !ok {
 		return errors.New("unknown bucket type")
@@ -44,7 +44,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	t := time.Now()
 	err := etl.Transform(ig.db, changeSetBucket,
 		v.IndexBucket,
-		os.TempDir(),
+		datadir,
 		getExtractFunc(v.WalkerAdapter),
 		loadFunc,
 		etl.TransformArgs{

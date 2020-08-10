@@ -67,7 +67,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
 	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, txCacher1)
+	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher1)
 	if err != nil {
 		t.Fatal(err)
 	}

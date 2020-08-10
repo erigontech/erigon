@@ -112,7 +112,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, db, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, nil, false, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, db, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil

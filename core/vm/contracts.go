@@ -104,12 +104,18 @@ var PrecompiledContractsYoloV1 = map[common.Address]PrecompiledContract{
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
-func RunPrecompiledContract(p PrecompiledContract, input []byte, contract *Contract) (ret []byte, err error) {
-	gas := p.RequiredGas(input)
-	if contract.UseGas(gas) {
-		return p.Run(input)
+// It returns
+// - the returned bytes,
+// - the _remaining_ gas,
+// - any error that occurred
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64) (ret []byte, remainingGas uint64, err error) {
+	gasCost := p.RequiredGas(input)
+	if suppliedGas < gasCost {
+		return nil, 0, ErrOutOfGas
 	}
-	return nil, ErrOutOfGas
+	suppliedGas -= gasCost
+	output, err := p.Run(input)
+	return output, suppliedGas, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -199,6 +205,7 @@ func (c *dataCopy) Run(in []byte) ([]byte, error) {
 type bigModExp struct{}
 
 var (
+	big0      = big.NewInt(0) //nolint:deadcode, varcheck, unused
 	big1      = big.NewInt(1)
 	big4      = big.NewInt(4)
 	big8      = big.NewInt(8)
@@ -622,11 +629,12 @@ func (c *bls12381G1MultiExp) RequiredGas(input []byte) uint64 {
 		return 0
 	}
 	// Lookup discount value for G1 point, scalar value pair length
-	maxDiscountLen := len(params.Bls12381MultiExpDiscountTable)
-	if k > maxDiscountLen {
-		k = maxDiscountLen
+	var discount uint64
+	if dLen := len(params.Bls12381MultiExpDiscountTable); k < dLen {
+		discount = params.Bls12381MultiExpDiscountTable[k-1]
+	} else {
+		discount = params.Bls12381MultiExpDiscountTable[dLen-1]
 	}
-	discount := params.Bls12381MultiExpDiscountTable[k-1]
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G1MulGas * discount) / 1000
 }
@@ -754,11 +762,12 @@ func (c *bls12381G2MultiExp) RequiredGas(input []byte) uint64 {
 		return 0
 	}
 	// Lookup discount value for G2 point, scalar value pair length
-	maxDiscountLen := len(params.Bls12381MultiExpDiscountTable)
-	if k > maxDiscountLen {
-		k = maxDiscountLen
+	var discount uint64
+	if dLen := len(params.Bls12381MultiExpDiscountTable); k < dLen {
+		discount = params.Bls12381MultiExpDiscountTable[k-1]
+	} else {
+		discount = params.Bls12381MultiExpDiscountTable[dLen-1]
 	}
-	discount := params.Bls12381MultiExpDiscountTable[k-1]
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G2MulGas * discount) / 1000
 }

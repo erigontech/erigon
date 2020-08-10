@@ -53,25 +53,24 @@ func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
 	var (
-		dests    = NewDestsCache(100)
-		env      = NewEVM(Context{}, &dummyStatedb{}, params.TestChainConfig, Config{}, dests)
+		env      = NewEVM(Context{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
 		rstack   = stack.NewReturnStack()
 		stack    = stack.New()
-		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, NewDestsCache(10))
+		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */)
 	)
-	stack.Push(uint256.NewInt().SetOne())
+	stack.Push(uint256.NewInt().SetUint64(1))
 	stack.Push(uint256.NewInt())
 	var index common.Hash
-	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, rstack, contract, 0, nil); err != nil {
+	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, rstack, nil, contract, 0, nil); err != nil {
 		t.Fatalf("error while caturing state %v", err)
 	}
-	if len(logger.changedValues[contract.Address()]) == 0 {
-		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.changedValues[contract.Address()]))
+	if len(logger.storage[contract.Address()]) == 0 {
+		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))
 	}
 	exp := common.BigToHash(big.NewInt(1))
-	if logger.changedValues[contract.Address()][index] != exp {
-		t.Errorf("expected %x, got %x", exp, logger.changedValues[contract.Address()][index])
+	if logger.storage[contract.Address()][index] != exp {
+		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
 	}
 }

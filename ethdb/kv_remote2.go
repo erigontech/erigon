@@ -41,7 +41,7 @@ type Remote2KV struct {
 type remote2Tx struct {
 	ctx     context.Context
 	db      *Remote2KV
-	cursors []remote2Cursor
+	cursors []*remote2Cursor
 }
 
 type remote2Bucket struct {
@@ -223,7 +223,17 @@ func (b *remote2Bucket) Clear() error {
 }
 
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
-	k, v, err := b.Cursor().Seek(key)
+	c := b.Cursor()
+	defer func() {
+		if v, ok := c.(*remote2Cursor); ok {
+			if v.stream == nil {
+				return
+			}
+			_ = v.stream.CloseSend()
+		}
+	}()
+
+	k, v, err := c.Seek(key)
 	if err != nil {
 		fmt.Printf("errr3: %s\n", err)
 		return nil, err
@@ -243,7 +253,9 @@ func (b *remote2Bucket) Delete(key []byte) error {
 }
 
 func (b *remote2Bucket) Cursor() Cursor {
-	return &remote2Cursor{bucket: b, ctx: b.tx.ctx}
+	c := &remote2Cursor{bucket: b, ctx: b.tx.ctx}
+	b.tx.cursors = append(b.tx.cursors, c)
+	return c
 }
 
 func (c *remote2Cursor) Put(key []byte, value []byte) error {

@@ -69,10 +69,6 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 }
 
 func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	toStateStageData := func(k []byte) []byte {
-		return append([]byte{0xFF}, k...)
-	}
-
 	err := etl.Transform(
 		db,
 		dbutils.PlainStateBucket,
@@ -82,20 +78,10 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
-			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(nil))
-				}
-				return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(key))
-			},
 		},
 	)
 	if err != nil {
 		return err
-	}
-
-	toCodeStageData := func(k []byte) []byte {
-		return append([]byte{0xCD}, k...)
 	}
 
 	return etl.Transform(
@@ -107,12 +93,6 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
-			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(batch, s.BlockNumber, nil)
-				}
-				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
-			},
 		},
 	)
 }
@@ -304,7 +284,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Debug("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
@@ -346,7 +326,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Debug("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
+	log.Info("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 

@@ -43,7 +43,7 @@ func NewAccountsTracer() *AccountsTracer {
 func (at *AccountsTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
-func (at *AccountsTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (at *AccountsTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (at *AccountsTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
@@ -95,7 +95,7 @@ func accountsReadWrites(blockNum uint64) {
 	at := NewAccountsTracer()
 	vmConfig := vm.Config{Tracer: at, Debug: false}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -122,7 +122,7 @@ func accountsReadWrites(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}

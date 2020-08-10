@@ -192,14 +192,13 @@ type BlockChain struct {
 	resolveReads        bool
 	pruner              Pruner
 
-	DestsCache   vm.Cache
 	senderCacher *TxSenderCacher
 }
 
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, dests vm.Cache, senderCacher *TxSenderCacher) (*BlockChain, error) {
+func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -234,7 +233,6 @@ func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConf
 		enableTxLookupIndex: true,
 		enableReceipts:      false,
 		enablePreimages:     true,
-		DestsCache:          dests,
 		senderCacher:        senderCacher,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
@@ -256,62 +254,7 @@ func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConf
 	bc.currentFastBlock.Store(nilBlock)
 
 	if err := bc.loadLastState(); err != nil {
-		return nil, err
-	}
-	// The first thing the node will do is reconstruct the verification data for
-	// the head block (ethash cache or clique voting snapshot). Might as well do
-	// it in advance.
-	err = bc.engine.VerifyHeader(bc, bc.CurrentHeader(), true)
-	if err != nil {
-		log.Error("can't check the head block", "err", err)
-	}
-
-	var frozen uint64
-	if frozen, err = bc.db.Ancients(); err == nil && frozen > 0 {
-		var (
-			needRewind bool
-			low        uint64
-		)
-		// The head full block may be rolled back to a very low height due to
-		// blockchain repair. If the head full block is even lower than the ancient
-		// chain, truncate the ancient store.
-		fullBlock := bc.CurrentBlock()
-		if fullBlock != nil && fullBlock != bc.genesisBlock && fullBlock.NumberU64() < frozen-1 {
-			needRewind = true
-			low = fullBlock.NumberU64()
-		}
-		// In fast sync, it may happen that ancient data has been written to the
-		// ancient store, but the LastFastBlock has not been updated, truncate the
-		// extra data here.
-		fastBlock := bc.CurrentFastBlock()
-		if fastBlock != nil && fastBlock.NumberU64() < frozen-1 {
-			needRewind = true
-			if fastBlock.NumberU64() < low || low == 0 {
-				low = fastBlock.NumberU64()
-			}
-		}
-		if needRewind {
-			var hashes []common.Hash
-			previous := bc.CurrentHeader().Number.Uint64()
-			for i := low + 1; i <= bc.CurrentHeader().Number.Uint64(); i++ {
-				hashes = append(hashes, rawdb.ReadCanonicalHash(bc.db, i))
-			}
-			bc.Rollback(hashes)
-			log.Warn("Truncate ancient chain", "from", previous, "to", low)
-		}
-	}
-	// Check the current state of the block hashes and make sure that we do not have any of the bad blocks in our chain
-	for hash := range BadHashes {
-		if header := bc.GetHeaderByHash(hash); header != nil {
-			// get the canonical block corresponding to the offending header's number
-			headerByNumber := bc.GetHeaderByNumber(header.Number.Uint64())
-			// make sure the headerByNumber (if present) is in our current canonical chain
-			if headerByNumber != nil && headerByNumber.Hash() == header.Hash() {
-				log.Error("Found bad hash, rewinding chain", "number", header.Number, "hash", header.ParentHash)
-				err = bc.SetHead(header.Number.Uint64() - 1)
-				log.Error("Chain rewind was successful, resuming normal operation", "err", err)
-			}
-		}
+		log.Error("loadLoadState", "err", err)
 	}
 	return bc, nil
 }
@@ -1629,7 +1572,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
-			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig, bc.DestsCache)
+			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
 			reuseTrieDbState := true
 			if err != nil {
 				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
@@ -2208,7 +2151,6 @@ func ExecuteBlockEphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-	dests vm.Cache,
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
 
@@ -2224,7 +2166,7 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, dests)
+		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}

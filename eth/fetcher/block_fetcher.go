@@ -397,6 +397,7 @@ func (f *BlockFetcher) loop() {
 
 			toForget := make(map[common.Hash]struct{})
 			var toFetch []*blockAnnounce
+			// Pick a random peer to retrieve from, reset all others
 			for _, announce := range f.announced {
 				if time.Since(announce.time) > arriveTimeout-gatherSlack {
 
@@ -552,40 +553,51 @@ func (f *BlockFetcher) loop() {
 				return
 			}
 			bodyFilterInMeter.Mark(int64(len(task.transactions)))
-
 			blocks := []*types.Block{}
-			unmatched_transactions := [][]*types.Transaction{}
-			unmatched_uncles := [][]*types.Header{}
-			for i := 0; i < len(task.transactions) && i < len(task.uncles); i++ {
-				// Match up a body to any possible completion request
-				matched := false
-
-				txnHash := types.DeriveSha(types.Transactions(task.transactions[i]))
-				uncleHash := types.CalcUncleHash(task.uncles[i])
-				for hash, announce := range f.completing {
-					if f.queued[hash] == nil {
-						if txnHash == announce.header.TxHash && uncleHash == announce.header.UncleHash && announce.origin == task.peer {
-							// Mark the body matched, reassemble if still unknown
-							matched = true
-
-							if f.getBlock(hash) == nil {
-								block := types.NewBlockWithHeader(announce.header).WithBody(task.transactions[i], task.uncles[i])
-								block.ReceivedAt = task.time
-
-								blocks = append(blocks, block)
-							} else {
-								f.forgetHash(hash)
-							}
+			// abort early if there's nothing explicitly requested
+			if len(f.completing) > 0 {
+				for i := 0; i < len(task.transactions) && i < len(task.uncles); i++ {
+					// Match up a body to any possible completion request
+					var (
+						matched   = false
+						uncleHash common.Hash // calculated lazily and reused
+						txnHash   common.Hash // calculated lazily and reused
+					)
+					for hash, announce := range f.completing {
+						if f.queued[hash] != nil || announce.origin != task.peer {
+							continue
 						}
+						if uncleHash == (common.Hash{}) {
+							uncleHash = types.CalcUncleHash(task.uncles[i])
+						}
+						if uncleHash != announce.header.UncleHash {
+							continue
+						}
+						if txnHash == (common.Hash{}) {
+							txnHash = types.DeriveSha(types.Transactions(task.transactions[i]))
+						}
+						if txnHash != announce.header.TxHash {
+							continue
+						}
+						// Mark the body matched, reassemble if still unknown
+						matched = true
+						if f.getBlock(hash) == nil {
+							block := types.NewBlockWithHeader(announce.header).WithBody(task.transactions[i], task.uncles[i])
+							block.ReceivedAt = task.time
+							blocks = append(blocks, block)
+						} else {
+							f.forgetHash(hash)
+						}
+
+					}
+					if matched {
+						task.transactions = append(task.transactions[:i], task.transactions[i+1:]...)
+						task.uncles = append(task.uncles[:i], task.uncles[i+1:]...)
+						i--
+						continue
 					}
 				}
-				if !matched {
-					unmatched_transactions = append(unmatched_transactions, task.transactions[i])
-					unmatched_uncles = append(unmatched_uncles, task.uncles[i])
-				}
 			}
-			task.transactions = unmatched_transactions
-			task.uncles = unmatched_uncles
 
 			bodyFilterOutMeter.Mark(int64(len(task.transactions)))
 			select {

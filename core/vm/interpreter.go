@@ -18,7 +18,6 @@ package vm
 
 import (
 	"hash"
-	"sync"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -33,6 +32,8 @@ type Config struct {
 	Tracer                  Tracer // Opcode logger
 	NoRecursion             bool   // Disables call, callcode, delegate call and create
 	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
+	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
+	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
 
 	EWASMInterpreter string // External EWASM interpreter options
 	EVMInterpreter   string // External EVM interpreter options
@@ -77,37 +78,6 @@ type callCtx struct {
 type keccakState interface {
 	hash.Hash
 	Read([]byte) (int, error)
-}
-
-var stackPool = NewStack()
-
-type Stack struct {
-	*sync.Pool
-}
-
-const maxCap = 1024 * 2
-
-func NewStack() *Stack {
-	return &Stack{
-		&sync.Pool{
-			New: func() interface{} {
-				return stack.New(maxCap)
-			},
-		},
-	}
-}
-
-func (p *Stack) Get() *stack.Stack {
-	return p.Pool.Get().(*stack.Stack)
-}
-
-func (p *Stack) Put(s *stack.Stack) {
-	if s == nil || s.Cap() == 0 || s.Cap() > maxCap {
-		return
-	}
-
-	s.Reset()
-	p.Pool.Put(s)
 }
 
 // EVMInterpreter represents an EVM interpreter
@@ -194,7 +164,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	var (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
-		locStack    = stackPool.Get()
+		locStack    = stack.New()
 		returns     = stack.NewReturnStack() // local returns stack
 		callContext = &callCtx{
 			memory:   mem,
@@ -213,14 +183,20 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 	)
-	defer stackPool.Put(locStack)
+	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
+	// so that it get's executed _after_: the capturestate needs the stacks before
+	// they are returned to the pools
+	defer func() {
+		stack.ReturnNormalStack(locStack)
+		stack.ReturnRStack(returns)
+	}()
 	contract.Input = input
 
 	if in.cfg.Debug {
 		defer func() {
 			if err != nil {
 				if !logged {
-					_ = in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
+					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
 				} else {
 					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
 				}
@@ -245,9 +221,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		operation := &in.jt[op]
+		operation := in.jt[op]
 
-		if !operation.valid {
+		if operation == nil {
 			return nil, &ErrInvalidOpCode{opcode: op}
 		}
 		// Validate stack
@@ -305,17 +281,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			_ = in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
+			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, returns, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
 
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
-
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
 		if operation.returns {
-			in.returnData = res
+			in.returnData = common.CopyBytes(res)
 		}
 
 		switch {

@@ -2,15 +2,15 @@ This project was bootstrapped with [Create React App](https://github.com/faceboo
 
 ## Prerequisites
 
-- Node.js v13
+- Node.js v13 or higher
 
 - yarn (install with `npm install -g yarn`)
 
 ## Quickstart
 
-1. Run geth with the remote DB interface on `localhost:9999`
+1. Install dependencies: `cd debug-web-ui && yarn install && cd ..`
 
-2. Install dependencies: `cd debug-web-ui && yarn install && cd ..`
+2. Run TurboGeth with the RemoteDB interface: `./build/bin/tg --private.api.addr=localhost:9090`
 
 3. Run the rest server: `make restapi && ./build/bin/restapi`
 

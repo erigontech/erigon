@@ -20,17 +20,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 
 	"github.com/fjl/memsize/memsizeui"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/exp"
+
 	colorable "github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -228,9 +227,10 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
-	// metrics and pprof server
-	StartPProf(pprof, metrics.Enabled, fmt.Sprintf("%s:%d", pprofAddr, pprofPort))
-
+	if pprof {
+		// metrics and pprof server
+		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), metrics.Enabled)
+	}
 	return nil
 }
 
@@ -276,52 +276,40 @@ func Setup(ctx *cli.Context) error {
 	}
 
 	// pprof server
-	listenHost := ctx.GlobalString(pprofAddrFlag.Name)
-	if ctx.GlobalIsSet(legacyPprofAddrFlag.Name) && !ctx.GlobalIsSet(pprofAddrFlag.Name) {
-		listenHost = ctx.GlobalString(legacyPprofAddrFlag.Name)
-		log.Warn("The flag --pprofaddr is deprecated and will be removed in the future, please use --pprof.addr")
-	}
+	if ctx.GlobalBool(pprofFlag.Name) {
+		listenHost := ctx.GlobalString(pprofAddrFlag.Name)
+		if ctx.GlobalIsSet(legacyPprofAddrFlag.Name) && !ctx.GlobalIsSet(pprofAddrFlag.Name) {
+			listenHost = ctx.GlobalString(legacyPprofAddrFlag.Name)
+			log.Warn("The flag --pprofaddr is deprecated and will be removed in the future, please use --pprof.addr")
+		}
 
-	port := ctx.GlobalInt(pprofPortFlag.Name)
-	if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
-		port = ctx.GlobalInt(legacyPprofPortFlag.Name)
-		log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
-		Exit()
-	}
+		port := ctx.GlobalInt(pprofPortFlag.Name)
+		if ctx.GlobalIsSet(legacyPprofPortFlag.Name) && !ctx.GlobalIsSet(pprofPortFlag.Name) {
+			port = ctx.GlobalInt(legacyPprofPortFlag.Name)
+			log.Warn("The flag --pprofport is deprecated and will be removed in the future, please use --pprof.port")
+		}
 
-	address := fmt.Sprintf("%s:%d", listenHost, port)
-	StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
+		address := fmt.Sprintf("%s:%d", listenHost, port)
+		// This context value ("metrics.addr") represents the utils.MetricsHTTPFlag.Name.
+		// It cannot be imported because it will cause a cyclical dependency.
+		StartPProf(address, !ctx.GlobalIsSet("metrics.addr"))
+	}
 	return nil
 }
 
-func StartPProf(enablePprof bool, enableMetrics bool, address string) {
-	mux := http.NewServeMux()
-	if enablePprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+func StartPProf(address string, withMetrics bool) {
+	// Hook go-metrics into expvar on any /debug/metrics request, load all vars
+	// from the registry into expvar, and execute regular expvar handler.
+	if withMetrics {
+		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
 	}
-
-	if enableMetrics {
-		// Hook go-metrics into expvar on any /debug/metrics request, load all vars
-		// from the registry into expvar, and execute regular expvar handler.
-		exp.Exp(metrics.DefaultRegistry, mux)
-		mux.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
-		// Start system runtime metrics collection
-		go metrics.CollectProcessMetrics(3 * time.Second)
-		log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
-	}
-
-	if enableMetrics || enablePprof {
-		go func() {
-			if err := http.ListenAndServe(address, mux); err != nil {
-				log.Error("Failure in running metrics server", "err", err)
-			}
-		}()
-	}
+	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
+	log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+	go func() {
+		if err := http.ListenAndServe(address, nil); err != nil {
+			log.Error("Failure in running pprof server", "err", err)
+		}
+	}()
 }
 
 // Exit stops all running profiles, flushing their output to the

@@ -44,11 +44,11 @@ type Prefetcher interface {
 	// Prefetch processes the state changes according to the Ethereum rules by running
 	// the transaction messages using the statedb, but any changes are discarded. The
 	// only goal is to pre-cache transaction signatures and state trie nodes.
-	Prefetch(block *types.Block, statedb *state.IntraBlockState, cfg vm.Config, interrupt *uint32, dests vm.Cache)
+	Prefetch(block *types.Block, statedb *state.IntraBlockState, cfg vm.Config, interrupt *uint32)
 }
 
 // Processor is an interface for processing blocks using a given initial state.
 type Processor interface {
-	PreProcess(block *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config, dests vm.Cache) (receipts types.Receipts, allLogs []*types.Log, usedGas uint64, root common.Hash, err error)
+	PreProcess(block *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (receipts types.Receipts, allLogs []*types.Log, usedGas uint64, root common.Hash, err error)
 	PostProcess(block *types.Block, tds *state.TrieDbState, receipts types.Receipts) error
 }
