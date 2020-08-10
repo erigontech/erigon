@@ -209,7 +209,7 @@ func (db *LmdbKV) IdealBatchSize() int {
 	return 50 * 1024 * 1024 // 50 Mb
 }
 
-func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -218,7 +218,11 @@ func (db *LmdbKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	if !writable {
 		flags |= lmdb.Readonly
 	}
-	tx, err := db.env.BeginTxn(nil, flags)
+	var parentTx *lmdb.Txn
+	if parent != nil {
+		parentTx = parent.(*lmdbTx).tx
+	}
+	tx, err := db.env.BeginTxn(parentTx, flags)
 	if err != nil {
 		return nil, err
 	}

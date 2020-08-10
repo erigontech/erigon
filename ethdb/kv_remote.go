@@ -125,7 +125,7 @@ func (db *RemoteKV) IdealBatchSize() int {
 	panic("not supported")
 }
 
-func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
 

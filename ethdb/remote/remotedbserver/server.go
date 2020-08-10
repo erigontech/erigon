@@ -104,7 +104,7 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 			}
 		case remote.CmdBeginTx:
 			var err error
-			tx, err = db.Begin(ctx, false)
+			tx, err = db.Begin(ctx, nil, false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for remote.CmdBeginTx: %w", err)
 				encodeErr(encoder, err2)
