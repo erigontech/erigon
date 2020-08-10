@@ -30,7 +30,7 @@ import (
 //		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 //			return err
 //		} else if !exists {
-//			return nil
+//			return OnLoadCommit(db, nil, true)
 //		}
 //
 //		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
