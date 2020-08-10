@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -30,6 +29,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+
+	"github.com/golang/snappy"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.

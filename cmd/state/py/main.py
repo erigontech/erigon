@@ -10,6 +10,8 @@ import chain
 import dbutils
 import common
 
+# apt install python3-snappy libgmp3-dev && pip3 install trinity lmdb pandas plotly
+
 cmd = sys.argv[1]
 chaindata = sys.argv[2]
 

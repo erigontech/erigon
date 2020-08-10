@@ -80,13 +80,13 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		// This will cause the sync return to the header stage
 		return false, nil
 	}
-	d.queue.Reset()
+	d.queue.Reset(blockCacheItems)
 	if hashCount == 0 {
 		// No more bodies to download
 		return false, nil
 	}
 	from := origin + 1
-	d.queue.Prepare(from, d.mode)
+	d.queue.Prepare(from, d.getMode())
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
 	to := from + uint64(hashCount)
 

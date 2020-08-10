@@ -44,7 +44,7 @@ type ChainIndexerBackend interface {
 	// will ensure a sequential order of headers.
 	Process(ctx context.Context, header *types.Header) error
 
-	// Commit finalizes the section metadata and stores it into the database.
+	// Prune deletes the chain index older than the given threshold.
 	Commit(blockNr uint64) error
 }
 
@@ -391,7 +391,6 @@ func (c *ChainIndexer) processSection(section uint64, lastHead common.Hash) (com
 	c.log.Trace("Processing new chain section", "section", section)
 
 	// Reset and partial processing
-
 	if err := c.backend.Reset(c.ctx, section, lastHead); err != nil {
 		c.setValidSections(0)
 		return common.Hash{}, err

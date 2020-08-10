@@ -30,7 +30,7 @@ import (
 //		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 //			return err
 //		} else if !exists {
-//			return nil
+//			return OnLoadCommit(db, nil, true)
 //		}
 //
 //		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
@@ -107,7 +107,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			if err != nil {
 				return err
 			}
-			err = db.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
 			if err != nil {
 				return err
 			}

@@ -96,7 +96,7 @@ func (tt *TxTracer) queryStorageAccess(account common.Address, storageKey common
 	}
 }
 
-func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	if tt.measureCreate && tt.measureDepth+1 == depth {
 		tt.gasForCREATE += (tt.measureCurrentGas - gas)
 	}
