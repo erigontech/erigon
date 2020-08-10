@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/holiman/uint256"
 	"sort"
+	"strconv"
 	"strings"
 	"github.com/logrusorgru/aurora"
 )
@@ -59,6 +60,7 @@ type stmt struct {
 	value uint256.Int
 	numBytes int
 	isData bool
+	ends bool
 }
 
 func (state state) String() string {
@@ -70,15 +72,15 @@ func (state state) String() string {
 }
 
 func (stmt stmt) String() string {
-	halts := ""
-	if stmt.operation.halts {
-		halts = "halts"
+	ends := ""
+	if stmt.ends {
+		ends = "ends"
 	}
 	valid := ""
 	if stmt.operation.valid {
 		valid = "valid"
 	}
-	return fmt.Sprintf("%v %v %v", stmt.opcode, halts, valid)
+	return fmt.Sprintf("%v %v %v", stmt.opcode, ends, valid)
 }
 
 type edge struct {
@@ -98,7 +100,7 @@ type ResolveResult struct {
 }
 
 func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
-	if !stmt.operation.valid || stmt.operation.halts {
+	if !stmt.operation.valid || stmt.ends {
 		return ResolveResult{resolved: true}
 	}
 
@@ -196,6 +198,7 @@ func getStmts(prog *Contract) []stmt {
 		op := prog.GetOp(uint64(pc))
 		stmt.opcode = op
 		stmt.operation = jt[op]
+		stmt.ends = stmt.operation.halts || stmt.operation.returns || stmt.operation.reverts
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {
@@ -283,21 +286,10 @@ func getEntryReachableEdges(entry int, edges []edge) []edge {
 	return reachable
 }
 
-func printAnlyState(stmts []stmt, edges map[*edge]bool, D map[int]state, badJump *stmt) {
+func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]state, badJump *stmt) {
 //	es := make([]edge, len(edges))
 //	copy(es, edges)
 //	sortEdges(es)
-
-	prev := make(map[int]map[int]bool)
-	covered := make(map[int]bool)
-	for e, _ := range edges {
-		covered[e.pc0] = true
-		covered[e.pc1] = true
-		if prev[e.pc1] == nil {
-			prev[e.pc1] = make(map[int]bool)
-		}
-		prev[e.pc1][e.pc0] = true
-	}
 
 	for pc, stmt := range stmts {
 		if stmt.isData {
@@ -315,24 +307,38 @@ func printAnlyState(stmts []stmt, edges map[*edge]bool, D map[int]state, badJump
 			valueStr = fmt.Sprintf("%v", stmt.opcode)
 		}
 
-		prevPCStr := ""
-		for prevPC, _ := range prev[pc] {
-			prevStmt := stmts[prevPC]
-			if prevPC + prevStmt.numBytes != pc {
-				prevPCs := make([]int, 0)
-				for prevPC0, _ := range prev[pc] {
-					prevPCs = append(prevPCs, prevPC0)
-				}
-				prevPCStr = fmt.Sprintf("%v", prevPCs)
+		pc0s := make([]string, 0)
+		showPC0s := false
+		for pc0, _ := range prevEdgeMap[pc] {
+			pc0s = append(pc0s, strconv.Itoa(pc0))
+			stmt0 := stmts[pc0]
+			if pc0 + stmt0.numBytes != pc {
+				showPC0s = true
 			}
+		}
+		if !showPC0s {
+			pc0s = nil
 		}
 
 		if badJump != nil && badJump.pc == pc {
-			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Red(pc), aurora.Red(valueStr), prevPCStr, D[pc])
-		} else if covered[pc] {
-			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Green(pc), aurora.Green(valueStr), prevPCStr, D[pc])
+			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Red(pc), aurora.Red(valueStr), strings.Join(pc0s, ","), D[pc])
+		} else if prevEdgeMap[pc] != nil {
+			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Green(pc), aurora.Green(valueStr), strings.Join(pc0s, ","), D[pc])
 		} else {
 			fmt.Printf("%3v\t %-25v\n", pc, valueStr)
+		}
+	}
+}
+
+func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
+
+	for pc1, pc0s := range prevEdgeMap {
+		for pc0 := range pc0s {
+			s := stmts[pc0]
+			if s.ends {
+				msg := fmt.Sprintf("Halt has successor: %v -> %v", pc0, pc1)
+				panic(msg)
+			}
 		}
 	}
 }
@@ -352,7 +358,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	i := 0
 
-	allEdges := make(map[*edge]bool)
+	prevEdgeMap := make(map[int]map[int]bool)
 
 	resolution := resolve(prog, startPC, D[startPC], stmts[startPC])
 	if !resolution.resolved {
@@ -360,23 +366,29 @@ func AbsIntCfgHarness(prog *Contract) error {
 		return nil
 	} else {
 		for _, e := range resolution.edges {
-			allEdges[&e] = true
+			if prevEdgeMap[e.pc1] == nil {
+				prevEdgeMap[e.pc1] = make(map[int]bool)
+			}
+			prevEdgeMap[e.pc1][e.pc0] = true
 		}
 	}
 
+	check(stmts, prevEdgeMap)
 	workList := resolution.edges
 	for len(workList) > 0 {
 		//sortEdges(workList)
 		var e edge
 		e, workList = workList[0], workList[1:]
 
-		if e.pc0 == 76 {
+		if e.pc0 == -1 {
 			fmt.Printf("---------------------------------------\n")
 			fmt.Printf("Verbose debugging for pc=%v\n", e.pc0)
 			DEBUG = true
 		}
 
-		if DEBUG { fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0]) }
+		if DEBUG {
+			fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0])
+		}
 		post1 := post(D[e.pc0], e.stmt)
 		if DEBUG {
 			fmt.Printf("post\t\t%v\n", post1);
@@ -390,20 +402,23 @@ func AbsIntCfgHarness(prog *Contract) error {
 			}
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 			if !resolution.resolved {
-				printAnlyState(stmts, allEdges, D, resolution.badJump)
+				printAnlyState(stmts, prevEdgeMap, D, resolution.badJump)
 				fmt.Printf("Unable to resolve at pc=%x\n", aurora.Magenta(e.pc1))
 				return nil
 			} else {
-				for _, e := range resolution.edges {
-					allEdges[&e] = true
+				if prevEdgeMap[e.pc1] == nil {
+					prevEdgeMap[e.pc1] = make(map[int]bool)
 				}
+				prevEdgeMap[e.pc1][e.pc0] = true
 			}
 			workList = append(workList, resolution.edges...)
-		}
 
+		}
 		DEBUG = false
 
 		i++
+
+		check(stmts, prevEdgeMap)
 	}
 
 	print("\nFinal resolve....")
@@ -425,7 +440,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 	fmt.Printf("\n# of total edges: %v\n", len(finalEdges))
 	//printEdges(edges)
 
-	printAnlyState(stmts, allEdges, D, nil)
+	printAnlyState(stmts, prevEdgeMap, D, nil)
 	println("done")
 
 	return nil
