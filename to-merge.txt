@@ -40,18 +40,3 @@ Date:   Mon Aug 10 14:33:22 2020 +0300
 
     ethstats: split read and write lock, otherwise they'll lock up
 
-commit cbbc54c4956968ef240ec2610444bb30b74333a0
-Merge: 48b484c5a 7cee2509c
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Mon Aug 10 12:08:46 2020 +0300
-
-    Merge pull request #21433 from holiman/statsync_exiter
-    
-    eth/downloader: allow all timers to exit
-
-commit 7cee2509c07e5514dc7647fcf8a4f066feaaa6df
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Aug 10 10:42:33 2020 +0200
-
-    eth/downloader: allow all timers to exit
-
