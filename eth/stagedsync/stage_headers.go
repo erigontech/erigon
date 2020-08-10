@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
@@ -113,7 +114,7 @@ Error: %v
 		return false, 0, nil
 	}
 
-	if rawdb.ReadHeaderNumber(db, headers[0].ParentHash) == nil {
+	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
 		return false, 0, errors.New("unknown parent")
 	}
 	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
@@ -196,8 +197,14 @@ Error: %v
 		if newCanonical {
 			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
 		}
+		data, err := rlp.EncodeToBytes(header)
+		if err != nil {
+			log.Crit("Failed to RLP encode header", "err", err)
+		}
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
-		rawdb.WriteHeader(context.Background(), batch, header)
+		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
+			log.Crit("Failed to store header", "err", err)
+		}
 	}
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
@@ -219,6 +226,11 @@ Error: %v
 		}
 	}
 	if newCanonical {
+		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
+
+		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.Hash().Bytes(), encoded); err != nil {
+			log.Crit("Failed to store hash to number mapping", "err", err)
+		}
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {

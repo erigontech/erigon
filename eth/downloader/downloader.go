@@ -954,7 +954,13 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 					end = check
 					break
 				}
-				header := d.lightchain.GetHeaderByHash(h) // Independent of sync mode, header surely exists
+				// Independent of sync mode, header surely exists
+				var header *types.Header
+				if mode == StagedSync {
+					header = rawdb.ReadHeader(d.stateDB, h, n)
+				} else {
+					header = d.lightchain.GetHeaderByHash(h)
+				}
 				if header.Number.Uint64() != check {
 					p.log.Warn("Received non requested header", "number", header.Number, "hash", header.Hash(), "request", check)
 					return 0, fmt.Errorf("%w: non-requested header (%d)", errBadPeer, header.Number)
