@@ -287,7 +287,7 @@ func (db *ObjectDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 						}
 					}
 					if cmp < 0 {
-						k, v, err = c.SeekTo(startkey)
+						k, v, err = c.Seek(startkey)
 						if err != nil {
 							return err
 						}

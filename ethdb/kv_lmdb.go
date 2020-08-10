@@ -586,10 +586,6 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (c *LmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	return c.Seek(seek)
-}
-
 func (c *LmdbCursor) Next() (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
@@ -881,10 +877,6 @@ func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, vSize uint32, err erro
 		return []byte{}, 0, err
 	}
 	return k, uint32(len(v)), err
-}
-
-func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
-	return c.Seek(seek)
 }
 
 func (c *lmdbNoValuesCursor) Next() (k []byte, vSize uint32, err error) {

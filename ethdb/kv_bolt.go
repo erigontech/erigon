@@ -416,22 +416,6 @@ func (c *boltCursor) Seek(seek []byte) (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (c *boltCursor) SeekTo(seek []byte) (k, v []byte, err error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, nil, c.ctx.Err()
-	default:
-	}
-
-	k, v = c.bolt.SeekTo(seek)
-	if c.prefix != nil {
-		if !bytes.HasPrefix(k, c.prefix) {
-			return nil, nil, nil
-		}
-	}
-	return k, v, nil
-}
-
 func (c *boltCursor) Next() (k, v []byte, err error) {
 	select {
 	case <-c.ctx.Done():
