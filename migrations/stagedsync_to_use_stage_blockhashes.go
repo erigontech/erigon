@@ -20,6 +20,10 @@ var stagedsyncToUseStageBlockhashes = Migration{
 			return err
 		}
 
+		if err = OnLoadCommit(db, nil, true); err != nil {
+			return err
+		}
+
 		return nil
 	},
 }
@@ -35,6 +39,10 @@ var unwindStagedsyncToUseStageBlockhashes = Migration{
 		}
 
 		if err = stages.SaveStageUnwind(db, stages.BlockHashes, progress, nil); err != nil {
+			return err
+		}
+
+		if err = OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 
