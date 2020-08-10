@@ -200,26 +200,26 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 				// Looking for storage sub-tree
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
-			if fstl.k, fstl.v, err = c.SeekTo(dbPrefix); err != nil {
+			if fstl.k, fstl.v, err = c.Seek(dbPrefix); err != nil {
 				return err
 			}
 			if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
 				// Advance past the storage to the first account
 				if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-					if fstl.k, fstl.v, err = c.SeekTo(fstl.nextAccountKey[:]); err != nil {
+					if fstl.k, fstl.v, err = c.Seek(fstl.nextAccountKey[:]); err != nil {
 						return err
 					}
 				} else {
 					fstl.k = nil
 				}
 			}
-			if fstl.ihK, fstl.ihV, err = ih.SeekTo(dbPrefix); err != nil {
+			if fstl.ihK, fstl.ihV, err = ih.Seek(dbPrefix); err != nil {
 				return err
 			}
 			if len(dbPrefix) <= common.HashLength && len(fstl.ihK) > common.HashLength {
 				// Advance to the first account
 				if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-					if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+					if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.nextAccountKey[:]); err != nil {
 						return err
 					}
 				} else {
@@ -264,12 +264,12 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 		if len(fstl.k) > common.HashLength && !bytes.HasPrefix(fstl.k, fstl.accAddrHashWithInc[:]) {
 			if bytes.Compare(fstl.k, fstl.accAddrHashWithInc[:]) < 0 {
 				// Skip all the irrelevant storage in the middle
-				if fstl.k, fstl.v, err = c.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+				if fstl.k, fstl.v, err = c.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 					return err
 				}
 			} else {
 				if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-					if fstl.k, fstl.v, err = c.SeekTo(fstl.nextAccountKey[:]); err != nil {
+					if fstl.k, fstl.v, err = c.Seek(fstl.nextAccountKey[:]); err != nil {
 						return err
 					}
 				} else {
@@ -306,14 +306,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 			// Now we know the correct incarnation of the account, and we can skip all irrelevant storage records
 			// Since 0 incarnation if 0xfff...fff, and we do not expect any records like that, this automatically
 			// skips over all storage items
-			if fstl.k, fstl.v, err = c.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+			if fstl.k, fstl.v, err = c.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 				return err
 			}
 			if fstl.trace {
-				fmt.Printf("k after accountWalker and SeekTo: %x\n", fstl.k)
+				fmt.Printf("k after accountWalker and Seek: %x\n", fstl.k)
 			}
 			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
-				if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+				if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 					return err
 				}
 			}
@@ -355,12 +355,12 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	if len(fstl.ihK) > common.HashLength && !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
 		if bytes.Compare(fstl.ihK, fstl.accAddrHashWithInc[:]) < 0 {
 			// Skip all the irrelevant storage in the middle
-			if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+			if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 				return err
 			}
 		} else {
 			if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-				if fstl.ihK, fstl.ihV, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+				if fstl.ihK, fstl.ihV, err = ih.Seek(fstl.nextAccountKey[:]); err != nil {
 					return err
 				}
 			} else {
@@ -400,14 +400,14 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	}
 
 	if isBefore, _ := keyIsBefore(fstl.k, next); isBefore {
-		if fstl.k, fstl.v, err = c.SeekTo(next); err != nil {
+		if fstl.k, fstl.v, err = c.Seek(next); err != nil {
 			return err
 		}
 	}
 	if len(next) <= common.HashLength && len(fstl.k) > common.HashLength {
 		// Advance past the storage to the first account
 		if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-			if fstl.k, fstl.v, err = c.SeekTo(fstl.nextAccountKey[:]); err != nil {
+			if fstl.k, fstl.v, err = c.Seek(fstl.nextAccountKey[:]); err != nil {
 				return err
 			}
 		} else {
@@ -417,7 +417,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c, ih ethdb.Cursor, first bool) error
 	if fstl.trace {
 		fmt.Printf("k after next: %x\n", fstl.k)
 	}
-	if fstl.ihK, fstl.ihV, err = ih.SeekTo(next); err != nil {
+	if fstl.ihK, fstl.ihV, err = ih.Seek(next); err != nil {
 		return err
 	}
 	return nil

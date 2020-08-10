@@ -231,14 +231,6 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
-func (c *remoteCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	c.k, c.v, c.err = c.remote.SeekTo(seek)
-	if c.err != nil {
-		return []byte{}, c.v, c.err
-	}
-	return c.k, c.v, nil
-}
-
 func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.Next()
 	return c.k, c.v, c.err
