@@ -251,7 +251,6 @@ func SetupCobra(cmd *cobra.Command) error {
 	}
 
 	withMetrics := metrics.Enabled && metricsAddr == ""
-	fmt.Printf("1: %t %t %s\n", withMetrics, metrics.Enabled, metricsAddr)
 	if pprof {
 		// metrics and pprof server
 		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
