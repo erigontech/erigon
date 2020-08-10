@@ -150,7 +150,7 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
 func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) error {
-	var isIH bool
+	var isIH, isIHSequence bool
 	var minKey []byte
 	var err error
 	if !first {
@@ -201,22 +201,27 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
 
-			if fstl.k, fstl.v, err = c.Seek(dbPrefix); err != nil {
+			if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(dbPrefix); err != nil {
 				return err
 			}
-			if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
-				// Advance past the storage to the first account
-				if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
-					if fstl.k, fstl.v, err = c.Seek(fstl.nextAccountKey[:]); err != nil {
-						return err
+			if isIHSequence {
+				fstl.k = common.CopyBytes(fstl.ihK)
+			} else {
+				if fstl.k, fstl.v, err = c.Seek(dbPrefix); err != nil {
+					return err
+				}
+				if len(dbPrefix) <= common.HashLength && len(fstl.k) > common.HashLength {
+					// Advance past the storage to the first account
+					if nextAccount(fstl.k, fstl.nextAccountKey[:]) {
+						if fstl.k, fstl.v, err = c.Seek(fstl.nextAccountKey[:]); err != nil {
+							return err
+						}
+					} else {
+						fstl.k = nil
 					}
-				} else {
-					fstl.k = nil
 				}
 			}
-			if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(dbPrefix); err != nil {
-				return err
-			}
+
 			isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
 			if fixedbytes == 0 {
 				cmp = 0
@@ -358,6 +363,13 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 		fmt.Printf("next: %x\n", next)
 	}
 
+	if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(next); err != nil {
+		return err
+	}
+	if isIHSequence {
+		fstl.k = common.CopyBytes(fstl.ihK)
+		return nil
+	}
 	if fstl.k, fstl.v, err = c.Seek(next); err != nil {
 		return err
 	}
@@ -373,9 +385,6 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	}
 	if fstl.trace {
 		fmt.Printf("k after next: %x\n", fstl.k)
-	}
-	if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(next); err != nil {
-		return err
 	}
 	return nil
 }
@@ -850,25 +859,10 @@ func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
 		return []byte{}, nil, false, err
 	}
 
-	/*
-		TODO: this feature not well tested yet
-		if k != nil {
-			exactMatch := isSequence(seek, k)
-			//if exactMatch {
-			//	n, _ := dbutils.NextSubtree(c.prev)
-			//	if !bytes.Equal(n, seek) {
-			//		//fmt.Printf("1: %x %x, %x %x\n", c.prev, n, seek, k)
-			//	}
-			//}
-			exactMatch = false
-			if exactMatch {
-				return k, v, true, nil
-			}
-		}
-		c.prev = common.CopyBytes(k)
-	*/
-
-	return k, v, false, nil
+	if k == nil {
+		return k, v, false, nil
+	}
+	return k, v, isSequence(seek, k), nil
 }
 
 /*
