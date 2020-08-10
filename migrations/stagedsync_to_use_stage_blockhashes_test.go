@@ -1,10 +1,8 @@
 package migrations
 
 import (
-	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
@@ -16,12 +14,7 @@ func TestStagedsyncToUseStageBlockhashes(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 	var expected uint64 = 12
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.SyncStageProgressOld2).(ethdb.BucketMigrator).Create()
-	})
-
-	require.NoError(err)
-	err = db.Put(dbutils.SyncStageProgressOld2, stages.DBKeys[stages.Headers], dbutils.EncodeBlockNumber(expected))
+	err := stages.SaveStageProgress(db, stages.Headers, expected, nil)
 	require.NoError(err)
 
 	migrator := NewMigrator()
@@ -39,12 +32,7 @@ func TestUnwindStagedsyncToUseStageBlockhashes(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 	var expected uint64 = 12
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.SyncStageUnwindOld2).(ethdb.BucketMigrator).Create()
-	})
-
-	require.NoError(err)
-	err = db.Put(dbutils.SyncStageUnwindOld2, stages.DBKeys[stages.Headers], dbutils.EncodeBlockNumber(expected))
+	err := stages.SaveStageUnwind(db, stages.Headers, expected, nil)
 	require.NoError(err)
 
 	migrator := NewMigrator()
