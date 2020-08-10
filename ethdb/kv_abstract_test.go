@@ -98,7 +98,7 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],
-		ethdb.NewRemote2().InMem(conn).MustOpen(),
+		rdb,
 	}
 
 	grpcServer := grpc.NewServer()
