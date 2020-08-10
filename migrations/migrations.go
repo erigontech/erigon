@@ -107,7 +107,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			if err != nil {
 				return err
 			}
-			err = db.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
 			if err != nil {
 				return err
 			}
