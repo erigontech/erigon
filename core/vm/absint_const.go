@@ -380,7 +380,8 @@ func AbsIntCfgHarness(prog *Contract) error {
 		var e edge
 		e, workList = workList[0], workList[1:]
 
-		if e.pc0 == -1 {
+		//fmt.Printf("%v\n", e.pc0)
+		if e.pc0 == 128 {
 			fmt.Printf("---------------------------------------\n")
 			fmt.Printf("Verbose debugging for pc=%v\n", e.pc0)
 			DEBUG = true
@@ -399,20 +400,33 @@ func AbsIntCfgHarness(prog *Contract) error {
 			D[e.pc1] = lub(post1, D[e.pc1])
 			if DEBUG {
 				fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1])
+				printAnlyState(stmts, prevEdgeMap, D, nil)
 			}
+
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
+
 			if !resolution.resolved {
 				printAnlyState(stmts, prevEdgeMap, D, resolution.badJump)
 				fmt.Printf("Unable to resolve at pc=%x\n", aurora.Magenta(e.pc1))
 				return nil
-			} else {
-				if prevEdgeMap[e.pc1] == nil {
-					prevEdgeMap[e.pc1] = make(map[int]bool)
-				}
-				prevEdgeMap[e.pc1][e.pc0] = true
 			}
-			workList = append(workList, resolution.edges...)
 
+			for _, e := range resolution.edges {
+				inWorkList := false
+				for _, w := range workList {
+					if w.pc0 == e.pc0 && w.pc1 == e.pc1 {
+						inWorkList = true
+					}
+				}
+				if !inWorkList {
+					workList = append(workList, e)
+				}
+			}
+
+			if prevEdgeMap[e.pc1] == nil {
+					prevEdgeMap[e.pc1] = make(map[int]bool)
+			}
+			prevEdgeMap[e.pc1][e.pc0] = true
 		}
 		DEBUG = false
 

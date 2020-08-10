@@ -17,14 +17,14 @@ func testGenCfg() error {
 	//dfTest2()
 	//dfTest3()
 	//absIntTest1()
-	absIntTestSimple00() //- PASSES
+	//absIntTestSimple00() //- PASSES
 	//absIntTestRequires00() //- PASSES
 	//absIntTestCall01() // - PASSES
 	//absIntTestEcrecoverLoop02() //- FAILS - Infinite loop
 	//absIntTestStorageVar03() // - PASSES
 	//absIntTestStaticLoop00() //- FAILS - Infinite loop
-	//absIntTestStaticLoop01() //- FAILS - Infinite loop
-	//absIntTestDepositContract()
+	absIntTestStaticLoop01() //- FAILS - Infinite loop
+	absIntTestDepositContract()
 	return nil
 }
 
