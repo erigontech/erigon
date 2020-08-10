@@ -55,7 +55,7 @@ var stagedsyncToUseStageBlockhashes = Migration{
 }
 
 var unwindStagedsyncToUseStageBlockhashes = Migration{
-	Name: "stagedsync_to_use_stage_blockhashes",
+	Name: "unwind_stagedsync_to_use_stage_blockhashes",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageUnwindOld2); err != nil {
 			return err
