@@ -30,7 +30,7 @@ func DecodeTimestamp(suffix []byte) (uint64, []byte) {
 	return timestamp, suffix[bytecount:]
 }
 
-func ChangeSetByIndexBucket(plain, storage bool) []byte {
+func ChangeSetByIndexBucket(plain, storage bool) string {
 	if plain {
 		if storage {
 			return PlainStorageChangeSetBucket

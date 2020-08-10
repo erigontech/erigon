@@ -152,7 +152,7 @@ func (tx *remoteTx) Rollback() {
 	panic("remote db is read-only")
 }
 
-func (tx *remoteTx) Bucket(name []byte) Bucket {
+func (tx *remoteTx) Bucket(name string) Bucket {
 	b := remoteBucket{tx: tx, nameLen: uint(len(name))}
 	b.remote = tx.remote.Bucket(name)
 	return b

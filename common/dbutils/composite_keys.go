@@ -52,11 +52,6 @@ func IsHeaderHashKey(k []byte) bool {
 	return len(k) == l && bytes.Equal(k[l-1:], HeaderHashSuffix)
 }
 
-// headerNumberKey = headerNumberPrefix + hash
-func HeaderNumberKey(hash common.Hash) []byte {
-	return append(HeaderNumberPrefix, hash.Bytes()...)
-}
-
 // blockBodyKey = blockBodyPrefix + num (uint64 big endian) + hash
 func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
@@ -67,11 +62,6 @@ func BlockReceiptsKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
-// txLookupKey = txLookupPrefix + hash
-func TxLookupKey(hash common.Hash) []byte {
-	return append(TxLookupPrefix, hash.Bytes()...)
-}
-
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
 func BloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
 	key := append(make([]byte, 10), hash.Bytes()...)
@@ -80,16 +70,6 @@ func BloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
 	binary.BigEndian.PutUint64(key[2:], section)
 
 	return key
-}
-
-// preimageKey = preimagePrefix + hash
-func PreimageKey(hash common.Hash) []byte {
-	return append(PreimagePrefix, hash.Bytes()...)
-}
-
-// configKey = configPrefix + hash
-func ConfigKey(hash common.Hash) []byte {
-	return append(ConfigPrefix, hash.Bytes()...)
 }
 
 // AddrHash + KeyHash

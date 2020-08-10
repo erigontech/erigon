@@ -17,7 +17,7 @@ service KV {
 }
 
 message SeekRequest {
-  bytes bucketName = 1;
+  string bucketName = 1;
   bytes seekKey = 2; // streaming start from this key
   bytes prefix = 3;  // streaming stops when see first key without given prefix
   bool startSreaming = 4;

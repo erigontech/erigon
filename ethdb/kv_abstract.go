@@ -20,7 +20,7 @@ type KV interface {
 }
 
 type Tx interface {
-	Bucket(name []byte) Bucket
+	Bucket(name string) Bucket
 
 	Commit(ctx context.Context) error
 	Rollback()

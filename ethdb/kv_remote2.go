@@ -43,7 +43,7 @@ type remote2Tx struct {
 
 type remote2Bucket struct {
 	tx   *remote2Tx
-	name []byte
+	name string
 }
 
 type remote2Cursor struct {
@@ -168,7 +168,7 @@ func (tx *remote2Tx) Rollback() {
 	}
 }
 
-func (tx *remote2Tx) Bucket(name []byte) Bucket {
+func (tx *remote2Tx) Bucket(name string) Bucket {
 	return &remote2Bucket{tx: tx, name: name}
 }
 

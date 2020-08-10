@@ -12,12 +12,12 @@ func newPuts() *puts {
 	}
 }
 
-func (p *puts) set(bucket, key, value []byte) {
+func (p *puts) set(bucket string, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
-	if bucketPuts, ok = p.mp[string(bucket)]; !ok {
+	if bucketPuts, ok = p.mp[bucket]; !ok {
 		bucketPuts = make(putsBucket)
-		p.mp[string(bucket)] = bucketPuts
+		p.mp[bucket] = bucketPuts
 	}
 	oldLen := len(bucketPuts)
 	skey := string(key)
@@ -31,16 +31,16 @@ func (p *puts) set(bucket, key, value []byte) {
 	p.len += len(bucketPuts) - oldLen
 }
 
-func (p *puts) get(bucket, key []byte) ([]byte, bool) {
+func (p *puts) get(bucket string, key []byte) ([]byte, bool) {
 	var bucketPuts putsBucket
 	var ok bool
-	if bucketPuts, ok = p.mp[string(bucket)]; !ok {
+	if bucketPuts, ok = p.mp[bucket]; !ok {
 		return nil, false
 	}
 	return bucketPuts.Get(key)
 }
 
-func (p *puts) Delete(bucket, key []byte) {
+func (p *puts) Delete(bucket string, key []byte) {
 	p.set(bucket, key, nil)
 }
 

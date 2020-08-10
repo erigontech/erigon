@@ -69,8 +69,8 @@ type TransformArgs struct {
 
 func Transform(
 	db ethdb.Database,
-	fromBucket []byte,
-	toBucket []byte,
+	fromBucket string,
+	toBucket string,
 	datadir string,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
@@ -96,7 +96,7 @@ func Transform(
 
 func extractBucketIntoFiles(
 	db ethdb.Database,
-	bucket []byte,
+	bucket string,
 	startkey []byte,
 	endkey []byte,
 	fixedBits int,
@@ -136,7 +136,7 @@ func disposeProviders(providers []dataProvider) {
 
 type bucketState struct {
 	getter ethdb.Getter
-	bucket []byte
+	bucket string
 	quit   <-chan struct{}
 }
 

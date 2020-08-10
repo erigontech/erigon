@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -22,7 +21,7 @@ import (
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 
-	test := func(blocksNum int, csBucket []byte) func(t *testing.T) {
+	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			defer db.Close()
@@ -62,7 +61,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	buckets := [][]byte{dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	buckets := []string{dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
 	for i := range buckets {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
@@ -156,20 +155,20 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	}
 }
 
-func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
+func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
 	csInfo, ok := changeset.Mapper[string(csBucket)]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if bytes.Equal(dbutils.PlainStorageChangeSetBucket, csBucket) || bytes.Equal(dbutils.PlainAccountChangeSetBucket, csBucket) {
+	if dbutils.PlainStorageChangeSetBucket == csBucket || dbutils.PlainAccountChangeSetBucket == csBucket {
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Equal(dbutils.StorageChangeSetBucket, csBucket) || bytes.Equal(dbutils.PlainStorageChangeSetBucket, csBucket) {
+	if dbutils.StorageChangeSetBucket == csBucket || dbutils.PlainStorageChangeSetBucket == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -260,7 +259,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket []byte, numOfBlo
 	}
 }
 
-func checkIndex(t *testing.T, db ethdb.Database, bucket, addrHash []byte, chunkBlock uint64, expected []uint64) {
+func checkIndex(t *testing.T, db ethdb.Database, bucket string, addrHash []byte, chunkBlock uint64, expected []uint64) {
 	t.Helper()
 	b, err := db.GetIndexChunk(bucket, addrHash, chunkBlock)
 	if err != nil {
@@ -278,7 +277,7 @@ func checkIndex(t *testing.T, db ethdb.Database, bucket, addrHash []byte, chunkB
 	}
 }
 
-func lastChunkCheck(t *testing.T, db ethdb.Database, bucket, key []byte, expected []uint64) {
+func lastChunkCheck(t *testing.T, db ethdb.Database, bucket string, key []byte, expected []uint64) {
 	t.Helper()
 	v, err := db.Get(bucket, dbutils.CurrentChunkKey(key))
 	if err != nil {

@@ -267,7 +267,7 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 }
 
 func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *Receiver) error {
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -288,7 +288,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
-		nil,
+		"",
 		p.TempDir,
 		getExtractFunc(changeSetBucket),
 		// here we avoid getting the state from changesets,
@@ -298,7 +298,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	); err != nil {
 		return err
@@ -308,7 +308,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 
 func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Receiver) error {
 	to := u.UnwindPoint
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -329,14 +329,14 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Re
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
-		nil,
+		"",
 		p.TempDir,
 		getUnwindExtractFunc(changeSetBucket),
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	); err != nil {
 		return err
