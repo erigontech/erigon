@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -91,7 +92,7 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment) (bool, *PeerPenalt
 				return false, nil, nil
 			}
 			// Before attaching, we must check the parent-child relationship
-			if valid, penalty := hd.childParentValid(header, tip); !valid {
+			if valid, penalty := hd.childTipValid(header, tip); !valid {
 				return false, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
 			}
 			if attachmentTip == nil {
@@ -108,15 +109,16 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment) (bool, *PeerPenalt
 	}
 	// Go through the headers again, and filter out the headers that are not connected to the attachment header
 	anchorParent := attachmentTip.anchorParent
-	connectedHeaders := make(map[common.Hash]struct{})
-	connectedHeaders[attachmentHeader.Hash()] = struct{}{}
-	hd.addHeaderAsTip(attachmentHeader, anchorParent)
+	connectedHeaders := make(map[common.Hash]*uint256.Int)
+	cumulativeDifficulty := new(uint256.Int).Add(attachmentTip.cumulativeDifficulty, uint256.FromBig(header.Difficulty))
+	connectedHeaders[attachmentHeader.Hash()] = cumulativeDifficulty
+	hd.addHeaderAsTip(attachmentHeader, anchorParent, cumulativeDifficulty)
 	for _, header := range chainSegment.headers[attachingFrom+1:] {
-		if _, connected := connectedHeaders[header.ParentHash]; !connected {
-			continue
+		if cumDiff, connected := connectedHeaders[header.ParentHash]; connected {
+			newCumDiff := new(uint256.Int).Add(cumDiff, uint256.FromBig(header.Difficulty))
+			connectedHeaders[header.Hash()] = newCumDiff
+			hd.addHeaderAsTip(header, anchorParent, newCumDiff)
 		}
-		connectedHeaders[header.Hash()] = struct{}{}
-		hd.addHeaderAsTip(header, anchorParent)
 	}
 	return true, nil, nil
 }
@@ -134,10 +136,23 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 	return true, NoPenalty
 }
 
-func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash) {
+// Checks whether child-tip relationship between two headers is correct
+// (excluding Proof Of Work validity)
+func (hd *HeaderDownload) childTipValid(child, tip *Tip) (bool, Penalty) {
+	if tip.blockHeight+1 != child.Number.Uint64() {
+		return false, WrongChildBlockHeightPenalty
+	}
+	childDifficulty := hd.calcDifficultyFunc(child.Time, parent)
+	if child.Difficulty.Cmp(childDifficulty) != 0 {
+		return false, WrongChildDifficultyPenalty
+	}
+	return true, NoPenalty
+}
+
+func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) {
 	tip := &Tip{
-		anchorParent: anchorParent,
-		cumulativeDifficulty: ,
+		anchorParent:         anchorParent,
+		cumulativeDifficulty: cumulativeDifficulty,
 	}
 	hd.tipLimiter.ReplaceOrInsert(tip)
 }
