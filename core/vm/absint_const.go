@@ -54,13 +54,13 @@ func startSt() state {
 }
 
 type stmt struct {
-	pc int
-	opcode OpCode
-	operation operation
-	value uint256.Int
-	numBytes int
-	isData bool
-	ends bool
+	pc             int
+	opcode         OpCode
+	operation      operation
+	value          uint256.Int
+	numBytes       int
+	inferredAsData bool
+	ends           bool
 }
 
 func (state state) String() string {
@@ -193,11 +193,11 @@ func getStmts(prog *Contract) []stmt {
 
 	codeLen := len(prog.Code)
 	var stmts []stmt
-	isData := make(map[int]bool)
+	inferIsData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
 		stmt := stmt{}
 		stmt.pc = pc
-		stmt.isData = isData[pc]
+		stmt.inferredAsData = inferIsData[pc]
 
 		op := prog.GetOp(uint64(pc))
 		stmt.opcode = op
@@ -219,8 +219,11 @@ func getStmts(prog *Contract) []stmt {
 			integer.SetBytes(prog.Code[startMin:endMin])
 			stmt.value = *integer
 			stmt.numBytes = pushByteSize + 1
-			for datapc := startMin; datapc < endMin; datapc++ {
-				isData[datapc] = true
+
+			if !stmt.inferredAsData {
+				for datapc := startMin; datapc < endMin; datapc++ {
+					inferIsData[datapc] = true
+				}
 			}
 		} else {
 			stmt.numBytes = 1
@@ -296,7 +299,8 @@ func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]st
 //	sortEdges(es)
 
 	for pc, stmt := range stmts {
-		if stmt.isData {
+		if stmt.inferredAsData {
+			//fmt.Printf("data: %v\n", stmt.inferredAsData)
 			continue
 		}
 
@@ -422,7 +426,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 					}
 				}
 				//fmt.Printf("lub\t\t\t%v\n", postDpc1)
-				//printAnlyState(stmts, prevEdgeMap, D, nil)
+				printAnlyState(stmts, prevEdgeMap, D, nil)
 			}
 			D[e.pc1] = postDpc1
 

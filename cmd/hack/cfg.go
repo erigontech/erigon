@@ -24,7 +24,7 @@ func testGenCfg() error {
 	//absIntTestStorageVar03() // - PASSES
 	//absIntTestStaticLoop00() //- FAILS - Infinite loop
 	absIntTestStaticLoop01() //- FAILS - Infinite loop
-	absIntTestDepositContract()
+	//// absIntTestDepositContract()
 	return nil
 }
 
