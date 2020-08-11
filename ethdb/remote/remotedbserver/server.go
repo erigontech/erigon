@@ -67,7 +67,7 @@ func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, close
 	var cursorHandle uint64
 	var cursorPrefix []byte
 
-	var name []byte
+	var name string
 	var seekKey []byte
 
 	for {

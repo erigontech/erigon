@@ -31,7 +31,7 @@ import (
 func ReadDatabaseVersion(db DatabaseReader) *uint64 {
 	var version uint64
 
-	enc, _ := db.Get(dbutils.DatabaseVerisionKey, dbutils.DatabaseVerisionKey)
+	enc, _ := db.Get(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey))
 	if len(enc) == 0 {
 		return nil
 	}
@@ -48,7 +48,7 @@ func WriteDatabaseVersion(db DatabaseWriter, version uint64) {
 	if err != nil {
 		log.Crit("Failed to encode database version", "err", err)
 	}
-	if err = db.Put(dbutils.DatabaseVerisionKey, dbutils.DatabaseVerisionKey, enc); err != nil {
+	if err = db.Put(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey), enc); err != nil {
 		log.Crit("Failed to store the database version", "err", err)
 	}
 }

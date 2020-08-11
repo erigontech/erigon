@@ -242,7 +242,7 @@ type lmdbBucket struct {
 	isDupsort bool
 	dupFrom   int
 	dupTo     int
-	name      []byte
+	name      string
 	tx        *lmdbTx
 	dbi       lmdb.DBI
 }
@@ -332,7 +332,7 @@ func (b *lmdbBucket) Clear() error {
 
 func (b *lmdbBucket) Drop() error {
 	for i := range dbutils.Buckets {
-		if bytes.Equal(dbutils.Buckets[i], b.name) {
+		if dbutils.Buckets[i] == b.name {
 			return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, b.name)
 		}
 	}
@@ -344,13 +344,13 @@ func (b *lmdbBucket) Exists() bool {
 	return b.dbi != NonExistingDBI
 }
 
-func (tx *lmdbTx) Bucket(name []byte) Bucket {
-	cfg, ok := dbutils.BucketsCfg[string(name)]
+func (tx *lmdbTx) Bucket(name string) Bucket {
+	cfg, ok := dbutils.BucketsCfg[name]
 	if !ok {
-		panic(fmt.Errorf("%w: %s", ErrUnknownBucket, string(name)))
+		panic(fmt.Errorf("%w: %s", ErrUnknownBucket, name))
 	}
 
-	return &lmdbBucket{tx: tx, dbi: tx.db.buckets[string(name)], isDupsort: cfg.IsDupsort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen, name: name}
+	return &lmdbBucket{tx: tx, dbi: tx.db.buckets[name], isDupsort: cfg.IsDupsort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen, name: name}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -584,10 +584,6 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		k, v = nil, nil
 	}
 	return k, v, nil
-}
-
-func (c *LmdbCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	return c.Seek(seek)
 }
 
 func (c *LmdbCursor) Next() (k, v []byte, err error) {
@@ -881,10 +877,6 @@ func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, vSize uint32, err erro
 		return []byte{}, 0, err
 	}
 	return k, uint32(len(v)), err
-}
-
-func (c *lmdbNoValuesCursor) SeekTo(seek []byte) ([]byte, uint32, error) {
-	return c.Seek(seek)
 }
 
 func (c *lmdbNoValuesCursor) Next() (k []byte, vSize uint32, err error) {

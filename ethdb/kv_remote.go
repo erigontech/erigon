@@ -152,7 +152,7 @@ func (tx *remoteTx) Rollback() {
 	panic("remote db is read-only")
 }
 
-func (tx *remoteTx) Bucket(name []byte) Bucket {
+func (tx *remoteTx) Bucket(name string) Bucket {
 	b := remoteBucket{tx: tx, nameLen: uint(len(name))}
 	b.remote = tx.remote.Bucket(name)
 	return b
@@ -225,14 +225,6 @@ func (c *remoteCursor) First() ([]byte, []byte, error) {
 
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.Seek(seek)
-	if c.err != nil {
-		return []byte{}, c.v, c.err
-	}
-	return c.k, c.v, nil
-}
-
-func (c *remoteCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	c.k, c.v, c.err = c.remote.SeekTo(seek)
 	if c.err != nil {
 		return []byte{}, c.v, c.err
 	}

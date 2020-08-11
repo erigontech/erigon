@@ -20,7 +20,7 @@ type KV interface {
 }
 
 type Tx interface {
-	Bucket(name []byte) Bucket
+	Bucket(name string) Bucket
 
 	Commit(ctx context.Context) error
 	Rollback()
@@ -51,7 +51,6 @@ type Cursor interface {
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
-	SeekTo(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 

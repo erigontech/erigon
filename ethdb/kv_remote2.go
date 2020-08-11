@@ -43,7 +43,7 @@ type remote2Tx struct {
 
 type remote2Bucket struct {
 	tx   *remote2Tx
-	name []byte
+	name string
 }
 
 type remote2Cursor struct {
@@ -168,7 +168,7 @@ func (tx *remote2Tx) Rollback() {
 	}
 }
 
-func (tx *remote2Tx) Bucket(name []byte) Bucket {
+func (tx *remote2Tx) Bucket(name string) Bucket {
 	return &remote2Bucket{tx: tx, name: name}
 }
 
@@ -216,7 +216,6 @@ func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 
 	k, v, err := c.Seek(key)
 	if err != nil {
-		fmt.Printf("errr3: %s\n", err)
 		return nil, err
 	}
 	if !bytes.Equal(key, k) {
@@ -267,7 +266,6 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	var err error
 	c.stream, err = c.bucket.tx.db.remoteKV.Seek(c.ctx)
 	if err != nil {
-		fmt.Printf("errr2: %s\n", err)
 		return []byte{}, nil, err
 	}
 	err = c.stream.Send(&remote.SeekRequest{BucketName: c.bucket.name, SeekKey: seek, Prefix: c.prefix, StartSreaming: false})
@@ -281,10 +279,6 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	return pair.Key, pair.Value, nil
-}
-
-func (c *remote2Cursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	return c.Seek(seek)
 }
 
 // Next - returns next data element from server, request streaming (if configured by user)

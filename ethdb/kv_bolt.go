@@ -4,102 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path"
-	"strings"
-	"sync"
-	"time"
-
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"os"
+	"path"
+	"sync"
 )
-
-var (
-	boltPagesAllocGauge    = metrics.NewRegisteredGauge("bolt/pages/alloc_bytes", nil)
-	boltPagesFreeGauge     = metrics.NewRegisteredGauge("bolt/pages/free", nil)
-	boltPagesPendingGauge  = metrics.NewRegisteredGauge("bolt/pages/pending", nil)
-	boltFreelistInuseGauge = metrics.NewRegisteredGauge("bolt/freelist/inuse", nil)
-	boltTxGauge            = metrics.NewRegisteredGauge("bolt/tx/total", nil)
-	boltTxOpenGauge        = metrics.NewRegisteredGauge("bolt/tx/open", nil)
-	boltTxCursorGauge      = metrics.NewRegisteredGauge("bolt/tx/cursors_total", nil)
-	boltRebalanceGauge     = metrics.NewRegisteredGauge("bolt/rebalance/total", nil)
-	boltRebalanceTimer     = metrics.NewRegisteredTimer("bolt/rebalance/time", nil)
-	boltSplitGauge         = metrics.NewRegisteredGauge("bolt/split/total", nil)
-	boltSpillGauge         = metrics.NewRegisteredGauge("bolt/spill/total", nil)
-	boltSpillTimer         = metrics.NewRegisteredTimer("bolt/spill/time", nil)
-	boltWriteGauge         = metrics.NewRegisteredGauge("bolt/write/total", nil)
-	boltWriteTimer         = metrics.NewRegisteredTimer("bolt/write/time", nil)
-)
-
-var valueBytesMetrics []metrics.Gauge
-var keyBytesMetrics []metrics.Gauge
-var totalBytesPutMetrics []metrics.Gauge
-var totalBytesDeleteMetrics []metrics.Gauge
-var keyNMetrics []metrics.Gauge
-
-func init() {
-	if metrics.Enabled {
-		for i := range dbutils.Buckets {
-			b := strings.ToLower(string(dbutils.Buckets[i]))
-			b = strings.Replace(b, "-", "_", -1)
-			valueBytesMetrics = append(valueBytesMetrics, metrics.NewRegisteredGauge("db/bucket/value_bytes/"+b, nil))
-			keyBytesMetrics = append(keyBytesMetrics, metrics.NewRegisteredGauge("db/bucket/key_bytes/"+b, nil))
-			totalBytesPutMetrics = append(totalBytesPutMetrics, metrics.NewRegisteredGauge("db/bucket/bytes_put_total/"+b, nil))
-			totalBytesDeleteMetrics = append(totalBytesDeleteMetrics, metrics.NewRegisteredGauge("db/bucket/bytes_delete_total/"+b, nil))
-			keyNMetrics = append(keyNMetrics, metrics.NewRegisteredGauge("db/bucket/keys/"+b, nil))
-		}
-	}
-}
-
-func collectBoltMetrics(ctx context.Context, db *bolt.DB, ticker *time.Ticker) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		stats := db.Stats()
-		boltPagesFreeGauge.Update(int64(stats.FreePageN))
-		boltPagesPendingGauge.Update(int64(stats.PendingPageN))
-		boltPagesAllocGauge.Update(int64(stats.FreeAlloc))
-		boltFreelistInuseGauge.Update(int64(stats.FreelistInuse))
-
-		boltTxGauge.Update(int64(stats.TxN))
-		boltTxOpenGauge.Update(int64(stats.OpenTxN))
-		boltTxCursorGauge.Update(int64(stats.TxStats.CursorCount))
-
-		boltRebalanceGauge.Update(int64(stats.TxStats.Rebalance))
-		boltRebalanceTimer.Update(stats.TxStats.RebalanceTime)
-
-		boltSplitGauge.Update(int64(stats.TxStats.Split))
-		boltSpillGauge.Update(int64(stats.TxStats.Spill))
-		boltSpillTimer.Update(stats.TxStats.SpillTime)
-
-		boltWriteGauge.Update(int64(stats.TxStats.Write))
-		boltWriteTimer.Update(stats.TxStats.WriteTime)
-
-		if len(valueBytesMetrics) == 0 {
-			continue
-		}
-		writeStats := db.WriteStats()
-		for i := range dbutils.Buckets {
-			st, ok := writeStats[string(dbutils.Buckets[i])]
-			if !ok {
-				continue
-			}
-
-			valueBytesMetrics[i].Update(int64(st.ValueBytesN))
-			keyBytesMetrics[i].Update(int64(st.KeyBytesN))
-			totalBytesPutMetrics[i].Update(int64(st.TotalBytesPut))
-			totalBytesDeleteMetrics[i].Update(int64(st.TotalBytesDelete))
-			keyNMetrics[i].Update(int64(st.KeyN))
-		}
-	}
-}
 
 type boltOpts struct {
 	Bolt *bolt.Options
@@ -107,11 +19,10 @@ type boltOpts struct {
 }
 
 type BoltKV struct {
-	opts        boltOpts
-	bolt        *bolt.DB
-	log         log.Logger
-	stopMetrics context.CancelFunc
-	wg          *sync.WaitGroup
+	opts boltOpts
+	bolt *bolt.DB
+	log  log.Logger
+	wg   *sync.WaitGroup
 }
 
 type boltTx struct {
@@ -168,7 +79,7 @@ func (opts boltOpts) Open() (KV, error) {
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
 			for _, name := range dbutils.Buckets {
-				_, createErr := tx.CreateBucketIfNotExists(name, false)
+				_, createErr := tx.CreateBucketIfNotExists([]byte(name), false)
 				if createErr != nil {
 					return createErr
 				}
@@ -184,18 +95,6 @@ func (opts boltOpts) Open() (KV, error) {
 		bolt: boltDB,
 		log:  log.New("bolt_db", opts.path),
 		wg:   &sync.WaitGroup{},
-	}
-
-	if metrics.Enabled {
-		ctx, cancel := context.WithCancel(context.Background())
-		db.stopMetrics = cancel
-		db.wg.Add(1)
-		go func() {
-			defer db.wg.Done()
-			ticker := time.NewTicker(3 * time.Second)
-			defer ticker.Stop()
-			collectBoltMetrics(ctx, boltDB, ticker)
-		}()
 	}
 
 	return db, nil
@@ -218,10 +117,6 @@ func NewBolt() boltOpts {
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *BoltKV) Close() {
-	if db.stopMetrics != nil {
-		db.stopMetrics()
-	}
-
 	db.wg.Wait()
 
 	if db.bolt != nil {
@@ -313,9 +208,9 @@ func (tx *boltTx) Yield() {
 	tx.bolt.Yield()
 }
 
-func (tx *boltTx) Bucket(name []byte) Bucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[string(name)].ID}
-	b.bolt = tx.bolt.Bucket(name)
+func (tx *boltTx) Bucket(name string) Bucket {
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[name].ID}
+	b.bolt = tx.bolt.Bucket([]byte(name))
 	return b
 }
 
@@ -343,11 +238,11 @@ func (b boltBucket) Size() (uint64, error) {
 }
 
 func (b boltBucket) Clear() error {
-	err := b.tx.bolt.DeleteBucket(dbutils.Buckets[b.id])
+	err := b.tx.bolt.DeleteBucket([]byte(dbutils.Buckets[b.id]))
 	if err != nil {
 		return err
 	}
-	_, err = b.tx.bolt.CreateBucket(dbutils.Buckets[b.id], false)
+	_, err = b.tx.bolt.CreateBucket([]byte(dbutils.Buckets[b.id]), false)
 	if err != nil {
 		return err
 	}
@@ -408,22 +303,6 @@ func (c *boltCursor) Seek(seek []byte) (k, v []byte, err error) {
 	}
 
 	k, v = c.bolt.Seek(seek)
-	if c.prefix != nil {
-		if !bytes.HasPrefix(k, c.prefix) {
-			return nil, nil, nil
-		}
-	}
-	return k, v, nil
-}
-
-func (c *boltCursor) SeekTo(seek []byte) (k, v []byte, err error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, nil, c.ctx.Err()
-	default:
-	}
-
-	k, v = c.bolt.SeekTo(seek)
 	if c.prefix != nil {
 		if !bytes.HasPrefix(k, c.prefix) {
 			return nil, nil, nil

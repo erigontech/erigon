@@ -32,7 +32,7 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 			return err
 		}
 		{
-			var bucket []byte
+			var bucket string
 			if plain {
 				bucket = dbutils.PlainStateBucket
 			} else {
@@ -51,7 +51,7 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 }
 
 func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	var hBucket []byte
+	var hBucket string
 	if storage {
 		hBucket = dbutils.StorageHistoryBucket
 	} else {
@@ -210,14 +210,14 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 	return data, nil
 }
 
-func WalkAsOf(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func WalkAsOf(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
-	if !(bytes.Equal(bucket, dbutils.PlainStateBucket) || bytes.Equal(bucket, dbutils.CurrentStateBucket)) {
+	if !(bucket == dbutils.PlainStateBucket || bucket == dbutils.CurrentStateBucket) {
 		return fmt.Errorf("unsupported state bucket: %s", string(bucket))
 	}
-	if bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+	if hBucket == dbutils.AccountsHistoryBucket {
 		return walkAsOfThinAccounts(db, bucket, hBucket, startkey, fixedbits, timestamp, walker)
-	} else if bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
+	} else if hBucket == dbutils.StorageHistoryBucket {
 		return walkAsOfThinStorage(db, bucket, hBucket, startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
 			return walker(append(common.CopyBytes(k1), k2...), v)
 		})
@@ -226,7 +226,7 @@ func WalkAsOf(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, time
 	panic(fmt.Sprintf("Not implemented for arbitrary buckets: %s, %s", string(bucket), string(hBucket)))
 }
 
-func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+func walkAsOfThinStorage(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
@@ -238,7 +238,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		}
 
 		csBucket := dbutils.StorageChangeSetBucket
-		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+		if bucket == dbutils.PlainStateBucket {
 			csBucket = dbutils.PlainStorageChangeSetBucket
 		}
 
@@ -259,7 +259,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		part1End := common.HashLength
 		part2Start := common.HashLength + common.IncarnationLength
 		part3Start := common.HashLength + common.IncarnationLength + common.HashLength
-		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+		if bucket == dbutils.PlainStateBucket {
 			part1End = common.AddressLength
 			part2Start = common.AddressLength + common.IncarnationLength
 			part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
@@ -282,7 +282,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		part1End = common.HashLength
 		part2Start = common.HashLength
 		part3Start = common.HashLength * 2
-		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+		if bucket == dbutils.PlainStateBucket {
 			part1End = common.AddressLength
 			part2Start = common.AddressLength
 			part3Start = common.AddressLength + common.HashLength
@@ -301,7 +301,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 		part1End = common.HashLength
 		part2Start = common.HashLength + common.IncarnationLength
 		part3Start = common.HashLength + common.IncarnationLength + common.HashLength
-		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+		if bucket == dbutils.PlainStateBucket {
 			part1End = common.AddressLength
 			part2Start = common.AddressLength + common.IncarnationLength
 			part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
@@ -373,7 +373,7 @@ func walkAsOfThinStorage(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbit
 	return err
 }
 
-func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(bucket)
@@ -386,7 +386,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 		}
 
 		csBucket := dbutils.AccountChangeSetBucket
-		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+		if bucket == dbutils.PlainStateBucket {
 			csBucket = dbutils.PlainAccountChangeSetBucket
 		}
 
@@ -408,7 +408,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket, hBucket, startkey []byte, fixedbi
 		part2Start := common.HashLength
 		part3Start := common.HashLength
 		maxKeyLen := common.HashLength
-		if bytes.Equal(bucket, dbutils.PlainStateBucket) {
+		if bucket == dbutils.PlainStateBucket {
 			part1End = common.AddressLength
 			part2Start = common.AddressLength
 			part3Start = common.AddressLength
@@ -542,16 +542,16 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byt
 	return nil, false, nil
 }
 
-func returnCorrectWalker(bucket, hBucket []byte) func(v []byte) changeset.Walker {
+func returnCorrectWalker(bucket, hBucket string) func(v []byte) changeset.Walker {
 	switch {
-	case bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
-		return changeset.Mapper[string(dbutils.StorageChangeSetBucket)].WalkerAdapter
-	case bytes.Equal(bucket, dbutils.CurrentStateBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
-		return changeset.Mapper[string(dbutils.AccountChangeSetBucket)].WalkerAdapter
-	case bytes.Equal(bucket, dbutils.PlainStateBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
-		return changeset.Mapper[string(dbutils.PlainStorageChangeSetBucket)].WalkerAdapter
-	case bytes.Equal(bucket, dbutils.PlainStateBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
-		return changeset.Mapper[string(dbutils.PlainAccountChangeSetBucket)].WalkerAdapter
+	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.StorageHistoryBucket:
+		return changeset.Mapper[dbutils.StorageChangeSetBucket].WalkerAdapter
+	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.AccountsHistoryBucket:
+		return changeset.Mapper[dbutils.AccountChangeSetBucket].WalkerAdapter
+	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.StorageHistoryBucket:
+		return changeset.Mapper[dbutils.PlainStorageChangeSetBucket].WalkerAdapter
+	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.AccountsHistoryBucket:
+		return changeset.Mapper[dbutils.PlainAccountChangeSetBucket].WalkerAdapter
 	default:
 		panic("not implemented")
 	}
