@@ -107,7 +107,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 	for i := range m.Migrations {
 		_, ok := uniqueNameCheck[m.Migrations[i].Name]
 		if ok {
-			return fmt.Errorf("%w, duplicate: %s\n", ErrMigrationNonUniqueName, m.Migrations[i].Name)
+			return fmt.Errorf("%w, duplicate: %s", ErrMigrationNonUniqueName, m.Migrations[i].Name)
 		}
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
