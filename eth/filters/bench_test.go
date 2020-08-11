@@ -140,7 +140,7 @@ func benchmarkBloomBits(b *testing.B, sectionSize uint64) {
 	db.Close()
 }
 
-var bloomBitsPrefix = []byte("BloomBits")
+var bloomBitsPrefix = "BloomBits"
 
 func clearBloomBits(db ethdb.Database) {
 	fmt.Println("Clearing bloombits data...")

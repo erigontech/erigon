@@ -314,7 +314,7 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if len(k) != 32 {
@@ -350,7 +350,7 @@ func bucketStats(chaindata string) {
 		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 		_ = db.View(func(tx *bolt.Tx) error {
 			for _, bucket := range bucketList {
-				b := tx.Bucket(bucket)
+				b := tx.Bucket([]byte(bucket))
 				bs := b.Stats()
 				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
 					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
@@ -775,7 +775,7 @@ func testStartup() {
 	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 
-func dbSlice(chaindata string, bucket []byte, prefix []byte) {
+func dbSlice(chaindata string, bucket string, prefix []byte) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -1019,7 +1019,7 @@ func printBranches(block uint64) {
 		var hashes []common.Hash
 		numberEnc := make([]byte, 8)
 		binary.BigEndian.PutUint64(numberEnc, block)
-		if err := ethDb.Walk([]byte("h"), numberEnc, 8*8, func(k, v []byte) (bool, error) {
+		if err := ethDb.Walk("h", numberEnc, 8*8, func(k, v []byte) (bool, error) {
 			if len(k) == 8+32 {
 				hashes = append(hashes, common.BytesToHash(k[8:]))
 			}
@@ -2122,7 +2122,7 @@ func main() {
 		getModifiedAccounts(*chaindata)
 	}
 	if *action == "slice" {
-		dbSlice(*chaindata, []byte(*bucket), common.FromHex(*hash))
+		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
 	}
 	if *action == "resetState" {
 		resetState(*chaindata)

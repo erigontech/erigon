@@ -68,8 +68,8 @@ type ChainIndexerChain interface {
 // affect already finished sections.
 type ChainIndexer struct {
 	chainDb           ethdb.Database // Chain database to index the data from
-	bucket            []byte
-	sectionHeadBucket []byte
+	bucket            string
+	sectionHeadBucket string
 	backend           ChainIndexerBackend // Background processor generating the index data content
 	children          []*ChainIndexer     // Child indexers to cascade chain updates to
 
@@ -98,10 +98,8 @@ type ChainIndexer struct {
 // NewChainIndexer creates a new chain indexer to do background processing on
 // chain segments of a given size after certain number of confirmations passed.
 // The throttling parameter might be used to prevent database thrashing.
-func NewChainIndexer(chainDb ethdb.Database, bucket []byte, backend ChainIndexerBackend, section, confirm uint64, throttling time.Duration, kind string) *ChainIndexer {
-	sectionHeadBucket := make([]byte, len(bucket)+len("shead"))
-	copy(sectionHeadBucket, bucket)
-	copy(sectionHeadBucket[len(bucket):], []byte("shead"))
+func NewChainIndexer(chainDb ethdb.Database, bucket string, backend ChainIndexerBackend, section, confirm uint64, throttling time.Duration, kind string) *ChainIndexer {
+	sectionHeadBucket := bucket + "shead"
 	c := &ChainIndexer{
 		chainDb:           chainDb,
 		bucket:            bucket,

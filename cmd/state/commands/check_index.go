@@ -16,6 +16,6 @@ var checkIndexCMD = &cobra.Command{
 	Use:   "checkIndex",
 	Short: "Index checker",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return verify.CheckIndex(chaindata, []byte(changeSetBucket), []byte(indexBucket))
+		return verify.CheckIndex(chaindata, changeSetBucket, indexBucket)
 	},
 }

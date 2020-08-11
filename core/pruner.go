@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"sync"
@@ -270,7 +269,7 @@ func newKeysToRemove() *keysToRemove {
 
 type Keys [][]byte
 type Batch struct {
-	bucket []byte
+	bucket string
 	keys   Keys
 }
 
@@ -304,19 +303,19 @@ func LimitIterator(k *keysToRemove, limit int) *limitIterator {
 type limitIterator struct {
 	k             *keysToRemove
 	counter       uint64
-	currentBucket []byte
+	currentBucket string
 	currentNum    int
 	limit         int
 	batches       []Batch
 }
 
-func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
+func (i *limitIterator) GetNext() ([]byte, string, bool) {
 	if i.limit <= i.currentNum {
-		return nil, nil, false
+		return nil, "", false
 	}
 	i.updateBucket()
 	if !i.HasMore() {
-		return nil, nil, false
+		return nil, "", false
 	}
 	defer func() {
 		i.currentNum++
@@ -327,11 +326,11 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 		if batchIndex == len(i.batches)-1 {
 			break
 		}
-		if bytes.Equal(i.currentBucket, batch.bucket) {
+		if i.currentBucket == batch.bucket {
 			return batch.keys[i.currentNum], batch.bucket, true
 		}
 	}
-	return nil, nil, false
+	return nil, "", false
 }
 
 func (i *limitIterator) ResetLimit() {
@@ -340,7 +339,7 @@ func (i *limitIterator) ResetLimit() {
 
 func (i *limitIterator) HasMore() bool {
 	lastBatch := i.batches[len(i.batches)-1]
-	if bytes.Equal(i.currentBucket, lastBatch.bucket) && len(lastBatch.keys) == i.currentNum {
+	if i.currentBucket == lastBatch.bucket && len(lastBatch.keys) == i.currentNum {
 		return false
 	}
 
@@ -348,7 +347,7 @@ func (i *limitIterator) HasMore() bool {
 }
 
 func (i *limitIterator) updateBucket() {
-	if i.currentBucket == nil {
+	if i.currentBucket == "" {
 		i.currentBucket = i.batches[0].bucket
 	}
 
@@ -357,7 +356,7 @@ func (i *limitIterator) updateBucket() {
 			break
 		}
 
-		if bytes.Equal(i.currentBucket, batch.bucket) && len(batch.keys) == i.currentNum {
+		if i.currentBucket == batch.bucket && len(batch.keys) == i.currentNum {
 			i.currentBucket = i.batches[batchIndex+1].bucket
 			i.currentNum = 0
 		}

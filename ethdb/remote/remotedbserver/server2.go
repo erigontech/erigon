@@ -82,7 +82,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		return recvErr
 	}
 
-	tx, err := s.kv.Begin(context.Background(), false)
+	tx, err := s.kv.Begin(context.Background(), nil, false)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		i++
 		if i%128 == 0 && time.Since(t) > MaxTxTTL {
 			tx.Rollback()
-			tx, err = s.kv.Begin(context.Background(), false)
+			tx, err = s.kv.Begin(context.Background(), nil, false)
 			if err != nil {
 				return err
 			}

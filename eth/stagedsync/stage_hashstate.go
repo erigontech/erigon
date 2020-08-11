@@ -193,8 +193,8 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
+func getExtractFunc(changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, _ []byte) error {
 			return next(k, k, nil)
@@ -202,8 +202,8 @@ func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
 	}
 }
 
-func getUnwindExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
+func getUnwindExtractFunc(changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 			return next(k, k, v)
@@ -278,7 +278,7 @@ func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 }
 
 func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes bool) error {
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -289,7 +289,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
 	var l OldestAppearedLoad
-	var loadBucket []byte
+	var loadBucket string
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
 		l.innerLoadFunc = getFromPlainCodesAndLoad(p.db, codeKeyTransformLoadFunc)
@@ -317,7 +317,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 }
 
 func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes bool) error {
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -331,7 +331,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
 	var l OldestAppearedLoad
-	var loadBucket []byte
+	var loadBucket string
 	var extractFunc etl.ExtractFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket

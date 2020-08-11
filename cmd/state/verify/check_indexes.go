@@ -1,7 +1,6 @@
 package verify
 
 import (
-	"bytes"
 	"fmt"
 	"time"
 
@@ -11,18 +10,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func CheckIndex(chaindata string, changeSetBucket []byte, indexBucket []byte) error {
+func CheckIndex(chaindata string, changeSetBucket string, indexBucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 
 	var walker func([]byte) changeset.Walker
-	if bytes.Equal(dbutils.AccountChangeSetBucket, changeSetBucket) {
+	if dbutils.AccountChangeSetBucket == changeSetBucket {
 		walker = func(cs []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(cs)
 		}
 	}
 
-	if bytes.Equal(dbutils.StorageChangeSetBucket, changeSetBucket) {
+	if dbutils.StorageChangeSetBucket == changeSetBucket {
 		walker = func(cs []byte) changeset.Walker {
 			return changeset.StorageChangeSetBytes(cs)
 		}

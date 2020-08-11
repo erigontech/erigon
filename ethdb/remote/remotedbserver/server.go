@@ -70,7 +70,7 @@ func Server(ctx context.Context, db ethdb.KV, txpool txPool, in io.Reader, out i
 	var cursorHandle uint64
 	var cursorPrefix []byte
 
-	var name []byte
+	var name string
 	var seekKey []byte
 
 	for {
@@ -107,7 +107,7 @@ func Server(ctx context.Context, db ethdb.KV, txpool txPool, in io.Reader, out i
 			}
 		case remote.CmdBeginTx:
 			var err error
-			tx, err = db.Begin(ctx, false)
+			tx, err = db.Begin(ctx, nil, false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for remote.CmdBeginTx: %w", err)
 				encodeErr(encoder, err2)

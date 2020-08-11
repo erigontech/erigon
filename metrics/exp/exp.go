@@ -64,6 +64,9 @@ func Setup(address string) {
 	m := http.NewServeMux()
 	m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
 	m.Handle("/debug/metrics/prometheus", prometheus.Handler(metrics.DefaultRegistry))
+	m.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
+		EnableOpenMetrics: true,
+	}))
 	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics", address))
 	go func() {
 		if err := http.ListenAndServe(address, m); err != nil {

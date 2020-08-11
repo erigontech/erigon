@@ -1635,14 +1635,14 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 	}
 
 	for bucketName, shouldBeEmpty := range map[string]bool{
-		string(dbutils.AccountsHistoryBucket): !history,
-		string(dbutils.PreimagePrefix):        !preimages,
-		string(dbutils.BlockReceiptsPrefix):   !receipts,
-		string(dbutils.TxLookupPrefix):        !txlookup,
+		dbutils.AccountsHistoryBucket: !history,
+		dbutils.PreimagePrefix:        !preimages,
+		dbutils.BlockReceiptsPrefix:   !receipts,
+		dbutils.TxLookupPrefix:        !txlookup,
 	} {
 		numberOfEntries := 0
 
-		err := db.Walk([]byte(bucketName), nil, 0, func(k, v []byte) (bool, error) {
+		err := db.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
 			// we ignore empty account history
 			//nolint:scopelint
 			if bucketName == string(dbutils.AccountsHistoryBucket) && len(v) == 0 {
