@@ -201,7 +201,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				copy(fstl.accAddrHashWithInc[:], dbPrefix[:common.HashLength+common.IncarnationLength])
 			}
 
-			if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(dbPrefix); err != nil {
+			if fstl.ihK, fstl.ihV, isIHSequence, err = ih.Seek(dbPrefix); err != nil {
 				return err
 			}
 			if isIHSequence {
@@ -309,7 +309,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 				fmt.Printf("k after accountWalker and Seek: %x\n", fstl.k)
 			}
 			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
-				if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+				if fstl.ihK, fstl.ihV, _, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 					return err
 				}
 			}
@@ -324,12 +324,12 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	if len(fstl.ihK) > common.HashLength && !bytes.HasPrefix(fstl.ihK, fstl.accAddrHashWithInc[:]) {
 		if bytes.Compare(fstl.ihK, fstl.accAddrHashWithInc[:]) < 0 {
 			// Skip all the irrelevant storage in the middle
-			if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.accAddrHashWithInc[:]); err != nil {
+			if fstl.ihK, fstl.ihV, _, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 				return err
 			}
 		} else {
 			if nextAccount(fstl.ihK, fstl.nextAccountKey[:]) {
-				if fstl.ihK, fstl.ihV, _, err = ih.SeekTo(fstl.nextAccountKey[:]); err != nil {
+				if fstl.ihK, fstl.ihV, _, err = ih.Seek(fstl.nextAccountKey[:]); err != nil {
 					return err
 				}
 			} else {
@@ -363,7 +363,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 		fmt.Printf("next: %x\n", next)
 	}
 
-	if fstl.ihK, fstl.ihV, isIHSequence, err = ih.SeekTo(next); err != nil {
+	if fstl.ihK, fstl.ihV, isIHSequence, err = ih.Seek(next); err != nil {
 		return err
 	}
 	if isIHSequence {
@@ -791,7 +791,7 @@ func Filter(filter func(k []byte) (bool, error), c ethdb.Cursor) *FilterCursor {
 	return &FilterCursor{c: c, filter: filter}
 }
 
-func (c *FilterCursor) _seekTo(seek []byte) (err error) {
+func (c *FilterCursor) _seek(seek []byte) (err error) {
 	c.k, c.v, err = c.c.Seek(seek)
 	if err != nil {
 		return err
@@ -836,8 +836,8 @@ func (c *FilterCursor) _next() (err error) {
 	}
 }
 
-func (c *FilterCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	if err := c._seekTo(seek); err != nil {
+func (c *FilterCursor) Seek(seek []byte) ([]byte, []byte, error) {
+	if err := c._seek(seek); err != nil {
 		return []byte{}, nil, err
 	}
 
@@ -853,8 +853,8 @@ func IH(c *FilterCursor) *IHCursor {
 	return &IHCursor{c: c}
 }
 
-func (c *IHCursor) SeekTo(seek []byte) ([]byte, []byte, bool, error) {
-	k, v, err := c.c.SeekTo(seek)
+func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
+	k, v, err := c.c.Seek(seek)
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
