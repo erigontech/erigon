@@ -22,7 +22,7 @@ import (
 
 type bucketWriter struct {
 	db      ethdb.Database
-	bucket  []byte
+	bucket  string
 	pending ethdb.DbWithPendingMutations
 	written uint64
 }
@@ -69,7 +69,7 @@ func (bw *bucketWriter) commit() error {
 	return nil
 }
 
-func newBucketWriter(db ethdb.Database, bucket []byte) *bucketWriter {
+func newBucketWriter(db ethdb.Database, bucket string) *bucketWriter {
 	return &bucketWriter{
 		db:      db,
 		bucket:  bucket,
@@ -79,7 +79,7 @@ func newBucketWriter(db ethdb.Database, bucket []byte) *bucketWriter {
 }
 
 func copyDatabase(fromDB ethdb.Database, toDB ethdb.Database) error {
-	for _, bucket := range [][]byte{dbutils.CurrentStateBucket, dbutils.CodeBucket, dbutils.DatabaseInfoBucket} {
+	for _, bucket := range []string{dbutils.CurrentStateBucket, dbutils.CodeBucket, dbutils.DatabaseInfoBucket} {
 		fmt.Printf(" - copying bucket '%s'...\n", string(bucket))
 		writer := newBucketWriter(toDB, bucket)
 
@@ -124,8 +124,8 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
 	var account accounts.Account
 	err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		cb, err := tx.CreateBucket(dbutils.CodeBucket, true)
+		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
+		cb, err := tx.CreateBucket([]byte(dbutils.CodeBucket), true)
 		if err != nil {
 			return err
 		}

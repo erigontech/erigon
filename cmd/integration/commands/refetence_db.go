@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var stateBuckets = [][]byte{
+var stateBuckets = []string{
 	dbutils.CurrentStateBucket,
 	dbutils.AccountChangeSetBucket,
 	dbutils.StorageChangeSetBucket,
@@ -111,7 +111,7 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		return refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
-			return compareBuckets(ctx, tx.Bucket([]byte(bucket)), refTX.Bucket([]byte(bucket)))
+			return compareBuckets(ctx, tx.Bucket(bucket), refTX.Bucket(bucket))
 		})
 	}); err != nil {
 		return err

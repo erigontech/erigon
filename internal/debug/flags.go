@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -53,6 +54,13 @@ var (
 		Name:  "backtrace",
 		Usage: "Request a stack trace at a specific logging statement (e.g. \"block.go:271\")",
 		Value: "",
+	}
+	metricsAddrFlag = cli.StringFlag{
+		Name: "metrics.addr",
+	}
+	metricsPortFlag = cli.UintFlag{
+		Name:  "metrics.port",
+		Value: 6060,
 	}
 	debugFlag = cli.BoolFlag{
 		Name:  "debug",
@@ -227,9 +235,25 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
+	metricsAddr, err := flags.GetString(metricsAddrFlag.Name)
+	if err != nil {
+		return err
+	}
+	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	if metrics.Enabled && metricsAddr != "" {
+		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
+		log.Info("Enabling stand-alone metrics HTTP endpoint", "addr", address)
+		exp.Setup(address)
+	}
+
+	withMetrics := metrics.Enabled && metricsAddr == ""
 	if pprof {
 		// metrics and pprof server
-		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), metrics.Enabled)
+		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
 	}
 	return nil
 }
@@ -304,7 +328,9 @@ func StartPProf(address string, withMetrics bool) {
 		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
 	}
 	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
-	log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
+	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
+	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 	go func() {
 		if err := http.ListenAndServe(address, nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)

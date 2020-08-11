@@ -561,7 +561,7 @@ func BenchmarkKVCursorFirst(b *testing.B) {
 	var k, v []byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tx, err := db.KV().Begin(context.Background(), false)
+		tx, err := db.KV().Begin(context.Background(), nil, false)
 		if err != nil {
 			panic(err)
 		}
