@@ -152,7 +152,7 @@ func (db *BoltKV) IdealBatchSize() int {
 	return 50 * 1024 * 1024 // 50 Mb
 }
 
-func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *BoltKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	if db.bolt == nil {
 		return nil, fmt.Errorf("db closed")
 	}

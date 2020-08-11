@@ -15,7 +15,7 @@ type KV interface {
 	Update(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
-	Begin(ctx context.Context, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
 	IdealBatchSize() int
 }
 
