@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"time"
 
@@ -213,6 +214,7 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
+	runtime.LockOSThread()
 	db.wg.Add(1)
 	flags := uint(0)
 	if !writable {
@@ -224,6 +226,7 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	}
 	tx, err := db.env.BeginTxn(parentTx, flags)
 	if err != nil {
+		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 
@@ -367,6 +370,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
+		runtime.UnlockOSThread()
 	}()
 	tx.closeCursors()
 	return tx.tx.Commit()
@@ -379,7 +383,14 @@ func (tx *lmdbTx) Rollback() {
 	if tx.tx == nil {
 		return
 	}
-	defer tx.db.wg.Done()
+	if tx.tx == nil {
+		return
+	}
+	defer func() {
+		tx.tx = nil
+		tx.db.wg.Done()
+		runtime.UnlockOSThread()
+	}()
 	tx.closeCursors()
 	tx.tx.Abort()
 	tx.tx = nil
