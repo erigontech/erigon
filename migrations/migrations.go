@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ugorji/go/codec"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
