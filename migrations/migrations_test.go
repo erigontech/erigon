@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"errors"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"testing"
 
@@ -151,4 +152,50 @@ func TestMarshalStages(t *testing.T) {
 	v, ok := res[string(stages.DBKeys[stages.Execution])]
 	require.True(ok)
 	require.NotNil(v)
+}
+
+func TestValidation(t *testing.T) {
+	require, db := require.New(t), ethdb.NewMemDatabase()
+	migrations = []Migration{
+		{
+			Name: "repeated_name",
+			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				return OnLoadCommit(db, nil, true)
+			},
+		},
+		{
+			Name: "repeated_name",
+			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				return OnLoadCommit(db, nil, true)
+			},
+		},
+	}
+	migrator := NewMigrator()
+	migrator.Migrations = migrations
+	err := migrator.Apply(db, "")
+	require.True(errors.Is(err, ErrMigrationNonUniqueName))
+
+	applied, err := AppliedMigrations(db, false)
+	require.NoError(err)
+	require.Equal(0, len(applied))
+}
+
+func TestCommitCallRequired(t *testing.T) {
+	require, db := require.New(t), ethdb.NewMemDatabase()
+	migrations = []Migration{
+		{
+			Name: "one",
+			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+				return nil // don't call OnLoadCommit
+			},
+		},
+	}
+	migrator := NewMigrator()
+	migrator.Migrations = migrations
+	err := migrator.Apply(db, "")
+	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
+
+	applied, err := AppliedMigrations(db, false)
+	require.NoError(err)
+	require.Equal(0, len(applied))
 }
