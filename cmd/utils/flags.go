@@ -1730,7 +1730,7 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
 	fullNode := new(eth.Ethereum)
 	err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		fullNodeInst, err := eth.New(ctx, cfg)
-		*fullNode = *fullNodeInst
+		*fullNode = *fullNodeInst //nolint:govet
 		return fullNode, err
 	})
 	if err != nil {
