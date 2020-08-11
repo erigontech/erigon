@@ -820,6 +820,10 @@ func (c *LmdbCursor) putCurrent(key []byte, value []byte) error {
 }
 
 func (c *LmdbCursor) append(key []byte, value []byte) error {
+	return c.cursor.Put(key, value, lmdb.Append)
+}
+
+func (c *LmdbCursor) appendDup(key []byte, value []byte) error {
 	return c.cursor.Put(key, value, lmdb.AppendDup)
 }
 
@@ -846,7 +850,7 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 			newValue := make([]byte, 0, b.dupFrom-b.dupTo+len(value))
 			newValue = append(append(newValue, key[b.dupTo:]...), value...)
 			key = key[:b.dupTo]
-			return c.append(key, newValue)
+			return c.appendDup(key, newValue)
 		}
 		return c.append(key, value)
 	}
