@@ -244,11 +244,11 @@ func init() {
 	})
 
 	for i := range Buckets {
-		BucketsCfg[string(Buckets[i])] = createBucketConfig(i, Buckets[i])
+		BucketsCfg[Buckets[i]] = createBucketConfig(i, Buckets[i])
 	}
 
 	for i := range DeprecatedBuckets {
-		BucketsCfg[string(DeprecatedBuckets[i])] = createBucketConfig(len(Buckets)+i, DeprecatedBuckets[i])
+		BucketsCfg[DeprecatedBuckets[i]] = createBucketConfig(len(Buckets)+i, DeprecatedBuckets[i])
 	}
 }
 
