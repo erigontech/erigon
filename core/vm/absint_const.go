@@ -408,7 +408,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 		if !leq(post1, preDpc1) {
 			postDpc1 := lub(post1, preDpc1)
-			if true {
+			if false {
 
 				fmt.Printf("\nedge %v %v\n", e.pc0, e.pc1)
 				//fmt.Printf("pre D[pc0]\t\t%v\n", preDpc0);

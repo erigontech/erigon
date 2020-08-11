@@ -20,11 +20,11 @@ func testGenCfg() error {
 	//absIntTestSimple00() //- PASSES
 	//absIntTestRequires00() //- PASSES
 	//absIntTestCall01() // - PASSES
-	absIntTestEcrecoverLoop02() //- Too many unreachable statements
+	//absIntTestEcrecoverLoop02() //- PASSES
 	//absIntTestStorageVar03() // - PASSES
 	//absIntTestStaticLoop00() //- PASSES
 	//absIntTestStaticLoop01() - PASSES
-	//// absIntTestDepositContract() //FAILS - Imprecision
+	absIntTestDepositContract() //FAILS - Imprecision
 	return nil
 }
 
