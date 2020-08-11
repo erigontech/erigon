@@ -58,7 +58,7 @@ func TestDupsortHashState(t *testing.T) {
 
 	tx, err := env.BeginTxn(nil, lmdb.Readonly)
 	require.NoError(err)
-	c, err := tx.OpenCursor(allDBI[string(dbutils.CurrentStateBucket)])
+	c, err := tx.OpenCursor(allDBI[dbutils.CurrentStateBucket])
 	require.NoError(err)
 
 	k, v, err := c.Get([]byte(accKey), nil, lmdb.Set)
