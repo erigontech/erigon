@@ -3,13 +3,15 @@ package migrations
 import (
 	"bytes"
 	"errors"
+
+	"github.com/ugorji/go/codec"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ugorji/go/codec"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
