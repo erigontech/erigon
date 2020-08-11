@@ -32,6 +32,17 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		return nil
 	}
 
+	hashStateProgress, _, err := stages.GetStageProgress(db, stages.HashState)
+	if err != nil {
+		return err
+	}
+	if s.BlockNumber > hashStateProgress {
+		// this case means - stages.HashState was interrupted and need firstly promote stages.HashState to stages.IntermediateHashes
+		// only then can run stages.IntermediateHashes
+		s.Done()
+		return nil
+	}
+
 	hash := rawdb.ReadCanonicalHash(db, to)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
@@ -410,6 +421,17 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
+
+	hashStateProgress, _, err := stages.GetStageProgress(db, stages.HashState)
+	if err != nil {
+		return err
+	}
+	if s.BlockNumber < hashStateProgress {
+		// this case means - stages.HashState was interrupted and need firstly promote stages.HashState to stages.IntermediateHashes
+		// only then can run stages.IntermediateHashes
+		s.Done()
+		return nil
+	}
 
 	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
 		return err
