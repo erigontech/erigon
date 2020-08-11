@@ -21,7 +21,7 @@ type AbsElmType int
 const (
 	//bot AbsElmType = iota
 	//top
-	value = iota
+	stateValueKind = iota
 )
 
 type state struct {
@@ -42,7 +42,7 @@ func (state * state) Pop() AbsConst {
 }
 
 func botSt() state {
-	st := state{value, make([]AbsConst, absStackLen)}
+	st := state{stateValueKind, make([]AbsConst, absStackLen)}
 	for i := range st.stack {
 		st.stack[i] = ConstBot()
 	}
@@ -109,7 +109,7 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
 
 	if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 		jumpDest := st0.stack[0]
-		if jumpDest.kind == Value {
+		if jumpDest.kind == ConstValueKind {
 			if jumpDest.value.IsUint64() {
 				pc1 := int(jumpDest.value.Uint64())
 				edges = append(edges, edge{pc0, stmt, pc1})
@@ -136,7 +136,7 @@ func resolve(prog *Contract, pc0 int, st0 state, stmt stmt) ResolveResult {
 }
 
 func post(st0 state, stmt stmt) state {
-	st1 := state{kind: value}
+	st1 := state{kind: stateValueKind}
 	st1.stack = make([]AbsConst, len(st0.stack))
 	copy(st1.stack, st0.stack)
 
@@ -165,6 +165,10 @@ func post(st0 state, stmt stmt) state {
 
 
 func leq(st0 state, st1 state) bool {
+	if len(st0.stack) != len(st1.stack) || absStackLen != len(st0.stack) {
+		panic("mismatched stack len")
+	}
+
 	for i := 0; i < absStackLen; i++ {
 		if !ConstLeq(st0.stack[i], st1.stack[i]) {
 			return false
@@ -174,7 +178,7 @@ func leq(st0 state, st1 state) bool {
 }
 
 func lub(st0 state, st1 state) state {
-	res := state{value, []AbsConst{}}
+	res := state{stateValueKind, []AbsConst{}}
 
 	for i := 0; i < absStackLen; i++ {
 		lub := ConstLub(st0.stack[i], st1.stack[i])
@@ -381,7 +385,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 		e, workList = workList[0], workList[1:]
 
 		//fmt.Printf("%v\n", e.pc0)
-		if e.pc0 == 128 {
+		if e.pc0 == -1 {
 			fmt.Printf("---------------------------------------\n")
 			fmt.Printf("Verbose debugging for pc=%v\n", e.pc0)
 			DEBUG = true
@@ -390,18 +394,37 @@ func AbsIntCfgHarness(prog *Contract) error {
 		if DEBUG {
 			fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0])
 		}
-		post1 := post(D[e.pc0], e.stmt)
+		preDpc0 := D[e.pc0]
+		preDpc1 := D[e.pc1]
+		post1 := post(preDpc0, e.stmt)
 		if DEBUG {
 			fmt.Printf("post\t\t%v\n", post1);
-			fmt.Printf("Dprev\t\t%v\n", D[e.pc1])
+			fmt.Printf("Dprev\t\t%v\n", preDpc1)
 		}
 
-		if !leq(post1, D[e.pc1]) {
-			D[e.pc1] = lub(post1, D[e.pc1])
-			if DEBUG {
-				fmt.Printf("lub pc=%v\t%v\n", e.pc1, D[e.pc1])
-				printAnlyState(stmts, prevEdgeMap, D, nil)
+		if !leq(post1, preDpc1) {
+			postDpc1 := lub(post1, preDpc1)
+			if true {
+
+				fmt.Printf("\nedge %v %v\n", e.pc0, e.pc1)
+				//fmt.Printf("pre D[pc0]\t\t%v\n", preDpc0);
+				fmt.Printf("pre D[pc1]\t\t%v\n", preDpc1)
+				fmt.Printf("post\t\t\t%v\n", post1)
+
+				for i := 0; i < absStackLen; i++ {
+					c0 := post1.stack[i]
+					c1 := preDpc1.stack[i]
+					if !ConstLeq(c0, c1) {
+						fmt.Printf("diff: \t\t\t%v %v %v %v %v\n", i, c0, c1, c0.kind, c1.kind)
+						if c0.kind == ConstValueKind && c1.kind == ConstValueKind  {
+							fmt.Printf("\t\t\t\t\tEQ=%v\n", c0.value.Eq(&c1.value))
+						}
+					}
+				}
+				//fmt.Printf("lub\t\t\t%v\n", postDpc1)
+				//printAnlyState(stmts, prevEdgeMap, D, nil)
 			}
+			D[e.pc1] = postDpc1
 
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 

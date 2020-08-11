@@ -42,7 +42,7 @@ type AbsConstValueType int
 const (
 	Bot AbsConstValueType = iota
 	Top
-	Value
+	ConstValueKind
 )
 
 func (d AbsConstValueType) String() string {
@@ -67,7 +67,7 @@ func (c0 AbsConst) String() string {
 }
 
 func ConstLub(c0 AbsConst, c1 AbsConst) AbsConst {
-	if c0.kind == Value && c1.kind == Value {
+	if c0.kind == ConstValueKind && c1.kind == ConstValueKind {
 		if c0.value != c1.value {
 			return ConstTop()
 		} else {
@@ -75,9 +75,9 @@ func ConstLub(c0 AbsConst, c1 AbsConst) AbsConst {
 		}
 	} else if c0.kind == Bot && c1.kind == Bot {
 		return ConstBot()
-	} else if c0.kind == Value && c1.kind == Bot {
+	} else if c0.kind == ConstValueKind && c1.kind == Bot {
 		return ConstValue(c0.value)
-	} else if c0.kind == Bot && c1.kind == Value {
+	} else if c0.kind == Bot && c1.kind == ConstValueKind {
 		return ConstValue(c1.value)
 	} else if c0.kind == Top || c1.kind == Top {
 		return ConstTop()
@@ -89,7 +89,7 @@ func ConstLub(c0 AbsConst, c1 AbsConst) AbsConst {
 func ConstLeq(c0 AbsConst, c1 AbsConst) bool {
 	if c0.kind == Bot || c1.kind == Top {
 		return true
-	} else if c0.kind == value && c1.kind == value && c0.value == c1.value {
+	} else if c0.kind == ConstValueKind && c1.kind == ConstValueKind && c0.value.Eq(&c1.value) {
 		return true
 	} else {
 		return false
@@ -109,7 +109,7 @@ func ConstBot() AbsConst {
 }
 
 func ConstValue(value uint256.Int) AbsConst {
-	return AbsConst{Value, value}
+	return AbsConst{ConstValueKind, value}
 }
 
 ///////////////
