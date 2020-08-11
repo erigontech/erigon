@@ -202,7 +202,7 @@ func getStmts(prog *Contract) []stmt {
 		op := prog.GetOp(uint64(pc))
 		stmt.opcode = op
 		stmt.operation = jt[op]
-		stmt.ends = stmt.operation.halts || stmt.operation.returns || stmt.operation.reverts
+		stmt.ends = stmt.operation.halts || stmt.operation.reverts
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {
