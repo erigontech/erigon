@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package remote;
+
+option go_package = "./remote;remote";
+option java_multiple_files = true;
+option java_package = "io.turbo-geth.db";
+option java_outer_classname = "TXPOOL";
+
+service TXPOOL {
+  rpc Add(TxRequest) returns (AddReply);
+}
+
+message TxRequest {
+  bytes signedtx = 1;
+}
+
+message AddReply {
+  bytes hash = 1;
+}

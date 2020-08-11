@@ -24,12 +24,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/service"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/urfave/cli"
 )
 
 var (
@@ -79,15 +80,16 @@ JavaScript API. See https://github.com/ledgerwatch/turbo-geth/wiki/JavaScript-Co
 func localConsole(ctx *cli.Context) error {
 	// Create and start the node based on the CLI flags
 	prepare(ctx)
-	stack := makeFullNode(ctx)
+	stack, ethService := makeFullNode(ctx)
 
 	err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		diskdb, err := ctx.OpenDatabaseWithFreezer("chaindata", "")
 		if err != nil {
 			return nil, err
 		}
-		return service.New(diskdb), nil
+		return service.New(diskdb, ethService.TxPool()), nil
 	})
+
 	if err != nil {
 		panic(err)
 	}
@@ -204,7 +206,7 @@ func dialRPC(endpoint string) (*rpc.Client, error) {
 // everything down.
 func ephemeralConsole(ctx *cli.Context) error {
 	// Create and start the node based on the CLI flags
-	node := makeFullNode(ctx)
+	node, _ := makeFullNode(ctx)
 	startNode(ctx, node)
 	defer node.Close()
 

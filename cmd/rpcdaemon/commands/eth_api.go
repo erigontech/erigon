@@ -17,7 +17,7 @@ import (
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
-	Coinbase(ctx context.Context) (common.Address, error)
+	Coinbase(context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
@@ -25,21 +25,24 @@ type EthAPI interface {
 	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
+	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	db           ethdb.KV
+	txpool       ethdb.Backend
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext, txpool ethdb.Backend) *APIImpl {
 	return &APIImpl{
 		db:           db,
 		dbReader:     dbReader,
 		chainContext: chainContext,
+		txpool:       txpool,
 	}
 }
 

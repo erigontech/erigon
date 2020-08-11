@@ -198,7 +198,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 	return conf
 }
 
-// TxPool contains all currently known transactions. Transactions
+// Backend contains all currently known transactions. Transactions
 // enter the pool when they are received from the network or submitted
 // locally. They exit the pool when they are included in the blockchain.
 //
@@ -1502,15 +1502,15 @@ func (as *accountSet) merge(other *accountSet) {
 	as.cache = nil
 }
 
-// txLookup is used internally by TxPool to track transactions while allowing lookup without
+// txLookup is used internally by Backend to track transactions while allowing lookup without
 // mutex contention.
 //
 // Note, although this type is properly protected against concurrent access, it
 // is **not** a type that should ever be mutated or even exposed outside of the
 // transaction pool, since its internal state is tightly coupled with the pools
 // internal mechanisms. The sole purpose of the type is to permit out-of-bound
-// peeking into the pool in TxPool.Get without having to acquire the widely scoped
-// TxPool.mu mutex.
+// peeking into the pool in Backend.Get without having to acquire the widely scoped
+// Backend.mu mutex.
 type txLookup struct {
 	all   map[common.Hash]*types.Transaction
 	slots int

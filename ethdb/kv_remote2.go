@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -17,10 +18,12 @@ import (
 // generate the messages
 //go:generate protoc --go_out=. "./remote/kv.proto"
 //go:generate protoc --go_out=. "./remote/db.proto"
+//go:generate protoc --go_out=. "./remote/txpool.proto"
 
 // generate the services
 //go:generate protoc --go-grpc_out=. "./remote/kv.proto"
 //go:generate protoc --go-grpc_out=. "./remote/db.proto"
+//go:generate protoc --go-grpc_out=. "./remote/txpool.proto"
 
 type remote2Opts struct {
 	DialAddress string
@@ -56,6 +59,13 @@ type remote2Cursor struct {
 	stream             remote.KV_SeekClient
 }
 
+type Remote2Backend struct {
+	opts         remote2Opts
+	remoteTxPool remote.TXPOOLClient
+	conn         *grpc.ClientConn
+	log          log.Logger
+}
+
 type remote2NoValuesCursor struct {
 	*remote2Cursor
 }
@@ -74,7 +84,7 @@ func (opts remote2Opts) InMem(listener *bufconn.Listener) remote2Opts {
 	return opts
 }
 
-func (opts remote2Opts) Open() (KV, error) {
+func (opts remote2Opts) Open() (KV, Backend, error) {
 	var dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
 		grpc.WithInsecure(),
@@ -91,24 +101,33 @@ func (opts remote2Opts) Open() (KV, error) {
 
 	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return &Remote2KV{
+	db := &Remote2KV{
 		opts:     opts,
 		conn:     conn,
 		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
-	}, nil
+	}
+
+	txPool := &Remote2Backend{
+		opts:         opts,
+		remoteTxPool: remote.NewTXPOOLClient(conn),
+		conn:         conn,
+		log:          log.New("remote_db", opts.DialAddress),
+	}
+
+	return db, txPool, nil
 }
 
-func (opts remote2Opts) MustOpen() KV {
-	db, err := opts.Open()
+func (opts remote2Opts) MustOpen() (KV, Backend) {
+	db, txPool, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
-	return db
+	return db, txPool
 }
 
 func NewRemote2() remote2Opts {
@@ -254,7 +273,7 @@ func (c *remote2Cursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
-// Seek - doesn't start streaming (because much of code does only several .Seek cals without reading sequenceof data)
+// Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
@@ -355,4 +374,12 @@ func (c *remote2NoValuesCursor) Next() ([]byte, uint32, error) {
 	}
 
 	return k, uint32(len(v)), err
+}
+
+func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
+	res, err := back.remoteTxPool.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
+	if err != nil {
+		return common.Hash{}.Bytes(), err
+	}
+	return res.Hash, nil
 }
