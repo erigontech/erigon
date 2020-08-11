@@ -357,7 +357,13 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}
-	defer tx.db.wg.Done()
+	if tx.tx == nil {
+		return nil
+	}
+	defer func() {
+		tx.tx = nil
+		tx.db.wg.Done()
+	}()
 	tx.closeCursors()
 	return tx.tx.Commit()
 }
@@ -366,9 +372,13 @@ func (tx *lmdbTx) Rollback() {
 	if tx.db.env == nil {
 		return
 	}
+	if tx.tx == nil {
+		return
+	}
 	defer tx.db.wg.Done()
 	tx.closeCursors()
 	tx.tx.Abort()
+	tx.tx = nil
 }
 
 func (tx *lmdbTx) get(dbi lmdb.DBI, key []byte) ([]byte, error) {
@@ -726,7 +736,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != b.dupFrom {
-		_, _, err := c.setExact(key)
+		_, _, err := c.set(key)
 		if err != nil {
 			if lmdb.IsNotFound(err) {
 				return c.put(key, value)
@@ -763,9 +773,21 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	return c.put(key, newValue)
 }
 
-func (c *LmdbCursor) setExact(key []byte) ([]byte, []byte, error) {
+func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
+	_, v, err := c.set(key)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return v, nil
+}
+
+func (c *LmdbCursor) set(key []byte) ([]byte, []byte, error) {
 	return c.cursor.Get(key, nil, lmdb.Set)
 }
+
 func (c *LmdbCursor) setRange(key []byte) ([]byte, []byte, error) {
 	return c.cursor.Get(key, nil, lmdb.SetRange)
 }
@@ -793,6 +815,10 @@ func (c *LmdbCursor) putCurrent(key []byte, value []byte) error {
 	return c.cursor.Put(key, value, lmdb.Current)
 }
 
+func (c *LmdbCursor) append(key []byte, value []byte) error {
+	return c.cursor.Put(key, value, lmdb.AppendDup)
+}
+
 // Append - speedy feature of lmdb which is not part of KV interface.
 // Cast your cursor to *LmdbCursor to use this method.
 // Danger: if provided data will not sorted (or bucket have old records which mess with new in sorting manner) - db will corrupt.
@@ -816,11 +842,11 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 			newValue := make([]byte, 0, b.dupFrom-b.dupTo+len(value))
 			newValue = append(append(newValue, key[b.dupTo:]...), value...)
 			key = key[:b.dupTo]
-			return c.cursor.Put(key, newValue, lmdb.AppendDup)
+			return c.append(key, newValue)
 		}
-		return c.cursor.Put(key, value, lmdb.Append)
+		return c.append(key, value)
 	}
-	return c.cursor.Put(key, value, lmdb.Append)
+	return c.append(key, value)
 }
 
 func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
