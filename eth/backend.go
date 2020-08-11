@@ -154,9 +154,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			return nil, err
 		}
 	}
-	if ctx.Config.PrivateApiAddr != "" {
-		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
-	}
 
 	err = migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir)
 	if err != nil {
@@ -246,6 +243,10 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
+
+	if ctx.Config.PrivateApiAddr != "" {
+		remotedbserver.StartGrpc(chainDb.KV(), eth.txPool, ctx.Config.PrivateApiAddr)
+	}
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {

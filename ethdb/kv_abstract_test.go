@@ -94,10 +94,11 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 
 	conn := bufconn.Listen(1024 * 1024)
 
+	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],
-		ethdb.NewRemote2().InMem(conn).MustOpen(),
+		rdb,
 	}
 
 	grpcServer := grpc.NewServer()
