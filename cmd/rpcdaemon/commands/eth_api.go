@@ -16,10 +16,11 @@ import (
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
-	Coinbase(context.Context) (common.Address, error)
+	Coinbase(ctx context.Context) (common.Address, error)
+	NetVersion(ctx context.Context) uint64
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
-	GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]ethapi.Account) (hexutil.Bytes, error)

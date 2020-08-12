@@ -13,6 +13,7 @@ type EthBackend struct {
 type Backend interface {
 	TxPool() *TxPool
 	Etherbase() (common.Address, error)
+	NetVersion() uint64
 }
 
 func NewEthBackend(eth Backend) *EthBackend {

@@ -10,6 +10,7 @@ option java_outer_classname = "ETHBACKEND";
 service ETHBACKEND {
   rpc Add(TxRequest) returns (AddReply);
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
+  rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
 }
 
 message TxRequest {
@@ -25,4 +26,11 @@ message EtherbaseRequest {
 
 message EtherbaseReply {
     bytes hash = 1;
+}
+
+message NetVersionRequest {
+}
+
+message NetVersionReply {
+    uint64 id = 1;
 }
