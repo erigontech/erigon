@@ -115,27 +115,27 @@ func keyTape(t *trie.Trie, number int) error {
 }
 
 var bucketLabels = map[string]string{
-	string(dbutils.PreimagePrefix):              "Preimages",
-	string(dbutils.BlockReceiptsPrefix):         "Receipts",
-	string(dbutils.AccountsHistoryBucket):       "History of Accounts",
-	string(dbutils.HeaderPrefix):                "Headers",
-	string(dbutils.ConfigPrefix):                "Config",
-	string(dbutils.BlockBodyPrefix):             "Block Bodies",
-	string(dbutils.HeaderNumberPrefix):          "Header Numbers",
-	string(dbutils.AccountChangeSetBucket):      "Account Change Sets",
-	string(dbutils.StorageChangeSetBucket):      "Storage Change Sets",
-	string(dbutils.CurrentStateBucket):          "Current State",
-	string(dbutils.TxLookupPrefix):              "Transaction Index",
-	string(dbutils.StorageHistoryBucket):        "History of Storage",
-	string(dbutils.CodeBucket):                  "Code of Contracts",
-	string(dbutils.Senders):                     "Senders",
-	string(dbutils.SyncStageProgress):           "Sync Progress",
-	string(dbutils.PlainStateBucket):            "PlainState",
-	string(dbutils.IntermediateTrieHashBucket):  "Intermediate Hashes",
-	string(dbutils.SyncStageUnwind):             "Unwind",
-	string(dbutils.PlainAccountChangeSetBucket): "Account Changes",
-	string(dbutils.PlainStorageChangeSetBucket): "Storage Changes",
-	string(dbutils.IncarnationMapBucket):        "Incarnations",
+	dbutils.PreimagePrefix:              "Preimages",
+	dbutils.BlockReceiptsPrefix:         "Receipts",
+	dbutils.AccountsHistoryBucket:       "History of Accounts",
+	dbutils.HeaderPrefix:                "Headers",
+	dbutils.ConfigPrefix:                "Config",
+	dbutils.BlockBodyPrefix:             "Block Bodies",
+	dbutils.HeaderNumberPrefix:          "Header Numbers",
+	dbutils.AccountChangeSetBucket:      "Account Change Sets",
+	dbutils.StorageChangeSetBucket:      "Storage Change Sets",
+	dbutils.CurrentStateBucket:          "Current State",
+	dbutils.TxLookupPrefix:              "Transaction Index",
+	dbutils.StorageHistoryBucket:        "History of Storage",
+	dbutils.CodeBucket:                  "Code of Contracts",
+	dbutils.Senders:                     "Senders",
+	dbutils.SyncStageProgress:           "Sync Progress",
+	dbutils.PlainStateBucket:            "PlainState",
+	dbutils.IntermediateTrieHashBucket:  "Intermediate Hashes",
+	dbutils.SyncStageUnwind:             "Unwind",
+	dbutils.PlainAccountChangeSetBucket: "Account Changes",
+	dbutils.PlainStorageChangeSetBucket: "Storage Changes",
+	dbutils.IncarnationMapBucket:        "Incarnations",
 }
 
 /*dbutils.PlainContractCodeBucket,
@@ -323,7 +323,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					key := keyKeyBytes.ToHex()
 					var f1 *os.File
 					var ok bool
-					if f1, ok = perBucketFiles[string(bucketName)]; !ok {
+					if f1, ok = perBucketFiles[bucketName]; !ok {
 						f1, err = os.Create(fmt.Sprintf("changes_%d_%s_%d.dot", number, bucketName, len(perBucketFiles)))
 						if err != nil {
 							return false, err
@@ -331,8 +331,8 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 						visual.StartGraph(f1, true)
 						var clusterLabel string
 						var ok bool
-						if clusterLabel, ok = bucketLabels[string(bucketName)]; !ok {
-							clusterLabel = string(bucketName)
+						if clusterLabel, ok = bucketLabels[bucketName]; !ok {
+							clusterLabel = bucketName
 						}
 						visual.StartCluster(f1, 0, clusterLabel)
 						perBucketFiles[bucketName] = f1
@@ -361,7 +361,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					} else {
 						noValues[i] = struct{}{}
 					}
-					lst := m[string(bucketName)]
+					lst := m[bucketName]
 					lst = append(lst, i)
 					m[bucketName] = lst
 					i++

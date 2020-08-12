@@ -1,0 +1,103 @@
+digraph trie {
+		rankdir=LR;
+		node [shape=none margin=0 width=0 height=0]
+		edge [dir = none headport=w tailport=e]
+	subgraph cluster_0 {
+			label = "Header Numbers";
+			color = black;
+
+	k_3 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+	<tr>		<td bgcolor="#90713A"><font color="#000000">b</font></td>
+				<td bgcolor="#02ABEA"><font color="#000000">7</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#0000D3"><font color="#FFFFFF">6</font></td>
+				<td bgcolor="#FBF305"><font color="#000000">1</font></td>
+				<td bgcolor="#02ABEA"><font color="#000000">7</font></td>
+				<td bgcolor="#808080"><font color="#000000">d</font></td>
+				<td bgcolor="#006412"><font color="#FFFFFF">9</font></td>
+				<td bgcolor="#FF6403"><font color="#000000">2</font></td>
+				<td bgcolor="#0000D3"><font color="#FFFFFF">6</font></td>
+				<td bgcolor="#F20884"><font color="#000000">4</font></td>
+				<td bgcolor="#F20884"><font color="#000000">4</font></td>
+				<td bgcolor="#000000"><font color="#FFFFFF">f</font></td>
+				<td bgcolor="#000000"><font color="#FFFFFF">f</font></td>
+				<td bgcolor="#90713A"><font color="#000000">b</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#FF6403"><font color="#000000">2</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#006412"><font color="#FFFFFF">9</font></td>
+				<td bgcolor="#562C05"><font color="#FFFFFF">a</font></td>
+				<td bgcolor="#FF6403"><font color="#000000">2</font></td>
+				<td bgcolor="#562C05"><font color="#FFFFFF">a</font></td>
+				<td bgcolor="#FBF305"><font color="#000000">1</font></td>
+				<td bgcolor="#DD0907"><font color="#000000">3</font></td>
+				<td bgcolor="#C0C0C0"><font color="#000000">c</font></td>
+				<td bgcolor="#808080"><font color="#000000">d</font></td>
+				<td bgcolor="#006412"><font color="#FFFFFF">9</font></td>
+				<td bgcolor="#0000D3"><font color="#FFFFFF">6</font></td>
+				<td bgcolor="#F20884"><font color="#000000">4</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#02ABEA"><font color="#000000">7</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#90713A"><font color="#000000">b</font></td>
+				<td bgcolor="#562C05"><font color="#FFFFFF">a</font></td>
+				<td bgcolor="#4700A5"><font color="#FFFFFF">5</font></td>
+				<td bgcolor="#808080"><font color="#000000">d</font></td>
+				<td bgcolor="#FBF305"><font color="#000000">1</font></td>
+				<td bgcolor="#DD0907"><font color="#000000">3</font></td>
+				<td bgcolor="#90713A"><font color="#000000">b</font></td>
+				<td bgcolor="#006412"><font color="#FFFFFF">9</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#1FB714"><font color="#000000">8</font></td>
+				<td bgcolor="#562C05"><font color="#FFFFFF">a</font></td>
+				<td bgcolor="#006412"><font color="#FFFFFF">9</font></td>
+				<td bgcolor="#90713A"><font color="#000000">b</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#0000D3"><font color="#FFFFFF">6</font></td>
+				<td bgcolor="#006412"><font color="#FFFFFF">9</font></td>
+				<td bgcolor="#0000D3"><font color="#FFFFFF">6</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#1FB714"><font color="#000000">8</font></td>
+				<td bgcolor="#02ABEA"><font color="#000000">7</font></td>
+				<td bgcolor="#4700A5"><font color="#FFFFFF">5</font></td>
+				<td bgcolor="#000000"><font color="#FFFFFF">f</font></td>
+				<td bgcolor="#404040"><font color="#FFFFFF">e</font></td>
+				<td bgcolor="#1FB714"><font color="#000000">8</font></td>
+				<td bgcolor="#90713A"><font color="#000000">b</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#4700A5"><font color="#FFFFFF">5</font></td>
+				<td bgcolor="#90713A"><font color="#000000">b</font></td>
+		
+	</tr></table>
+	>];
+	
+	v_3 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+	<tr>		<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FFFFFF"><font color="#000000">0</font></td>
+				<td bgcolor="#FF6403"><font color="#000000">2</font></td>
+		
+	</tr></table>
+	>];
+	k_3 -> v_3;
+
+}
+}
