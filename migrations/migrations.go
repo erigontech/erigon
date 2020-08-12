@@ -142,7 +142,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		}
 
 		if !commitFuncCalled {
-			return ErrMigrationCommitNotCalled
+			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
 		}
 		log.Info("Applied migration", "name", v.Name)
 	}
