@@ -107,7 +107,7 @@ func bytesToStorageChangeSetWalkerPlain(b []byte) walker {
 	return changeset.StorageChangeSetPlainBytes(b)
 }
 
-func walkAndCollect(collectorFunc func([]byte, []byte) error, db Getter, bucket []byte, suffixDst []byte, timestampSrc uint64, bytesToWalker func([]byte) walker) error {
+func walkAndCollect(collectorFunc func([]byte, []byte) error, db Getter, bucket string, suffixDst []byte, timestampSrc uint64, bytesToWalker func([]byte) walker) error {
 	return db.Walk(bucket, suffixDst, 0, func(k, v []byte) (bool, error) {
 		timestamp, _ := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {

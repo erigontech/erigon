@@ -1719,7 +1719,7 @@ func oldStorage() {
 	itemsByAddress := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
 		if b == nil {
 			return nil
 		}
@@ -1739,7 +1739,7 @@ func oldStorage() {
 	})
 	check(err)
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsHistoryBucket)
+		b := tx.Bucket([]byte(dbutils.AccountsHistoryBucket))
 		if b == nil {
 			return nil
 		}

@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/spf13/cobra"
 )
 
 // splitAndTrim splits input separated by a comma
@@ -132,12 +133,12 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func GetAPI(db ethdb.KV, enabledApis []string) []rpc.API {
-	var rpcAPI = []rpc.API{}
+func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
+	var rpcAPI []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(db, dbReader, chainContext)
+	apiImpl := NewAPI(db, dbReader, chainContext, eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
 
 	for _, enabledAPI := range enabledApis {
@@ -170,9 +171,10 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	enabledApis := splitAndTrim(cfg.API)
 
 	var db ethdb.KV
+	var txPool ethdb.Backend
 	var err error
 	if cfg.privateApiAddr != "" {
-		db, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		db, txPool, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return
@@ -192,7 +194,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 		return
 	}
 
-	var rpcAPI = GetAPI(db, enabledApis)
+	var rpcAPI = GetAPI(db, txPool, enabledApis)
 
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.httpListenAddress, cfg.httpPort)
 

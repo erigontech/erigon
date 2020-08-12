@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func RegenerateIndex(chaindata string, csBucket []byte) error {
+func RegenerateIndex(chaindata string, csBucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
@@ -31,7 +31,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 
 	ig := core.NewIndexGenerator(db, quitCh)
-	cs, ok := changeset.Mapper[string(csBucket)]
+	cs, ok := changeset.Mapper[csBucket]
 	if !ok {
 		return errors.New("unknown changeset")
 	}

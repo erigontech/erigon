@@ -109,14 +109,14 @@ func Len(b []byte) int {
 }
 
 var Mapper = map[string]struct {
-	IndexBucket   []byte
+	IndexBucket   string
 	WalkerAdapter func(v []byte) Walker
 	KeySize       int
 	Template      string
 	New           func() *ChangeSet
 	Encode        func(*ChangeSet) ([]byte, error)
 }{
-	string(dbutils.AccountChangeSetBucket): {
+	dbutils.AccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return AccountChangeSetBytes(v)
@@ -126,7 +126,7 @@ var Mapper = map[string]struct {
 		New:      NewAccountChangeSet,
 		Encode:   EncodeAccounts,
 	},
-	string(dbutils.StorageChangeSetBucket): {
+	dbutils.StorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return StorageChangeSetBytes(v)
@@ -136,7 +136,7 @@ var Mapper = map[string]struct {
 		New:      NewStorageChangeSet,
 		Encode:   EncodeStorage,
 	},
-	string(dbutils.PlainAccountChangeSetBucket): {
+	dbutils.PlainAccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return AccountChangeSetPlainBytes(v)
@@ -146,7 +146,7 @@ var Mapper = map[string]struct {
 		New:      NewAccountChangeSetPlain,
 		Encode:   EncodeAccountsPlain,
 	},
-	string(dbutils.PlainStorageChangeSetBucket): {
+	dbutils.PlainStorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return StorageChangeSetPlainBytes(v)

@@ -19,6 +19,6 @@ var indexStatsCmd = &cobra.Command{
 		if statsfile == "stateless.csv" {
 			statsfile = ""
 		}
-		return stats.IndexStats(chaindata, []byte(indexBucket), statsfile)
+		return stats.IndexStats(chaindata, indexBucket, statsfile)
 	},
 }

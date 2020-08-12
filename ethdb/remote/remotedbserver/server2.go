@@ -9,12 +9,14 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"google.golang.org/grpc"
 )
 
 const MaxTxTTL = time.Minute
@@ -25,7 +27,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, addr string) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -35,6 +37,7 @@ func StartGrpc(kv ethdb.KV, addr string) {
 
 	kvSrv := NewKvServer(kv)
 	dbSrv := NewDBServer(kv)
+	ethBackendSrv := NewEthBackendServer(eth)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -56,6 +59,7 @@ func StartGrpc(kv ethdb.KV, addr string) {
 	)
 	remote.RegisterKVServer(grpcServer, kvSrv)
 	remote.RegisterDBServer(grpcServer, dbSrv)
+	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -78,7 +82,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		return recvErr
 	}
 
-	tx, err := s.kv.Begin(context.Background(), false)
+	tx, err := s.kv.Begin(context.Background(), nil, false)
 	if err != nil {
 		return err
 	}
@@ -122,7 +126,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		i++
 		if i%128 == 0 && time.Since(t) > MaxTxTTL {
 			tx.Rollback()
-			tx, err = s.kv.Begin(context.Background(), false)
+			tx, err = s.kv.Begin(context.Background(), nil, false)
 			if err != nil {
 				return err
 			}

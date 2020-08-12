@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -17,10 +18,12 @@ import (
 // generate the messages
 //go:generate protoc --go_out=. "./remote/kv.proto"
 //go:generate protoc --go_out=. "./remote/db.proto"
+//go:generate protoc --go_out=. "./remote/ethbackend.proto"
 
 // generate the services
 //go:generate protoc --go-grpc_out=. "./remote/kv.proto"
 //go:generate protoc --go-grpc_out=. "./remote/db.proto"
+//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto"
 
 type remote2Opts struct {
 	DialAddress string
@@ -43,7 +46,7 @@ type remote2Tx struct {
 
 type remote2Bucket struct {
 	tx   *remote2Tx
-	name []byte
+	name string
 }
 
 type remote2Cursor struct {
@@ -54,6 +57,13 @@ type remote2Cursor struct {
 	bucket             *remote2Bucket
 	prefix             []byte
 	stream             remote.KV_SeekClient
+}
+
+type Remote2Backend struct {
+	opts             remote2Opts
+	remoteEthBackend remote.ETHBACKENDClient
+	conn             *grpc.ClientConn
+	log              log.Logger
 }
 
 type remote2NoValuesCursor struct {
@@ -74,7 +84,7 @@ func (opts remote2Opts) InMem(listener *bufconn.Listener) remote2Opts {
 	return opts
 }
 
-func (opts remote2Opts) Open() (KV, error) {
+func (opts remote2Opts) Open() (KV, Backend, error) {
 	var dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
 		grpc.WithInsecure(),
@@ -91,24 +101,33 @@ func (opts remote2Opts) Open() (KV, error) {
 
 	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return &Remote2KV{
+	db := &Remote2KV{
 		opts:     opts,
 		conn:     conn,
 		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
-	}, nil
+	}
+
+	eth := &Remote2Backend{
+		opts:             opts,
+		remoteEthBackend: remote.NewETHBACKENDClient(conn),
+		conn:             conn,
+		log:              log.New("remote_db", opts.DialAddress),
+	}
+
+	return db, eth, nil
 }
 
-func (opts remote2Opts) MustOpen() KV {
-	db, err := opts.Open()
+func (opts remote2Opts) MustOpen() (KV, Backend) {
+	db, txPool, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
-	return db
+	return db, txPool
 }
 
 func NewRemote2() remote2Opts {
@@ -140,7 +159,7 @@ func (db *Remote2KV) IdealBatchSize() int {
 	panic("not supported")
 }
 
-func (db *Remote2KV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *Remote2KV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
 
@@ -168,7 +187,7 @@ func (tx *remote2Tx) Rollback() {
 	}
 }
 
-func (tx *remote2Tx) Bucket(name []byte) Bucket {
+func (tx *remote2Tx) Bucket(name string) Bucket {
 	return &remote2Bucket{tx: tx, name: name}
 }
 
@@ -216,7 +235,6 @@ func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 
 	k, v, err := c.Seek(key)
 	if err != nil {
-		fmt.Printf("errr3: %s\n", err)
 		return nil, err
 	}
 	if !bytes.Equal(key, k) {
@@ -255,7 +273,7 @@ func (c *remote2Cursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
-// Seek - doesn't start streaming (because much of code does only several .Seek cals without reading sequenceof data)
+// Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
@@ -267,7 +285,6 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	var err error
 	c.stream, err = c.bucket.tx.db.remoteKV.Seek(c.ctx)
 	if err != nil {
-		fmt.Printf("errr2: %s\n", err)
 		return []byte{}, nil, err
 	}
 	err = c.stream.Send(&remote.SeekRequest{BucketName: c.bucket.name, SeekKey: seek, Prefix: c.prefix, StartSreaming: false})
@@ -281,10 +298,6 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	return pair.Key, pair.Value, nil
-}
-
-func (c *remote2Cursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	return c.Seek(seek)
 }
 
 // Next - returns next data element from server, request streaming (if configured by user)
@@ -307,6 +320,10 @@ func (c *remote2Cursor) Next() ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 	return pair.Key, pair.Value, nil
+}
+
+func (c *remote2Cursor) Last() ([]byte, []byte, error) {
+	panic("not implemented yet")
 }
 
 func (c *remote2Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
@@ -361,4 +378,31 @@ func (c *remote2NoValuesCursor) Next() ([]byte, uint32, error) {
 	}
 
 	return k, uint32(len(v)), err
+}
+
+func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
+	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
+	if err != nil {
+		return common.Hash{}.Bytes(), err
+	}
+	return res.Hash, nil
+}
+
+func (back *Remote2Backend) Etherbase() (common.Address, error) {
+	res, err := back.remoteEthBackend.Etherbase(context.Background(), &remote.EtherbaseRequest{})
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	return common.BytesToAddress(res.Hash), nil
+}
+
+func (back *Remote2Backend) NetVersion() uint64 {
+	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
+	if err != nil {
+		log.Error("NetVersion call got an error", "err", err)
+		return 0
+	}
+
+	return res.Id
 }

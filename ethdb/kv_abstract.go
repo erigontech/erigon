@@ -3,6 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 var (
@@ -15,12 +17,12 @@ type KV interface {
 	Update(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
-	Begin(ctx context.Context, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
 	IdealBatchSize() int
 }
 
 type Tx interface {
-	Bucket(name []byte) Bucket
+	Bucket(name string) Bucket
 
 	Commit(ctx context.Context) error
 	Rollback()
@@ -51,8 +53,8 @@ type Cursor interface {
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
-	SeekTo(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
+	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
@@ -69,6 +71,12 @@ type NoValuesCursor interface {
 
 type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
+}
+
+type Backend interface {
+	AddLocal([]byte) ([]byte, error)
+	Etherbase() (common.Address, error)
+	NetVersion() uint64
 }
 
 type DbProvider uint8

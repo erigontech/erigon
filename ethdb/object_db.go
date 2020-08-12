@@ -82,7 +82,7 @@ func Open(path string) (*ObjectDatabase, error) {
 }
 
 // Put inserts or updates a single entry.
-func (db *ObjectDatabase) Put(bucket, key []byte, value []byte) error {
+func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 	if metrics.Enabled {
 		defer dbPutTimer.UpdateSince(time.Now())
 	}
@@ -100,7 +100,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			bucketEnd := bucketStart
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
-			b := tx.Bucket(tuples[bucketStart])
+			b := tx.Bucket(string(tuples[bucketStart]))
 			c := b.Cursor()
 
 			// move cursor to a first element in batch
@@ -147,7 +147,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	return 0, nil
 }
 
-func (db *ObjectDatabase) Has(bucket, key []byte) (bool, error) {
+func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
 		v, _ := tx.Bucket(bucket).Get(key)
@@ -166,7 +166,7 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 }
 
 // Get returns the value for a given key if it's present.
-func (db *ObjectDatabase) Get(bucket, key []byte) (dat []byte, err error) {
+func (db *ObjectDatabase) Get(bucket string, key []byte) (dat []byte, err error) {
 	if metrics.Enabled {
 		defer dbGetTimer.UpdateSince(time.Now())
 	}
@@ -188,9 +188,26 @@ func (db *ObjectDatabase) Get(bucket, key []byte) (dat []byte, err error) {
 	return dat, nil
 }
 
+func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
+	var key, value []byte
+	if err := db.kv.View(context.Background(), func(tx Tx) error {
+		k, v, err := tx.Bucket(bucket).Cursor().Last()
+		if err != nil {
+			return err
+		}
+		if k != nil {
+			key, value = common.CopyBytes(k), common.CopyBytes(v)
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	return key, value, nil
+}
+
 // GetIndexChunk returns proper index chunk or return error if index is not created.
 // key must contain inverted block number in the end
-func (db *ObjectDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
 		c := tx.Bucket(bucket).Cursor()
@@ -230,7 +247,7 @@ func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([
 	return dat, nil
 }
 
-func (db *ObjectDatabase) Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
+func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.kv.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
@@ -260,7 +277,7 @@ func (db *ObjectDatabase) Walk(bucket, startkey []byte, fixedbits int, walker fu
 	return err
 }
 
-func (db *ObjectDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
+func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
@@ -287,7 +304,7 @@ func (db *ObjectDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 						}
 					}
 					if cmp < 0 {
-						k, v, err = c.SeekTo(startkey)
+						k, v, err = c.Seek(startkey)
 						if err != nil {
 							return err
 						}
@@ -320,7 +337,7 @@ func (db *ObjectDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 }
 
 // Delete deletes the key from the queue and database
-func (db *ObjectDatabase) Delete(bucket, key []byte) error {
+func (db *ObjectDatabase) Delete(bucket string, key []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Bucket(bucket).Delete(key)
@@ -328,7 +345,7 @@ func (db *ObjectDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-func (db *ObjectDatabase) BucketExists(name []byte) (bool, error) {
+func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 	exists := false
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
 		migrator, ok := tx.Bucket(name).(BucketMigrator)
@@ -343,7 +360,7 @@ func (db *ObjectDatabase) BucketExists(name []byte) (bool, error) {
 	return exists, nil
 }
 
-func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
+func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
@@ -363,7 +380,7 @@ func (db *ObjectDatabase) ClearBuckets(buckets ...[]byte) error {
 	return nil
 }
 
-func (db *ObjectDatabase) DropBuckets(buckets ...[]byte) error {
+func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {

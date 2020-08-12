@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	witnessesBucket = []byte("witnesses")
+	witnessesBucket = "witnesses"
 )
 
 type WitnessDBWriter struct {

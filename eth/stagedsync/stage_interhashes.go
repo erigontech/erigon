@@ -32,6 +32,17 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		return nil
 	}
 
+	hashStateProgress, _, err := stages.GetStageProgress(db, stages.HashState)
+	if err != nil {
+		return err
+	}
+	if s.BlockNumber > hashStateProgress {
+		// this case means - stages.HashState was interrupted and need firstly promote stages.HashState to stages.IntermediateHashes
+		// only then can run stages.IntermediateHashes
+		s.Done()
+		return nil
+	}
+
 	hash := rawdb.ReadCanonicalHash(db, to)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
@@ -267,7 +278,7 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 }
 
 func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *Receiver) error {
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -288,7 +299,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
-		nil,
+		"",
 		p.TempDir,
 		getExtractFunc(changeSetBucket),
 		// here we avoid getting the state from changesets,
@@ -298,7 +309,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	); err != nil {
 		return err
@@ -308,7 +319,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 
 func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Receiver) error {
 	to := u.UnwindPoint
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -329,14 +340,14 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Re
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
-		nil,
+		"",
 		p.TempDir,
 		getUnwindExtractFunc(changeSetBucket),
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	); err != nil {
 		return err
@@ -410,6 +421,17 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
+
+	hashStateProgress, _, err := stages.GetStageProgress(db, stages.HashState)
+	if err != nil {
+		return err
+	}
+	if s.BlockNumber < hashStateProgress {
+		// this case means - stages.HashState was interrupted and need firstly promote stages.HashState to stages.IntermediateHashes
+		// only then can run stages.IntermediateHashes
+		s.Done()
+		return nil
+	}
 
 	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
 		return err

@@ -40,7 +40,7 @@ const (
 	AccountHistoryIndex                  // Generating history index for accounts
 	StorageHistoryIndex                  // Generating history index for storage
 	TxLookup                             // Generating transactions lookup index
-	TxPool                               // Starts TxPool
+	TxPool                               // Starts Backend
 	Finish                               // Nominal stage after all other stages
 )
 

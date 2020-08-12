@@ -24,6 +24,7 @@ env.reader_check()  # clear stale reads
 if cmd == "stats":
     data = {"name": [], "size": []}
     for bucket in dbutils.buckets:
+        print(bucket)
         b = env.open_db(bucket.encode(), create=False)
         with env.begin(write=False) as txn:
             stat = txn.stat(b)

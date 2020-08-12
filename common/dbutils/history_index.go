@@ -223,9 +223,6 @@ func CompositeKeyWithoutIncarnation(key []byte) []byte {
 	}
 	return key
 }
-func IsIndexBucket(b []byte) bool {
-	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
-}
 
 func CheckNewIndexChunk(b []byte, v uint64) bool {
 	if len(b) < 8 {

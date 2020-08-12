@@ -20,7 +20,7 @@ func generateData(prefix string) testData {
 	return testData(data)
 }
 
-func writeDataToDb(t *testing.T, db ethdb.Database, bucket []byte, data testData) {
+func writeDataToDb(t *testing.T, db ethdb.Database, bucket string, data testData) {
 	for k, v := range data {
 		err := db.Put(bucket, []byte(k), v)
 		if err != nil {
@@ -29,7 +29,7 @@ func writeDataToDb(t *testing.T, db ethdb.Database, bucket []byte, data testData
 	}
 }
 
-func checkDataInDb(t *testing.T, db ethdb.Database, bucket []byte, data testData) {
+func checkDataInDb(t *testing.T, db ethdb.Database, bucket string, data testData) {
 	for k, v := range data {
 		val, err := db.Get(bucket, []byte(k))
 		if err != nil {
@@ -101,7 +101,7 @@ func doTestcase(t *testing.T, testCase map[string]testData) {
 	defer destDb.Close()
 
 	for bucket, data := range testCase {
-		writeDataToDb(t, sourceDb, []byte(bucket), data)
+		writeDataToDb(t, sourceDb, bucket, data)
 	}
 
 	err := copyDatabase(sourceDb, destDb)
@@ -111,6 +111,6 @@ func doTestcase(t *testing.T, testCase map[string]testData) {
 	}
 
 	for bucket, data := range testCase {
-		checkDataInDb(t, destDb, []byte(bucket), data)
+		checkDataInDb(t, destDb, bucket, data)
 	}
 }

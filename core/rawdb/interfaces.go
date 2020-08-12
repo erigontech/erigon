@@ -18,16 +18,16 @@ package rawdb
 
 // DatabaseReader wraps the Has and Get method of a backing data store.
 type DatabaseReader interface {
-	Has(bucket, key []byte) (bool, error)
-	Get(bucket, key []byte) ([]byte, error)
+	Has(bucket string, key []byte) (bool, error)
+	Get(bucket string, key []byte) ([]byte, error)
 }
 
 // DatabaseWriter wraps the Put method of a backing data store.
 type DatabaseWriter interface {
-	Put(bucket, key []byte, value []byte) error
+	Put(bucket string, key []byte, value []byte) error
 }
 
 // DatabaseDeleter wraps the Delete method of a backing data store.
 type DatabaseDeleter interface {
-	Delete(bucket, key []byte) error
+	Delete(bucket string, key []byte) error
 }
