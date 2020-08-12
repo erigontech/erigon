@@ -1594,17 +1594,7 @@ You can think about it as Sub-Database which doesn't store any values.
 [acc2_hash]             | [acc2_value]
                         ...
 
-
 On 5M block CurrentState bucket using 5.9Gb. This layout using 2.3Gb. See dupSortState()
-
-Another feature of this layout is:
-- DupSort stores values in B+ tree
-- To delete key with multiple values - LMDB does add pages (of sub-tree) to the free list
-- Same logic used when `drop bucket`
-- LMDB doesn't deletes much. Deletion of 17GB (1 key with 1 billions values 8 bytes each) took 2sec on SSD. See deleteLargeDupSortKey()
-- It means performance of deletion contracts with huge storage is predictable
-- Means we can drop incarnations concept
-
 
 As further evolution of this idea:
 - Can add CodeHash as 2-nd value of [acc_hash] key (just use 1st byte to store type of value)

@@ -3,6 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 var (
@@ -52,6 +54,7 @@ type Cursor interface {
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
+	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
@@ -72,6 +75,8 @@ type HasStats interface {
 
 type Backend interface {
 	AddLocal([]byte) ([]byte, error)
+	Etherbase() (common.Address, error)
+	NetVersion() uint64
 }
 
 type DbProvider uint8

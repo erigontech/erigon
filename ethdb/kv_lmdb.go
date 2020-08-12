@@ -262,6 +262,14 @@ type LmdbCursor struct {
 	cursor *lmdb.Cursor
 }
 
+func (db *LmdbKV) Env() *lmdb.Env {
+	return db.env
+}
+
+func (db *LmdbKV) AllDBI() map[string]lmdb.DBI {
+	return db.buckets
+}
+
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
@@ -449,7 +457,7 @@ func (b lmdbBucket) getDupSort(key []byte) ([]byte, error) {
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
-		_, v, err := c.dupBothRange(key[:b.dupTo], key[b.dupTo:])
+		_, v, err := c.getBothRange(key[:b.dupTo], key[b.dupTo:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
 				return nil, nil
@@ -522,6 +530,43 @@ func (c *LmdbCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
+func (c *LmdbCursor) Last() ([]byte, []byte, error) {
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, nil, err
+		}
+	}
+
+	if c.prefix != nil {
+		return []byte{}, nil, fmt.Errorf(".Last doesn't support c.prefix yet")
+	}
+
+	k, v, err := c.last()
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		err = fmt.Errorf("failed LmdbKV cursor.Last(): %w, bucket: %s, isDupsort: %t", err, c.bucket.name, c.bucket.isDupsort)
+		return []byte{}, nil, err
+	}
+
+	if c.bucket.isDupsort {
+		if k == nil {
+			return k, v, nil
+		}
+		k, v, err = c.lastDup(k)
+		if err != nil {
+			if lmdb.IsNotFound(err) {
+				return nil, nil, nil
+			}
+			err = fmt.Errorf("failed LmdbKV cursor.Last(): %w, bucket: %s, isDupsort: %t", err, c.bucket.name, c.bucket.isDupsort)
+			return []byte{}, nil, err
+		}
+	}
+
+	return k, v, nil
+}
+
 func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
@@ -584,7 +629,7 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	}
 
 	if seek2 != nil && bytes.Equal(seek1, k) {
-		k, v, err = c.dupBothRange(seek1, seek2)
+		k, v, err = c.getBothRange(seek1, seek2)
 		if err != nil && lmdb.IsNotFound(err) {
 			k, v, err = c.next()
 			if err != nil {
@@ -766,7 +811,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	newValue = append(append(newValue, key[b.dupTo:]...), value...)
 
 	key = key[:b.dupTo]
-	_, v, err := c.dupBothRange(key, newValue[:b.dupFrom-b.dupTo])
+	_, v, err := c.getBothRange(key, newValue[:b.dupFrom-b.dupTo])
 	if err != nil { // if key not found, or found another one - then just insert
 		if lmdb.IsNotFound(err) {
 			return c.put(key, newValue)
@@ -810,12 +855,20 @@ func (c *LmdbCursor) next() ([]byte, []byte, error) {
 	return c.cursor.Get(nil, nil, lmdb.Next)
 }
 
-func (c *LmdbCursor) dupBothRange(key []byte, value []byte) ([]byte, []byte, error) {
+func (c *LmdbCursor) getBothRange(key []byte, value []byte) ([]byte, []byte, error) {
 	k, v, err := c.cursor.Get(key, value, lmdb.GetBothRange)
 	if err != nil {
 		return []byte{}, nil, err
 	}
 	return k, v, nil
+}
+
+func (c *LmdbCursor) last() ([]byte, []byte, error) {
+	return c.cursor.Get(nil, nil, lmdb.Last)
+}
+
+func (c *LmdbCursor) lastDup(key []byte) ([]byte, []byte, error) {
+	return c.cursor.Get(key, nil, lmdb.LastDup)
 }
 
 func (c *LmdbCursor) delCurrent() error {

@@ -5,7 +5,7 @@ PlainStateBucket = "PLAIN-CST".encode()
 PlainContractCodeBucket = "PLAIN-contractCode".encode()
 PlainAccountChangeSetBucket = "PLAIN-ACS".encode()
 PlainStorageChangeSetBucket = "PLAIN-SCS".encode()
-CurrentStateBucket = "CST".encode()
+CurrentStateBucket = "CST2".encode()
 AccountsHistoryBucket = "hAT".encode()
 StorageHistoryBucket = "hST".encode()
 CodeBucket = "CODE".encode()
@@ -45,7 +45,7 @@ CliqueBucket = "clique-".encode()
 Senders = "txSenders".encode()
 
 # cat common/dbutils/bucket.go| grep '=' | grep byte | sed 's/\[\]byte(//' | sed 's/)//' | awk '{print $3}' | grep -v '//' | grep -v '='  | tr '\n' ','
-buckets = ["PLAIN-CST", "PLAIN-contractCode", "PLAIN-ACS", "PLAIN-SCS", "CST", "hAT", "hST", "CODE", "contractCode",
+buckets = ["PLAIN-CST", "PLAIN-contractCode", "PLAIN-ACS", "PLAIN-SCS", "CST2", "hAT", "hST", "CODE", "contractCode",
            "incarnationMap", "ACS", "SCS", "iTh", "DBINFO", "DatabaseVersion", "LastHeader", "LastBlock",
            "LastFast", "TrieSync", "h", "t", "n", "H", "b", "r", "l", "B", "secure-key-", "ethereum-config-", "iB",
            "iBshead", "LastPrunedBlock", "lastAppliedMigration", "smHistory",

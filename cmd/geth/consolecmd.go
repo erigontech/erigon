@@ -87,7 +87,7 @@ func localConsole(ctx *cli.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		return service.New(diskdb, ethService.TxPool()), nil
+		return service.New(diskdb, ethService), nil
 	})
 
 	if err != nil {

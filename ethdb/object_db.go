@@ -188,6 +188,23 @@ func (db *ObjectDatabase) Get(bucket string, key []byte) (dat []byte, err error)
 	return dat, nil
 }
 
+func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
+	var key, value []byte
+	if err := db.kv.View(context.Background(), func(tx Tx) error {
+		k, v, err := tx.Bucket(bucket).Cursor().Last()
+		if err != nil {
+			return err
+		}
+		if k != nil {
+			key, value = common.CopyBytes(k), common.CopyBytes(v)
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	return key, value, nil
+}
+
 // GetIndexChunk returns proper index chunk or return error if index is not created.
 // key must contain inverted block number in the end
 func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
