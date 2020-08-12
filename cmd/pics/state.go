@@ -299,7 +299,6 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 	if err = second.View(context.Background(), func(readTx ethdb.Tx) error {
 		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
 			for _, bucketName := range dbutils.Buckets {
-				bucketName := bucketName
 				b := readTx.Bucket(bucketName)
 				firstB := firstTx.Bucket(bucketName)
 				if err2 := b.Cursor().Walk(func(k, v []byte) (bool, error) {
@@ -324,7 +323,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					key := keyKeyBytes.ToHex()
 					var f1 *os.File
 					var ok bool
-					if f1, ok = perBucketFiles[bucketName]; !ok {
+					if f1, ok = perBucketFiles[string(bucketName)]; !ok {
 						f1, err = os.Create(fmt.Sprintf("changes_%d_%s_%d.dot", number, bucketName, len(perBucketFiles)))
 						if err != nil {
 							return false, err
@@ -332,8 +331,8 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 						visual.StartGraph(f1, true)
 						var clusterLabel string
 						var ok bool
-						if clusterLabel, ok = bucketLabels[bucketName]; !ok {
-							clusterLabel = bucketName
+						if clusterLabel, ok = bucketLabels[string(bucketName)]; !ok {
+							clusterLabel = string(bucketName)
 						}
 						visual.StartCluster(f1, 0, clusterLabel)
 						perBucketFiles[bucketName] = f1
@@ -362,7 +361,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					} else {
 						noValues[i] = struct{}{}
 					}
-					lst := m[bucketName]
+					lst := m[string(bucketName)]
 					lst = append(lst, i)
 					m[bucketName] = lst
 					i++
