@@ -27,7 +27,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, txpool *core.TxPool, addr string) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -37,7 +37,7 @@ func StartGrpc(kv ethdb.KV, txpool *core.TxPool, addr string) {
 
 	kvSrv := NewKvServer(kv)
 	dbSrv := NewDBServer(kv)
-	txPoolSrv := NewTxPoolServer(txpool)
+	ethBackendSrv := NewEthBackendServer(eth)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -59,7 +59,7 @@ func StartGrpc(kv ethdb.KV, txpool *core.TxPool, addr string) {
 	)
 	remote.RegisterKVServer(grpcServer, kvSrv)
 	remote.RegisterDBServer(grpcServer, dbSrv)
-	remote.RegisterTXPOOLServer(grpcServer, txPoolSrv)
+	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
