@@ -348,11 +348,11 @@ func (db *ObjectDatabase) Delete(bucket string, key []byte) error {
 func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 	exists := false
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		migrator, ok := tx.Bucket(name).(BucketMigrator)
+		migrator, ok := tx.(BucketMigrator)
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 		}
-		exists = migrator.Exists()
+		exists = migrator.ExistsBucket(name)
 		return nil
 	}); err != nil {
 		return false, err
@@ -364,11 +364,11 @@ func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			migrator, ok := tx.Bucket(name).(BucketMigrator)
+			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 			}
-			if err := migrator.Clear(); err != nil {
+			if err := migrator.ClearBucket(name); err != nil {
 				return err
 			}
 			return nil
@@ -385,11 +385,11 @@ func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 		name := buckets[i]
 		log.Info("Dropping bucket", "name", name)
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			migrator, ok := tx.Bucket(name).(BucketMigrator)
+			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 			}
-			if err := migrator.Drop(); err != nil {
+			if err := migrator.DropBucket(name); err != nil {
 				return err
 			}
 			return nil

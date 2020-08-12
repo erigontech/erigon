@@ -10,22 +10,18 @@ import (
 )
 
 func TestBucketCRUD(t *testing.T) {
+	require := require.New(t)
 	kv := NewLMDB().InMem().MustOpen()
 	defer kv.Close()
 
 	ctx := context.Background()
 	if err := kv.Update(ctx, func(tx Tx) error {
-		normalBucketMigrator, ok := tx.Bucket(dbutils.Buckets[15]).(BucketMigrator)
+		normalBucket := dbutils.Buckets[15]
+		deprecatedBucket := dbutils.DeprecatedBuckets[0]
+		migrator, ok := tx.(BucketMigrator)
 		if !ok {
 			return nil
 		}
-		deprecatedBucket := tx.Bucket(dbutils.DeprecatedBuckets[0])
-		deprecatedBucketMigrator, ok := deprecatedBucket.(BucketMigrator)
-		if !ok {
-			return nil
-		}
-
-		require := require.New(t)
 
 		// check thad buckets have unique DBI's
 		uniquness := map[lmdb.DBI]bool{}
@@ -39,24 +35,28 @@ func TestBucketCRUD(t *testing.T) {
 			uniquness[dbi] = true
 		}
 
-		require.True(normalBucketMigrator.Exists())
-		require.True(errors.Is(normalBucketMigrator.Drop(), ErrAttemptToDeleteNonDeprecatedBucket))
+		require.True(migrator.ExistsBucket(normalBucket))
+		require.True(errors.Is(migrator.DropBucket(normalBucket), ErrAttemptToDeleteNonDeprecatedBucket))
 
-		require.False(deprecatedBucketMigrator.Exists())
-		require.NoError(deprecatedBucketMigrator.Create())
-		require.True(deprecatedBucketMigrator.Exists())
+		require.False(migrator.ExistsBucket(deprecatedBucket))
+		require.NoError(migrator.CreateBucket(deprecatedBucket))
+		require.True(migrator.ExistsBucket(deprecatedBucket))
 
-		require.NoError(deprecatedBucketMigrator.Drop())
-		require.False(deprecatedBucketMigrator.Exists())
+		require.NoError(migrator.DropBucket(deprecatedBucket))
+		require.False(migrator.ExistsBucket(deprecatedBucket))
 
-		require.NoError(deprecatedBucketMigrator.Create())
-		require.True(deprecatedBucketMigrator.Exists())
+		require.NoError(migrator.CreateBucket(deprecatedBucket))
+		require.True(migrator.ExistsBucket(deprecatedBucket))
 
-		err := deprecatedBucket.Put([]byte{1}, []byte{1})
+		err := tx.Bucket(deprecatedBucket).Put([]byte{1}, []byte{1})
 		require.NoError(err)
-		v, err := deprecatedBucket.Get([]byte{1})
+		v, err := tx.Bucket(deprecatedBucket).Get([]byte{1})
 		require.NoError(err)
 		require.Equal([]byte{1}, v)
+
+		buckets, err := migrator.ExistingBuckets()
+		require.NoError(err)
+		require.True(len(buckets) > 10)
 
 		// check thad buckets have unique DBI's
 		uniquness = map[lmdb.DBI]bool{}
@@ -70,6 +70,6 @@ func TestBucketCRUD(t *testing.T) {
 		}
 		return nil
 	}); err != nil {
-		require.NoError(t, err)
+		require.NoError(err)
 	}
 }

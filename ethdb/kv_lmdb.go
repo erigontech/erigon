@@ -271,24 +271,19 @@ func (db *LmdbKV) AllDBI() map[string]lmdb.DBI {
 }
 
 // All buckets stored as keys of un-named bucket
-func (db *LmdbKV) ExistingBuckets() ([]string, error) {
+func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	var res []string
-	if err := db.View(context.Background(), func(tx Tx) error {
-		rawTx := tx.(*lmdbTx).tx
-		root, err := rawTx.OpenRoot(0)
-		if err != nil {
-			return err
-		}
-		c, err := rawTx.OpenCursor(root)
-		if err != nil {
-			return err
-		}
-		for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
-			res = append(res, string(k))
-		}
-		return nil
-	}); err != nil {
+	rawTx := tx.tx
+	root, err := rawTx.OpenRoot(0)
+	if err != nil {
 		return nil, err
+	}
+	c, err := rawTx.OpenCursor(root)
+	if err != nil {
+		return nil, err
+	}
+	for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
+		res = append(res, string(k))
 	}
 	return res, nil
 }
