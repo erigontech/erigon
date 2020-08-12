@@ -4,13 +4,14 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
 func TestHandleHeadersMsg(t *testing.T) {
-	hd := NewHeaderDownload("", 10, func(timestamp uint64, parent *types.Header) *big.Int {
+	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
-		return big.NewInt(0).Add(parent.Difficulty, big.NewInt(1000))
+		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	})
 	peer := PeerHandle(1)
 
@@ -172,9 +173,9 @@ func TestHandleHeadersMsg(t *testing.T) {
 }
 
 func TestHandleNewBlockMsg(t *testing.T) {
-	hd := NewHeaderDownload("", 10, func(timestamp uint64, parent *types.Header) *big.Int {
+	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
-		return big.NewInt(0).Add(parent.Difficulty, big.NewInt(1000))
+		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	})
 	peer := PeerHandle(1)
 	var h types.Header
@@ -206,15 +207,25 @@ func TestHandleNewBlockMsg(t *testing.T) {
 			t.Errorf("expected no chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle header msg: %v", err)
+		t.Errorf("handle newBlock msg: %v", err)
 	}
 }
 
 func TestPrepend(t *testing.T) {
-	hd := NewHeaderDownload("", 10, func(timestamp uint64, parent *types.Header) *big.Int {
+	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
-		return big.NewInt(0).Add(parent.Difficulty, big.NewInt(1000))
+		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	})
 	peer := PeerHandle(1)
-
+	// empty chain segment
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+	} else {
+		t.Errorf("preprend: %v", err)
+	}
 }

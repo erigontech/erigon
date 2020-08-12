@@ -93,7 +93,7 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 				return false, nil, nil
 			}
 			// Before attaching, we must check the parent-child relationship
-			if valid, penalty := hd.childTipValid(header, tip); !valid {
+			if valid, penalty := hd.childTipValid(header, header.ParentHash, tip); !valid {
 				return false, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
 			}
 			if attachmentTip == nil {
@@ -117,7 +117,9 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 	}
 	cumulativeDifficulty := new(uint256.Int).Add(&attachmentTip.cumulativeDifficulty, diff)
 	connectedHeaders[attachmentHeader.Hash()] = cumulativeDifficulty
-	hd.addHeaderAsTip(attachmentHeader, anchorParent, cumulativeDifficulty)
+	if err := hd.addHeaderAsTip(attachmentHeader, anchorParent, cumulativeDifficulty); err != nil {
+		return false, nil, err
+	}
 	for _, header := range chainSegment.headers[attachingFrom+1:] {
 		if cumDiff, connected := connectedHeaders[header.ParentHash]; connected {
 			diff, ok = uint256.FromBig(header.Difficulty)
@@ -126,7 +128,9 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 			}
 			newCumDiff := new(uint256.Int).Add(cumDiff, diff)
 			connectedHeaders[header.Hash()] = newCumDiff
-			hd.addHeaderAsTip(header, anchorParent, newCumDiff)
+			if err := hd.addHeaderAsTip(header, anchorParent, newCumDiff); err != nil {
+				return false, nil, err
+			}
 		}
 	}
 	return true, nil, nil
@@ -138,7 +142,7 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 	if parent.Number.Uint64()+1 != child.Number.Uint64() {
 		return false, WrongChildBlockHeightPenalty
 	}
-	childDifficulty := hd.calcDifficultyFunc(child.Time, parent.Time, parent.Difficulty, parent.Number, parent.UncleHash)
+	childDifficulty := hd.calcDifficultyFunc(child.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
 	if child.Difficulty.Cmp(childDifficulty) != 0 {
 		return false, WrongChildDifficultyPenalty
 	}
@@ -147,21 +151,31 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 
 // Checks whether child-tip relationship between two headers is correct
 // (excluding Proof Of Work validity)
-func (hd *HeaderDownload) childTipValid(child *types.Header, tip *Tip) (bool, Penalty) {
+func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash, tip *Tip) (bool, Penalty) {
 	if tip.blockHeight+1 != child.Number.Uint64() {
 		return false, WrongChildBlockHeightPenalty
 	}
-	childDifficulty := hd.calcDifficultyFunc(child.Time, tip.timestamp, tip.difficulty.ToBig(), big.NewInt(int64(tip.blockHeight)), tip.uncleHash)
+	childDifficulty := hd.calcDifficultyFunc(child.Time, tip.timestamp, tip.difficulty.ToBig(), big.NewInt(int64(tip.blockHeight)), tipHash, tip.uncleHash)
 	if child.Difficulty.Cmp(childDifficulty) != 0 {
 		return false, WrongChildDifficultyPenalty
 	}
 	return true, NoPenalty
 }
 
-func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) {
+func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) error {
+	diff, ok := uint256.FromBig(header.Difficulty)
+	if !ok {
+		return fmt.Errorf("could not convert header.Difficulty to uint256: %s", header.Difficulty)
+	}
 	tip := &Tip{
 		anchorParent:         anchorParent,
 		cumulativeDifficulty: *cumulativeDifficulty,
+		timestamp:            header.Time,
+		difficulty:           *diff,
+		blockHeight:          header.Number.Uint64(),
+		uncleHash:            header.UncleHash,
+		noPrepend:            false, // TODO: Check
 	}
 	hd.tipLimiter.ReplaceOrInsert(tip)
+	return nil
 }

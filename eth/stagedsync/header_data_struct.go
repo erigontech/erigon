@@ -62,7 +62,7 @@ type RequestQueueItem struct {
 
 type RequestQueue []RequestQueueItem
 
-type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int
+type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
 	buffer                 []*types.Header
