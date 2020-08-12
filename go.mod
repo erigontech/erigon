@@ -7,8 +7,15 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
 	github.com/JekaMas/notify v0.9.4
+	github.com/PuerkitoBio/goquery v1.5.1 // indirect
+	github.com/RoaringBitmap/roaring v0.5.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
+	github.com/anacrolix/dht/v2 v2.6.1 // indirect
+	github.com/anacrolix/go-libutp v1.0.3 // indirect
+	github.com/anacrolix/log v0.7.0
+	github.com/anacrolix/multiless v0.0.0-20200413040533-acfd16f65d5d // indirect
+	github.com/anacrolix/torrent v1.15.2
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
 	github.com/aws/aws-sdk-go v1.28.9
 	github.com/blend/go-sdk v2.0.0+incompatible // indirect
@@ -21,7 +28,8 @@ require (
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200219165308-d1232e640a87
-	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
+	github.com/edsrzf/mmap-go v1.0.0
+	github.com/elliotchance/orderedmap v1.3.0 // indirect
 	github.com/ethereum/evmc/v7 v7.3.0
 	github.com/fatih/color v1.7.0
 	github.com/fjl/memsize v0.0.0-20180418122429-ca190fb6ffbc
@@ -38,6 +46,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/holiman/uint256 v1.1.1
+	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/huin/goupnp v1.0.0
 	github.com/influxdata/influxdb v1.2.3-0.20180221223340-01288bdb0883
 	github.com/jackpal/go-nat-pmp v1.0.2-0.20160603034137-1fa385a6f458
@@ -49,13 +58,15 @@ require (
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12
+	github.com/mattn/go-sqlite3 v2.0.3+incompatible // indirect
+	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
 	github.com/olekukonko/tablewriter v0.0.2-0.20190409134802-7e037d187b0c
 	github.com/pborman/uuid v0.0.0-20170112150404-1b00554d8222
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v1.1.1-0.20190123174540-a2c9a5303de7
-	github.com/pkg/errors v0.8.1
+	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
@@ -66,18 +77,21 @@ require (
 	github.com/steakknife/bloomfilter v0.0.0-20180922174646-6819c0d2a570
 	github.com/steakknife/hamming v0.0.0-20180906055917-c99c65617cd3 // indirect
 	github.com/stretchr/testify v1.6.1
+	github.com/tinylib/msgp v1.1.2 // indirect
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.22.1
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
+	go.etcd.io/bbolt v1.3.5 // indirect
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 	golang.org/x/net v0.0.0-20200625001655-4c5254603344
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
-	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
+	golang.org/x/sys v0.0.0-20200803210538-64077c9b5642
 	golang.org/x/text v0.3.2
-	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
+	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	google.golang.org/grpc v1.30.0
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200806223615-7419b444ee17 // indirect
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce

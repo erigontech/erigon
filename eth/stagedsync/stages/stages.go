@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -27,10 +28,14 @@ import (
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
-type SyncStage byte
+type SyncStage int
 
 const (
-	Headers             SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BittorentHeaders SyncStage =iota - 4
+	BittorentBodies
+	BittorentState
+	BittorentReceipts
+	Headers             				 // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders                              // "From" recovered from signatures, bodies re-written
 	Execution                            // Executing each block w/o buildinf a trie
@@ -45,7 +50,7 @@ const (
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
+	v, err := db.Get(dbutils.SyncStageProgress, []byte{stage.ToByte()})
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
@@ -54,14 +59,14 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) 
 
 // SaveStageProgress saves the progress of the given stage in the database
 func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, marshalData(progress, stageData))
+	return db.Put(dbutils.SyncStageProgress, []byte{stage.ToByte()}, marshalData(progress, stageData))
 }
 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageUnwind, []byte{byte(stage)})
+	v, err := db.Get(dbutils.SyncStageUnwind, []byte{stage.ToByte()})
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
@@ -70,7 +75,7 @@ func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 
 // SaveStageUnwind saves the progress of the given stage in the database
 func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, marshalData(invalidation, stageData))
+	return db.Put(dbutils.SyncStageUnwind, []byte{stage.ToByte()}, marshalData(invalidation, stageData))
 }
 
 func marshalData(blockNumber uint64, stageData []byte) []byte {
@@ -91,4 +96,14 @@ func encodeBigEndian(n uint64) []byte {
 	var v [8]byte
 	binary.BigEndian.PutUint64(v[:], n)
 	return v[:]
+}
+
+func (s SyncStage) ToByte() byte  {
+	if s>255 {
+		log.Error("Too high stage", "stage", s)
+	}
+	return byte(s)+255
+}
+func FromByte(b byte) SyncStage  {
+	return SyncStage(int(b)-255)
 }

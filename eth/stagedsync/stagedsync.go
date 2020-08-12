@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"runtime"
 	"time"
 
@@ -30,8 +31,33 @@ func PrepareStagedSync(
 	changeSetHook ChangeSetHook,
 ) (*State, error) {
 	defer log.Info("Staged sync finished")
-
+	sndb:=debug.SnapshotDB()
 	stages := []*Stage{
+		{
+			ID:          stages.BittorentHeaders,
+			Description: "Download headers snapshot",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+
+				return SpawnHeadersSnapshotDownload(s,stateDB,datadir, quitCh )
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+			Disabled: sndb=="",
+			DisabledDescription: "Experimental stage",
+		},
+		{
+			ID:          stages.BittorentBodies,
+			Description: "Download bodies snapshot",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+			Disabled: sndb=="",
+			DisabledDescription: "Experimental stage",
+		},
 		{
 			ID:          stages.Headers,
 			Description: "Download headers",
@@ -157,7 +183,7 @@ func PrepareStagedSync(
 	state := NewState(stages)
 	state.unwindOrder = []*Stage{
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-		stages[0], stages[1], stages[2], stages[9], stages[3], stages[4], stages[5], stages[6], stages[7], stages[8],
+		stages[0], stages[1], stages[2], stages[9], stages[3], stages[4], stages[5], stages[6], stages[7], stages[8], stages[9], stages[10],
 	}
 	if err := state.LoadUnwindInfo(stateDB); err != nil {
 		return nil, err

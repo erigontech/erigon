@@ -92,3 +92,17 @@ func IsHashedStateDupsortEnabled() bool {
 	})
 	return dupsortHashed
 }
+
+
+var (
+	snapshotDB    string
+	getSnapshotDB sync.Once
+)
+
+func SnapshotDB() string {
+	getSnapshotDB.Do(func() {
+		snapshotDB, _ = os.LookupEnv("SN_DB")
+	})
+	return snapshotDB
+}
+

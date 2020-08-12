@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -75,6 +76,9 @@ func Open(path string) (*ObjectDatabase, error) {
 		kv, err = NewBolt().Path(path).Open()
 	default:
 		kv, err = NewLMDB().Path(path).Open()
+	}
+	if snDB:=debug.SnapshotDB(); snDB!="" {
+		kv = NewSnapshotKV().DB(kv).Path(snDB).Open()
 	}
 	if err != nil {
 		return nil, err
@@ -173,7 +177,8 @@ func (db *ObjectDatabase) Get(bucket, key []byte) (dat []byte, err error) {
 	}
 
 	err = db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(bucket).Get(key)
+		v, err := tx.Bucket(bucket).Get(key)
+		fmt.Println(err)
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
