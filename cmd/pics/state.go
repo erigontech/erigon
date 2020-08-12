@@ -575,11 +575,10 @@ func initialState1() error {
 	kv = db.KV()
 	snapshotDB := db.MemCopy()
 
-	_, genesisHash, _, err = core.SetupGenesisBlock(db, gspec, true, false)
+	_, _, _, err = core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return err
 	}
-	genesis = rawdb.ReadBlock(db, genesisHash, 0)
 	engine = ethash.NewFaker()
 
 	if err != nil {
