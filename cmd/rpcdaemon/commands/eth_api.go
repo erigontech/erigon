@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -31,18 +30,18 @@ type EthAPI interface {
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	db           ethdb.KV
-	txpool       ethdb.Backend
+	ethBackend   ethdb.Backend
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext, txpool ethdb.Backend) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext, eth ethdb.Backend) *APIImpl {
 	return &APIImpl{
 		db:           db,
 		dbReader:     dbReader,
 		chainContext: chainContext,
-		txpool:       txpool,
+		ethBackend:   eth,
 	}
 }
 
@@ -52,11 +51,6 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	return hexutil.Uint64(execution), nil
-}
-
-// Etherbase is the address that mining rewards will be send to
-func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
-	return common.Address{}, errors.New("not implemented")
 }
 
 type blockGetter struct {

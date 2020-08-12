@@ -133,12 +133,12 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func GetAPI(db ethdb.KV, txpool ethdb.Backend, enabledApis []string) []rpc.API {
+func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 	var rpcAPI []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(db, dbReader, chainContext, txpool)
+	apiImpl := NewAPI(db, dbReader, chainContext, eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
 
 	for _, enabledAPI := range enabledApis {

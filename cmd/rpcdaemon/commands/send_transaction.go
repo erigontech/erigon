@@ -8,6 +8,6 @@ import (
 )
 
 func (api *APIImpl) SendRawTransaction(_ context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
-	res, err := api.txpool.AddLocal(encodedTx)
+	res, err := api.ethBackend.AddLocal(encodedTx)
 	return common.BytesToHash(res), err
 }

@@ -18,12 +18,12 @@ import (
 // generate the messages
 //go:generate protoc --go_out=. "./remote/kv.proto"
 //go:generate protoc --go_out=. "./remote/db.proto"
-//go:generate protoc --go_out=. "./remote/txpool.proto"
+//go:generate protoc --go_out=. "./remote/ethbackend.proto"
 
 // generate the services
 //go:generate protoc --go-grpc_out=. "./remote/kv.proto"
 //go:generate protoc --go-grpc_out=. "./remote/db.proto"
-//go:generate protoc --go-grpc_out=. "./remote/txpool.proto"
+//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto"
 
 type remote2Opts struct {
 	DialAddress string
@@ -61,7 +61,7 @@ type remote2Cursor struct {
 
 type Remote2Backend struct {
 	opts         remote2Opts
-	remoteTxPool remote.TXPOOLClient
+	remoteTxPool remote.ETHBACKENDClient
 	conn         *grpc.ClientConn
 	log          log.Logger
 }
@@ -114,7 +114,7 @@ func (opts remote2Opts) Open() (KV, Backend, error) {
 
 	txPool := &Remote2Backend{
 		opts:         opts,
-		remoteTxPool: remote.NewTXPOOLClient(conn),
+		remoteTxPool: remote.NewETHBACKENDClient(conn),
 		conn:         conn,
 		log:          log.New("remote_db", opts.DialAddress),
 	}
@@ -386,4 +386,13 @@ func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
 		return common.Hash{}.Bytes(), err
 	}
 	return res.Hash, nil
+}
+
+func (back *Remote2Backend) Etherbase() (common.Address, error) {
+	res, err := back.remoteTxPool.Etherbase(context.Background(), &remote.EtherbaseRequest{})
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	return common.BytesToAddress(res.Hash), nil
 }

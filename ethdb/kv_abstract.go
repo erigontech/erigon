@@ -3,6 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 var (
@@ -73,6 +75,7 @@ type HasStats interface {
 
 type Backend interface {
 	AddLocal([]byte) ([]byte, error)
+	Etherbase() (common.Address, error)
 }
 
 type DbProvider uint8

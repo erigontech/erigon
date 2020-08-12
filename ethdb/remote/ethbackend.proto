@@ -5,10 +5,11 @@ package remote;
 option go_package = "./remote;remote";
 option java_multiple_files = true;
 option java_package = "io.turbo-geth.db";
-option java_outer_classname = "TXPOOL";
+option java_outer_classname = "ETHBACKEND";
 
-service TXPOOL {
+service ETHBACKEND {
   rpc Add(TxRequest) returns (AddReply);
+  rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
 }
 
 message TxRequest {
@@ -17,4 +18,11 @@ message TxRequest {
 
 message AddReply {
   bytes hash = 1;
+}
+
+message EtherbaseRequest {
+}
+
+message EtherbaseReply {
+    bytes hash = 1;
 }

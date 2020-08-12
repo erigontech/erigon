@@ -6,21 +6,24 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-type RawTxPool TxPool
-
-func RawFromTxPool(pool *TxPool) *RawTxPool {
-	return (*RawTxPool)(pool)
+type EthBackend struct {
+	Backend
 }
 
-func TxPoolFromRaw(pool *RawTxPool) *TxPool {
-	return (*TxPool)(pool)
+type Backend interface {
+	TxPool() *TxPool
+	Etherbase() (common.Address, error)
 }
 
-func (pool *RawTxPool) AddLocal(signedtx []byte) ([]byte, error) {
+func NewEthBackend(eth Backend) *EthBackend {
+	return &EthBackend{eth}
+}
+
+func (back *EthBackend) AddLocal(signedtx []byte) ([]byte, error) {
 	tx := new(types.Transaction)
 	if err := rlp.DecodeBytes(signedtx, tx); err != nil {
 		return common.Hash{}.Bytes(), err
 	}
 
-	return tx.Hash().Bytes(), TxPoolFromRaw(pool).AddLocal(tx)
+	return tx.Hash().Bytes(), back.TxPool().AddLocal(tx)
 }
