@@ -51,6 +51,10 @@ func (m *mutation) Get(bucket string, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
+func (m *mutation) Last(bucket string) ([]byte, []byte, error) {
+	return m.db.Last(bucket)
+}
+
 func (m *mutation) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
 	if m.db != nil {
 		return m.db.GetIndexChunk(bucket, key, timestamp)

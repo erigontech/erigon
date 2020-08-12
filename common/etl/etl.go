@@ -149,6 +149,6 @@ func (s *bucketState) Stopped() error {
 }
 
 // IdentityLoadFunc loads entries as they are, without transformation
-func IdentityLoadFunc(k []byte, value []byte, _ State, next LoadNextFunc) error {
+var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ State, next LoadNextFunc) error {
 	return next(k, k, value)
 }

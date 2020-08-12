@@ -236,6 +236,10 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
+func (c *remoteCursor) Last() ([]byte, []byte, error) {
+	panic("not implemented yet")
+}
+
 func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {

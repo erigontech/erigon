@@ -75,7 +75,8 @@ type Database interface {
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
 	Close()
-	NewBatch() DbWithPendingMutations
+	NewBatch() DbWithPendingMutations // starts in-mem batch
+	Last(bucket string) ([]byte, []byte, error)
 
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
 	IdealBatchSize() int

@@ -327,6 +327,10 @@ func (c *boltCursor) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
+func (c *boltCursor) Last() (k, v []byte, err error) {
+	panic("not implemented yet")
+}
+
 func (c *boltCursor) Delete(key []byte) error {
 	select {
 	case <-c.ctx.Done():
