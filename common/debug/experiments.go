@@ -80,15 +80,3 @@ func IsPlainStateDupsortEnabled() bool {
 	})
 	return dupsortPlain
 }
-
-var (
-	dupsortHashed    bool
-	getDupsortHashed sync.Once
-)
-
-func IsHashedStateDupsortEnabled() bool {
-	getDupsortHashed.Do(func() {
-		_, dupsortHashed = os.LookupEnv("DUPSORT_HASHED")
-	})
-	return dupsortHashed
-}

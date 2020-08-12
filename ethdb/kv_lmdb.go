@@ -262,6 +262,14 @@ type LmdbCursor struct {
 	cursor *lmdb.Cursor
 }
 
+func (db *LmdbKV) Env() *lmdb.Env {
+	return db.env
+}
+
+func (db *LmdbKV) AllDBI() map[string]lmdb.DBI {
+	return db.buckets
+}
+
 func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
