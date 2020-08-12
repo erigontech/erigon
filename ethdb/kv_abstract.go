@@ -39,10 +39,11 @@ type Bucket interface {
 
 // Interface used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	Drop() error
-	Create() error
-	Exists() bool
-	Clear() error
+	DropBucket(string) error
+	CreateBucket(string) error
+	ExistsBucket(string) bool
+	ClearBucket(string) error
+	ExistingBuckets() ([]string, error)
 }
 
 type Cursor interface {
