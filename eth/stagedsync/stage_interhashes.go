@@ -32,43 +32,20 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		return nil
 	}
 
-	hashStateProgress, _, err := stages.GetStageProgress(db, stages.HashState)
-	if err != nil {
-		return err
-	}
-	if s.BlockNumber > hashStateProgress {
-		// this case means - stages.HashState was interrupted and need firstly promote stages.HashState to stages.IntermediateHashes
-		// only then can run stages.IntermediateHashes
-		s.Done()
-		return nil
-	}
-
 	hash := rawdb.ReadCanonicalHash(db, to)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 
+	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 {
-		log.Info("Initial hashing plain state", "to", to)
-		if err := ResetHashState(db); err != nil {
-			return err
-		}
-		log.Debug("Clean bucket: done")
-
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
-			return err
-		}
-
 		if err := regenerateIntermediateHashes(db, datadir, expectedRootHash, quit); err != nil {
 			return err
 		}
-		return s.DoneAndUpdate(db, to)
+	} else {
+		if err := incrementIntermediateHashes(s, db, to, datadir, expectedRootHash, quit); err != nil {
+			return err
+		}
 	}
-
-	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
-	if err := incrementIntermediateHashes(s, db, to, datadir, expectedRootHash, quit); err != nil {
-		return err
-	}
-
 	return s.DoneAndUpdate(db, to)
 }
 
@@ -421,17 +398,6 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-
-	hashStateProgress, _, err := stages.GetStageProgress(db, stages.HashState)
-	if err != nil {
-		return err
-	}
-	if s.BlockNumber < hashStateProgress {
-		// this case means - stages.HashState was interrupted and need firstly promote stages.HashState to stages.IntermediateHashes
-		// only then can run stages.IntermediateHashes
-		s.Done()
-		return nil
-	}
 
 	if err := unwindIntermediateHashesStageImpl(u, s, db, datadir, expectedRootHash, quit); err != nil {
 		return err
