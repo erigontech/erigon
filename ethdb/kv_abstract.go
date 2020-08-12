@@ -52,6 +52,7 @@ type Cursor interface {
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
+	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
