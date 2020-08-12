@@ -167,7 +167,10 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent comm
 	if !ok {
 		return fmt.Errorf("could not convert header.Difficulty to uint256: %s", header.Difficulty)
 	}
+	tipId := nextTipId
+	nextTipId++
 	tip := &Tip{
+		id:                   tipId,
 		anchorParent:         anchorParent,
 		cumulativeDifficulty: *cumulativeDifficulty,
 		timestamp:            header.Time,
@@ -177,5 +180,9 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent comm
 		noPrepend:            false, // TODO: Check
 	}
 	hd.tipLimiter.ReplaceOrInsert(tip)
+	// Enforce the limit
+	for hd.tipLimiter.Len() > hd.tipLimit {
+		hd.tipLimiter.DeleteMin()
+	}
 	return nil
 }

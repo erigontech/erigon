@@ -64,7 +64,7 @@ func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainReader, block 
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
-func (c *powEngine) CalcDifficulty(chain consensus.ChainReader, time uint64, parent *types.Header) *big.Int {
+func (c *powEngine) CalcDifficulty(_ consensus.ChainReader, _, _ uint64, _, _ *big.Int, _, _ common.Hash) *big.Int {
 	panic("must not be called")
 }
 func (c *powEngine) APIs(chain consensus.ChainReader) []rpc.API {

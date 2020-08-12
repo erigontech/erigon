@@ -217,15 +217,8 @@ func TestPrepend(t *testing.T) {
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	})
 	peer := PeerHandle(1)
-	// empty chain segment
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-	} else {
-		t.Errorf("preprend: %v", err)
+	// empty chain segment - returns error
+	if _, _, err := hd.Prepend(&ChainSegment{}, peer); err == nil {
+		t.Errorf("preprend for empty segment - expected error")
 	}
 }

@@ -22,6 +22,7 @@ type Anchor struct {
 }
 
 type Tip struct {
+	id                   int
 	anchorParent         common.Hash
 	cumulativeDifficulty uint256.Int
 	timestamp            uint64
@@ -30,6 +31,8 @@ type Tip struct {
 	uncleHash            common.Hash
 	noPrepend            bool
 }
+
+var nextTipId int
 
 // First item in ChainSegment is the anchor
 // ChainSegment must be contiguous and must not include bad headers
@@ -81,6 +84,10 @@ type HeaderDownload struct {
 
 func (a *Tip) Less(b llrb.Item) bool {
 	bi := b.(*Tip)
+	if a.cumulativeDifficulty.Eq(&bi.cumulativeDifficulty) {
+		// id is unique and it breaks the ties
+		return a.id < bi.id
+	}
 	return a.cumulativeDifficulty.Lt(&bi.cumulativeDifficulty)
 }
 
