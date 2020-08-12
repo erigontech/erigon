@@ -66,7 +66,7 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle Pee
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, &PeerPenalty{peerHandle: peerHandle, penalty: BadBlockPenalty}, nil
 	}
-	return []*ChainSegment{&ChainSegment{headers: []*types.Header{header}}}, nil, nil
+	return []*ChainSegment{{headers: []*types.Header{header}}}, nil, nil
 }
 
 // Prepend attempts to find a suitable tip within the working chain segments to prepend the given (new) chain segment to
