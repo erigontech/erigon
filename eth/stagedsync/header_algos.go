@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -71,7 +72,7 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle Pee
 // Prepend attempts to find a suitable tip within the working chain segments to prepend the given (new) chain segment to
 // The first return value is true if the prepending was done, false if a suitable tip was not found, or there is a
 // penalty or error
-func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment) (bool, *PeerPenalty, error) {
+func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHandle) (bool, *PeerPenalty, error) {
 	if len(chainSegment.headers) == 0 {
 		return false, nil, fmt.Errorf("chainSegment must not be empty for Prepend, len %d", len(chainSegment.headers))
 	}
@@ -100,7 +101,7 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment) (bool, *PeerPenalt
 				// a header closest to the root (or root itself)
 				attachmentTip = tip
 				attachmentHeader = header
-				attachmentFrom = i
+				attachingFrom = i
 			}
 		}
 	}
@@ -110,12 +111,20 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment) (bool, *PeerPenalt
 	// Go through the headers again, and filter out the headers that are not connected to the attachment header
 	anchorParent := attachmentTip.anchorParent
 	connectedHeaders := make(map[common.Hash]*uint256.Int)
-	cumulativeDifficulty := new(uint256.Int).Add(attachmentTip.cumulativeDifficulty, uint256.FromBig(header.Difficulty))
+	diff, ok := uint256.FromBig(attachmentHeader.Difficulty)
+	if !ok {
+		return false, nil, fmt.Errorf("could not convert attachmentHeader.Difficulty to uint256: %s", attachmentHeader.Difficulty)
+	}
+	cumulativeDifficulty := new(uint256.Int).Add(&attachmentTip.cumulativeDifficulty, diff)
 	connectedHeaders[attachmentHeader.Hash()] = cumulativeDifficulty
 	hd.addHeaderAsTip(attachmentHeader, anchorParent, cumulativeDifficulty)
 	for _, header := range chainSegment.headers[attachingFrom+1:] {
 		if cumDiff, connected := connectedHeaders[header.ParentHash]; connected {
-			newCumDiff := new(uint256.Int).Add(cumDiff, uint256.FromBig(header.Difficulty))
+			diff, ok = uint256.FromBig(header.Difficulty)
+			if !ok {
+				return false, nil, fmt.Errorf("could not convert header.Difficulty to uint256: %s", header.Difficulty)
+			}
+			newCumDiff := new(uint256.Int).Add(cumDiff, diff)
 			connectedHeaders[header.Hash()] = newCumDiff
 			hd.addHeaderAsTip(header, anchorParent, newCumDiff)
 		}
@@ -129,7 +138,7 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 	if parent.Number.Uint64()+1 != child.Number.Uint64() {
 		return false, WrongChildBlockHeightPenalty
 	}
-	childDifficulty := hd.calcDifficultyFunc(child.Time, parent)
+	childDifficulty := hd.calcDifficultyFunc(child.Time, parent.Time, parent.Difficulty, parent.Number, parent.UncleHash)
 	if child.Difficulty.Cmp(childDifficulty) != 0 {
 		return false, WrongChildDifficultyPenalty
 	}
@@ -138,11 +147,11 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 
 // Checks whether child-tip relationship between two headers is correct
 // (excluding Proof Of Work validity)
-func (hd *HeaderDownload) childTipValid(child, tip *Tip) (bool, Penalty) {
+func (hd *HeaderDownload) childTipValid(child *types.Header, tip *Tip) (bool, Penalty) {
 	if tip.blockHeight+1 != child.Number.Uint64() {
 		return false, WrongChildBlockHeightPenalty
 	}
-	childDifficulty := hd.calcDifficultyFunc(child.Time, parent)
+	childDifficulty := hd.calcDifficultyFunc(child.Time, tip.timestamp, tip.difficulty.ToBig(), big.NewInt(int64(tip.blockHeight)), tip.uncleHash)
 	if child.Difficulty.Cmp(childDifficulty) != 0 {
 		return false, WrongChildDifficultyPenalty
 	}
@@ -152,7 +161,7 @@ func (hd *HeaderDownload) childTipValid(child, tip *Tip) (bool, Penalty) {
 func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) {
 	tip := &Tip{
 		anchorParent:         anchorParent,
-		cumulativeDifficulty: cumulativeDifficulty,
+		cumulativeDifficulty: *cumulativeDifficulty,
 	}
 	hd.tipLimiter.ReplaceOrInsert(tip)
 }

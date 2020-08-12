@@ -70,8 +70,7 @@ chain segment's tips. This collection allows efficiently iterating over the tips
 difficulties of the tips when the anchor changes.
 When a chain segment gets appended to an existing anchor, there are a few conditions that need to be met. Firstly, the `parentHash` of the anchor header
 needs to match the hash of the attaching tip. Secondly, the difficulty calculation formula for the anchor yields the anchor's difficulty. In Ethereum, difficulty of a child block header is calculated from various attributes of that child block header (`timestamp`) and the parent block header
-(`timestamp`, `difficulty`, `blockHeight`). Therefore, anchors need to have two other attributes, `difficulty` and `timestamp`, so that the correctness
-of the calculating `difficulty` from its parent header can be verified.
+(`timestamp`, `difficulty`, `blockHeight`, `uncleHash`). Therefore, anchors need to have two other attributes, `difficulty` and `timestamp`, so that the correctness of the calculating `difficulty` from its parent header can be verified.
 To conclude, the anchors data structure (which is a part of "the chain segments" data structure) is a mapping of anchor parentHashes (not hashes of
 anchors themsevles) to a collection of objects with attributes `powDepth`, `totalDifficulty`, `tips`, `difficulty`, and `timestamp`. We are talking
 about collection of objects rather than objects because there may be multiple anchor headers having the same value of Parent Hash.
@@ -99,7 +98,7 @@ difficulties are removed from the mapping, as well as from the tips data structu
 The chain segments that are created from the hard-coded anchors, are only allowed to be extended on the anchor's side, therefore their tips need
 to be marked as non-prependable. This is the role of another boolean attribute of a tip, `noPrepend`.
 To conclude, the tips data structure (which is a part of "the chain segments" data structure) is a mapping of tip hashes to objects with the attributes
-`anchorParent`, `cumulativeDifficulty`, `timestamp`, `difficulty`, `blockHeight`, `noPrepend`.
+`anchorParent`, `cumulativeDifficulty`, `timestamp`, `difficulty`, `blockHeight`, `uncleHash`,  `noPrepend`.
 We will call the sorted mapping of cumulative difficulties to tip hashes "the tip limited data structure.
 
 ### Working chain segments

@@ -27,6 +27,7 @@ type Tip struct {
 	timestamp            uint64
 	difficulty           uint256.Int
 	blockHeight          uint64
+	uncleHash            common.Hash
 	noPrepend            bool
 }
 
@@ -61,7 +62,7 @@ type RequestQueueItem struct {
 
 type RequestQueue []RequestQueueItem
 
-type CalcDifficultyFunc func(childTimestamp uint64, parent *types.Header) *big.Int
+type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
 	buffer                 []*types.Header

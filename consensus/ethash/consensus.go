@@ -270,7 +270,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainReader, header, parent *
 		return errOlderBlockTime
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
-	expected := ethash.CalcDifficulty(chain, header.Time, parent)
+	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.UncleHash)
 
 	if expected.Cmp(header.Difficulty) != 0 {
 		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
@@ -318,26 +318,26 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainReader, header, parent *
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func (ethash *Ethash) CalcDifficulty(chain consensus.ChainReader, time uint64, parent *types.Header) *big.Int {
-	return CalcDifficulty(chain.Config(), time, parent)
+func (ethash *Ethash) CalcDifficulty(chain consensus.ChainReader, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int {
+	return CalcDifficulty(chain.Config(), time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func CalcDifficulty(config *params.ChainConfig, time uint64, parent *types.Header) *big.Int {
-	next := new(big.Int).Add(parent.Number, big1)
+func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int {
+	next := new(big.Int).Add(parentNumber, big1)
 	switch {
 	case config.IsMuirGlacier(next):
-		return calcDifficultyEip2384(time, parent)
+		return calcDifficultyEip2384(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsConstantinople(next):
-		return calcDifficultyConstantinople(time, parent)
+		return calcDifficultyConstantinople(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsByzantium(next):
-		return calcDifficultyByzantium(time, parent)
+		return calcDifficultyByzantium(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsHomestead(next):
-		return calcDifficultyHomestead(time, parent)
+		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber)
 	default:
-		return calcDifficultyFrontier(time, parent)
+		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber)
 	}
 }
 
@@ -354,11 +354,11 @@ var (
 // makeDifficultyCalculator creates a difficultyCalculator with the given bomb-delay.
 // the difficulty is calculated with Byzantium rules, which differs from Homestead in
 // how uncles affect the calculation
-func makeDifficultyCalculator(bombDelay *big.Int) func(time uint64, parent *types.Header) *big.Int {
+func makeDifficultyCalculator(bombDelay *big.Int) func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int {
 	// Note, the calculations below looks at the parent number, which is 1 below
 	// the block number. Thus we remove one from the delay given
 	bombDelayFromParent := new(big.Int).Sub(bombDelay, big1)
-	return func(time uint64, parent *types.Header) *big.Int {
+	return func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int {
 		// https://github.com/ethereum/EIPs/issues/100.
 		// algorithm:
 		// diff = (parent_diff +
@@ -366,7 +366,7 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time uint64, parent *type
 		//        ) + 2^(periodCount - 2)
 
 		bigTime := new(big.Int).SetUint64(time)
-		bigParentTime := new(big.Int).SetUint64(parent.Time)
+		bigParentTime := new(big.Int).SetUint64(parentTime)
 
 		// holds intermediate values to make the algo easier to read & audit
 		x := new(big.Int)
@@ -375,7 +375,7 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time uint64, parent *type
 		// (2 if len(parent_uncles) else 1) - (block_timestamp - parent_timestamp) // 9
 		x.Sub(bigTime, bigParentTime)
 		x.Div(x, big9)
-		if parent.UncleHash == types.EmptyUncleHash {
+		if parentUncleHash == types.EmptyUncleHash {
 			x.Sub(big1, x)
 		} else {
 			x.Sub(big2, x)
@@ -385,9 +385,9 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time uint64, parent *type
 			x.Set(bigMinus99)
 		}
 		// parent_diff + (parent_diff / 2048 * max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99))
-		y.Div(parent.Difficulty, params.DifficultyBoundDivisor)
+		y.Div(parentDifficulty, params.DifficultyBoundDivisor)
 		x.Mul(y, x)
-		x.Add(parent.Difficulty, x)
+		x.Add(parentDifficulty, x)
 
 		// minimum difficulty can ever be (before exponential factor)
 		if x.Cmp(params.MinimumDifficulty) < 0 {
@@ -396,8 +396,8 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time uint64, parent *type
 		// calculate a fake block number for the ice-age delay
 		// Specification: https://eips.ethereum.org/EIPS/eip-1234
 		fakeBlockNumber := new(big.Int)
-		if parent.Number.Cmp(bombDelayFromParent) >= 0 {
-			fakeBlockNumber = fakeBlockNumber.Sub(parent.Number, bombDelayFromParent)
+		if parentNumber.Cmp(bombDelayFromParent) >= 0 {
+			fakeBlockNumber = fakeBlockNumber.Sub(parentNumber, bombDelayFromParent)
 		}
 		// for the exponential factor
 		periodCount := fakeBlockNumber
@@ -417,7 +417,7 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time uint64, parent *type
 // calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time given the
 // parent block's time and difficulty. The calculation uses the Homestead rules.
-func calcDifficultyHomestead(time uint64, parent *types.Header) *big.Int {
+func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int {
 	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md
 	// algorithm:
 	// diff = (parent_diff +
@@ -425,7 +425,7 @@ func calcDifficultyHomestead(time uint64, parent *types.Header) *big.Int {
 	//        ) + 2^(periodCount - 2)
 
 	bigTime := new(big.Int).SetUint64(time)
-	bigParentTime := new(big.Int).SetUint64(parent.Time)
+	bigParentTime := new(big.Int).SetUint64(parentTime)
 
 	// holds intermediate values to make the algo easier to read & audit
 	x := new(big.Int)
@@ -441,16 +441,16 @@ func calcDifficultyHomestead(time uint64, parent *types.Header) *big.Int {
 		x.Set(bigMinus99)
 	}
 	// (parent_diff + parent_diff // 2048 * max(1 - (block_timestamp - parent_timestamp) // 10, -99))
-	y.Div(parent.Difficulty, params.DifficultyBoundDivisor)
+	y.Div(parentDifficulty, params.DifficultyBoundDivisor)
 	x.Mul(y, x)
-	x.Add(parent.Difficulty, x)
+	x.Add(parentDifficulty, x)
 
 	// minimum difficulty can ever be (before exponential factor)
 	if x.Cmp(params.MinimumDifficulty) < 0 {
 		x.Set(params.MinimumDifficulty)
 	}
 	// for the exponential factor
-	periodCount := new(big.Int).Add(parent.Number, big1)
+	periodCount := new(big.Int).Add(parentNumber, big1)
 	periodCount.Div(periodCount, expDiffPeriod)
 
 	// the exponential factor, commonly referred to as "the bomb"
@@ -466,25 +466,25 @@ func calcDifficultyHomestead(time uint64, parent *types.Header) *big.Int {
 // calcDifficultyFrontier is the difficulty adjustment algorithm. It returns the
 // difficulty that a new block should have when created at time given the parent
 // block's time and difficulty. The calculation uses the Frontier rules.
-func calcDifficultyFrontier(time uint64, parent *types.Header) *big.Int {
+func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int {
 	diff := new(big.Int)
-	adjust := new(big.Int).Div(parent.Difficulty, params.DifficultyBoundDivisor)
+	adjust := new(big.Int).Div(parentDifficulty, params.DifficultyBoundDivisor)
 	bigTime := new(big.Int)
 	bigParentTime := new(big.Int)
 
 	bigTime.SetUint64(time)
-	bigParentTime.SetUint64(parent.Time)
+	bigParentTime.SetUint64(parentTime)
 
 	if bigTime.Sub(bigTime, bigParentTime).Cmp(params.DurationLimit) < 0 {
-		diff.Add(parent.Difficulty, adjust)
+		diff.Add(parentDifficulty, adjust)
 	} else {
-		diff.Sub(parent.Difficulty, adjust)
+		diff.Sub(parentDifficulty, adjust)
 	}
 	if diff.Cmp(params.MinimumDifficulty) < 0 {
 		diff.Set(params.MinimumDifficulty)
 	}
 
-	periodCount := new(big.Int).Add(parent.Number, big1)
+	periodCount := new(big.Int).Add(parentNumber, big1)
 	periodCount.Div(periodCount, expDiffPeriod)
 	if periodCount.Cmp(big1) > 0 {
 		// diff = diff + 2^(periodCount - 2)
@@ -575,7 +575,7 @@ func (ethash *Ethash) Prepare(chain consensus.ChainReader, header *types.Header)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent)
+	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.UncleHash)
 	return nil
 }
 
