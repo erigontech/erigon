@@ -279,6 +279,10 @@ func (b boltBucket) Delete(key []byte) error {
 	return b.bolt.Delete(key)
 }
 
+func (tx *boltTx) Cursor(bucket string) Cursor {
+	return tx.Bucket(bucket).(boltBucket).Cursor()
+}
+
 func (b boltBucket) Cursor() Cursor {
 	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }

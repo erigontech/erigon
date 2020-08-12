@@ -16,7 +16,7 @@ func TestDupsortHashState(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.CurrentStateBucketOld1).(ethdb.BucketMigrator).Create()
+		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.CurrentStateBucketOld1)
 	})
 	require.NoError(err)
 

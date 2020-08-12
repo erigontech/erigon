@@ -163,7 +163,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 		count := 0
 		if err := diskDb.KV().View(context.Background(), func(txDisk ethdb.Tx) error {
 			bDisk := txDisk.Bucket(dbutils.CurrentStateBucket)
-			cDisk := bDisk.Cursor()
+			cDisk := txDisk.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
 				if err != nil {
 					return err
@@ -182,7 +182,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				}
 			}
 			count = 0
-			cDisk = bDisk.Cursor()
+			cDisk = txDisk.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
 				if err != nil {
 					return err
@@ -200,7 +200,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				}
 			}
 			count = 0
-			c := b.Cursor()
+			c := tx.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -218,7 +218,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 					fmt.Printf("Compared %d records\n", count)
 				}
 			}
-			c = b.Cursor()
+			c = tx.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err

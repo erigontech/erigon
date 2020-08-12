@@ -22,6 +22,7 @@ type KV interface {
 }
 
 type Tx interface {
+	Cursor(bucket string) Cursor
 	Bucket(name string) Bucket
 
 	Commit(ctx context.Context) error
@@ -32,7 +33,6 @@ type Bucket interface {
 	Get(key []byte) (val []byte, err error)
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
-	Cursor() Cursor
 
 	Size() (uint64, error)
 }

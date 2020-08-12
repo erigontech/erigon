@@ -251,6 +251,10 @@ func (b *remote2Bucket) Delete(key []byte) error {
 	panic("not supported")
 }
 
+func (tx *remote2Tx) Cursor(bucket string) Cursor {
+	return tx.Bucket(bucket).(*remote2Bucket).Cursor()
+}
+
 func (b *remote2Bucket) Cursor() Cursor {
 	c := &remote2Cursor{bucket: b, ctx: b.tx.ctx}
 	b.tx.cursors = append(b.tx.cursors, c)

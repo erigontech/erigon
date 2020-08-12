@@ -327,13 +327,12 @@ func (db *DB) DeleteNode(id ID) {
 
 func deleteRange(db ethdb.KV, prefix []byte) {
 	if err := db.Update(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.InodesBucket)
 		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if err := b.Delete(k); err != nil {
+			if err := c.Delete(k); err != nil {
 				return nil
 			}
 		}
@@ -380,12 +379,8 @@ func (db *DB) expireNodes() {
 	)
 	var toDelete [][]byte
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		if b == nil {
-			return nil
-		}
+		c := tx.Cursor(dbutils.InodesBucket)
 		p := []byte(dbNodePrefix)
-		c := b.Cursor()
 		var prevId ID
 		var empty bool = true
 		for k, v, err := c.Seek(p); bytes.HasPrefix(k, p); k, v, err = c.Next() {
@@ -490,8 +485,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	)
 
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.InodesBucket)
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// Seek to a random entry. The first byte is incremented by a
@@ -517,7 +511,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			blob, errGet := b.Get(pongKey)
+			blob, errGet := tx.Bucket(dbutils.InodesBucket).Get(pongKey)
 			if errGet != nil {
 				return errGet
 			}
