@@ -232,6 +232,7 @@ func stageIHash(ctx context.Context) error {
 		if err := stagedsync.ResetHashState(db); err != nil {
 			return err
 		}
+		return nil
 	}
 
 	stage4 := progress(stages.Execution)
@@ -255,6 +256,13 @@ func stageHashState(ctx context.Context) error {
 
 	bc, _, progress := newSync(ctx.Done(), db, nil)
 	defer bc.Stop()
+
+	if reset {
+		if err := stagedsync.ResetHashState(db); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	stage5 := progress(stages.IntermediateHashes)
 	stage6 := progress(stages.HashState)

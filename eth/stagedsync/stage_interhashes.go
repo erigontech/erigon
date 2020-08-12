@@ -229,11 +229,11 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
-	if len(value) > 0 {
-		r.storageMap[newKStr] = common.CopyBytes(value)
-	} else {
-		delete(r.storageMap, newKStr)
-	}
+	//if len(value) > 0 {
+	//	r.storageMap[newKStr] = common.CopyBytes(value)
+	//} else {
+	//	delete(r.storageMap, newKStr)
+	//}
 	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
 }
@@ -302,7 +302,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Re
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Unwinding of intermediate hashes", "from", s.BlockNumber, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Unwinding of intermediate hashes", "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
@@ -373,7 +373,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	}
 	// hashCollector in the line below will collect creations of new intermediate hashes
 	r.defaultReceiver.Reset(trie.NewRetainList(0), hashCollector, false)
-	loader.SetStreamReceiver(r)
+	//loader.SetStreamReceiver(r)
 	t := time.Now()
 	subTries, err := loader.LoadSubTries()
 	if err != nil {

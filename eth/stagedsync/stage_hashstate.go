@@ -235,6 +235,11 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, newK)
 			}
+
+			// test
+			codeHash2, err := db.Get(dbutils.ContractCodeBucket, newK)
+			fmt.Printf("1: %x, %x, %x\n", a.CodeHash, codeHash2, codeHash)
+
 			return next(k, newK, codeHash)
 		})
 	}
