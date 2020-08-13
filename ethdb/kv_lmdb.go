@@ -455,6 +455,53 @@ func (c *LmdbCursor) NoValues() NoValuesCursor {
 	return &lmdbNoValuesCursor{LmdbCursor: c}
 }
 
+func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
+	dbi := tx.db.buckets[bucket]
+	cfg := dbutils.BucketsCfg[bucket]
+	if cfg.IsDupsort {
+		return tx.getDupSort(bucket, dbi, cfg, key)
+	}
+
+	val, err := tx.get(dbi, key)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return val, nil
+}
+
+func (tx *lmdbTx) getDupSort(bucket string, dbi lmdb.DBI, cfg *dbutils.BucketConfigItem, key []byte) ([]byte, error) {
+	from, to := cfg.DupFromLen, cfg.DupToLen
+	if len(key) == from {
+		c := tx.Cursor(bucket).(*LmdbCursor)
+		if err := c.initCursor(); err != nil {
+			return nil, err
+		}
+		_, v, err := c.getBothRange(key[:to], key[to:])
+		if err != nil {
+			if lmdb.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if !bytes.Equal(key[to:], v[:from-to]) {
+			return nil, nil
+		}
+		return v[from-to:], nil
+	}
+
+	val, err := tx.get(dbi, key)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return val, nil
+}
+
 func (b lmdbBucket) Get(key []byte) ([]byte, error) {
 	if b.isDupsort {
 		return b.getDupSort(key)
@@ -520,7 +567,7 @@ func (b *lmdbBucket) Size() (uint64, error) {
 //}
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
-	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, bucketCfg: dbutils.BucketsCfg[bucket]}
+	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket]}
 }
 
 func (c *LmdbCursor) initCursor() error {
@@ -859,7 +906,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	return c.put(key, newValue)
 }
 
-func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
+func (c *LmdbCursor) Get(key []byte) ([]byte, error) {
 	_, v, err := c.set(key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {

@@ -38,7 +38,10 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 			} else {
 				bucket = dbutils.CurrentStateBucket
 			}
-			v, _ := tx.Bucket(bucket).Get(key)
+			v, err := tx.Get(bucket, key)
+			if err != nil {
+				return err
+			}
 			if v == nil {
 				return ethdb.ErrKeyNotFound
 			}
@@ -58,9 +61,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		hBucket = dbutils.AccountsHistoryBucket
 	}
 	c := tx.Cursor(hBucket)
-	k, v, err := c.Seek(dbutils.IndexChunkKey(key, timestamp))
-	if err != nil {
-		return nil, err
+	k, v, seekErr := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+	if seekErr != nil {
+		return nil, seekErr
 	}
 	if k == nil {
 		return nil, ethdb.ErrKeyNotFound
@@ -93,13 +96,11 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			return []byte{}, nil
 		}
 		csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
-		csB := tx.Bucket(csBucket)
-		if csB == nil {
-			return nil, fmt.Errorf("no changeset bucket %s", csB)
-		}
-
 		csKey := dbutils.EncodeTimestamp(changeSetBlock)
-		changeSetData, _ := csB.Get(csKey)
+		changeSetData, err := tx.Get(csBucket, csKey)
+		if err != nil {
+			return nil, err
+		}
 
 		if plain {
 			if storage {
@@ -121,26 +122,23 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 	} else if plain {
 		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
 		var lastChangesetBlock, lastIndexBlock uint64
-		stageBucket := tx.Bucket(dbutils.SyncStageProgress)
-		if stageBucket != nil {
-			v1, err1 := stageBucket.Get(stages.DBKeys[stages.Execution])
-			if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
-				return nil, err1
-			}
-			if len(v1) > 0 {
-				lastChangesetBlock = binary.BigEndian.Uint64(v1[:8])
-			}
-			if storage {
-				v1, err1 = stageBucket.Get(stages.DBKeys[stages.AccountHistoryIndex])
-			} else {
-				v1, err1 = stageBucket.Get(stages.DBKeys[stages.StorageHistoryIndex])
-			}
-			if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
-				return nil, err1
-			}
-			if len(v1) > 0 {
-				lastIndexBlock = binary.BigEndian.Uint64(v1[:8])
-			}
+		v1, err1 := tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution])
+		if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
+			return nil, err1
+		}
+		if len(v1) > 0 {
+			lastChangesetBlock = binary.BigEndian.Uint64(v1[:8])
+		}
+		if storage {
+			v1, err1 = tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.AccountHistoryIndex])
+		} else {
+			v1, err1 = tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.StorageHistoryIndex])
+		}
+		if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
+			return nil, err1
+		}
+		if len(v1) > 0 {
+			lastIndexBlock = binary.BigEndian.Uint64(v1[:8])
 		}
 		//fmt.Printf("lastChangesetBlock=%d, lastIndexBlock=%d\n", lastChangesetBlock, lastIndexBlock)
 		if lastChangesetBlock > lastIndexBlock {
@@ -154,7 +152,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 				startTimestamp = timestamp + 1
 			}
 			startKey := dbutils.EncodeTimestamp(startTimestamp)
-			err = nil
+			var err error
 			for k, v, err1 := c.Seek(startKey); k != nil && err1 == nil; k, v, err1 = c.Next() {
 				if storage {
 					data, err = changeset.StorageChangeSetPlainBytes(v).Find(key)
@@ -186,12 +184,17 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		}
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			var codeHash []byte
+			var err error
 			if plain {
-				codeBucket := tx.Bucket(dbutils.PlainContractCodeBucket)
-				codeHash, _ = codeBucket.Get(dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+				codeHash, err = tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+				if err != nil {
+					return nil, err
+				}
 			} else {
-				codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
-				codeHash, _ = codeBucket.Get(dbutils.GenerateStoragePrefix(key, acc.Incarnation))
+				codeHash, err = tx.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(key, acc.Incarnation))
+				if err != nil {
+					return nil, err
+				}
 			}
 			if len(codeHash) > 0 {
 				acc.CodeHash = common.BytesToHash(codeHash)
@@ -516,7 +519,10 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byt
 		if !set {
 			// Extract value from the changeSet
 			csKey := dbutils.EncodeTimestamp(changeSetBlock)
-			changeSetData, _ := csGetter(csKey)
+			changeSetData, err := csGetter(csKey)
+			if err != nil {
+				return nil, false, err
+			}
 			if changeSetData == nil {
 				return nil, false, fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 			}
@@ -553,15 +559,14 @@ func returnCorrectWalker(bucket, hBucket string) func(v []byte) changeset.Walker
 }
 
 func getIndexGenerationProgress(tx ethdb.Tx, stage stages.SyncStage) (generatedTo uint64, executedTo uint64, err error) {
-	b := tx.Bucket(dbutils.SyncStageProgress)
-	v, err := b.Get(stages.DBKeys[stage])
+	v, err := tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stage])
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, 0, err
 	}
 	if len(v) >= 8 {
 		generatedTo = binary.BigEndian.Uint64(v[:8])
 	}
-	v, err = b.Get(stages.DBKeys[stages.Execution])
+	v, err = tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution])
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, 0, err
 	}
@@ -680,7 +685,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		copy(hK[:len(hAddrHash)], hAddrHash)
 		copy(hK[len(hAddrHash):], hKeyHash)
 		get := func(k []byte) ([]byte, error) {
-			return csd.tx.Bucket(csd.bucketName).Get(k)
+			return csd.tx.Get(csd.bucketName, k)
 		}
 		data, found, innerErr := findInHistory(hK, hV, csd.timestamp, get, csd.walkerAdapter)
 		if innerErr != nil {
@@ -757,7 +762,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
 			get := func(k []byte) ([]byte, error) {
-				return csd.tx.Bucket(csd.bucketName).Get(k)
+				return csd.tx.Get(csd.bucketName, k)
 			}
 			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, get, csd.walkerAdapter)
 			if innderErr != nil {
@@ -838,7 +843,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
 			get := func(k []byte) ([]byte, error) {
-				return csd.tx.Bucket(csd.bucketName).Get(k)
+				return csd.tx.Get(csd.bucketName, k)
 			}
 			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, get, csd.walkerAdapter)
 			if innderErr != nil {

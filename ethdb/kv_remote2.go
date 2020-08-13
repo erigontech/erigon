@@ -222,6 +222,31 @@ func (b *remote2Bucket) Clear() error {
 	panic("not supporte")
 }
 
+func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
+	c := tx.Cursor(bucket)
+	defer func() {
+		if v, ok := c.(*remote2Cursor); ok {
+			if v.stream == nil {
+				return
+			}
+			_ = v.stream.CloseSend()
+		}
+	}()
+
+	return c.Get(key)
+}
+
+func (c *remote2Cursor) Get(key []byte) (val []byte, err error) {
+	k, v, err := c.Seek(key)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(key, k) {
+		return nil, nil
+	}
+	return v, nil
+}
+
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 	c := b.Cursor()
 	defer func() {

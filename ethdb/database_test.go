@@ -171,7 +171,7 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	require.NoError(t, err)
 	err = writeTx.Commit(context.Background())
 	require.NoError(t, err)
-	_, err = tx.Bucket(dbutils.Buckets[0]).Get([]byte{1})
+	_, err = tx.Get(dbutils.Buckets[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 

@@ -149,7 +149,10 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(bucket).Get(key)
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
 		has = v != nil
 		return nil
 	})
@@ -165,20 +168,23 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 }
 
 // Get returns the value for a given key if it's present.
-func (db *ObjectDatabase) Get(bucket string, key []byte) (dat []byte, err error) {
-	if metrics.Enabled {
+func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
+	if metrics.EnabledExpensive {
 		defer dbGetTimer.UpdateSince(time.Now())
 	}
 
-	err = db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(bucket).Get(key)
+	var dat []byte
+	if err := db.kv.View(context.Background(), func(tx Tx) error {
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 	if dat == nil {
@@ -233,7 +239,10 @@ func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([
 
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(true /* plain */, storage)).Get(key)
+		v, err := tx.Get(dbutils.ChangeSetByIndexBucket(true /* plain */, storage), key)
+		if err != nil {
+			return err
+		}
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)

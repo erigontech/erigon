@@ -301,13 +301,10 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 			for _, bucketName := range dbutils.Buckets {
 				bucketName := bucketName
 				c := readTx.Cursor(bucketName)
-				firstB := firstTx.Bucket(bucketName)
 				if err2 := c.Walk(func(k, v []byte) (bool, error) {
-					if firstB != nil {
-						if firstV, _ := firstB.Get(k); firstV != nil && bytes.Equal(v, firstV) {
-							// Skip the record that is the same as in the first Db
-							return true, nil
-						}
+					if firstV, _ := firstTx.Get(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
+						// Skip the record that is the same as in the first Db
+						return true, nil
 					}
 					// Produce pair of nodes
 					keyKeyBytes := &trie.Keybytes{

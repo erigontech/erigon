@@ -453,35 +453,35 @@ func TestReadAfterPut(t *testing.T) {
 		msg := fmt.Sprintf("%T", db)
 		t.Run("GetAfterPut "+msg, func(t *testing.T) {
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-				b := tx.Bucket(dbutils.Buckets[0])
+				c := tx.Cursor(dbutils.Buckets[0])
 				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
-					require.NoError(t, b.Put([]byte{i}, []byte{i}))
+					require.NoError(t, c.Put([]byte{i}, []byte{i}))
 				}
 
 				for i := uint8(0); i < 10; i++ {
-					v, err := b.Get([]byte{i})
+					v, err := c.Get([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
 
-				b2 := tx.Bucket(dbutils.Buckets[1])
+				c2 := tx.Cursor(dbutils.Buckets[1])
 				for i := uint8(0); i < 12; i++ {
-					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
+					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
 				}
 
 				for i := uint8(0); i < 12; i++ {
-					v, err := b2.Get([]byte{i})
+					v, err := c2.Get([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
 
 				{
-					require.NoError(t, b2.Delete([]byte{5}))
-					v, err := b2.Get([]byte{5})
+					require.NoError(t, c2.Delete([]byte{5}))
+					v, err := c2.Get([]byte{5})
 					require.NoError(t, err)
 					require.Nil(t, v)
 
-					require.NoError(t, b2.Delete([]byte{255})) // delete non-existing key
+					require.NoError(t, c2.Delete([]byte{255})) // delete non-existing key
 				}
 
 				return nil
@@ -497,7 +497,7 @@ func TestReadAfterPut(t *testing.T) {
 					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
 				}
 				for i := uint8(0); i < 10; i++ {
-					v, err := tx.Bucket(dbutils.Buckets[2]).Get([]byte{i})
+					v, err := tx.Get(dbutils.Buckets[2], []byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
@@ -509,10 +509,9 @@ func TestReadAfterPut(t *testing.T) {
 			}
 
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-				b3 := tx.Bucket(dbutils.Buckets[2])
 				c3 := tx.Cursor(dbutils.Buckets[2])
 				require.NoError(t, c3.Delete([]byte{5}))
-				v, err := b3.Get([]byte{5})
+				v, err := tx.Get(dbutils.Buckets[2], []byte{5})
 				require.NoError(t, err)
 				require.Nil(t, v)
 				return nil
