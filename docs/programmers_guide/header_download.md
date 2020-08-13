@@ -167,6 +167,7 @@ Therefore, we will only be looking at the block header part of the message. This
 ### Prepend
 **Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no prepend point found", or penalty for the handle (tombstone creation)
 We do not allow prepending to the hard-coded tips (therefore tips need an extra boolean attribute `noPrepend`)
+Proof Of Work verification happens only if other conditions have been satisfied.
 
 ### Append
 **Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no append point found", or penalty for the handle (tombstone creation)

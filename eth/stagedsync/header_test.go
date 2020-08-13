@@ -221,4 +221,17 @@ func TestPrepend(t *testing.T) {
 	if _, _, err := hd.Prepend(&ChainSegment{}, peer); err == nil {
 		t.Errorf("preprend for empty segment - expected error")
 	}
+
+	// single header in the chain segment
+	var h types.Header
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+	} else {
+		t.Errorf("handle newBlock msg: %v", err)
+	}
 }
