@@ -83,7 +83,7 @@ func (b *sortableBuffer) Get(i int) sortableBufferEntry {
 }
 
 func (b *sortableBuffer) Reset() {
-	b.entries = b.entries[:0] // keep the capacity
+	b.entries = nil
 	b.size = 0
 }
 func (b *sortableBuffer) Sort() {
@@ -150,7 +150,7 @@ func (b *appendSortableBuffer) Get(i int) sortableBufferEntry {
 	return b.sortedBuf[i]
 }
 func (b *appendSortableBuffer) Reset() {
-	b.sortedBuf = b.sortedBuf[:0]
+	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
@@ -220,7 +220,7 @@ func (b *oldestEntrySortableBuffer) Get(i int) sortableBufferEntry {
 	return b.sortedBuf[i]
 }
 func (b *oldestEntrySortableBuffer) Reset() {
-	b.sortedBuf = b.sortedBuf[:0]
+	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }

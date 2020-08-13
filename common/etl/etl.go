@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -151,4 +152,8 @@ func (s *bucketState) Stopped() error {
 // IdentityLoadFunc loads entries as they are, without transformation
 var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ State, next LoadNextFunc) error {
 	return next(k, k, value)
+}
+
+func isIdentityLoadFunc(f LoadFunc) bool {
+	return reflect.ValueOf(IdentityLoadFunc).Pointer() == reflect.ValueOf(f).Pointer()
 }

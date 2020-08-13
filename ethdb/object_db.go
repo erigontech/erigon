@@ -95,8 +95,20 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
+	putTimer := time.Now()
+	i := 0
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
+			i++
+			if i%10_000 == 0 && time.Since(putTimer) < 30*time.Second {
+				fmt.Printf("tick\n")
+			}
+			if i%10_000 == 0 && time.Since(putTimer) > 30*time.Second {
+				total := float64(len(tuples)) / 3
+				progress := fmt.Sprintf("%.1fM/%.1fM", float64(i)/1_000_000, total/1_000_00)
+				log.Info("Write to db", "progress", progress)
+			}
+
 			bucketEnd := bucketStart
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
@@ -282,7 +294,6 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 }
 
 func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
@@ -474,6 +485,14 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
+func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
+	batch := &TxDb{db: db, cursors: map[string]*LmdbCursor{}}
+	if err := batch.begin(); err != nil {
+		panic(err)
+	}
+	return batch, nil
+}
+
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *ObjectDatabase) IdealBatchSize() int {
 	return db.kv.IdealBatchSize()
@@ -488,8 +507,4 @@ func (db *ObjectDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
-}
-
-func (db *ObjectDatabase) ID() uint64 {
-	return db.id
 }
