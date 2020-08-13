@@ -21,10 +21,18 @@ analyticsEnv = lmdb.open("analytics", max_dbs=100, readonly=False, subdir=True, 
 
 env.reader_check()  # clear stale reads
 
+def allBuckets(env):
+    buckets = []
+    root = env.open_db(None, create=False)
+    with env.begin(write=False) as txn:
+        with readTx.cursor(b) as curs:
+            for i, (k, v) in enumerate(curs.iternext()):
+                buckets.append(k.decode("utf-8"))
+    return buckets
+
 if cmd == "stats":
     data = {"name": [], "size": []}
-    for bucket in dbutils.buckets:
-        print(bucket)
+    for bucket in allBuckets(env):
         b = env.open_db(bucket.encode(), create=False)
         with env.begin(write=False) as txn:
             stat = txn.stat(b)
