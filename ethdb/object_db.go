@@ -97,6 +97,7 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	putTimer := time.Now()
 	count := 0
+	total := float64(len(tuples)) / 3
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
 			bucketEnd := bucketStart
@@ -139,8 +140,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 
 				count++
 				if count%100_000 == 0 && time.Since(putTimer) > 30*time.Second {
-					total := float64(len(tuples)) / 3
-					progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_00)
+					progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
 					log.Info("Write to db", "progress", progress)
 					putTimer = time.Now()
 				}
