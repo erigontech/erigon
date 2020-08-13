@@ -95,6 +95,7 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
+	var commitTimer time.Time
 	putTimer := time.Now()
 	count := 0
 	total := float64(len(tuples)) / 3
@@ -148,10 +149,15 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 
 			bucketStart = bucketEnd
 		}
+		commitTimer = time.Now()
 		return nil
 	})
 	if err != nil {
 		return 0, err
+	}
+	commitTook := time.Since(commitTimer)
+	if commitTook > 10*time.Second {
+		log.Info("Batch committed", "in", commitTook)
 	}
 	return 0, nil
 }
