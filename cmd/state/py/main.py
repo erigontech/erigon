@@ -25,7 +25,7 @@ def allBuckets(env):
     buckets = []
     root = env.open_db(None, create=False)
     with env.begin(write=False) as txn:
-        with readTx.cursor(b) as curs:
+        with txn.cursor(root) as curs:
             for i, (k, v) in enumerate(curs.iternext()):
                 buckets.append(k.decode("utf-8"))
     return buckets
