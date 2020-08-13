@@ -1340,7 +1340,7 @@ func NewCreationTracer(w io.Writer) CreationTracer {
 func (ct CreationTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
-func (ct CreationTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (ct CreationTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (ct CreationTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
@@ -1384,7 +1384,7 @@ func makeCreators(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: ct, Debug: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -1401,7 +1401,7 @@ func makeCreators(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -1719,7 +1719,7 @@ func oldStorage() {
 	itemsByAddress := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
 		if b == nil {
 			return nil
 		}
@@ -1739,7 +1739,7 @@ func oldStorage() {
 	})
 	check(err)
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsHistoryBucket)
+		b := tx.Bucket([]byte(dbutils.AccountsHistoryBucket))
 		if b == nil {
 			return nil
 		}
@@ -1975,7 +1975,7 @@ func makeSha3Preimages(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{EnablePreimageRecording: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -2000,7 +2000,7 @@ func makeSha3Preimages(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}

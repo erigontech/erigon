@@ -19,3 +19,6 @@ issues:
       linters:
         - gosec
         - unused
+  exclude:
+    # gosec: Profiling endpoint is automatically exposed on /debug/pprof
+    - G108

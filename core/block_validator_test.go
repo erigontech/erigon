@@ -38,9 +38,8 @@ func TestHeaderVerification(t *testing.T) {
 		gspec   = &Genesis{Config: params.TestChainConfig}
 		genesis = gspec.MustCommit(testdb)
 	)
-	dests := vm.NewDestsCache(100)
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, dests, txCacher)
+	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
@@ -114,8 +113,6 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 	old := runtime.GOMAXPROCS(threads)
 	defer runtime.GOMAXPROCS(old)
 
-	dests := vm.NewDestsCache(100)
-
 	// Run the header checker for the entire block chain at once both for a valid and
 	// also an invalid chain (enough if one arbitrary block is invalid).
 	for i, valid := range []bool{true, false} {
@@ -123,12 +120,12 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 
 		if valid {
 			txCacher := NewTxSenderCacher(runtime.NumCPU())
-			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, dests, txCacher)
+			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 			_, results = chain.engine.VerifyHeaders(chain, headers, seals)
 			chain.Stop()
 		} else {
 			txCacher := NewTxSenderCacher(runtime.NumCPU())
-			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeFailer(uint64(len(headers)-1)), vm.Config{}, nil, dests, txCacher)
+			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeFailer(uint64(len(headers)-1)), vm.Config{}, nil, txCacher)
 			_, results = chain.engine.VerifyHeaders(chain, headers, seals)
 			chain.Stop()
 		}
@@ -196,9 +193,8 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	defer runtime.GOMAXPROCS(old)
 
 	// Start the verifications and immediately abort
-	dests := vm.NewDestsCache(100)
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, dests, txCacher)
+	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
 	cancel, results := chain.engine.VerifyHeaders(chain, headers, seals)

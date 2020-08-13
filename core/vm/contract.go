@@ -49,7 +49,7 @@ type Contract struct {
 	caller        ContractRef
 	self          ContractRef
 	analysis      []uint64 // Locally cached result of JUMPDEST analysis
-	dests         Cache
+	skipAnalysis  bool
 
 	Code     []byte
 	CodeHash common.Hash
@@ -61,7 +61,7 @@ type Contract struct {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, dests Cache) *Contract {
+func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
 	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: object}
 
 	// Gas should be a pointer so it can safely be reduced through the run
@@ -70,23 +70,28 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 	// ensures a value is set
 	c.value = value
 
-	c.dests = dests
+	c.skipAnalysis = skipAnalysis
 
 	return c
 }
 
-func (c *Contract) validJumpdest(dest *uint256.Int) bool {
+// First result tells us if the destination is valid
+// Second result tells us if the code bitmap was used
+func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	udest, overflow := dest.Uint64WithOverflow()
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
-		return false
+		return false, false
 	}
 	// Only JUMPDESTs allowed for destinations
 	if OpCode(c.Code[udest]) != JUMPDEST {
-		return false
+		return false, false
 	}
-	return c.isCode(udest)
+	if c.skipAnalysis {
+		return true, false
+	}
+	return c.isCode(udest), true
 }
 
 func (c *Contract) validJumpSubdest(udest uint64) bool {
@@ -105,20 +110,6 @@ func (c *Contract) validJumpSubdest(udest uint64) bool {
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
-	// Do we have a contract hash already?
-	if c.CodeHash != (common.Hash{}) {
-		// Does parent context have the analysis?
-		analysis, exist := c.dests.Get(c.CodeHash)
-		if !exist {
-			// Do the analysis and save in parent context
-			// We do not need to store it in c.analysis
-			analysis = codeBitmap(c.Code)
-			c.dests.Set(c.CodeHash, analysis)
-		}
-		// Also stash it in current contract for faster access
-		c.analysis = analysis
-		return c.analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
-	}
 	// We don't have the code hash, most likely a piece of initcode not already
 	// in state trie. In that case, we do an analysis, and save it locally, so
 	// we don't have to recalculate it for every JUMP instruction in the execution

@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -30,6 +29,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+
+	"github.com/golang/snappy"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -105,7 +106,7 @@ func DeleteHeaderNumber(db DatabaseDeleter, hash common.Hash) {
 
 // ReadHeadHeaderHash retrieves the hash of the current canonical head header.
 func ReadHeadHeaderHash(db DatabaseReader) common.Hash {
-	data, _ := db.Get(dbutils.HeadHeaderKey, dbutils.HeadHeaderKey)
+	data, _ := db.Get(dbutils.HeadHeaderKey, []byte(dbutils.HeadHeaderKey))
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -114,14 +115,14 @@ func ReadHeadHeaderHash(db DatabaseReader) common.Hash {
 
 // WriteHeadHeaderHash stores the hash of the current canonical head header.
 func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) {
-	if err := db.Put(dbutils.HeadHeaderKey, dbutils.HeadHeaderKey, hash.Bytes()); err != nil {
+	if err := db.Put(dbutils.HeadHeaderKey, []byte(dbutils.HeadHeaderKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last header's hash", "err", err)
 	}
 }
 
 // ReadHeadBlockHash retrieves the hash of the current canonical head block.
 func ReadHeadBlockHash(db DatabaseReader) common.Hash {
-	data, _ := db.Get(dbutils.HeadBlockKey, dbutils.HeadBlockKey)
+	data, _ := db.Get(dbutils.HeadBlockKey, []byte(dbutils.HeadBlockKey))
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -130,14 +131,14 @@ func ReadHeadBlockHash(db DatabaseReader) common.Hash {
 
 // WriteHeadBlockHash stores the head block's hash.
 func WriteHeadBlockHash(db DatabaseWriter, hash common.Hash) {
-	if err := db.Put(dbutils.HeadBlockKey, dbutils.HeadBlockKey, hash.Bytes()); err != nil {
+	if err := db.Put(dbutils.HeadBlockKey, []byte(dbutils.HeadBlockKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last block's hash", "err", err)
 	}
 }
 
 // ReadHeadFastBlockHash retrieves the hash of the current fast-sync head block.
 func ReadHeadFastBlockHash(db DatabaseReader) common.Hash {
-	data, _ := db.Get(dbutils.HeadFastBlockKey, dbutils.HeadFastBlockKey)
+	data, _ := db.Get(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey))
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -146,7 +147,7 @@ func ReadHeadFastBlockHash(db DatabaseReader) common.Hash {
 
 // WriteHeadFastBlockHash stores the hash of the current fast-sync head block.
 func WriteHeadFastBlockHash(db DatabaseWriter, hash common.Hash) {
-	if err := db.Put(dbutils.HeadFastBlockKey, dbutils.HeadFastBlockKey, hash.Bytes()); err != nil {
+	if err := db.Put(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last fast block's hash", "err", err)
 	}
 }
@@ -154,7 +155,7 @@ func WriteHeadFastBlockHash(db DatabaseWriter, hash common.Hash) {
 // ReadFastTrieProgress retrieves the number of tries nodes fast synced to allow
 // reporting correct numbers across restarts.
 func ReadFastTrieProgress(db DatabaseReader) uint64 {
-	data, _ := db.Get(dbutils.FastTrieProgressKey, dbutils.FastTrieProgressKey)
+	data, _ := db.Get(dbutils.FastTrieProgressKey, []byte(dbutils.FastTrieProgressKey))
 	if len(data) == 0 {
 		return 0
 	}
@@ -164,7 +165,7 @@ func ReadFastTrieProgress(db DatabaseReader) uint64 {
 // WriteFastTrieProgress stores the fast sync trie process counter to support
 // retrieving it across restarts.
 func WriteFastTrieProgress(db DatabaseWriter, count uint64) {
-	if err := db.Put(dbutils.FastTrieProgressKey, dbutils.FastTrieProgressKey, new(big.Int).SetUint64(count).Bytes()); err != nil {
+	if err := db.Put(dbutils.FastTrieProgressKey, []byte(dbutils.FastTrieProgressKey), new(big.Int).SetUint64(count).Bytes()); err != nil {
 		log.Crit("Failed to store fast sync trie progress", "err", err)
 	}
 }

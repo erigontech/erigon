@@ -22,12 +22,13 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type closerType struct {
@@ -66,7 +67,7 @@ func TestCmdVersion(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	var responseCode remote.ResponseCode
@@ -105,7 +106,7 @@ func TestCmdBeginEndError(t *testing.T) {
 	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	var responseCode remote.ResponseCode
@@ -145,7 +146,7 @@ func TestCmdBucket(t *testing.T) {
 	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -200,7 +201,7 @@ func TestCmdGet(t *testing.T) {
 	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -265,7 +266,7 @@ func TestCmdSeek(t *testing.T) {
 	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -351,7 +352,7 @@ func TestCursorOperations(t *testing.T) {
 	defer cancel()
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db.KV(), &inBuf, &outBuf, closer)
+	err := Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -493,7 +494,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	go func() {
-		require.NoError(Server(ctx, db.KV(), &inBuf, &outBuf, closer))
+		require.NoError(Server(ctx, db.KV(), nil, &inBuf, &outBuf, closer))
 	}()
 
 	var responseCode remote.ResponseCode
@@ -561,7 +562,7 @@ func BenchmarkKVCursorFirst(b *testing.B) {
 	var k, v []byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tx, err := db.KV().Begin(context.Background(), false)
+		tx, err := db.KV().Begin(context.Background(), nil, false)
 		if err != nil {
 			panic(err)
 		}

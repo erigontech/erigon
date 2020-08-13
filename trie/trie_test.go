@@ -286,7 +286,7 @@ type countingDB struct {
 	gets map[string]int
 }
 
-func (db *countingDB) Get(bucket []byte, key []byte) ([]byte, error) {
+func (db *countingDB) Get(bucket string, key []byte) ([]byte, error) {
 	db.gets[string(key)]++
 	return db.Database.Get(bucket, key)
 }

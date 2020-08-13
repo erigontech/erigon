@@ -23,6 +23,11 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
+tg:
+	$(GORUN) build/ci.go install ./cmd/geth
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+
 hack:
 	$(GORUN) build/ci.go install ./cmd/hack
 	@echo "Done building."
@@ -95,16 +100,13 @@ ios:
 	@echo "Done building."
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
-test: semantics/z3/build/libz3.a all
+test: semantics/z3/build/libz3.a
 	$(GORUN) build/ci.go test
 
-test-lmdb: semantics/z3/build/libz3.a all
+test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GORUN) build/ci.go test
 
-test-badger: semantics/z3/build/libz3.a all
-	TEST_DB=badger $(GORUN) build/ci.go test
-
-test-bolt: semantics/z3/build/libz3.a all
+test-bolt: semantics/z3/build/libz3.a
 	TEST_DB=bolt $(GORUN) build/ci.go test
 
 lint: lintci
@@ -130,7 +132,7 @@ lintci: semantics/z3/build/libz3.a
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.28.2
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.29.0
 
 clean:
 	env GO111MODULE=on go clean -cache
@@ -252,7 +254,7 @@ simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
 
 prometheus:
-	@cd ./cmd/prometheus && docker-compose up prometheus grafana
+	docker-compose up prometheus grafana
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out

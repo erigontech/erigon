@@ -31,6 +31,7 @@ type SyncStage byte
 
 const (
 	Headers             SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BlockHashes                          // Headers Number are written, fills blockHash => number bucket
 	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders                              // "From" recovered from signatures, bodies re-written
 	Execution                            // Executing each block w/o buildinf a trie
@@ -39,13 +40,28 @@ const (
 	AccountHistoryIndex                  // Generating history index for accounts
 	StorageHistoryIndex                  // Generating history index for storage
 	TxLookup                             // Generating transactions lookup index
-	TxPool                               // Starts TxPool
+	TxPool                               // Starts Backend
 	Finish                               // Nominal stage after all other stages
 )
 
+var DBKeys = map[SyncStage][]byte{
+	Headers:             []byte("Headers"),
+	BlockHashes:         []byte("BlockHashes"),
+	Bodies:              []byte("Bodies"),
+	Senders:             []byte("Senders"),
+	Execution:           []byte("Execution"),
+	IntermediateHashes:  []byte("IntermediateHashes"),
+	HashState:           []byte("HashState"),
+	AccountHistoryIndex: []byte("AccountHistoryIndex"),
+	StorageHistoryIndex: []byte("StorageHistoryIndex"),
+	TxLookup:            []byte("TxLookup"),
+	TxPool:              []byte("TxPool"),
+	Finish:              []byte("Finish"),
+}
+
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageProgress, []byte{byte(stage)})
+	v, err := db.Get(dbutils.SyncStageProgress, DBKeys[stage])
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
@@ -54,14 +70,14 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) 
 
 // SaveStageProgress saves the progress of the given stage in the database
 func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageProgress, []byte{byte(stage)}, marshalData(progress, stageData))
+	return db.Put(dbutils.SyncStageProgress, DBKeys[stage], marshalData(progress, stageData))
 }
 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageUnwind, []byte{byte(stage)})
+	v, err := db.Get(dbutils.SyncStageUnwind, DBKeys[stage])
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
@@ -70,7 +86,7 @@ func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 
 // SaveStageUnwind saves the progress of the given stage in the database
 func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageUnwind, []byte{byte(stage)}, marshalData(invalidation, stageData))
+	return db.Put(dbutils.SyncStageUnwind, DBKeys[stage], marshalData(invalidation, stageData))
 }
 
 func marshalData(blockNumber uint64, stageData []byte) []byte {

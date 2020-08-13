@@ -39,13 +39,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethclient"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
-
-	"net/http"
-	//nolint:gosec
-	_ "net/http/pprof"
 )
 
 const (
@@ -57,7 +54,7 @@ var (
 	gitCommit = ""
 	gitDate   = ""
 	// The app that holds all commands and flags.
-	app = utils.NewApp(gitCommit, gitDate, "the go-ethereum command line interface")
+	app = flags.NewApp(gitCommit, gitDate, "the go-ethereum command line interface")
 	// flags that configure the node
 	nodeFlags = []cli.Flag{
 		utils.IdentityFlag,
@@ -113,6 +110,7 @@ var (
 		utils.StorageModeFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
+		utils.LMDBMapSizeFlag,
 		utils.PrivateApiAddr,
 		utils.CacheNoPrefetchFlag,
 		utils.ListenPortFlag,
@@ -193,11 +191,14 @@ var (
 		utils.IPCPathFlag,
 		utils.InsecureUnlockAllowedFlag,
 		utils.RPCGlobalGasCap,
+		utils.RPCGlobalTxFeeCap,
 	}
 
 	metricsFlags = []cli.Flag{
 		utils.MetricsEnabledFlag,
 		utils.MetricsEnabledExpensiveFlag,
+		utils.MetricsHTTPFlag,
+		utils.MetricsPortFlag,
 		utils.MetricsEnableInfluxDBFlag,
 		utils.MetricsInfluxDBEndpointFlag,
 		utils.MetricsInfluxDBDatabaseFlag,
@@ -263,9 +264,6 @@ func init() {
 }
 
 func main() {
-	go func() {
-		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
-	}()
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -278,24 +276,24 @@ func prepare(ctx *cli.Context) {
 	// If we're running a known preset, log it for convenience.
 	switch {
 	case ctx.GlobalIsSet(utils.LegacyTestnetFlag.Name):
-		log.Info("Starting Geth on Ropsten testnet...")
+		log.Info("Starting Turbo-Geth on Ropsten testnet...")
 		log.Warn("The --testnet flag is ambiguous! Please specify one of --goerli, --rinkeby, or --ropsten.")
 		log.Warn("The generic --testnet flag is deprecated and will be removed in the future!")
 
 	case ctx.GlobalIsSet(utils.RopstenFlag.Name):
-		log.Info("Starting Geth on Ropsten testnet...")
+		log.Info("Starting Turbo-Geth on Ropsten testnet...")
 
 	case ctx.GlobalIsSet(utils.RinkebyFlag.Name):
-		log.Info("Starting Geth on Rinkeby testnet...")
+		log.Info("Starting Turbo-Geth on Rinkeby testnet...")
 
 	case ctx.GlobalIsSet(utils.GoerliFlag.Name):
-		log.Info("Starting Geth on Görli testnet...")
+		log.Info("Starting Turbo-Geth on Görli testnet...")
 
 	case ctx.GlobalIsSet(utils.DeveloperFlag.Name):
-		log.Info("Starting Geth in ephemeral dev mode...")
+		log.Info("Starting Turbo-Geth in ephemeral dev mode...")
 
 	case !ctx.GlobalIsSet(utils.NetworkIdFlag.Name):
-		log.Info("Starting Geth on Ethereum mainnet...")
+		log.Info("Starting Turbo-Geth on Ethereum mainnet...")
 	}
 	// If we're a full node on mainnet without --cache specified, bump default cache allowance
 	if !ctx.GlobalIsSet(utils.CacheFlag.Name) && !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
@@ -348,7 +346,7 @@ func geth(ctx *cli.Context) error {
 		return fmt.Errorf("invalid command: %q", args[0])
 	}
 	prepare(ctx)
-	node := makeFullNode(ctx)
+	node, _ := makeFullNode(ctx)
 	defer node.Close()
 	startNode(ctx, node)
 	node.Wait()
@@ -464,7 +462,7 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 			log.Warn("The flag --minerthreads is deprecated and will be removed in the future, please use --miner.threads")
 		}
 
-		if err := ethereum.StartMining(threads, ethereum.BlockChain().DestsCache); err != nil {
+		if err := ethereum.StartMining(threads); err != nil {
 			utils.Fatalf("Failed to start mining: %v", err)
 		}
 	}

@@ -209,7 +209,7 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
-		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig, b.eth.blockchain.DestsCache)
+		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -248,15 +248,15 @@ func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*typ
 	return logs, nil
 }
 
-func (b *EthAPIBackend) GetTd(blockHash common.Hash) *big.Int {
-	return b.eth.blockchain.GetTdByHash(blockHash)
+func (b *EthAPIBackend) GetTd(ctx context.Context, hash common.Hash) *big.Int {
+	return b.eth.blockchain.GetTdByHash(hash)
 }
 
 func (b *EthAPIBackend) GetEVM(ctx context.Context, msg core.Message, state *state.IntraBlockState, header *types.Header) (*vm.EVM, func() error, error) {
 	vmError := func() error { return nil }
 
 	context := core.NewEVMContext(msg, header, b.eth.BlockChain(), nil)
-	return vm.NewEVM(context, state, b.eth.blockchain.Config(), *b.eth.blockchain.GetVMConfig(), b.eth.blockchain.DestsCache), vmError, nil
+	return vm.NewEVM(context, state, b.eth.blockchain.Config(), *b.eth.blockchain.GetVMConfig()), vmError, nil
 }
 
 func (b *EthAPIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
@@ -352,8 +352,12 @@ func (b *EthAPIBackend) ExtRPCEnabled() bool {
 	return b.extRPCEnabled
 }
 
-func (b *EthAPIBackend) RPCGasCap() *big.Int {
+func (b *EthAPIBackend) RPCGasCap() uint64 {
 	return b.eth.config.RPCGasCap
+}
+
+func (b *EthAPIBackend) RPCTxFeeCap() float64 {
+	return b.eth.config.RPCTxFeeCap
 }
 
 func (b *EthAPIBackend) BloomStatus() (uint64, uint64) {

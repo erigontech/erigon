@@ -69,10 +69,6 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 }
 
 func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	toStateStageData := func(k []byte) []byte {
-		return append([]byte{0xFF}, k...)
-	}
-
 	err := etl.Transform(
 		db,
 		dbutils.PlainStateBucket,
@@ -82,20 +78,10 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
-			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(nil))
-				}
-				return s.UpdateWithStageData(batch, s.BlockNumber, toStateStageData(key))
-			},
 		},
 	)
 	if err != nil {
 		return err
-	}
-
-	toCodeStageData := func(k []byte) []byte {
-		return append([]byte{0xCD}, k...)
 	}
 
 	return etl.Transform(
@@ -107,12 +93,6 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
-			OnLoadCommit: func(batch ethdb.Putter, key []byte, isDone bool) error {
-				if isDone {
-					return s.UpdateWithStageData(batch, s.BlockNumber, nil)
-				}
-				return s.UpdateWithStageData(batch, s.BlockNumber, toCodeStageData(key))
-			},
 		},
 	)
 }
@@ -213,8 +193,8 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
+func getExtractFunc(changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, _ []byte) error {
 			return next(k, k, nil)
@@ -222,8 +202,8 @@ func getExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
 	}
 }
 
-func getUnwindExtractFunc(changeSetBucket []byte) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[string(changeSetBucket)].WalkerAdapter
+func getUnwindExtractFunc(changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 			return next(k, k, v)
@@ -298,18 +278,18 @@ func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 }
 
 func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes bool) error {
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Debug("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
 	var l OldestAppearedLoad
-	var loadBucket []byte
+	var loadBucket string
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
 		l.innerLoadFunc = getFromPlainCodesAndLoad(p.db, codeKeyTransformLoadFunc)
@@ -331,13 +311,13 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	)
 }
 
 func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes bool) error {
-	var changeSetBucket []byte
+	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
@@ -346,12 +326,12 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Debug("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
+	log.Info("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
 	var l OldestAppearedLoad
-	var loadBucket []byte
+	var loadBucket string
 	var extractFunc etl.ExtractFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
@@ -373,7 +353,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
-			Quit: p.quitCh,
+			Quit:            p.quitCh,
 		},
 	)
 }

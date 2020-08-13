@@ -74,10 +74,10 @@ func TestUpdateLeaks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < len(keys); i += 2 {
-		if bytes.Equal(keys[i], dbutils.PreimagePrefix) {
+		if string(keys[i]) == dbutils.PreimagePrefix {
 			continue
 		}
-		value, _ := db.Get(keys[i], keys[i+1])
+		value, _ := db.Get(string(keys[i]), keys[i+1])
 		t.Errorf("State leaked into database: %x:%x -> %x", keys[i], keys[i+1], value)
 	}
 }
@@ -117,8 +117,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Write modifications to trie.
-	err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter())
-	if err != nil {
+	if err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter()); err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
 
@@ -131,30 +130,26 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Commit and cross check the databases.
-	err = transState.FinalizeTx(context.Background(), transTds.TrieStateWriter())
-	if err != nil {
+
+	if err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter()); err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
 
-	_, err = transTds.ComputeTrieRoots()
-	if err != nil {
+	if _, err := transTds.ComputeTrieRoots(); err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
 	transTds.SetBlockNr(1)
 
-	err = transState.CommitBlock(context.Background(), transTds.DbStateWriter())
-	if err != nil {
+	if err := transState.CommitBlock(context.Background(), transTds.DbStateWriter()); err != nil {
 		t.Fatal("failed to commit transition state", err)
 	}
 
-	err = finalState.FinalizeTx(context.Background(), finalTds.TrieStateWriter())
-	if err != nil {
+	if err := finalState.FinalizeTx(context.Background(), finalTds.TrieStateWriter()); err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
 
-	_, err = finalTds.ComputeTrieRoots()
-	if err != nil {
+	if _, err := finalTds.ComputeTrieRoots(); err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
@@ -162,16 +157,16 @@ func TestIntermediateLeaks(t *testing.T) {
 	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
-	finalKeys, err := finalDb.Keys()
-	if err != nil {
-		t.Fatal(err)
+	finalKeys, err2 := finalDb.Keys()
+	if err2 != nil {
+		t.Fatal(err2)
 	}
 	for i := 0; i < len(finalKeys); i += 2 {
-		if bytes.Equal(finalKeys[i], dbutils.PreimagePrefix) {
+		if string(finalKeys[i]) == dbutils.PreimagePrefix {
 			continue
 		}
-		if _, err := transDb.Get(finalKeys[i], finalKeys[i+1]); err != nil {
-			val, _ := finalDb.Get(finalKeys[i], finalKeys[i+1])
+		if _, err := transDb.Get(string(finalKeys[i]), finalKeys[i+1]); err != nil {
+			val, _ := finalDb.Get(string(finalKeys[i]), finalKeys[i+1])
 			t.Errorf("entry missing from the transition database: %x:%x -> %x", finalKeys[i], finalKeys[i+1], val)
 		}
 	}
@@ -180,11 +175,11 @@ func TestIntermediateLeaks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < len(transKeys); i += 2 {
-		if bytes.Equal(transKeys[i], dbutils.PreimagePrefix) {
+		if string(transKeys[i]) == dbutils.PreimagePrefix {
 			continue
 		}
-		if _, err := finalDb.Get(transKeys[i], transKeys[i+1]); err != nil {
-			val, _ := transDb.Get(transKeys[i], transKeys[i+1])
+		if _, err := finalDb.Get(string(transKeys[i]), transKeys[i+1]); err != nil {
+			val, _ := transDb.Get(string(transKeys[i]), transKeys[i+1])
 			t.Errorf("entry missing in the transition database: %x:%x -> %x", transKeys[i], transKeys[i+1], val)
 		}
 	}

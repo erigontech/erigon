@@ -70,7 +70,7 @@ func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Add
 	tt.startMode[depth] = true
 	return nil
 }
-func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
@@ -137,7 +137,7 @@ func makeTokens(blockNum uint64) {
 	tt := NewTokenTracer()
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	defer bc.Stop()
 	check(err)
 	if blockNum > 1 {
@@ -163,7 +163,7 @@ func makeTokens(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -197,7 +197,7 @@ func makeTokenBalances() {
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
@@ -255,7 +255,7 @@ func makeTokenBalances() {
 		vmConfig := vm.Config{EnablePreimageRecording: true}
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)
@@ -418,7 +418,7 @@ func makeTokenAllowances() {
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
@@ -479,7 +479,7 @@ func makeTokenAllowances() {
 		vmConfig := vm.Config{EnablePreimageRecording: true}
 		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
 		if err != nil {
 			fmt.Printf("Call failed with error: %v\n", err)

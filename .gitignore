@@ -51,3 +51,6 @@ profile.cov
 /timings.txt
 right_*.txt
 root_*.txt
+
+__pycache__
+docker-compose.dev.yml

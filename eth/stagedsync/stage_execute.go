@@ -31,7 +31,7 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, toBlock uint64, quit <-chan struct{}, dests vm.Cache, writeReceipts bool, changeSetHook ChangeSetHook) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, toBlock uint64, quit <-chan struct{}, writeReceipts bool, changeSetHook ChangeSetHook) error {
 	prevStageProgress, _, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -87,7 +87,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		stateWriter = state.NewPlainStateWriter(batch, blockNum)
 
 		// where the magic happens
-		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter, dests)
+		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return err
 		}
@@ -112,14 +112,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if blockNum-s.BlockNumber == 100000 {
 				// Flush the CPU profiler
 				pprof.StopCPUProfile()
-
-				// And the memory profiler
-				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
-				runtime.GC()
-				if err = pprof.WriteHeapProfile(f); err != nil {
-					log.Error("could not save memory profile", "error", err)
-				}
-				f.Close()
 			}
 		}
 
@@ -283,7 +275,7 @@ func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
 
 func cleanupContractCodeBucket(
 	db ethdb.Database,
-	bucket []byte,
+	bucket string,
 	acc accounts.Account,
 	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
 	getKeyForIncarnationFunc func(uint64) []byte,
@@ -327,7 +319,7 @@ func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
 	return rawdb.PlainDeleteAccount(db, address)
 }
 
-func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket []byte) error {
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
 	changeSetKey := dbutils.EncodeTimestamp(timestamp)
 	if err := batch.Delete(accountBucket, changeSetKey); err != nil {
 		return err

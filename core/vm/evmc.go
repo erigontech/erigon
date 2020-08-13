@@ -293,7 +293,11 @@ func (host *hostContext) Call(kind evmc.CallKind,
 		}
 	case evmc.Create2:
 		var createOutput []byte
-		createOutput, createAddr, gasLeftU, err = host.env.Create2(host.contract, input, gasU, value, salt)
+
+		saltInt256 := new(uint256.Int)
+		saltInt256.SetBytes(salt.Bytes())
+
+		createOutput, createAddr, gasLeftU, err = host.env.Create2(host.contract, input, gasU, value, saltInt256)
 		createAddrEvmc = evmc.Address(createAddr)
 		if err == ErrExecutionReverted {
 			// Assign return buffer from REVERT.

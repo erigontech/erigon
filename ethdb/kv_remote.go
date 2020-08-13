@@ -125,7 +125,7 @@ func (db *RemoteKV) IdealBatchSize() int {
 	panic("not supported")
 }
 
-func (db *RemoteKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
 
@@ -152,7 +152,7 @@ func (tx *remoteTx) Rollback() {
 	panic("remote db is read-only")
 }
 
-func (tx *remoteTx) Bucket(name []byte) Bucket {
+func (tx *remoteTx) Bucket(name string) Bucket {
 	b := remoteBucket{tx: tx, nameLen: uint(len(name))}
 	b.remote = tx.remote.Bucket(name)
 	return b
@@ -231,17 +231,13 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
-func (c *remoteCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	c.k, c.v, c.err = c.remote.SeekTo(seek)
-	if c.err != nil {
-		return []byte{}, c.v, c.err
-	}
-	return c.k, c.v, nil
-}
-
 func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	c.k, c.v, c.err = c.remote.Next()
 	return c.k, c.v, c.err
+}
+
+func (c *remoteCursor) Last() ([]byte, []byte, error) {
+	panic("not implemented yet")
 }
 
 func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {

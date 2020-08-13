@@ -71,7 +71,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -274,14 +274,6 @@ func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <
 func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) {
 	var msg interface{}
 	switch {
-	case p.version == eth63:
-		msg = &statusData63{
-			ProtocolVersion: uint32(p.version),
-			NetworkID:       DefaultConfig.NetworkID,
-			TD:              td,
-			CurrentBlock:    head,
-			GenesisBlock:    genesis,
-		}
 	case p.version >= eth64:
 		msg = &statusData{
 			ProtocolVersion: uint32(p.version),

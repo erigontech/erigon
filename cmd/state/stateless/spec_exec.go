@@ -71,7 +71,7 @@ func (ct *CombTracer) ResetSets() {
 func (ct *CombTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
-func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (ct *CombTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	if op == vm.SSTORE {
 		addr := contract.Address()
 		if stack.Len() == 0 {
@@ -174,7 +174,7 @@ func speculativeExecution(blockNum uint64) {
 	vmConfig2 := vm.Config{Tracer: ct2, Debug: true}
 	vmConfig3 := vm.Config{Tracer: ct3, Debug: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig1, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig1, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -196,7 +196,7 @@ func speculativeExecution(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb1, chainConfig, vmConfig1, nil)
+			vmenv := vm.NewEVM(context, statedb1, chainConfig, vmConfig1)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -221,7 +221,7 @@ func speculativeExecution(blockNum uint64) {
 			msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data(), false)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb2, chainConfig, vmConfig2, nil)
+			vmenv := vm.NewEVM(context, statedb2, chainConfig, vmConfig2)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -240,7 +240,7 @@ func speculativeExecution(blockNum uint64) {
 			msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data(), false)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb3, chainConfig, vmConfig3, nil)
+			vmenv := vm.NewEVM(context, statedb3, chainConfig, vmConfig3)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -263,7 +263,7 @@ func speculativeExecution(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb4, chainConfig, vmConfig2, nil)
+			vmenv := vm.NewEVM(context, statedb4, chainConfig, vmConfig2)
 			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}

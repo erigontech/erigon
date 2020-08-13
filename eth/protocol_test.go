@@ -49,58 +49,6 @@ func init() {
 
 var testAccount, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 
-// Tests that handshake failures are detected and reported correctly.
-func TestStatusMsgErrors63(t *testing.T) {
-	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
-	defer clear()
-	var (
-		genesis = pm.blockchain.Genesis()
-		head    = pm.blockchain.CurrentHeader()
-		td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
-	)
-
-	tests := []struct {
-		code      uint64
-		data      interface{}
-		wantError error
-	}{
-		{
-			code: TransactionMsg, data: []interface{}{},
-			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
-		},
-		{
-			code: StatusMsg, data: statusData63{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash()},
-			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 63),
-		},
-		{
-			code: StatusMsg, data: statusData63{63, 999, td, head.Hash(), genesis.Hash()},
-			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
-		},
-		{
-			code: StatusMsg, data: statusData63{63, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}},
-			wantError: errResp(ErrGenesisMismatch, "0300000000000000 (!= %x)", genesis.Hash().Bytes()[:8]),
-		},
-	}
-	for i, test := range tests {
-		p, errc := newTestPeer("peer", 63, pm, false)
-		// The send call might hang until reset because
-		// the protocol might not read the payload.
-		go p2p.Send(p.app, test.code, test.data)
-
-		select {
-		case err := <-errc:
-			if err == nil {
-				t.Errorf("test %d: protocol returned nil error, want %q", i, test.wantError)
-			} else if err.Error() != test.wantError.Error() {
-				t.Errorf("test %d: wrong error: got %q, want %q", i, err, test.wantError)
-			}
-		case <-time.After(2 * time.Second):
-			t.Errorf("protocol did not shut down within 2 seconds")
-		}
-		p.close()
-	}
-}
-
 func TestStatusMsgErrors64(t *testing.T) {
 	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
 	defer clear()
@@ -157,6 +105,62 @@ func TestStatusMsgErrors64(t *testing.T) {
 	}
 }
 
+func TestStatusMsgErrors65(t *testing.T) {
+	pm, clear := newTestProtocolManagerMust(t, downloader.StagedSync, 0, nil, nil)
+	defer clear()
+	var (
+		genesis = pm.blockchain.Genesis()
+		head    = pm.blockchain.CurrentHeader()
+		td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
+		forkID  = forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64())
+	)
+
+	tests := []struct {
+		code      uint64
+		data      interface{}
+		wantError error
+	}{
+		{
+			code: TransactionMsg, data: []interface{}{},
+			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
+		},
+		{
+			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 65),
+		},
+		{
+			code: StatusMsg, data: statusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
+			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
+		},
+		{
+			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
+		},
+		{
+			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
+		},
+	}
+	for i, test := range tests {
+		p, errc := newTestPeer("peer", 65, pm, false)
+		// The send call might hang until reset because
+		// the protocol might not read the payload.
+		go p2p.Send(p.app, test.code, test.data)
+
+		select {
+		case err := <-errc:
+			if err == nil {
+				t.Errorf("test %d: protocol returned nil error, want %q", i, test.wantError)
+			} else if err.Error() != test.wantError.Error() {
+				t.Errorf("test %d: wrong error: got %q, want %q", i, err, test.wantError)
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("protocol did not shut down within 2 seconds")
+		}
+		p.close()
+	}
+}
+
 func TestForkIDSplit(t *testing.T) {
 	dbNoFork := ethdb.NewMemDatabase()
 	defer dbNoFork.Close()
@@ -182,9 +186,9 @@ func TestForkIDSplit(t *testing.T) {
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 
 		txCacherNoFork  = core.NewTxSenderCacher(runtime.NumCPU())
-		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil, txCacherNoFork)
+		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, txCacherNoFork)
 		txCacherProFork = core.NewTxSenderCacher(runtime.NumCPU())
-		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil, txCacherProFork)
+		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, txCacherProFork)
 
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false /* intermediateHashes */)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false /* intermediateHashes */)
@@ -271,7 +275,6 @@ func TestForkIDSplit(t *testing.T) {
 }
 
 // This test checks that received transactions are added to the local pool.
-func TestRecvTransactions63(t *testing.T) { testRecvTransactions(t, 63) }
 func TestRecvTransactions64(t *testing.T) { testRecvTransactions(t, 64) }
 func TestRecvTransactions65(t *testing.T) { testRecvTransactions(t, 65) }
 
@@ -300,7 +303,6 @@ func testRecvTransactions(t *testing.T, protocol int) {
 }
 
 // This test checks that pending transactions are sent.
-func TestSendTransactions63(t *testing.T) { testSendTransactions(t, 63) }
 func TestSendTransactions64(t *testing.T) { testSendTransactions(t, 64) }
 func TestSendTransactions65(t *testing.T) { testSendTransactions(t, 65) }
 
@@ -331,8 +333,6 @@ func testSendTransactions(t *testing.T, protocol int) {
 		for n := 0; n < len(alltxs) && !t.Failed(); {
 			var forAllHashes func(callback func(hash common.Hash))
 			switch protocol {
-			case 63:
-				fallthrough
 			case 64:
 				msg, err := p.app.ReadMsg()
 				if err != nil {

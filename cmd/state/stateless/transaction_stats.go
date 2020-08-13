@@ -96,7 +96,7 @@ func (tt *TxTracer) queryStorageAccess(account common.Address, storageKey common
 	}
 }
 
-func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	if tt.measureCreate && tt.measureDepth+1 == depth {
 		tt.gasForCREATE += (tt.measureCurrentGas - gas)
 	}
@@ -196,7 +196,7 @@ func transactionStats(blockNum uint64) {
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, nil, txCacher)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
 	check(err)
 	defer bc.Stop()
 	interrupt := false
@@ -213,7 +213,7 @@ func transactionStats(blockNum uint64) {
 			msg, _ := tx.AsMessage(signer)
 			context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig, nil)
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			tt.ResetCounters()
 			tt.currentBlock = blockNum
 			tt.measureCreate = tx.To() == nil

@@ -24,12 +24,13 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 type hasher struct {
-	sha                  keccakState
+	sha                  crypto.KeccakState
 	valueNodesRlpEncoded bool
 	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
@@ -56,7 +57,7 @@ func newHasher(valueNodesRlpEncoded bool) *hasher {
 	case h = <-hasherPool:
 	default:
 		h = &hasher{
-			sha: sha3.NewLegacyKeccak256().(keccakState),
+			sha: sha3.NewLegacyKeccak256().(crypto.KeccakState),
 			bw:  &ByteArrayWriter{},
 		}
 	}

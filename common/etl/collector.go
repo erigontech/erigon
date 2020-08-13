@@ -66,7 +66,7 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, args TransformArgs) error {
+func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		disposeProviders(c.dataProviders)
 	}()
@@ -78,7 +78,7 @@ func (c *Collector) Load(db ethdb.Database, toBucket []byte, loadFunc LoadFunc, 
 	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
 }
 
-func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
+func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 	h := &Heap{}
@@ -120,7 +120,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 			runtime.ReadMemStats(&m)
 			log.Info(
 				"Committed batch",
-				"bucket", string(bucket),
+				"bucket", bucket,
 				"size", common.StorageSize(batchSize),
 				"current key", makeCurrentKeyStr(originalK),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
@@ -158,7 +158,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket []byte, providers []dataProvi
 	runtime.ReadMemStats(&m)
 	log.Debug(
 		"Committed batch",
-		"bucket", string(bucket),
+		"bucket", bucket,
 		"size", common.StorageSize(batchSize),
 		"current key", makeCurrentKeyStr(nil),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))

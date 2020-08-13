@@ -111,7 +111,7 @@ func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool 
 		}
 	}
 	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind TxPool: reset: %w", err)
+		return fmt.Errorf("unwind Backend: reset: %w", err)
 	}
 	return nil
 }

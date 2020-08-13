@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/compiler"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
 
 	cli "github.com/urfave/cli"
@@ -101,7 +102,7 @@ var (
 )
 
 func init() {
-	app = utils.NewApp(gitCommit, gitDate, "ethereum checkpoint helper tool")
+	app = flags.NewApp(gitCommit, gitDate, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		abiFlag,
 		binFlag,
@@ -118,7 +119,7 @@ func init() {
 		aliasFlag,
 	}
 	app.Action = utils.MigrateFlags(abigen)
-	cli.CommandHelpTemplate = utils.OriginCommandHelpTemplate
+	cli.CommandHelpTemplate = flags.OriginCommandHelpTemplate
 }
 
 func abigen(c *cli.Context) error {

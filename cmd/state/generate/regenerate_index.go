@@ -2,10 +2,11 @@ package generate
 
 import (
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"os"
 	"os/signal"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -13,7 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func RegenerateIndex(chaindata string, csBucket []byte) error {
+func RegenerateIndex(chaindata string, csBucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
@@ -30,7 +31,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 
 	ig := core.NewIndexGenerator(db, quitCh)
-	cs, ok := changeset.Mapper[string(csBucket)]
+	cs, ok := changeset.Mapper[csBucket]
 	if !ok {
 		return errors.New("unknown changeset")
 	}
@@ -41,7 +42,7 @@ func RegenerateIndex(chaindata string, csBucket []byte) error {
 	}
 	startTime := time.Now()
 	log.Info("Index generation started", "start time", startTime)
-	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket)
+	err = ig.GenerateIndex(0, lastExecutedBlock, csBucket, os.TempDir())
 	if err != nil {
 		return err
 	}

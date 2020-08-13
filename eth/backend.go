@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -153,9 +154,10 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			return nil, err
 		}
 	}
-	if ctx.Config.PrivateApiAddr != "" {
-		//remotedbserver.StartDeprecated(chainDb.KV(), ctx.Config.PrivateApiAddr)
-		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
+
+	err = migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir)
+	if err != nil {
+		return nil, err
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
@@ -210,9 +212,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 	}
 
-	vmConfig, cacheConfig, dests := BlockchainRuntimeConfig(config)
+	vmConfig, cacheConfig := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, dests, txCacher)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, txCacher)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +244,10 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
+	if ctx.Config.PrivateApiAddr != "" {
+		remotedbserver.StartGrpc(chainDb.KV(), eth, ctx.Config.PrivateApiAddr)
+	}
+
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
@@ -258,7 +264,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	if config.SyncMode != downloader.StagedSync {
-		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, dests)
+		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 	}
 
@@ -279,7 +285,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	return eth, nil
 }
 
-func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig, *vm.DestsCache) {
+func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
@@ -300,7 +306,7 @@ func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig, *vm.
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
-	return vmConfig, cacheConfig, vm.NewDestsCache(50000)
+	return vmConfig, cacheConfig
 }
 
 func makeExtraData(extra []byte) []byte {
@@ -515,7 +521,7 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(threads int, dests vm.Cache) error {
+func (s *Ethereum) StartMining(threads int) error {
 	// Update the thread count within the consensus engine
 	type threaded interface {
 		SetThreads(threads int)
@@ -553,7 +559,7 @@ func (s *Ethereum) StartMining(threads int, dests vm.Cache) error {
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 
-		go s.miner.Start(eb, dests)
+		go s.miner.Start(eb)
 	}
 	return nil
 }

@@ -33,9 +33,10 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 
 	var kv ethdb.KV
 	var db ethdb.Database
+	var back ethdb.Backend
 	var err error
 	if rpcHost != "" {
-		kv, err = ethdb.NewRemote2().Path(rpcHost).Open()
+		kv, back, err = ethdb.NewRemote2().Path(rpcHost).Open()
 		db = ethdb.NewObjectDatabase(kv)
 	} else if chaindata != "" {
 		database, errOpen := ethdb.Open(chaindata)
@@ -44,7 +45,7 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 		}
 		kv = database.KV()
 	} else {
-		err = fmt.Errorf("either remote db or bolt db must be specified")
+		err = fmt.Errorf("either remote or local db must be specified")
 	}
 	if err != nil {
 		return err
@@ -53,6 +54,7 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 	e := &apis.Env{
 		KV:              kv,
 		DB:              db,
+		Back:            back,
 		RemoteDBAddress: rpcHost,
 		Chaindata:       chaindata,
 	}

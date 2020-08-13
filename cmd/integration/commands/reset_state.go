@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -21,7 +22,7 @@ import (
 
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
-	Short: "Reset StateStages (4,5,6,7,8,9) and buckets",
+	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := rootContext()
 		err := resetState(ctx)
@@ -39,11 +40,42 @@ var cmdResetState = &cobra.Command{
 	},
 }
 
+var cmdClearUnwindStack = &cobra.Command{
+	Use:   "clear_unwind_stack",
+	Short: "Clear unwind stack",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := rootContext()
+		err := clearUnwindStack(ctx)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdResetState)
 	withCompact(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
+
+	withChaindata(cmdClearUnwindStack)
+
+	rootCmd.AddCommand(cmdClearUnwindStack)
+}
+
+func clearUnwindStack(_ context.Context) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	for i := stages.SyncStage(0); i < stages.Finish; i++ {
+		if err := stages.SaveStageUnwind(db, i, 0, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resetState(_ context.Context) error {
@@ -161,11 +193,14 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 func printStages(db *ethdb.ObjectDatabase) error {
 	var err error
 	var progress uint64
+	w := new(tabwriter.Writer)
+	defer w.Flush()
+	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
 		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
-		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
+		fmt.Fprintf(w, "%s \t %d\n", string(stages.DBKeys[stage]), progress)
 	}
 	return nil
 }
@@ -185,10 +220,11 @@ func copyCompact() error {
 	if err := env.Open(from, lmdb.Readonly, 0644); err != nil {
 		return err
 	}
+	_ = os.RemoveAll(to)
 	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
-	if err := env.SetMapSize(ethdb.LMDBMapSize); err != nil {
+	if err := env.SetMapSize(int64(ethdb.LMDBMapSize.Bytes())); err != nil {
 		return err
 	}
 

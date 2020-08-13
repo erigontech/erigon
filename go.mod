@@ -13,11 +13,11 @@ require (
 	github.com/aws/aws-sdk-go v1.28.9
 	github.com/blend/go-sdk v2.0.0+incompatible // indirect
 	github.com/btcsuite/btcd v0.0.0-20171128150713-2e60448ffcc6
+	github.com/c2h5oh/datasize v0.0.0-20200112174442-28bbd4740fee
 	github.com/cespare/cp v0.1.0
 	github.com/cloudflare/cloudflare-go v0.10.6
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dgraph-io/badger/v2 v2.0.3
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200219165308-d1232e640a87
@@ -31,7 +31,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.4.2
-	github.com/golang/snappy v0.0.2-0.20190904063534-ff6b7dc882cf
+	github.com/golang/snappy v0.0.2-0.20200707131729-196ae77b8a26
 	github.com/gorilla/websocket v1.4.1
 	github.com/graph-gophers/graphql-go v0.0.0-20191115155744-f33e81362277
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0
@@ -45,7 +45,7 @@ require (
 	github.com/karalabe/usb v0.0.0-20190919080040-51dc0efba356
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
-	github.com/ledgerwatch/lmdb-go v1.11.0
+	github.com/ledgerwatch/lmdb-go v1.13.0
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12
@@ -73,10 +73,11 @@ require (
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 	golang.org/x/net v0.0.0-20200625001655-4c5254603344
-	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
+	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/grpc v1.30.0
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15

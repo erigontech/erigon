@@ -30,6 +30,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+var toAddr = common.BytesToAddress
+
 type StateSuite struct {
 	db    ethdb.Database
 	kv    ethdb.KV // Same as db, but with a different interface
@@ -38,8 +40,6 @@ type StateSuite struct {
 }
 
 var _ = checker.Suite(&StateSuite{})
-
-var toAddr = common.BytesToAddress
 
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
@@ -95,7 +95,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
     }
 }`
 	if got != want {
-		c.Errorf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
+		c.Errorf("DumpToCollector mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
 }
 

@@ -2,6 +2,14 @@ package ethdb
 
 import (
 	"context"
+	"errors"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+)
+
+var (
+	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 )
 
 type KV interface {
@@ -9,12 +17,12 @@ type KV interface {
 	Update(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
-	Begin(ctx context.Context, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
 	IdealBatchSize() int
 }
 
 type Tx interface {
-	Bucket(name []byte) Bucket
+	Bucket(name string) Bucket
 
 	Commit(ctx context.Context) error
 	Rollback()
@@ -27,6 +35,13 @@ type Bucket interface {
 	Cursor() Cursor
 
 	Size() (uint64, error)
+}
+
+// Interface used for buckets migration, don't use it in usual app code
+type BucketMigrator interface {
+	Drop() error
+	Create() error
+	Exists() bool
 	Clear() error
 }
 
@@ -38,8 +53,8 @@ type Cursor interface {
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
-	SeekTo(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
+	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
@@ -58,11 +73,16 @@ type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
 }
 
+type Backend interface {
+	AddLocal([]byte) ([]byte, error)
+	Etherbase() (common.Address, error)
+	NetVersion() uint64
+}
+
 type DbProvider uint8
 
 const (
 	Bolt DbProvider = iota
-	Badger
 	Remote
 	Lmdb
 )
