@@ -907,6 +907,12 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 }
 
 func (c *LmdbCursor) Get(key []byte) ([]byte, error) {
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return nil, err
+		}
+	}
+
 	_, v, err := c.set(key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
