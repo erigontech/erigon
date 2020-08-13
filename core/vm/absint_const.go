@@ -27,6 +27,7 @@ const (
 type state struct {
 	kind AbsElmType
 	stack []AbsConst
+	anlyCounter int
 }
 
 func (state * state) Push(value AbsConst) {
@@ -42,7 +43,7 @@ func (state * state) Pop() AbsConst {
 }
 
 func botSt() state {
-	st := state{stateValueKind, make([]AbsConst, absStackLen)}
+	st := state{stateValueKind, make([]AbsConst, absStackLen), -1}
 	for i := range st.stack {
 		st.stack[i] = ConstBot()
 	}
@@ -178,7 +179,7 @@ func leq(st0 state, st1 state) bool {
 }
 
 func lub(st0 state, st1 state) state {
-	res := state{stateValueKind, []AbsConst{}}
+	res := state{stateValueKind, []AbsConst{}, -1}
 
 	for i := 0; i < absStackLen; i++ {
 		lub := ConstLub(st0.stack[i], st1.stack[i])
@@ -202,7 +203,7 @@ func getStmts(prog *Contract) []stmt {
 		op := prog.GetOp(uint64(pc))
 		stmt.opcode = op
 		stmt.operation = jt[op]
-		stmt.ends = stmt.operation.halts || stmt.operation.reverts
+		stmt.ends = stmt.operation.halts || stmt.operation.reverts || !stmt.operation.valid
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {
@@ -329,9 +330,9 @@ func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]st
 		}
 
 		if badJump != nil && badJump.pc == pc {
-			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Red(pc), aurora.Red(valueStr), strings.Join(pc0s, ","), D[pc])
+			fmt.Printf("[%v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Red(pc), aurora.Red(valueStr), strings.Join(pc0s, ","), D[pc])
 		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("%3v\t %-25v %-10v %v\n", aurora.Green(pc), aurora.Green(valueStr), strings.Join(pc0s, ","), D[pc])
+			fmt.Printf("[%v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Green(pc), aurora.Green(valueStr), strings.Join(pc0s, ","), D[pc])
 		} else {
 			fmt.Printf("%3v\t %-25v\n", pc, valueStr)
 		}
@@ -364,8 +365,6 @@ func AbsIntCfgHarness(prog *Contract) error {
 	}
 	D[startPC] = startSt()
 
-	i := 0
-
 	prevEdgeMap := make(map[int]map[int]bool)
 
 	resolution := resolve(prog, startPC, D[startPC], stmts[startPC])
@@ -383,6 +382,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	check(stmts, prevEdgeMap)
 	workList := resolution.edges
+	anlyCounter := 0
 	for len(workList) > 0 {
 		//sortEdges(workList)
 		var e edge
@@ -428,7 +428,9 @@ func AbsIntCfgHarness(prog *Contract) error {
 				//fmt.Printf("lub\t\t\t%v\n", postDpc1)
 				printAnlyState(stmts, prevEdgeMap, D, nil)
 			}
+			postDpc1.anlyCounter = anlyCounter
 			D[e.pc1] = postDpc1
+			anlyCounter++
 
 			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 
@@ -456,8 +458,6 @@ func AbsIntCfgHarness(prog *Contract) error {
 			prevEdgeMap[e.pc1][e.pc0] = true
 		}
 		DEBUG = false
-
-		i++
 
 		check(stmts, prevEdgeMap)
 	}
