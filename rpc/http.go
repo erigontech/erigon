@@ -95,7 +95,7 @@ type HTTPTimeouts struct {
 // configuration is not provided.
 var DefaultHTTPTimeouts = HTTPTimeouts{
 	ReadTimeout:  30 * time.Second,
-	WriteTimeout: 30 * time.Second,
+	WriteTimeout: 30 * time.Minute,
 	IdleTimeout:  120 * time.Second,
 }
 

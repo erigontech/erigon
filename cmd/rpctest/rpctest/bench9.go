@@ -40,7 +40,7 @@ func Bench9(needCompare bool) {
 		accRangeTG := make(map[common.Address]state.DumpAccount)
 		var sr DebugAccountRange
 		reqGen.reqID++
-		res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+		res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 
 		if res.Err != nil {
 			fmt.Printf("Could not get accountRange (turbo-geth): %v\n", res.Err)

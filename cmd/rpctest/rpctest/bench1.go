@@ -325,7 +325,7 @@ func Bench1(needCompare bool, fullTest bool) {
 				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
 				reqGen.reqID++
-				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page), &sr)
+				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 				resultsCh <- res
 
 				if res.Err != nil {
@@ -344,7 +344,7 @@ func Bench1(needCompare bool, fullTest bool) {
 				}
 				if needCompare {
 					var srGeth DebugAccountRange
-					res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth), &srGeth)
+					res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth, 256), &srGeth)
 					resultsCh <- res
 					if res.Err != nil {
 						fmt.Printf("Could not get accountRange geth: %v\n", res.Err)

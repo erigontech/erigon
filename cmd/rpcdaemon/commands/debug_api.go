@@ -103,7 +103,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	fmt.Println("end", err, len(res.Accounts), res.Root)
-	return res, err
+	return res, nil
 }
 
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error) {
