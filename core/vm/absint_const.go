@@ -446,7 +446,8 @@ func AbsIntCfgHarness(prog *Contract) error {
 					}
 				}
 				if !inWorkList {
-					workList = append(workList, e)
+					head := []edge{e}
+					workList = append(head, workList...)
 				}
 			}
 
