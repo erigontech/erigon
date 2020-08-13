@@ -104,6 +104,11 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 				attachingFrom = i
 			}
 		}
+		if attachmentTip != nil {
+			if err := hd.verifySealFunc(header); err != nil {
+				return false, &PeerPenalty{peerHandle: peerHandle, penalty: InvalidSealPenalty, err: err}, nil
+			}
+		}
 	}
 	if attachmentTip == nil {
 		return false, nil, nil
@@ -167,10 +172,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent comm
 	if !ok {
 		return fmt.Errorf("could not convert header.Difficulty to uint256: %s", header.Difficulty)
 	}
-	tipId := nextTipId
-	nextTipId++
 	tip := &Tip{
-		id:                   tipId,
 		anchorParent:         anchorParent,
 		cumulativeDifficulty: *cumulativeDifficulty,
 		timestamp:            header.Time,
@@ -179,10 +181,17 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent comm
 		uncleHash:            header.UncleHash,
 		noPrepend:            false, // TODO: Check
 	}
-	hd.tipLimiter.ReplaceOrInsert(tip)
+	tipItem := &TipItem{
+		tipHash:              header.Hash(),
+		cumulativeDifficulty: *cumulativeDifficulty,
+	}
+	hd.tipLimiter.ReplaceOrInsert(tipItem)
+	hd.tips[header.Hash()] = tip
 	// Enforce the limit
 	for hd.tipLimiter.Len() > hd.tipLimit {
-		hd.tipLimiter.DeleteMin()
+		deleted := hd.tipLimiter.DeleteMin()
+		deletedItem := deleted.(*TipItem)
+		delete(hd.tips, deletedItem.tipHash)
 	}
 	return nil
 }

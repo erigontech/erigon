@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/big"
@@ -22,7 +23,6 @@ type Anchor struct {
 }
 
 type Tip struct {
-	id                   int
 	anchorParent         common.Hash
 	cumulativeDifficulty uint256.Int
 	timestamp            uint64
@@ -32,7 +32,10 @@ type Tip struct {
 	noPrepend            bool
 }
 
-var nextTipId int
+type TipItem struct {
+	tipHash              common.Hash
+	cumulativeDifficulty uint256.Int
+}
 
 // First item in ChainSegment is the anchor
 // ChainSegment must be contiguous and must not include bad headers
@@ -50,12 +53,14 @@ const (
 	DuplicateHeaderPenalty
 	WrongChildBlockHeightPenalty
 	WrongChildDifficultyPenalty
+	InvalidSealPenalty
 )
 
 type PeerPenalty struct {
 	// This type may also contain the "severity" of penalty, if we find that it helps
 	peerHandle PeerHandle
 	penalty    Penalty
+	err        error // Underlying error if available
 }
 
 type RequestQueueItem struct {
@@ -65,6 +70,7 @@ type RequestQueueItem struct {
 
 type RequestQueue []RequestQueueItem
 
+type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
@@ -80,13 +86,14 @@ type HeaderDownload struct {
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
+	verifySealFunc         VerifySealFunc
 }
 
-func (a *Tip) Less(b llrb.Item) bool {
-	bi := b.(*Tip)
+func (a *TipItem) Less(b llrb.Item) bool {
+	bi := b.(*TipItem)
 	if a.cumulativeDifficulty.Eq(&bi.cumulativeDifficulty) {
-		// id is unique and it breaks the ties
-		return a.id < bi.id
+		// hash is unique and it breaks the ties
+		return bytes.Compare(a.tipHash[:], bi.tipHash[:]) < 0
 	}
 	return a.cumulativeDifficulty.Lt(&bi.cumulativeDifficulty)
 }
@@ -117,7 +124,7 @@ func (rq *RequestQueue) Pop() interface{} {
 	return x
 }
 
-func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDifficultyFunc) *HeaderDownload {
+func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDifficultyFunc, verifySealFunc VerifySealFunc) *HeaderDownload {
 	return &HeaderDownload{
 		filesDir:           filesDir,
 		badHeaders:         make(map[common.Hash]struct{}),
@@ -126,6 +133,7 @@ func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDif
 		tipLimiter:         llrb.New(),
 		tipLimit:           tipLimit,
 		calcDifficultyFunc: calcDifficultyFunc,
+		verifySealFunc:     verifySealFunc,
 	}
 }
 
@@ -142,8 +150,10 @@ func (pp PeerPenalty) String() string {
 		penaltyStr = "WrongChildBlockHeight"
 	case WrongChildDifficultyPenalty:
 		penaltyStr = "WrongChildDifficulty"
+	case InvalidSealPenalty:
+		penaltyStr = "InvalidSeal"
 	default:
 		penaltyStr = fmt.Sprintf("Unknown(%d)", pp.penalty)
 	}
-	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s}", pp.peerHandle, penaltyStr)
+	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, penaltyStr, pp.err)
 }
