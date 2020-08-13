@@ -24,6 +24,10 @@ const (
 	stateValueKind = iota
 )
 
+const (
+	failOnBadJump = false
+)
+
 type state struct {
 	kind AbsElmType
 	stack []AbsConst
@@ -294,11 +298,12 @@ func getEntryReachableEdges(entry int, edges []edge) []edge {
 	return reachable
 }
 
-func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]state, badJump *stmt) {
+func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]state, badJumps map[int]bool) {
 //	es := make([]edge, len(edges))
 //	copy(es, edges)
 //	sortEdges(es)
 
+	var badJumpList []string
 	for pc, stmt := range stmts {
 		if stmt.inferredAsData {
 			//fmt.Printf("data: %v\n", stmt.inferredAsData)
@@ -329,13 +334,20 @@ func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]st
 			pc0s = nil
 		}
 
-		if badJump != nil && badJump.pc == pc {
-			fmt.Printf("[%v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Red(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+		if badJumps[pc] {
+			out := fmt.Sprintf("[%5v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+			fmt.Print(out)
+			badJumpList = append(badJumpList, out)
 		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("[%v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Green(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+			fmt.Printf("[%5v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
 		} else {
-			fmt.Printf("%3v\t %-25v\n", pc, valueStr)
+			fmt.Printf("[%5v] %3v\t %-25v\n", aurora.Blue(D[pc].anlyCounter), aurora.Yellow(pc), valueStr)
 		}
+	}
+
+	print("\nFull list of bad jumps:\n")
+	for _, badJump := range badJumpList {
+		fmt.Println(badJump)
 	}
 }
 
@@ -355,7 +367,9 @@ func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
 func AbsIntCfgHarness(prog *Contract) error {
 
 	stmts := getStmts(prog)
-	if DEBUG { printStmts(stmts) }
+	if DEBUG {
+		printStmts(stmts)
+	}
 
 	startPC := 0
 	codeLen := len(prog.Code)
@@ -367,22 +381,27 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	prevEdgeMap := make(map[int]map[int]bool)
 
-	resolution := resolve(prog, startPC, D[startPC], stmts[startPC])
-	if !resolution.resolved {
-		fmt.Printf("Unable to resolve at pc=%x\n", startPC)
-		return nil
-	} else {
-		for _, e := range resolution.edges {
-			if prevEdgeMap[e.pc1] == nil {
-				prevEdgeMap[e.pc1] = make(map[int]bool)
+	var workList []edge
+	{
+		resolution := resolve(prog, startPC, D[startPC], stmts[startPC])
+		if !resolution.resolved {
+			fmt.Printf("Unable to resolve at pc=%x\n", startPC)
+			return nil
+		} else {
+			for _, e := range resolution.edges {
+				if prevEdgeMap[e.pc1] == nil {
+					prevEdgeMap[e.pc1] = make(map[int]bool)
+				}
+				prevEdgeMap[e.pc1][e.pc0] = true
 			}
-			prevEdgeMap[e.pc1][e.pc0] = true
 		}
+		workList = resolution.edges
 	}
 
 	check(stmts, prevEdgeMap)
-	workList := resolution.edges
+
 	anlyCounter := 0
+	badJumps := make(map[int]bool)
 	for len(workList) > 0 {
 		//sortEdges(workList)
 		var e edge
@@ -430,31 +449,36 @@ func AbsIntCfgHarness(prog *Contract) error {
 			}
 			D[e.pc1] = postDpc1
 
-			resolution = resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
+			resolution := resolve(prog, e.pc1, D[e.pc1], stmts[e.pc1])
 
 			if !resolution.resolved {
-				printAnlyState(stmts, prevEdgeMap, D, resolution.badJump)
-				fmt.Printf("Unable to resolve at pc=%x\n", aurora.Magenta(e.pc1))
-				return nil
-			}
-
-			for _, e := range resolution.edges {
-				inWorkList := false
-				for _, w := range workList {
-					if w.pc0 == e.pc0 && w.pc1 == e.pc1 {
-						inWorkList = true
+				badJumps[resolution.badJump.pc] = true
+				fmt.Printf("FAILURE: Unable to resolve: anlyCounter=%v pc=%x\n", aurora.Red(anlyCounter), aurora.Red(e.pc1))
+				if failOnBadJump {
+					badJumps := make(map[int]bool)
+					badJumps[resolution.badJump.pc] = true
+					printAnlyState(stmts, prevEdgeMap, D, badJumps)
+					return nil
+				}
+			} else {
+				for _, e := range resolution.edges {
+					inWorkList := false
+					for _, w := range workList {
+						if w.pc0 == e.pc0 && w.pc1 == e.pc1 {
+							inWorkList = true
+						}
+					}
+					if !inWorkList {
+						head := []edge{e}
+						workList = append(head, workList...)
 					}
 				}
-				if !inWorkList {
-					head := []edge{e}
-					workList = append(head, workList...)
-				}
-			}
 
-			if prevEdgeMap[e.pc1] == nil {
+				if prevEdgeMap[e.pc1] == nil {
 					prevEdgeMap[e.pc1] = make(map[int]bool)
+				}
+				prevEdgeMap[e.pc1][e.pc0] = true
 			}
-			prevEdgeMap[e.pc1][e.pc0] = true
 		}
 		DEBUG = false
 
@@ -469,11 +493,10 @@ func AbsIntCfgHarness(prog *Contract) error {
 	print("\nFinal resolve....")
 	var finalEdges []edge
 	for pc := 0; pc < codeLen; pc++ {
-		resolution = resolve(prog, pc, D[pc], stmts[pc])
+		resolution := resolve(prog, pc, D[pc], stmts[pc])
 		if !resolution.resolved {
-			printAnlyState(stmts, nil, D, resolution.badJump)
-			fmt.Printf("Unable to resolve at pc=%x\n", pc)
-			return nil
+			badJumps[resolution.badJump.pc] = true
+			fmt.Println("Bad jump found during final resolve.")
 		}
 		finalEdges = append(finalEdges, resolution.edges...)
 	}
@@ -487,6 +510,10 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 	printAnlyState(stmts, prevEdgeMap, D, nil)
 	println("done")
+
+	if len(badJumps) > 0 {
+		printAnlyState(stmts, prevEdgeMap, D, badJumps)
+	}
 
 	return nil
 }
