@@ -246,7 +246,7 @@ type lmdbTx struct {
 }
 
 type lmdbBucket struct {
-	isDupsort bool
+	isDupSort bool
 	dupFrom   int
 	dupTo     int
 	name      string
@@ -384,7 +384,7 @@ func (tx *lmdbTx) Bucket(name string) Bucket {
 		panic(fmt.Errorf("%w: %s", ErrUnknownBucket, name))
 	}
 
-	return &lmdbBucket{tx: tx, dbi: tx.db.buckets[name], isDupsort: cfg.IsDupsort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen, name: name}
+	return &lmdbBucket{tx: tx, dbi: tx.db.buckets[name], isDupSort: cfg.IsDupSort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen, name: name}
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -503,7 +503,7 @@ func (tx *lmdbTx) getDupSort(bucket string, dbi lmdb.DBI, cfg *dbutils.BucketCon
 }
 
 func (b lmdbBucket) Get(key []byte) ([]byte, error) {
-	if b.isDupsort {
+	if b.isDupSort {
 		return b.getDupSort(key)
 	}
 

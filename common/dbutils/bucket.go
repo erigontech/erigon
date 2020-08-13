@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -12,13 +11,32 @@ import (
 var (
 	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
 
-	// Contains Accounts:
-	//   key - address (unhashed)
-	//   value - account encoded for storage
-	// Contains Storage:
-	//   key - address (unhashed) + incarnation + storage key (unhashed)
-	//   value - storage value(common.hash)
-	PlainStateBucket = "PLAIN-CST"
+	/*
+		Logical layout:
+			Contains Accounts:
+			  key - address (unhashed)
+			  value - account encoded for storage
+			Contains Storage:
+			  key - address (unhashed) + incarnation + storage key (unhashed)
+			  value - storage value(common.hash)
+
+		Physical layout:
+			PlainStateBucket and CurrentStateBucket utilises DupSort feature of LMDB (store multiple values inside 1 key).
+		-------------------------------------------------------------
+			   key              |            value
+		-------------------------------------------------------------
+		[acc_hash]              | [acc_value]
+		[acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
+								| [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+								| [storage3_hash]+[storage3_value]
+								| ...
+		[acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
+								| ...
+		[acc2_hash]             | [acc2_value]
+								...
+	*/
+	PlainStateBucket     = "PLAIN-CST2"
+	PlainStateBucketOld1 = "PLAIN-CST"
 
 	// "Plain State"
 	//key - address+incarnation
@@ -204,13 +222,14 @@ var DeprecatedBuckets = []string{
 	SyncStageProgressOld1,
 	SyncStageUnwindOld1,
 	CurrentStateBucketOld1,
+	PlainStateBucketOld1,
 }
 
 var BucketsCfg = map[string]*BucketConfigItem{}
 
 type BucketConfigItem struct {
 	ID         int
-	IsDupsort  bool
+	IsDupSort  bool
 	DupToLen   int
 	DupFromLen int
 }
@@ -232,7 +251,7 @@ var dupSortConfig = []dupSortConfigEntry{
 	},
 	{
 		Bucket:    PlainStateBucket,
-		IsDupSort: debug.IsPlainStateDupsortEnabled(),
+		IsDupSort: true,
 		ToLen:     28,
 		FromLen:   60,
 	},
@@ -262,7 +281,7 @@ func createBucketConfig(id int, name string) *BucketConfigItem {
 
 		cfg.DupFromLen = dupCfg.FromLen
 		cfg.DupToLen = dupCfg.ToLen
-		cfg.IsDupsort = dupCfg.IsDupSort
+		cfg.IsDupSort = dupCfg.IsDupSort
 	}
 
 	return cfg

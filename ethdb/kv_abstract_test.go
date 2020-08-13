@@ -28,10 +28,10 @@ func TestManagedTx(t *testing.T) {
 	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
-	dbutils.BucketsCfg[bucket1].IsDupsort = true
+	dbutils.BucketsCfg[bucket1].IsDupSort = true
 	dbutils.BucketsCfg[bucket1].DupFromLen = 6
 	dbutils.BucketsCfg[bucket1].DupToLen = 4
-	dbutils.BucketsCfg[bucket2].IsDupsort = false
+	dbutils.BucketsCfg[bucket2].IsDupSort = false
 
 	writeDBs, readDBs, closeAll := setupDatabases()
 	defer closeAll()
@@ -110,7 +110,9 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	return writeDBs, readDBs, func() {
 		grpcServer.Stop()
 
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			panic(err)
+		}
 
 		for _, db := range readDBs {
 			db.Close()
