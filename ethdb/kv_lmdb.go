@@ -930,6 +930,7 @@ func (c *LmdbCursor) set(key []byte) ([]byte, []byte, error) {
 func (c *LmdbCursor) setRange(key []byte) ([]byte, []byte, error) {
 	return c.cursor.Get(key, nil, lmdb.SetRange)
 }
+
 func (c *LmdbCursor) next() ([]byte, []byte, error) {
 	return c.cursor.Get(nil, nil, lmdb.Next)
 }

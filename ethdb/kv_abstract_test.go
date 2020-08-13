@@ -149,7 +149,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.NoError(err2)
 		assert.Equal([]byte{2}, k2)
 
-		c = tx.Cursor(bucket1).Prefix([]byte{2})
+		c = tx.Cursor(bucket1)
 		counter = 0
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
