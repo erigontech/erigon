@@ -161,6 +161,7 @@ func (m *mutation) Commit() (uint64, error) {
 			value, _ := bt.GetStr(key)
 			m.tuples = append(m.tuples, bucketB, []byte(key), value)
 		}
+		delete(m.puts.mp, bucketStr)
 	}
 	sort.Sort(m.tuples)
 

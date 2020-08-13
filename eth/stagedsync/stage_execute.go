@@ -163,6 +163,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	batch := stateDB.NewBatch()
+	defer batch.Rollback()
 
 	rewindFunc := ethdb.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket

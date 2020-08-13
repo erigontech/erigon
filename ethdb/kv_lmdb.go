@@ -207,7 +207,7 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *LmdbKV) IdealBatchSize() int {
-	return int(1 * datasize.GB)
+	return int(2 * datasize.GB)
 }
 
 func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
