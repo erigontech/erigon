@@ -32,6 +32,7 @@ type state struct {
 	kind AbsElmType
 	stack []AbsConst
 	anlyCounter int
+	worklistLen int
 }
 
 func (state * state) Push(value AbsConst) {
@@ -47,7 +48,7 @@ func (state * state) Pop() AbsConst {
 }
 
 func botSt() state {
-	st := state{stateValueKind, make([]AbsConst, absStackLen), -1}
+	st := state{stateValueKind, make([]AbsConst, absStackLen), -1, -1}
 	for i := range st.stack {
 		st.stack[i] = ConstBot()
 	}
@@ -183,7 +184,7 @@ func leq(st0 state, st1 state) bool {
 }
 
 func lub(st0 state, st1 state) state {
-	res := state{stateValueKind, []AbsConst{}, -1}
+	res := state{stateValueKind, []AbsConst{}, -1,-1}
 
 	for i := 0; i < absStackLen; i++ {
 		lub := ConstLub(st0.stack[i], st1.stack[i])
@@ -335,13 +336,13 @@ func printAnlyState(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]st
 		}
 
 		if badJumps[pc] {
-			out := fmt.Sprintf("[%5v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 	aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
 			fmt.Print(out)
 			badJumpList = append(badJumpList, out)
 		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("[%5v] %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 			aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
 		} else {
-			fmt.Printf("[%5v] %3v\t %-25v\n", aurora.Blue(D[pc].anlyCounter), aurora.Yellow(pc), valueStr)
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", 					aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), valueStr)
 		}
 	}
 
@@ -484,6 +485,7 @@ func AbsIntCfgHarness(prog *Contract) error {
 
 		decp1Copy := D[e.pc1]
 		decp1Copy.anlyCounter = anlyCounter
+		decp1Copy.worklistLen = len(workList)
 		D[e.pc1] = decp1Copy
 		anlyCounter++
 
