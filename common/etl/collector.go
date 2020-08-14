@@ -122,7 +122,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
-		if i%100_000 == 0 && time.Since(putTimer) > 30*time.Second {
+		if i%1_000_000 == 0 && time.Since(putTimer) > 30*time.Second {
 			putTimer = time.Now()
 			runtime.ReadMemStats(&m)
 			log.Info(
