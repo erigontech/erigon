@@ -311,23 +311,33 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
+	var commitTimer time.Time
 	tx := &lmdbTx{db: db, ctx: ctx}
 	if err := db.env.Update(func(txn *lmdb.Txn) error {
 		defer tx.closeCursors()
 		txn.RawRead = true
 		tx.tx = txn
-		return f(tx)
+		if exeErr := f(tx); exeErr != nil {
+			return exeErr
+		}
+		commitTimer = time.Now()
+		return nil
 	}); err != nil {
 		return err
 	}
 
-	t := time.Now()
-	if err := db.env.Sync(true); err != nil {
+	commitTook := time.Since(commitTimer)
+	if commitTook > 10*time.Second {
+		log.Info("Batch", "commit", commitTook)
+	}
+
+	fsyncTimer := time.Now()
+	if err := tx.db.env.Sync(true); err != nil {
 		log.Warn("fsync after commit failed: \n", err)
 	}
-	fsyncTime := time.Since(t)
-	if fsyncTime > 5*time.Second {
-		log.Info("commit", "fsync", fsyncTime)
+	fsyncTook := time.Since(fsyncTimer)
+	if fsyncTook > 1*time.Second {
+		log.Info("Batch", "fsync", fsyncTook)
 	}
 	return nil
 }
@@ -412,16 +422,23 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		runtime.UnlockOSThread()
 	}()
 	tx.closeCursors()
+
+	commitTimer := time.Now()
 	if err := tx.tx.Commit(); err != nil {
 		return err
 	}
-	t := time.Now()
+	commitTook := time.Since(commitTimer)
+	if commitTook > 10*time.Second {
+		log.Info("Batch", "commit", commitTook)
+	}
+
+	fsyncTimer := time.Now()
 	if err := tx.db.env.Sync(true); err != nil {
 		log.Warn("fsync after commit failed: \n", err)
 	}
-	fsyncTime := time.Since(t)
-	if fsyncTime > 1*time.Second {
-		log.Info("commit", "fsync", fsyncTime)
+	fsyncTook := time.Since(fsyncTimer)
+	if fsyncTook > 1*time.Second {
+		log.Info("Batch", "fsync", fsyncTook)
 	}
 	return nil
 }
