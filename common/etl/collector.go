@@ -123,6 +123,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		}
 		i++
 		if i%100_000 == 0 && time.Since(putTimer) > 30*time.Second {
+			putTimer = time.Now()
 			runtime.ReadMemStats(&m)
 			log.Info(
 				"Loading into bucket",
