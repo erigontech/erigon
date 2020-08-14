@@ -264,7 +264,6 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 		data: tx.data,
 		time: tx.time,
 	}
-	cpy := &Transaction{data: tx.data}
 	cpy.data.R, cpy.data.S, cpy.data.V = *r, *s, *v
 	return cpy, nil
 }
@@ -280,11 +279,6 @@ func (tx *Transaction) Cost() *big.Int {
 // The return values should not be modified by the caller.
 func (tx *Transaction) RawSignatureValues() (v, r, s *uint256.Int) {
 	return &tx.data.V, &tx.data.R, &tx.data.S
-}
-
-// SetReceivedTime sets the time that this transaction was received at.
-func (tx *Transaction) SetReceivedTime(time time.Time) {
-	tx.receivedTime = &time
 }
 
 // Transactions is a Transaction slice type for basic sorting.
@@ -337,7 +331,7 @@ func (s TxByPriceAndTime) Len() int { return len(s) }
 func (s TxByPriceAndTime) Less(i, j int) bool {
 	// If the prices are equal, use the time the transaction was first seen for
 	// deterministic sorting
-	cmp := s[i].data.Price.Cmp(s[j].data.Price)
+	cmp := s[i].data.Price.Cmp(&s[j].data.Price)
 	if cmp == 0 {
 		return s[i].time.Before(s[j].time)
 	}
