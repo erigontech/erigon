@@ -420,7 +420,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Warn("fsync after commit failed: \n", err)
 	}
 	fsyncTime := time.Since(t)
-	if fsyncTime > 5*time.Second {
+	if fsyncTime > 1*time.Second {
 		log.Info("commit", "fsync", fsyncTime)
 	}
 	return nil
