@@ -95,6 +95,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 			panic(eee)
 		}
 	}
+
 	batch, err := db.Begin()
 	if err != nil {
 		return err
@@ -103,9 +104,13 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 	state := &bucketState{batch, bucket, args.Quit}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
-	lastKey, _, err := batch.Last(bucket)
-	if err != nil {
-		return err
+	var lastKey []byte
+	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
+		var errLast error
+		lastKey, _, errLast = batch.Last(bucket)
+		if errLast != nil {
+			return errLast
+		}
 	}
 	var canUseAppend bool
 

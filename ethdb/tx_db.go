@@ -75,7 +75,11 @@ func (m *TxDb) KV() KV {
 
 // Can only be called from the worker thread
 func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
-	return m.cursors[bucket].Last()
+	c, ok := m.cursors[bucket]
+	if !ok {
+		panic(fmt.Sprintf("bucket doesn't exists: '%s'", bucket))
+	}
+	return c.Last()
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {

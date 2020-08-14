@@ -155,5 +155,5 @@ var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ State, next LoadN
 }
 
 func isIdentityLoadFunc(f LoadFunc) bool {
-	return reflect.ValueOf(IdentityLoadFunc).Pointer() == reflect.ValueOf(f).Pointer()
+	return f == nil || reflect.ValueOf(IdentityLoadFunc).Pointer() == reflect.ValueOf(f).Pointer()
 }
