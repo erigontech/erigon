@@ -309,20 +309,27 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
-	defer func() {
-		db.wg.Done()
-		if err := db.env.Sync(false); err != nil {
-			log.Warn("fsync after commit failed: \n", err)
-		}
-	}()
+	defer db.wg.Done()
 
-	t := &lmdbTx{db: db, ctx: ctx}
-	return db.env.Update(func(tx *lmdb.Txn) error {
-		defer t.closeCursors()
-		tx.RawRead = true
-		t.tx = tx
-		return f(t)
-	})
+	tx := &lmdbTx{db: db, ctx: ctx}
+	if err := db.env.Update(func(txn *lmdb.Txn) error {
+		defer tx.closeCursors()
+		txn.RawRead = true
+		tx.tx = txn
+		return f(tx)
+	}); err != nil {
+		return err
+	}
+
+	t := time.Now()
+	if err := db.env.Sync(true); err != nil {
+		log.Warn("fsync after commit failed: \n", err)
+	}
+	fsyncTime := time.Since(t)
+	if fsyncTime > 5*time.Second {
+		log.Info("commit", "fsync", fsyncTime)
+	}
+	return nil
 }
 
 func (tx *lmdbTx) CreateBucket(name string) error {
@@ -403,12 +410,20 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		tx.tx = nil
 		tx.db.wg.Done()
 		runtime.UnlockOSThread()
-		if err := tx.db.env.Sync(false); err != nil {
-			log.Warn("fsync after commit failed: \n", err)
-		}
 	}()
 	tx.closeCursors()
-	return tx.tx.Commit()
+	if err := tx.tx.Commit(); err != nil {
+		return err
+	}
+	t := time.Now()
+	if err := tx.db.env.Sync(true); err != nil {
+		log.Warn("fsync after commit failed: \n", err)
+	}
+	fsyncTime := time.Since(t)
+	if fsyncTime > 5*time.Second {
+		log.Info("commit", "fsync", fsyncTime)
+	}
+	return nil
 }
 
 func (tx *lmdbTx) Rollback() {
