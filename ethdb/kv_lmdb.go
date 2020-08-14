@@ -325,7 +325,7 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 	if !tx.db.opts.readOnly {
 		flags |= lmdb.Create
 	}
-	if dbutils.BucketsCfg[name].IsDupsort {
+	if dbutils.BucketsCfg[name].IsDupSort {
 		flags |= lmdb.DupSort
 	}
 	dbi, err := tx.tx.OpenDBI(name, flags)
@@ -458,7 +458,7 @@ func (c *LmdbCursor) NoValues() NoValuesCursor {
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 	dbi := tx.db.buckets[bucket]
 	cfg := dbutils.BucketsCfg[bucket]
-	if cfg.IsDupsort {
+	if cfg.IsDupSort {
 		return tx.getDupSort(bucket, dbi, cfg, key)
 	}
 
@@ -620,7 +620,7 @@ func (c *LmdbCursor) Last() ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 
-	if c.bucketCfg.IsDupsort {
+	if c.bucketCfg.IsDupSort {
 		if k == nil {
 			return k, v, nil
 		}
@@ -644,7 +644,7 @@ func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 	}
 
-	if c.bucketCfg.IsDupsort {
+	if c.bucketCfg.IsDupSort {
 		return c.seekDupSort(seek)
 	}
 
@@ -734,7 +734,7 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 	default:
 	}
 
-	if c.bucketCfg.IsDupsort {
+	if c.bucketCfg.IsDupSort {
 		return c.nextDupSort()
 	}
 
@@ -791,7 +791,7 @@ func (c *LmdbCursor) Delete(key []byte) error {
 		}
 	}
 
-	if c.bucketCfg.IsDupsort {
+	if c.bucketCfg.IsDupSort {
 		return c.deleteDupSort(key)
 	}
 
@@ -854,7 +854,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 		}
 	}
 
-	if c.bucketCfg.IsDupsort {
+	if c.bucketCfg.IsDupSort {
 		return c.putDupSort(key, value)
 	}
 
@@ -986,7 +986,7 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	}
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
-	if b.IsDupsort {
+	if b.IsDupSort {
 		if len(key) != from && len(key) >= to {
 			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
 		}
