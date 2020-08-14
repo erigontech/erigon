@@ -58,7 +58,7 @@ func (m *TxDb) begin() error {
 	}
 	m.Tx = tx
 	for i := range dbutils.Buckets {
-		m.cursors[dbutils.Buckets[i]] = tx.Bucket(dbutils.Buckets[i]).Cursor().(*LmdbCursor)
+		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
 		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
 			return err
 		}
@@ -83,7 +83,7 @@ func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
-	v, err := m.cursors[bucket].SeekExact(key)
+	v, err := m.cursors[bucket].Get(key)
 	if err != nil {
 		return nil, err
 	}
