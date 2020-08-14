@@ -30,7 +30,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/rs/cors"
 )
 

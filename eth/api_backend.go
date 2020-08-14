@@ -24,7 +24,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -319,8 +320,7 @@ func (b *EthAPIBackend) Stats() (pending int, queued int) {
 
 func (b *EthAPIBackend) TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions) {
 	return b.eth.TxPool().Content()
-func (b *EthAPIBackend) TxPool() *core.TxPool {
-}
+	(func(b *EthAPIBackend) TxPool)() * core.TxPool{}
 
 	return b.eth.TxPool()
 }
