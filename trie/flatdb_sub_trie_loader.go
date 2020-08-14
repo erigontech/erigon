@@ -622,8 +622,8 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		return SubTries{}, nil
 	}
 	if err := fstl.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
-		ih := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
+		ih := tx.Cursor(dbutils.IntermediateTrieHashBucket)
 		if err := fstl.iteration(c, ih, true /* first */); err != nil {
 			return err
 		}

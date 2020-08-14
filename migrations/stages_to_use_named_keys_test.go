@@ -16,7 +16,7 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.SyncStageProgressOld1).(ethdb.BucketMigrator).Create()
+		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.SyncStageProgressOld1)
 	})
 	require.NoError(err)
 
@@ -49,7 +49,7 @@ func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.SyncStageUnwindOld1).(ethdb.BucketMigrator).Create()
+		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.SyncStageUnwindOld1)
 	})
 	require.NoError(err)
 

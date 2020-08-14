@@ -779,8 +779,7 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(bucket)
-		c := st.Cursor()
+		c := tx.Cursor(bucket)
 		for k, v, err := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -945,11 +944,7 @@ func relayoutKeys() {
 	defer db.Close()
 	var accountChangeSetCount, storageChangeSetCount int
 	err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.AccountChangeSetBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.AccountChangeSetBucket)
 		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
 			accountChangeSetCount++
 		}
@@ -957,11 +952,7 @@ func relayoutKeys() {
 	})
 	check(err)
 	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.StorageChangeSetBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.StorageChangeSetBucket)
 		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
 			storageChangeSetCount++
 		}
@@ -1139,8 +1130,7 @@ func repairCurrent() {
 		newB := tx.Bucket(dbutils.CurrentStateBucket)
 		count := 0
 		if err := currentDb.KV().View(context.Background(), func(ctx ethdb.Tx) error {
-			b := ctx.Bucket(dbutils.CurrentStateBucket)
-			c := b.Cursor()
+			c := ctx.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -1166,7 +1156,7 @@ func dumpStorage() {
 	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.StorageHistoryBucket).Cursor().Walk(func(k, v []byte) (bool, error) {
+		return tx.Cursor(dbutils.StorageHistoryBucket).Walk(func(k, v []byte) (bool, error) {
 			fmt.Printf("%x %x\n", k, v)
 			return true, nil
 		})
@@ -1184,8 +1174,7 @@ func printBucket(chaindata string) {
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.StorageHistoryBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.StorageHistoryBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1553,8 +1542,7 @@ func findPreimage(chaindata string, hash common.Hash) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.PlainStateBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.PlainStateBucket)
 		k, _, e := c.First()
 		if e != nil {
 			return e
@@ -1658,11 +1646,10 @@ func dupSortState(chaindata string) {
 	check(err)
 
 	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		txn, _ := env.BeginTxn(nil, 0)
 		txn2, _ := env2.BeginTxn(nil, 0)
 
-		c := b.Cursor()
 		i := 0
 		for k, v, err1 := c.First(); k != nil; k, v, err = c.Next() {
 			check(err1)
@@ -1858,8 +1845,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	stAccounts := 0
 	stStorage := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainStateBucket)
-		c := st.Cursor()
+		c := tx.Cursor(dbutils.PlainStateBucket)
 		k, _, e := c.First()
 		for ; k != nil && e == nil; k, _, e = c.Next() {
 			if len(k) > 28 {
@@ -1879,9 +1865,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	accounts := make(map[string]struct{})
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
 		start := dbutils.EncodeTimestamp(block1)
-		c := st.Cursor()
 		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1906,9 +1891,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	}
 	storage := make(map[string]struct{})
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
 		start := dbutils.EncodeTimestamp(block1)
-		c := st.Cursor()
 		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1940,9 +1924,8 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainAccountChangeSetBucket)
+		c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
 		start := dbutils.EncodeTimestamp(block)
-		c := st.Cursor()
 		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1970,9 +1953,8 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.PlainStorageChangeSetBucket)
+		c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
 		start := dbutils.EncodeTimestamp(block)
-		c := st.Cursor()
 		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
