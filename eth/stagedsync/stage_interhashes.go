@@ -229,11 +229,11 @@ func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 		return err
 	}
 	newKStr := string(newK)
-	//if len(value) > 0 {
-	//	r.storageMap[newKStr] = common.CopyBytes(value)
-	//} else {
-	//	delete(r.storageMap, newKStr)
-	//}
+	if len(value) > 0 {
+		r.storageMap[newKStr] = common.CopyBytes(value)
+	} else {
+		delete(r.storageMap, newKStr)
+	}
 	r.unfurlList = append(r.unfurlList, newKStr)
 	return nil
 }
@@ -278,11 +278,11 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getExtractFunc(changeSetBucket),
+		getExtractFunc2(changeSetBucket),
 		// here we avoid getting the state from changesets,
 		// we just care about the accounts that did change,
 		// so we can directly read from the PlainTextBuffer
-		getFromPlainStateAndLoad(p.db, l.LoadFunc),
+		getFromPlainStateAndLoad2(p.db, l.LoadFunc),
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,

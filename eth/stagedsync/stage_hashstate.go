@@ -200,8 +200,17 @@ type Promoter struct {
 func getExtractFunc(changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, _ []byte) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 			return next(k, k, nil)
+		})
+	}
+}
+
+func getExtractFunc2(changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			return next(k, k, v)
 		})
 	}
 }
@@ -235,24 +244,25 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, newK)
 			}
-
-			// test
-			codeHash2, err := db.Get(dbutils.ContractCodeBucket, newK)
-			fmt.Printf("1: %x, %x, %x\n", a.CodeHash, codeHash2, codeHash)
-
 			return next(k, newK, codeHash)
 		})
 	}
 }
 
 func getFromPlainStateAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
-	return func(k []byte, _ []byte, state etl.State, next etl.LoadNextFunc) error {
+	return func(k []byte, v []byte, state etl.State, next etl.LoadNextFunc) error {
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err == nil || errors.Is(err, ethdb.ErrKeyNotFound) {
 			return loadFunc(k, value, state, next)
 		}
 		return err
+	}
+}
+
+func getFromPlainStateAndLoad2(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
+	return func(k []byte, v []byte, state etl.State, next etl.LoadNextFunc) error {
+		return loadFunc(k, v, state, next)
 	}
 }
 
@@ -312,7 +322,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		changeSetBucket,
 		loadBucket,
 		p.TempDir,
-		getExtractFunc(changeSetBucket),
+		getExtractFunc2(changeSetBucket),
 		// here we avoid getting the state from changesets,
 		// we just care about the accounts that did change,
 		// so we can directly read from the PlainTextBuffer
