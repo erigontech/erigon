@@ -211,18 +211,3 @@ Date:   Tue Aug 18 11:27:04 2020 +0200
 
     metrics: make meter updates lock-free (#21446)
 
-commit 54add4255064f722b33fe1c13e46db0b875fe325
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri Aug 14 14:18:12 2020 +0200
-
-    cmd/geth/tests: try to fix spurious travis failure in les tests (#21410)
-    
-    * cmd/geth/tests: try to fix spurious travis failure in les tests
-    
-    * cmd/geth: les_test - remove extraneous option during boot
-
-commit 04926db204232b7103b8eb14bf3f8e9de129ad44
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Aug 11 14:11:16 2020 +0300
-
-    params: begin v1.9.20 release cycle
