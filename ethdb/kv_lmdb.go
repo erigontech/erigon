@@ -81,8 +81,8 @@ func (opts lmdbOpts) Open() (KV, error) {
 		flags |= lmdb.Readonly
 	}
 	if opts.inMem {
-		flags |= lmdb.NoSync | lmdb.NoMetaSync
 	}
+	flags |= lmdb.NoSync | lmdb.NoMetaSync
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
@@ -309,7 +309,13 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
-	defer db.wg.Done()
+	defer func() {
+		db.wg.Done()
+		if err := db.env.Sync(false); err != nil {
+			log.Warn("fsync after commit failed: \n", err)
+		}
+	}()
+
 	t := &lmdbTx{db: db, ctx: ctx}
 	return db.env.Update(func(tx *lmdb.Txn) error {
 		defer t.closeCursors()
@@ -397,6 +403,9 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		tx.tx = nil
 		tx.db.wg.Done()
 		runtime.UnlockOSThread()
+		if err := tx.db.env.Sync(false); err != nil {
+			log.Warn("fsync after commit failed: \n", err)
+		}
 	}()
 	tx.closeCursors()
 	return tx.tx.Commit()
