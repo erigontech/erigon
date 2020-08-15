@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 )
 
-func New(db *ethdb.ObjectDatabase, ethereum *eth.Ethereum, stack *node.Node) {
+func New(db ethdb.HasKV, ethereum *eth.Ethereum, stack *node.Node) {
 	apis := commands.GetAPI(db.KV(), core.NewEthBackend(ethereum), []string{"eth", "debug"})
 
 	stack.RegisterAPIs(apis)
