@@ -346,7 +346,6 @@ func (pm *ProtocolManager) StopTxPool() {
 }
 
 func (pm *ProtocolManager) Stop() {
-	pm.txsSub.Unsubscribe() // quits txBroadcastLoop
 	pm.StopTxPool()
 
 	if pm.minedBlockSub != nil {
