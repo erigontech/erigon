@@ -169,12 +169,13 @@ func (n *Node) Start() error {
 		return err
 	}
 	// Start all registered lifecycles.
-	started := make([]Lifecycle, len(lifecycles))
-	for i, lifecycle := range lifecycles {
+	// preallocation leads to bugs here
+	var started []Lifecycle //nolint:prealloc
+	for _, lifecycle := range lifecycles {
 		if err = lifecycle.Start(); err != nil {
 			break
 		}
-		started[i] = lifecycle
+		started = append(started, lifecycle)
 	}
 	// Check if any lifecycle failed to start.
 	if err != nil {
