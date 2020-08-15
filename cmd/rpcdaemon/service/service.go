@@ -6,22 +6,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-// RPCDaemonService is used in js console and console tests
-type RPCDaemonService struct {
-	api        []rpc.API
-	db         *ethdb.ObjectDatabase
-	ethBackend *eth.Ethereum
-}
-
-
-func New(db *ethdb.ObjectDatabase, ethBackend *eth.Ethereum, stack *node.Node) *RPCDaemonService {
-	service := &RPCDaemonService{[]rpc.API{}, db, ethBackend}
-	apis := commands.GetAPI(db.KV(), core.NewEthBackend(ethBackend), []string{"eth", "debug"})
+func New(db *ethdb.ObjectDatabase, ethereum *eth.Ethereum, stack *node.Node) {
+	apis := commands.GetAPI(db.KV(), core.NewEthBackend(ethereum), []string{"eth", "debug"})
 
 	stack.RegisterAPIs(apis)
-
-	return service
 }

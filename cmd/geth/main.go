@@ -351,7 +351,7 @@ func geth(ctx *cli.Context) error {
 	stack, backend := makeFullNode(ctx)
 	defer stack.Close()
 
-	startNode(ctx, stack, backend)
+	startNode(ctx, stack, backend.APIBackend)
 	stack.Wait()
 	return nil
 }

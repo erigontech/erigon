@@ -86,9 +86,9 @@ func localConsole(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	service.New(diskdb, backend.TxPool(), stack)
+	service.New(diskdb, backend, stack)
 
-	startNode(ctx, stack, backend)
+	startNode(ctx, stack, backend.APIBackend)
 	defer stack.Close()
 
 	// Attach to the newly started node and start the JavaScript console
@@ -200,7 +200,7 @@ func dialRPC(endpoint string) (*rpc.Client, error) {
 func ephemeralConsole(ctx *cli.Context) error {
 	// Create and start the node based on the CLI flags
 	stack, backend := makeFullNode(ctx)
-	startNode(ctx, stack, backend)
+	startNode(ctx, stack, backend.APIBackend)
 	defer stack.Close()
 
 	// Attach to the newly started node and start the JavaScript console
