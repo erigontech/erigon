@@ -127,6 +127,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 				return err
 			}
 			delete(expectedAccountChanges, blockN)
+			delete(expectedStorageChanges, blockN)
 		}
 
 		// Unwind all stages to `execStage - unwind` block

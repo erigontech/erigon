@@ -209,11 +209,6 @@ func stageExec(ctx context.Context) error {
 		// TODO
 	}
 
-	chainConfig, blockchain, err := newBlockChain(db)
-	if err != nil {
-		return err
-	}
-	defer bc.Stop()
 	stage4 := progress(stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
@@ -221,7 +216,7 @@ func stageExec(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, blockchain.GetVMConfig(), block, ch, false, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, bc.Config(), bc, bc.GetVMConfig(), block, ch, false, nil)
 }
 
 func stageIHash(ctx context.Context) error {
