@@ -227,23 +227,6 @@ func getExtractPlainStateForIH(changeSetBucket string) etl.ExtractFunc {
 		})
 	}
 }
-func getExtractPlainState2(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
-			value, err := db.Get(dbutils.PlainStateBucket, k)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return err
-			}
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, value)
-		})
-	}
-}
 
 func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
@@ -281,20 +264,15 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	}
 }
 
-func getExtractFunc2(changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			return next(k, k, v)
-		})
-	}
-}
-
 func getUnwindExtractFunc(changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			return next(k, k, v)
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, v)
 		})
 	}
 }
@@ -313,11 +291,15 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 			if a.Incarnation == 0 {
 				return nil
 			}
-			newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+			plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 			var codeHash []byte
-			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
+			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, newK)
+				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
+			}
+			newK, err := transformContractCodeKey(plainKey)
+			if err != nil {
+				return err
 			}
 			return next(k, newK, codeHash)
 		})
@@ -427,11 +409,11 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
 		extractFunc = getCodeUnwindExtractFunc(p.db)
-		l.innerLoadFunc = codeKeyTransformLoadFunc
+		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
 		loadBucket = dbutils.CurrentStateBucket
 		extractFunc = getUnwindExtractFunc(changeSetBucket)
-		l.innerLoadFunc = keyTransformLoadFunc
+		l.innerLoadFunc = etl.IdentityLoadFunc
 	}
 
 	return etl.Transform(
