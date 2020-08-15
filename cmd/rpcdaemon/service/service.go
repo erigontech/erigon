@@ -5,11 +5,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-var _ node.Service = &RPCDaemonService{}
+var _ node.Lifecycle = &RPCDaemonService{}
 
 // RPCDaemonService is used in js console and console tests
 type RPCDaemonService struct {
@@ -18,12 +17,7 @@ type RPCDaemonService struct {
 	txpool *core.TxPool
 }
 
-func (*RPCDaemonService) Protocols() []p2p.Protocol {
-	return []p2p.Protocol{}
-}
-
-func (r *RPCDaemonService) Start(server *p2p.Server) error {
-	r.api = commands.GetAPI(r.db.KV(), core.RawFromTxPool(r.txpool), []string{"eth", "debug"})
+func (r *RPCDaemonService) Start() error {
 	return nil
 }
 
@@ -31,10 +25,12 @@ func (r *RPCDaemonService) Stop() error {
 	return nil
 }
 
-func (r *RPCDaemonService) APIs() []rpc.API {
-	return r.api
-}
+func New(db *ethdb.ObjectDatabase, txpool *core.TxPool, stack *node.Node) *RPCDaemonService {
+	service := &RPCDaemonService{[]rpc.API{}, db, txpool}
+	apis := commands.GetAPI(db.KV(), core.RawFromTxPool(txpool), []string{"eth", "debug"})
 
-func New(db *ethdb.ObjectDatabase, txpool *core.TxPool) *RPCDaemonService {
-	return &RPCDaemonService{[]rpc.API{}, db, txpool}
+	stack.RegisterLifecycle(service)
+	stack.RegisterAPIs(apis)
+
+	return service
 }

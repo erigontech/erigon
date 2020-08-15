@@ -191,7 +191,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return 0, err
 	}
 	if manager.blockFetcher == nil {
-		manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+		manager.blockFetcher = fetcher.NewBlockFetcher(false, nil, blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, nil, inserter, manager.removePeer)
 	}
 
 	if manager.chainSync == nil {
@@ -346,7 +346,7 @@ func (pm *ProtocolManager) StopTxPool() {
 }
 
 func (pm *ProtocolManager) Stop() {
-	pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	pm.txsSub.Unsubscribe() // quits txBroadcastLoop
 	pm.StopTxPool()
 
 	if pm.minedBlockSub != nil {
@@ -754,7 +754,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			code, err := tds.ReadCodeByHash(hash)
 			if err == nil {
 				data = append(data, code)
-		}
 				bytes += len(code)
 			} else {
 				data = append(data, nil)

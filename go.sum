@@ -101,6 +101,8 @@ github.com/ethereum/evmc/v7 v7.3.0 h1:4CsjJ+vSRrkzxOHeG1lFRGk4sG4/PgzXnWuRNgLGMJ
 github.com/ethereum/evmc/v7 v7.3.0/go.mod h1:q2Q0rCSUlIkngd+mZwfCzEUbvB0IIopH1+7hcs9QuDg=
 github.com/ethereum/go-ethereum v1.9.19 h1:c9IrhzqPKY+ZkS/YhXCO3rgNzlxsVrCYIRvrIAFmIWM=
 github.com/ethereum/go-ethereum v1.9.19/go.mod h1:JSSTypSMTkGZtAdAChH2wP5dZEvPGh3nUTuDpH+hNrg=
+github.com/ewasm/go-ethereum v1.8.12 h1:wlemuzbaV1huzJJQpkMNWAlte3qeanTK+nA3/Zw4DQo=
+github.com/ewasm/go-ethereum v1.8.12/go.mod h1:qXB/fM6BLbAOuw8jEVbl+txBR23c5s69tGedqdljhLA=
 github.com/fatih/color v1.3.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/fatih/color v1.7.0 h1:DkWD4oS2D8LGGgTQ6IvwJJXSL5Vp2ffcQg58nFV38Ys=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=

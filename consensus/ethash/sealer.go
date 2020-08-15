@@ -54,7 +54,7 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderRead
 		header := block.Header()
 		header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 		select {
-		case results <- consensus.ResultWithContext{ctx, block.WithSeal(header)}:
+		case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
 		default:
 			ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", ethash.SealHash(block.Header()))
 		}

@@ -212,7 +212,7 @@ func (e *NoRewardEngine) VerifyHeader(chain consensus.ChainHeaderReader, header 
 	return e.inner.VerifyHeader(chain, header, seal)
 }
 
-func (e *NoRewardEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+func (e *NoRewardEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	return e.inner.VerifyHeaders(chain, headers, seals)
 }
 
@@ -237,7 +237,7 @@ func (e *NoRewardEngine) accumulateRewards(config *params.ChainConfig, state *st
 	state.AddBalance(header.Coinbase, reward)
 }
 
-func (e *NoRewardEngine) Finalize(chain consensus.ChainHeaderReader, header *types.Header, statedb *state.StateDB, txs []*types.Transaction,
+func (e *NoRewardEngine) Finalize(chainConfig *params.ChainConfig, header *types.Header, statedb *state.IntraBlockState, txs []*types.Transaction,
 	uncles []*types.Header) {
 	if e.rewardsOn {
 		e.inner.Finalize(chainConfig, header, statedb, txs, uncles)
@@ -247,7 +247,7 @@ func (e *NoRewardEngine) Finalize(chain consensus.ChainHeaderReader, header *typ
 	}
 }
 
-func (e *NoRewardEngine) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, statedb *state.StateDB, txs []*types.Transaction,
+func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, statedb *state.IntraBlockState, txs []*types.Transaction,
 	uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	if e.rewardsOn {
 		return e.inner.FinalizeAndAssemble(chainConfig, header, statedb, txs, uncles, receipts)
@@ -260,8 +260,8 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chain consensus.ChainHeaderReader, 
 	}
 }
 
-func (e *NoRewardEngine) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return e.inner.Seal(chain, block, results, stop)
+func (e *NoRewardEngine) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+	return e.inner.Seal(ctx, chain, block, results, stop)
 }
 
 func (e *NoRewardEngine) SealHash(header *types.Header) common.Hash {
@@ -712,7 +712,6 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
-	}
 		result.AddressMap[addrHash] = addr
 	}
 

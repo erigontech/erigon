@@ -173,10 +173,10 @@ type BlockFetcher struct {
 	completing map[common.Hash]*blockAnnounce   // Blocks with headers, currently body-completing
 
 	// Block cache
-	queue   *prque.Prque                 // Queue containing the import operations (block number sorted)
-	queueCh chan struct{}                // Channel to signal that the queue is not yet empty
-	queues  map[string]int               // Per peer block counts to prevent memory exhaustion
-	queued  map[common.Hash]*blockInject // Set of already queued blocks (to dedupe imports)
+	queue   *prque.Prque                         // Queue containing the import operations (block number sorted)
+	queueCh chan struct{}                        // Channel to signal that the queue is not yet empty
+	queues  map[string]int                       // Per peer block counts to prevent memory exhaustion
+	queued  map[common.Hash]*blockOrHeaderInject // Set of already queued blocks (to dedupe imports)
 
 	// Callbacks
 	getHeader      HeaderRetrievalFn  // Retrieves a header from the local chain
@@ -213,7 +213,7 @@ func NewBlockFetcher(light bool, getHeader HeaderRetrievalFn, getBlock blockRetr
 		completing:     make(map[common.Hash]*blockAnnounce),
 		queue:          prque.New(nil),
 		queues:         make(map[string]int),
-		queued:         make(map[common.Hash]*blockInject),
+		queued:         make(map[common.Hash]*blockOrHeaderInject),
 		queueCh:        make(chan struct{}, 1),
 		getBlock:       getBlock,
 		verifyHeader:   verifyHeader,
@@ -370,12 +370,7 @@ func (f *BlockFetcher) loop() {
 				f.forgetBlock(hash)
 				continue
 			}
-			if f.light {
-				f.importHeaders(op.origin, op.header)
-			} else {
-				f.importBlocks(op.origin, op.block)
-			}
-			f.insert(op.origin, op.block)
+			f.importBlocks(op.origin, op.block)
 		}
 		// Wait for an outside event to occur
 		select {
@@ -436,25 +431,17 @@ func (f *BlockFetcher) loop() {
 			request := make(map[string][]common.Hash)
 
 			toForget := make(map[common.Hash]struct{})
-				// In current LES protocol(les2/les3), only header announce is
-				// available, no need to wait too much time for header broadcast.
-				timeout := arriveTimeout - gatherSlack
-				if f.light {
-					timeout = 0
-				}
-				if time.Since(announces[0].time) > timeout {
-					// Pick a random peer to retrieve from, reset all others
-					announce := announces[rand.Intn(len(announces))]
-					f.forgetHash(hash)
+			var toFetch []*blockAnnounce
 
-					if _, ok := toForget[announce.hash]; !ok {
-					// If the block still didn't arrive, queue for fetching
-					if (f.light && f.getHeader(hash) == nil) || (!f.light && f.getBlock(hash) == nil) {
-							// TODO randomise?
-							request[announce.origin] = append(request[announce.origin], announce.hash)
-							toFetch = append(toFetch, announce)
-						}
-						toForget[announce.hash] = struct{}{}
+			for _, announce := range f.announced {
+				timeout := arriveTimeout - gatherSlack
+				if time.Since(announce.time) > timeout {
+					// Pick a random peer to retrieve from, reset all others
+					toForget[announce.hash] = struct{}{}
+
+					if f.getBlock(announce.hash) == nil {
+						request[announce.origin] = append(request[announce.origin], announce.hash)
+						toFetch = append(toFetch, announce)
 					}
 				}
 			}
@@ -759,39 +746,6 @@ func (f *BlockFetcher) enqueue(peer string, header *types.Header, block *types.B
 	}
 }
 
-// importHeaders spawns a new goroutine to run a header insertion into the chain.
-// If the header's number is at the same height as the current import phase, it
-// updates the phase states accordingly.
-func (f *BlockFetcher) importHeaders(peer string, header *types.Header) {
-	hash := header.Hash()
-	log.Debug("Importing propagated header", "peer", peer, "number", header.Number, "hash", hash)
-
-	go func() {
-		defer func() { f.done <- hash }()
-		// If the parent's unknown, abort insertion
-		parent := f.getHeader(header.ParentHash)
-		if parent == nil {
-			log.Debug("Unknown parent of propagated header", "peer", peer, "number", header.Number, "hash", hash, "parent", header.ParentHash)
-			return
-		}
-		// Validate the header and if something went wrong, drop the peer
-		if err := f.verifyHeader(header); err != nil && err != consensus.ErrFutureBlock {
-			log.Debug("Propagated header verification failed", "peer", peer, "number", header.Number, "hash", hash, "err", err)
-			f.dropPeer(peer)
-			return
-		}
-		// Run the actual import and log any issues
-		if _, err := f.insertHeaders([]*types.Header{header}); err != nil {
-			log.Debug("Propagated header import failed", "peer", peer, "number", header.Number, "hash", hash, "err", err)
-			return
-		}
-		// Invoke the testing hook if needed
-		if f.importedHook != nil {
-			f.importedHook(header, nil)
-		}
-	}()
-}
-
 // importBlocks spawns a new goroutine to run a block insertion into the chain. If the
 // block's number is at the same height as the current import phase, it updates
 // the phase states accordingly.
@@ -836,10 +790,9 @@ func (f *BlockFetcher) importBlocks(peer string, block *types.Block) {
 	blockAnnounceOutTimer.UpdateSince(block.ReceivedAt)
 	go f.broadcastBlock(block, false)
 
-		// Invoke the testing hook if needed
-		if f.importedHook != nil {
-			f.importedHook(nil, block)
-		}
+	// Invoke the testing hook if needed
+	if f.importedHook != nil {
+		f.importedHook(nil, block)
 	}
 }
 

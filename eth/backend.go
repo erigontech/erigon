@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -89,9 +88,8 @@ type Ethereum struct {
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
 
-	p2pServer *p2p.Server
+	p2pServer     *p2p.Server
 	txPoolStarted bool
-}
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
@@ -130,12 +128,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
-	chainDb, err := stack.OpenDatabaseWithFreezer("chaindata", config.DatabaseCache, config.DatabaseHandles, config.DatabaseFreezer, "eth/db/chaindata/")
+		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
+		if err != nil {
 			return nil, err
 		}
 	}
 
-	err = migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir)
+	err = migrations.NewMigrator().Apply(chainDb, stack.Config().DataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +224,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
-	if ctx.Config.PrivateApiAddr != "" {
-		remotedbserver.StartGrpc(chainDb.KV(), eth.txPool, ctx.Config.PrivateApiAddr)
+	if stack.Config().PrivateApiAddr != "" {
+		remotedbserver.StartGrpc(chainDb.KV(), eth.txPool, stack.Config().PrivateApiAddr)
 	}
 
 	checkpoint := config.Checkpoint
@@ -237,12 +236,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
+	eth.protocolManager.SetDataDir(stack.Config().DataDir)
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {
 			return nil, err
 		}
+	}
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
@@ -256,7 +256,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 
 	if config.SyncMode != downloader.StagedSync {
-		eth.APIBackend = &EthAPIBackend{ctx.ExtRPCEnabled(), eth, nil}
+		eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil}
 		gpoParams := config.GPO
 		if gpoParams.Default == nil {
 			gpoParams.Default = config.Miner.GasPrice
@@ -269,8 +269,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	// Start the RPC service
-
-	eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, eth.NetVersion())
+	if config.SyncMode != downloader.StagedSync {
+		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, eth.NetVersion())
+	}
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
@@ -596,9 +597,6 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		protos = append(protos, s.protocolManager.makeDebugProtocol())
 	}
 
-	if s.lesServer != nil {
-		protos = append(protos, s.lesServer.Protocols()...)
-	}
 	return protos
 }
 
@@ -612,25 +610,11 @@ func (s *Ethereum) Start() error {
 		s.startBloomHandlers(params.BloomBitsBlocks)
 	}
 
-	// Start the RPC service
-	if s.config.SyncMode != downloader.StagedSync {
-		s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
-	}
-
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
-	if s.config.LightServ > 0 {
-		if s.config.LightPeers >= s.p2pServer.MaxPeers {
-			return fmt.Errorf("invalid peer config: light peer count (%d) >= total peer count (%d)", s.config.LightPeers, s.p2pServer.MaxPeers)
-		}
-		maxPeers -= s.config.LightPeers
-	}
-
 	withTxPool := s.config.SyncMode != downloader.StagedSync
 	// Start the networking layer and the light server if requested
-	if err := s.protocolManager.Start(maxPeers, withTxPool); err != nil {
-// Stop implements node.Lifecycle, terminating all internal goroutines used by the
-	return nil
+	return s.protocolManager.Start(maxPeers, withTxPool)
 }
 
 func (s *Ethereum) StartTxPool() error {

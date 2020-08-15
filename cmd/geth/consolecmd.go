@@ -85,6 +85,12 @@ func localConsole(ctx *cli.Context) error {
 	startNode(ctx, stack, backend)
 	defer stack.Close()
 
+	diskdb, err := stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
+	if err != nil {
+		return err
+	}
+	service.New(diskdb, backend.TxPool(), stack)
+
 	// Attach to the newly started node and start the JavaScript console
 	client, err := stack.Attach()
 	if err != nil {

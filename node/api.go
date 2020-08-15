@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -283,12 +284,6 @@ func (api *privateAdminAPI) StopWS() (bool, error) {
 // both secure and unsecure RPC channels.
 type publicAdminAPI struct {
 	node *Node // Node interfaced by this API
-}
-
-// NewPublicAdminAPI creates a new API definition for the public admin methods
-// of the node itself.
-func NewPublicAdminAPI(node *Node) *PublicAdminAPI {
-	return &PublicAdminAPI{node: node}
 }
 
 // Peers retrieves all the information we know about each individual peer at the

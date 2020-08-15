@@ -320,8 +320,9 @@ func (b *EthAPIBackend) Stats() (pending int, queued int) {
 
 func (b *EthAPIBackend) TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions) {
 	return b.eth.TxPool().Content()
-	(func(b *EthAPIBackend) TxPool)() * core.TxPool{}
+}
 
+func (b *EthAPIBackend) TxPool() *core.TxPool {
 	return b.eth.TxPool()
 }
 

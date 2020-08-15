@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -56,8 +55,6 @@ type Node struct {
 	ws            *httpServer //
 	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
-
-	databases map[*closeTrackingDB]struct{} // All open databases
 }
 
 const (
@@ -65,12 +62,6 @@ const (
 	runningState
 	closedState
 )
-
-	stop chan struct{} // Channel to wait for termination notifications
-	lock sync.RWMutex
-
-	log log.Logger
-}
 
 // New creates a new P2P node, ready for protocol registration.
 func New(conf *Config) (*Node, error) {
@@ -108,7 +99,6 @@ func New(conf *Config) (*Node, error) {
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
 		server:        &p2p.Server{Config: conf.P2P},
-		databases:     make(map[*closeTrackingDB]struct{}),
 	}
 
 	// Register built-in APIs.
@@ -224,7 +214,6 @@ func (n *Node) doClose(errs []error) error {
 	// synchronize with OpenDatabase*.
 	n.lock.Lock()
 	n.state = closedState
-	errs = append(errs, n.closeDatabases()...)
 	n.lock.Unlock()
 
 	if err := n.accman.Close(); err != nil {
@@ -432,17 +421,14 @@ func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	if n.state != initializingState {
-	close(n.stop)
-
 	// Remove the keystore if it was created ephemerally.
-	type closer interface {
+	if n.state != initializingState {
 		panic("can't register protocols on running/stopped node")
 	}
 	n.server.Protocols = append(n.server.Protocols, protocols...)
 }
-// RegisterAPIs registers the APIs a service provides on the node.
 
+// RegisterAPIs registers the APIs a service provides on the node.
 func (n *Node) RegisterAPIs(apis []rpc.API) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -543,24 +529,7 @@ func (n *Node) EventMux() *event.TypeMux {
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
 func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-	if n.state == closedState {
-		return nil, ErrNodeStopped
-	}
-
-	var db ethdb.Database
-	var err error
-	if n.config.DataDir == "" {
-		db = rawdb.NewMemoryDatabase()
-	} else {
-		db, err = rawdb.NewLevelDBDatabase(n.ResolvePath(name), cache, handles, namespace)
-	}
-
-	if err == nil {
-		db = n.wrapDatabase(db)
-	}
-	return db, err
+	return n.OpenDatabaseWithFreezer(name, 0, 0, "", "")
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
@@ -568,23 +537,21 @@ func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer, namespace string) (ethdb.Database, error) {
+// NOTE: kept for compatibility and for easier rebases (turbo-geth)
+func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
+
 	if n.state == closedState {
 		return nil, ErrNodeStopped
 	}
 
-	var db ethdb.Database
-	var err error
 	if n.config.DataDir == "" {
-		db = rawdb.NewMemoryDatabase()
+		return ethdb.NewMemDatabase(), nil
+	}
+
 	if n.config.Bolt {
 		log.Info("Opening Database (Bolt)")
-		switch {
-		case freezer == "":
-			freezer = filepath.Join(root, "ancient")
-		case !filepath.IsAbs(freezer):
 		return ethdb.Open(n.config.ResolvePath(name + "_bolt"))
 	}
 
@@ -595,37 +562,4 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer,
 // ResolvePath returns the absolute path of a resource in the instance directory.
 func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
-}
-
-// closeTrackingDB wraps the Close method of a database. When the database is closed by the
-// service, the wrapper removes it from the node's database map. This ensures that Node
-// won't auto-close the database if it is closed by the service that opened it.
-type closeTrackingDB struct {
-	ethdb.Database
-	n *Node
-}
-
-func (db *closeTrackingDB) Close() error {
-	db.n.lock.Lock()
-	delete(db.n.databases, db)
-	db.n.lock.Unlock()
-	return db.Database.Close()
-}
-
-// wrapDatabase ensures the database will be auto-closed when Node is closed.
-func (n *Node) wrapDatabase(db ethdb.Database) ethdb.Database {
-	wrapper := &closeTrackingDB{db, n}
-	n.databases[wrapper] = struct{}{}
-	return wrapper
-}
-
-// closeDatabases closes all open databases.
-func (n *Node) closeDatabases() (errors []error) {
-	for db := range n.databases {
-		delete(n.databases, db)
-		if err := db.Database.Close(); err != nil {
-			errors = append(errors, err)
-		}
-	}
-	return errors
 }

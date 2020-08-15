@@ -1052,7 +1052,7 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 	defer close(done)
 
 	var promoteAddrs []common.Address
-	if dirtyAccounts != nil && reset == nil {
+	if dirtyAccounts != nil && !reset {
 		// Only dirty accounts need to be promoted, unless we're resetting.
 		// For resets, all addresses in the tx queue will be promoted and
 		// the flatten operation can be avoided.
