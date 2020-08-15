@@ -109,7 +109,7 @@ func createNode(t *testing.T, gqlEnabled bool) *node.Node {
 	return stack
 }
 
-func createGQLService(t *testing.T, stack *node.Node, endpoint string) {
+func createGQLService(t *testing.T, stack *node.Node, endpoint string) { //nolint:unparam
 	// create backend
 	ethBackend, err := eth.New(stack, &eth.DefaultConfig)
 	if err != nil {

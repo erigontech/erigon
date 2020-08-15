@@ -203,7 +203,7 @@ func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient
 			if upnp == nil {
 				return
 			}
-			upnp.dev = devs[i].Root
+			upnp.dev = devs[i].Root //nolint:scopelint
 
 			// check whether port mapping is enabled
 			if upnp.natEnabled() {

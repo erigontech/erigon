@@ -246,7 +246,7 @@ func TestStartRPC(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Apply some sane defaults.
-			config := test.cfg
+			config := test.cfg //nolint:scopelint
 			// config.Logger = testlog.Logger(t, log.LvlDebug)
 			config.NoUSB = true
 			config.P2P.NoDiscovery = true
@@ -268,8 +268,8 @@ func TestStartRPC(t *testing.T) {
 			}
 
 			// Run the API call hook.
-			if test.fn != nil {
-				test.fn(t, stack, &privateAdminAPI{stack})
+			if test.fn != nil { //nolint:scopelint
+				test.fn(t, stack, &privateAdminAPI{stack}) //nolint:scopelint
 			}
 
 			// Check if the HTTP endpoints are available.
@@ -278,17 +278,17 @@ func TestStartRPC(t *testing.T) {
 			handlersAvailable := checkBodyOK(baseURL + "/test")
 			rpcAvailable := checkRPC(baseURL)
 			wsAvailable := checkRPC(strings.Replace(baseURL, "http://", "ws://", 1))
-			if reachable != test.wantReachable {
-				t.Errorf("HTTP server is %sreachable, want it %sreachable", not(reachable), not(test.wantReachable))
+			if reachable != test.wantReachable { //nolint:scopelint
+				t.Errorf("HTTP server is %sreachable, want it %sreachable", not(reachable), not(test.wantReachable)) //nolint:scopelint
 			}
-			if handlersAvailable != test.wantHandlers {
-				t.Errorf("RegisterHandler handlers %savailable, want them %savailable", not(handlersAvailable), not(test.wantHandlers))
+			if handlersAvailable != test.wantHandlers { //nolint:scopelint
+				t.Errorf("RegisterHandler handlers %savailable, want them %savailable", not(handlersAvailable), not(test.wantHandlers)) //nolint:scopelint
 			}
-			if rpcAvailable != test.wantRPC {
-				t.Errorf("HTTP RPC %savailable, want it %savailable", not(rpcAvailable), not(test.wantRPC))
+			if rpcAvailable != test.wantRPC { //nolint:scopelint
+				t.Errorf("HTTP RPC %savailable, want it %savailable", not(rpcAvailable), not(test.wantRPC)) //nolint:scopelint
 			}
-			if wsAvailable != test.wantWS {
-				t.Errorf("WS RPC %savailable, want it %savailable", not(wsAvailable), not(test.wantWS))
+			if wsAvailable != test.wantWS { //nolint:scopelint
+				t.Errorf("WS RPC %savailable, want it %savailable", not(wsAvailable), not(test.wantWS)) //nolint:scopelint
 			}
 		})
 	}

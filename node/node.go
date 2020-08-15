@@ -169,12 +169,12 @@ func (n *Node) Start() error {
 		return err
 	}
 	// Start all registered lifecycles.
-	var started []Lifecycle
-	for _, lifecycle := range lifecycles {
+	started := make([]Lifecycle, len(lifecycles))
+	for i, lifecycle := range lifecycles {
 		if err = lifecycle.Start(); err != nil {
 			break
 		}
-		started = append(started, lifecycle)
+		started[i] = lifecycle
 	}
 	// Check if any lifecycle failed to start.
 	if err != nil {
