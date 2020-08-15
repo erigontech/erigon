@@ -143,8 +143,9 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter) error {
 	if err != nil {
 		return err
 	}
+	index, stage := s.CurrentStage()
 
-	message := fmt.Sprintf("Sync stage %d/%d. %v...", stage.ID+1, s.Len(), stage.Description)
+	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
 	log.Info(message)
 
 	err = stage.ExecFunc(stageState, s)
@@ -157,7 +158,7 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter) error {
 }
 
 func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
-	log.Info("Unwinding...", "stage", unwind.Stage)
+	log.Info("Unwinding...", "stage", string(stages.DBKeys[unwind.Stage]))
 	stage, err := s.StageByID(unwind.Stage)
 	if err != nil {
 		return err

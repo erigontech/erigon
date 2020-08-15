@@ -18,12 +18,12 @@ import (
 // generate the messages
 //go:generate protoc --go_out=. "./remote/kv.proto"
 //go:generate protoc --go_out=. "./remote/db.proto"
-//go:generate protoc --go_out=. "./remote/txpool.proto"
+//go:generate protoc --go_out=. "./remote/ethbackend.proto"
 
 // generate the services
 //go:generate protoc --go-grpc_out=. "./remote/kv.proto"
 //go:generate protoc --go-grpc_out=. "./remote/db.proto"
-//go:generate protoc --go-grpc_out=. "./remote/txpool.proto"
+//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto"
 
 type remote2Opts struct {
 	DialAddress string
@@ -60,10 +60,10 @@ type remote2Cursor struct {
 }
 
 type Remote2Backend struct {
-	opts         remote2Opts
-	remoteTxPool remote.TXPOOLClient
-	conn         *grpc.ClientConn
-	log          log.Logger
+	opts             remote2Opts
+	remoteEthBackend remote.ETHBACKENDClient
+	conn             *grpc.ClientConn
+	log              log.Logger
 }
 
 type remote2NoValuesCursor struct {
@@ -112,14 +112,14 @@ func (opts remote2Opts) Open() (KV, Backend, error) {
 		log:      log.New("remote_db", opts.DialAddress),
 	}
 
-	txPool := &Remote2Backend{
-		opts:         opts,
-		remoteTxPool: remote.NewTXPOOLClient(conn),
-		conn:         conn,
-		log:          log.New("remote_db", opts.DialAddress),
+	eth := &Remote2Backend{
+		opts:             opts,
+		remoteEthBackend: remote.NewETHBACKENDClient(conn),
+		conn:             conn,
+		log:              log.New("remote_db", opts.DialAddress),
 	}
 
-	return db, txPool, nil
+	return db, eth, nil
 }
 
 func (opts remote2Opts) MustOpen() (KV, Backend) {
@@ -222,6 +222,31 @@ func (b *remote2Bucket) Clear() error {
 	panic("not supporte")
 }
 
+func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
+	c := tx.Cursor(bucket)
+	defer func() {
+		if v, ok := c.(*remote2Cursor); ok {
+			if v.stream == nil {
+				return
+			}
+			_ = v.stream.CloseSend()
+		}
+	}()
+
+	return c.Get(key)
+}
+
+func (c *remote2Cursor) Get(key []byte) (val []byte, err error) {
+	k, v, err := c.Seek(key)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(key, k) {
+		return nil, nil
+	}
+	return v, nil
+}
+
 func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 	c := b.Cursor()
 	defer func() {
@@ -249,6 +274,10 @@ func (b *remote2Bucket) Put(key []byte, value []byte) error {
 
 func (b *remote2Bucket) Delete(key []byte) error {
 	panic("not supported")
+}
+
+func (tx *remote2Tx) Cursor(bucket string) Cursor {
+	return tx.Bucket(bucket).(*remote2Bucket).Cursor()
 }
 
 func (b *remote2Bucket) Cursor() Cursor {
@@ -381,9 +410,28 @@ func (c *remote2NoValuesCursor) Next() ([]byte, uint32, error) {
 }
 
 func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
-	res, err := back.remoteTxPool.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
+	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
 	if err != nil {
 		return common.Hash{}.Bytes(), err
 	}
 	return res.Hash, nil
+}
+
+func (back *Remote2Backend) Etherbase() (common.Address, error) {
+	res, err := back.remoteEthBackend.Etherbase(context.Background(), &remote.EtherbaseRequest{})
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	return common.BytesToAddress(res.Hash), nil
+}
+
+func (back *Remote2Backend) NetVersion() uint64 {
+	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
+	if err != nil {
+		log.Error("NetVersion call got an error", "err", err)
+		return 0
+	}
+
+	return res.Id
 }

@@ -100,8 +100,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			bucketEnd := bucketStart
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
-			b := tx.Bucket(string(tuples[bucketStart]))
-			c := b.Cursor()
+			c := tx.Cursor(string(tuples[bucketStart]))
 
 			// move cursor to a first element in batch
 			// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
@@ -150,7 +149,10 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(bucket).Get(key)
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
 		has = v != nil
 		return nil
 	})
@@ -166,20 +168,23 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 }
 
 // Get returns the value for a given key if it's present.
-func (db *ObjectDatabase) Get(bucket string, key []byte) (dat []byte, err error) {
-	if metrics.Enabled {
+func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
+	if metrics.EnabledExpensive {
 		defer dbGetTimer.UpdateSince(time.Now())
 	}
 
-	err = db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(bucket).Get(key)
+	var dat []byte
+	if err := db.kv.View(context.Background(), func(tx Tx) error {
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 	if dat == nil {
@@ -191,7 +196,7 @@ func (db *ObjectDatabase) Get(bucket string, key []byte) (dat []byte, err error)
 func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 	var key, value []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		k, v, err := tx.Bucket(bucket).Cursor().Last()
+		k, v, err := tx.Cursor(bucket).Last()
 		if err != nil {
 			return err
 		}
@@ -210,7 +215,7 @@ func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		c := tx.Bucket(bucket).Cursor()
+		c := tx.Cursor(bucket)
 		k, v, err := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 		if err != nil {
 			return err
@@ -234,7 +239,10 @@ func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([
 
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, _ := tx.Bucket(dbutils.ChangeSetByIndexBucket(true /* plain */, storage)).Get(key)
+		v, err := tx.Get(dbutils.ChangeSetByIndexBucket(true /* plain */, storage), key)
+		if err != nil {
+			return err
+		}
 		if v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
@@ -250,11 +258,7 @@ func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		b := tx.Bucket(bucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(bucket)
 		k, v, err := c.Seek(startkey)
 		if err != nil {
 			return err
@@ -283,7 +287,7 @@ func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		c := tx.Bucket(bucket).Cursor()
+		c := tx.Cursor(bucket)
 		k, v, err := c.Seek(startkey)
 		if err != nil {
 			return err
@@ -348,11 +352,11 @@ func (db *ObjectDatabase) Delete(bucket string, key []byte) error {
 func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 	exists := false
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		migrator, ok := tx.Bucket(name).(BucketMigrator)
+		migrator, ok := tx.(BucketMigrator)
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 		}
-		exists = migrator.Exists()
+		exists = migrator.ExistsBucket(name)
 		return nil
 	}); err != nil {
 		return false, err
@@ -364,11 +368,11 @@ func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			migrator, ok := tx.Bucket(name).(BucketMigrator)
+			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 			}
-			if err := migrator.Clear(); err != nil {
+			if err := migrator.ClearBucket(name); err != nil {
 				return err
 			}
 			return nil
@@ -383,12 +387,13 @@ func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
+		log.Info("Dropping bucket", "name", name)
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			migrator, ok := tx.Bucket(name).(BucketMigrator)
+			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 			}
-			if err := migrator.Drop(); err != nil {
+			if err := migrator.DropBucket(name); err != nil {
 				return err
 			}
 			return nil
@@ -409,7 +414,7 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 		for _, name := range dbutils.Buckets {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
-			return tx.Bucket(name).Cursor().Walk(func(k, _ []byte) (bool, error) {
+			return tx.Cursor(name).Walk(func(k, _ []byte) (bool, error) {
 				var kCopy = make([]byte, len(k))
 				copy(kCopy, k)
 				keys = append(append(keys, nameCopy), kCopy)
@@ -441,10 +446,9 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
 		for _, name := range dbutils.Buckets {
 			name := name
-			b := readTx.Bucket(name)
 			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
 				newBucketToWrite := writeTx.Bucket(name)
-				return b.Cursor().Walk(func(k, v []byte) (bool, error) {
+				return readTx.Cursor(name).Walk(func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 						return false, err
 					}
