@@ -55,6 +55,8 @@ type Node struct {
 	ws            *httpServer //
 	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
+
+	databases []ethdb.Closer
 }
 
 const (
@@ -99,6 +101,7 @@ func New(conf *Config) (*Node, error) {
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
 		server:        &p2p.Server{Config: conf.P2P},
+		databases:     make([]ethdb.Closer, 0),
 	}
 
 	// Register built-in APIs.
@@ -214,6 +217,9 @@ func (n *Node) doClose(errs []error) error {
 	// synchronize with OpenDatabase*.
 	n.lock.Lock()
 	n.state = closedState
+	for _, closer := range n.databases {
+		closer.Close()
+	}
 	n.lock.Unlock()
 
 	if err := n.accman.Close(); err != nil {
@@ -546,17 +552,25 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 		return nil, ErrNodeStopped
 	}
 
+	var db *ethdb.ObjectDatabase
+	var err error
+
 	if n.config.DataDir == "" {
-		return ethdb.NewMemDatabase(), nil
-	}
-
-	if n.config.Bolt {
+		db = ethdb.NewMemDatabase()
+	} else if n.config.Bolt {
 		log.Info("Opening Database (Bolt)")
-		return ethdb.Open(n.config.ResolvePath(name + "_bolt"))
+		db, err = ethdb.Open(n.config.ResolvePath(name + "_bolt"))
+	} else {
+		log.Info("Opening Database (LMDB)")
+		db, err = ethdb.Open(n.config.ResolvePath(name))
 	}
 
-	log.Info("Opening Database (LMDB)")
-	return ethdb.Open(n.config.ResolvePath(name))
+	if err != nil {
+		return nil, err
+	}
+
+	n.databases = append(n.databases, db)
+	return db, nil
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

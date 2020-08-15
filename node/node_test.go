@@ -28,7 +28,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 
@@ -157,16 +159,16 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(testNodeConfig())
 	defer stack.Close()
 
-	db, err := stack.OpenDatabase("mydb", 0, 0, "")
+	db, err := stack.OpenDatabaseWithFreezer("mydb", 0, 0, "", "")
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
-	if err = db.Put([]byte{}, []byte{}); err != nil {
+	if err = db.Put(dbutils.CurrentStateBucket, []byte("testK"), []byte{}); err != nil {
 		t.Fatal("can't Put on open DB:", err)
 	}
 
 	stack.Close()
-	if err = db.Put([]byte{}, []byte{}); err == nil {
+	if err = db.Put(dbutils.CurrentStateBucket, []byte("testK"), []byte{}); err == nil {
 		t.Fatal("Put succeeded after node is closed")
 	}
 }
@@ -180,7 +182,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = stack.OpenDatabase("mydb", 0, 0, "")
+			db, err = stack.OpenDatabaseWithFreezer("mydb", 0, 0, "", "")
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -201,7 +203,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := stack.OpenDatabase("mydb", 0, 0, "")
+			db, err := stack.OpenDatabaseWithFreezer("mydb", 0, 0, "", "")
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
