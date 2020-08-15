@@ -37,7 +37,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricsEnabledFlag, utils.MetricsEnabledExpensiveFlag))
+	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricsEnabledFlag, utils.MetricsEnabledExpensiveFlag, utils.MetricsHTTPFlag, utils.MetricsPortFlag))
 }
 
 func rootContext() context.Context {

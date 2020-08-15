@@ -48,3 +48,6 @@ issues:
     - path: cmd/faucet/
       linters:
         - deadcode
+  exclude:
+    # gosec: Profiling endpoint is automatically exposed on /debug/pprof
+    - G108

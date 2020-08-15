@@ -1,11 +1,11 @@
 # cat common/dbutils/bucket.go| grep '=' | grep byte | sed 's/\[\]byte(//' | sed 's/)//' | awk '{print $1 $2 $3".encode()"}' | grep -v '//'
 import common
 
-PlainStateBucket = "PLAIN-CST".encode()
+PlainStateBucket = "PLAIN-CST2".encode()
 PlainContractCodeBucket = "PLAIN-contractCode".encode()
 PlainAccountChangeSetBucket = "PLAIN-ACS".encode()
 PlainStorageChangeSetBucket = "PLAIN-SCS".encode()
-CurrentStateBucket = "CST".encode()
+CurrentStateBucket = "CST2".encode()
 AccountsHistoryBucket = "hAT".encode()
 StorageHistoryBucket = "hST".encode()
 CodeBucket = "CODE".encode()
@@ -39,17 +39,10 @@ StorageModeReceipts = "smReceipts".encode()
 StorageModeTxIndex = "smTxIndex".encode()
 StorageModePreImages = "smPreImages".encode()
 StorageModeIntermediateTrieHash = "smIntermediateTrieHash".encode()
-SyncStageProgress = "SSP".encode()
-SyncStageUnwind = "SSU".encode()
+SyncStageProgress = "SSP2".encode()
+SyncStageUnwind = "SSU2".encode()
 CliqueBucket = "clique-".encode()
 Senders = "txSenders".encode()
-
-# cat common/dbutils/bucket.go| grep '=' | grep byte | sed 's/\[\]byte(//' | sed 's/)//' | awk '{print $3}' | grep -v '//' | grep -v '='  | tr '\n' ','
-buckets = ["PLAIN-CST", "PLAIN-contractCode", "PLAIN-ACS", "PLAIN-SCS", "CST", "hAT", "hST", "CODE", "contractCode",
-           "incarnationMap", "ACS", "SCS", "iTh", "DBINFO", "DatabaseVersion", "LastHeader", "LastBlock",
-           "LastFast", "TrieSync", "h", "t", "n", "H", "b", "r", "l", "B", "secure-key-", "ethereum-config-", "iB",
-           "iBshead", "LastPrunedBlock", "lastAppliedMigration", "smHistory",
-           "SSP", "SSU", "clique-", "txSenders",]
 
 
 def isHeaderHashKey(k):

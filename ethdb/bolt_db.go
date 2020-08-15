@@ -48,17 +48,17 @@ func (t MultiPutTuples) Swap(i, j int) {
 	t[i*3+2], t[j*3+2] = t[j*3+2], t[i*3+2]
 }
 
-func Get(db KV, bucket, key []byte) ([]byte, error) {
+func Get(db KV, bucket string, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.View(context.Background(), func(tx Tx) error {
-		b := tx.Bucket(bucket)
-		if b != nil {
-			v, _ := b.Get(key)
-			if v != nil {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-			}
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
 		}
 		return nil
 	})

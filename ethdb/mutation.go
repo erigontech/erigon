@@ -31,14 +31,14 @@ func (m *mutation) KV() KV {
 	return nil
 }
 
-func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
+func (m *mutation) getMem(bucket string, key []byte) ([]byte, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.puts.get(bucket, key)
 }
 
 // Can only be called from the worker thread
-func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
+func (m *mutation) Get(bucket string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(bucket, key); ok {
 		if value == nil {
 			return nil, ErrKeyNotFound
@@ -51,31 +51,25 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
-func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
-	if value, ok := m.puts.get(bucket, key); ok {
-		return value, nil
-	}
-	if m.db != nil {
-		return m.db.Get(bucket, key)
-	}
-	return nil, ErrKeyNotFound
+func (m *mutation) Last(bucket string) ([]byte, []byte, error) {
+	return m.db.Last(bucket)
 }
 
-func (m *mutation) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+func (m *mutation) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
 	if m.db != nil {
 		return m.db.GetIndexChunk(bucket, key, timestamp)
 	}
 	return nil, ErrKeyNotFound
 }
 
-func (m *mutation) hasMem(bucket, key []byte) bool {
+func (m *mutation) hasMem(bucket string, key []byte) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	_, ok := m.puts.get(bucket, key)
 	return ok
 }
 
-func (m *mutation) Has(bucket, key []byte) (bool, error) {
+func (m *mutation) Has(bucket string, key []byte) (bool, error) {
 	if m.hasMem(bucket, key) {
 		return true, nil
 	}
@@ -96,7 +90,7 @@ func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	return common.StorageSize(sz), nil
 }
 
-func (m *mutation) Put(bucket, key []byte, value []byte) error {
+func (m *mutation) Put(bucket string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -109,7 +103,7 @@ func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 	defer m.mu.Unlock()
 	l := len(tuples)
 	for i := 0; i < l; i += 3 {
-		m.puts.set(tuples[i], tuples[i+1], tuples[i+2])
+		m.puts.set(string(tuples[i]), tuples[i+1], tuples[i+2])
 	}
 	return 0, nil
 }
@@ -126,18 +120,18 @@ func (m *mutation) IdealBatchSize() int {
 }
 
 // WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func (m *mutation) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
 	return m.db.Walk(bucket, startkey, fixedbits, walker)
 }
 
 // WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
+func (m *mutation) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
 
-func (m *mutation) Delete(bucket, key []byte) error {
+func (m *mutation) Delete(bucket string, key []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts.Delete(bucket, key)
@@ -267,29 +261,29 @@ type DBCounterStats struct {
 	MultiPut      uint64
 }
 
-func (d *RWCounterDecorator) Put(bucket, key, value []byte) error {
+func (d *RWCounterDecorator) Put(bucket string, key, value []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Put, 1)
 	return d.Database.Put(bucket, key, value)
 }
 
-func (d *RWCounterDecorator) Get(bucket, key []byte) ([]byte, error) {
+func (d *RWCounterDecorator) Get(bucket string, key []byte) ([]byte, error) {
 	atomic.AddUint64(&d.DBCounterStats.Get, 1)
 	return d.Database.Get(bucket, key)
 }
 
-func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
+func (d *RWCounterDecorator) Has(bucket string, key []byte) (bool, error) {
 	atomic.AddUint64(&d.DBCounterStats.Has, 1)
 	return d.Database.Has(bucket, key)
 }
-func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func (d *RWCounterDecorator) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
 	return d.Database.Walk(bucket, startkey, fixedbits, walker)
 }
-func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
+func (d *RWCounterDecorator) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
 	return d.Database.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
-func (d *RWCounterDecorator) Delete(bucket, key []byte) error {
+func (d *RWCounterDecorator) Delete(bucket string, key []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Delete, 1)
 	return d.Database.Delete(bucket, key)
 }

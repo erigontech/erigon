@@ -275,7 +275,7 @@ func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
 
 func cleanupContractCodeBucket(
 	db ethdb.Database,
-	bucket []byte,
+	bucket string,
 	acc accounts.Account,
 	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
 	getKeyForIncarnationFunc func(uint64) []byte,
@@ -319,7 +319,7 @@ func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
 	return rawdb.PlainDeleteAccount(db, address)
 }
 
-func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket []byte) error {
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
 	changeSetKey := dbutils.EncodeTimestamp(timestamp)
 	if err := batch.Delete(accountBucket, changeSetKey); err != nil {
 		return err

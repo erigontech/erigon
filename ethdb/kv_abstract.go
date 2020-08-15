@@ -3,6 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 var (
@@ -15,32 +17,33 @@ type KV interface {
 	Update(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
-	Begin(ctx context.Context, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
 	IdealBatchSize() int
 }
 
 type Tx interface {
-	Bucket(name []byte) Bucket
+	Cursor(bucket string) Cursor
+	Bucket(name string) Bucket
+	Get(bucket string, key []byte) (val []byte, err error)
 
 	Commit(ctx context.Context) error
 	Rollback()
 }
 
 type Bucket interface {
-	Get(key []byte) (val []byte, err error)
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
-	Cursor() Cursor
 
 	Size() (uint64, error)
 }
 
 // Interface used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	Drop() error
-	Create() error
-	Exists() bool
-	Clear() error
+	DropBucket(string) error
+	CreateBucket(string) error
+	ExistsBucket(string) bool
+	ClearBucket(string) error
+	ExistingBuckets() ([]string, error)
 }
 
 type Cursor interface {
@@ -51,8 +54,9 @@ type Cursor interface {
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
-	SeekTo(seek []byte) ([]byte, []byte, error)
+	Get(key []byte) ([]byte, error)
 	Next() ([]byte, []byte, error)
+	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
@@ -69,6 +73,12 @@ type NoValuesCursor interface {
 
 type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
+}
+
+type Backend interface {
+	AddLocal([]byte) ([]byte, error)
+	Etherbase() (common.Address, error)
+	NetVersion() uint64
 }
 
 type DbProvider uint8

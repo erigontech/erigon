@@ -247,8 +247,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
 				if err := dbCopy.KV().View(context.Background(), func(tx ethdb.Tx) error {
-					bucket := tx.Bucket(dbutils.CurrentStateBucket)
-					cursor := bucket.Cursor()
+					cursor := tx.Cursor(dbutils.CurrentStateBucket)
 					k, v, e := cursor.First()
 					for ; k != nil && e == nil; k, v, e = cursor.Next() {
 						fmt.Printf("%x: %x\n", k, v)

@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
-
 // splitCursor implements cursor with two keys
 // it is used to ignore incarnations in the middle
 // of composite storage key, but without
@@ -44,9 +43,9 @@ type splitCursor struct {
 	part3start int // Position in the key where the third part starts
 }
 
-func NewSplitCursor(b Bucket, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
+func NewSplitCursor(c Cursor, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
 	var sc splitCursor
-	sc.c = b.Cursor()
+	sc.c = c
 	sc.startkey = startkey
 	sc.part1end = part1end
 	sc.part2start = part2start

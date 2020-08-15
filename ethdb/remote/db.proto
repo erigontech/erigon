@@ -21,7 +21,7 @@ message SizeReply {
 }
 
 message BucketSizeRequest {
-  bytes bucketName = 1;
+  string bucketName = 1;
 }
 
 message BucketSizeReply {

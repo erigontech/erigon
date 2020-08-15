@@ -1726,15 +1726,16 @@ func setDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *eth.Config) {
-	var err error
-	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		fullNode, err := eth.New(ctx, cfg)
+func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
+	fullNode := new(eth.Ethereum)
+	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
+		fullNodeInst, err := eth.New(ctx, cfg)
+		*fullNode = *fullNodeInst //nolint:govet
 		return fullNode, err
-	})
-	if err != nil {
+	}); err != nil {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}
+	return fullNode
 }
 
 // RegisterEthStatsService configures the Ethereum Stats daemon and adds it to
@@ -1743,7 +1744,9 @@ func RegisterEthStatsService(stack *node.Node, url string) {
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		// Retrieve both eth and les services
 		var ethServ *eth.Ethereum
-		ctx.Service(&ethServ)
+		if err := ctx.Service(&ethServ); err != nil {
+			return nil, err
+		}
 
 		return ethstats.New(url, ethServ)
 	}); err != nil {

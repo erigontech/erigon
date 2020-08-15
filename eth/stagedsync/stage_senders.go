@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
 	"sync"
@@ -162,11 +161,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	wg.Add(cfg.NumOfGoroutines)
 	for i := 0; i < cfg.NumOfGoroutines; i++ {
 		go func() {
-			runtime.LockOSThread()
-			defer func() {
-				wg.Done()
-				runtime.UnlockOSThread()
-			}()
+			defer wg.Done()
 
 			// each goroutine gets it's own crypto context to make sure they are really parallel
 			recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)

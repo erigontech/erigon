@@ -35,7 +35,7 @@ func (a *KeyItem) Less(b llrb.Item) bool {
 func storageRoot(db ethdb.KV, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		enc, err := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(crypto.Keccak256(contract[:]))
+		enc, err := tx.Get(dbutils.IntermediateTrieHashBucket, crypto.Keccak256(contract[:]))
 		if err != nil {
 			return err
 		}
@@ -56,8 +56,7 @@ func actualContractSize(db ethdb.KV, contract common.Address) (int, error) {
 	copy(fk[:], contract[:])
 	actual := 0
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, _, err := c.Seek(fk[:]); k != nil && bytes.HasPrefix(k, contract[:]); k, _, err = c.Next() {
 			if err != nil {
 				return err
@@ -309,11 +308,7 @@ func estimate() {
 	count := 0
 	contractCount := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		st := tx.Bucket(dbutils.CurrentStateBucket)
-		if st == nil {
-			return nil
-		}
-		c := st.Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
@@ -321,7 +316,10 @@ func estimate() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				v, _ := st.Get(crypto.Keccak256(addr[:]))
+				v, err := tx.Get(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				if err != nil {
+					return err
+				}
 				del = v == nil
 				deleted[addr] = del
 				if del {

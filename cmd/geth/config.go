@@ -131,9 +131,9 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	return stack, cfg
 }
 
-func makeFullNode(ctx *cli.Context) *node.Node {
+func makeFullNode(ctx *cli.Context) (*node.Node, *eth.Ethereum) {
 	stack, cfg := makeConfigNode(ctx)
-	utils.RegisterEthService(stack, &cfg.Eth)
+	service := utils.RegisterEthService(stack, &cfg.Eth)
 
 	// Configure GraphQL if required
 	if ctx.GlobalIsSet(utils.GraphQLEnabledFlag.Name) {
@@ -143,7 +143,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	if cfg.Ethstats.URL != "" {
 		utils.RegisterEthStatsService(stack, cfg.Ethstats.URL)
 	}
-	return stack
+	return stack, service
 }
 
 // dumpConfig is the dumpconfig command.
