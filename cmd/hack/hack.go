@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1648,6 +1649,39 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	return nil
 }
 
+func supply(chaindata string) error {
+	startTime := time.Now()
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	count := 0
+	supply := uint256.NewInt()
+	var a accounts.Account
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.PlainStateBucket)
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			if len(k) != 20 {
+				continue
+			}
+			if err1 := a.DecodeForStorage(v); err1 != nil {
+				return err1
+			}
+			count++
+			supply.Add(supply, &a.Balance)
+			if count%100000 == 0 {
+				fmt.Printf("Processed %dK account records\n", count/1000)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("Total accounts: %d, supply: %d, took: %s\n", count, supply, time.Since(startTime))
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1786,6 +1820,11 @@ func main() {
 	}
 	if *action == "changeSetStats" {
 		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "supply" {
+		if err := supply(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
