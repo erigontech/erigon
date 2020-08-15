@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDupsortHashState(t *testing.T) {
+func TestDupSortHashState(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
@@ -30,7 +30,7 @@ func TestDupsortHashState(t *testing.T) {
 	require.NoError(err)
 
 	migrator := NewMigrator()
-	migrator.Migrations = []Migration{dupsortHashState}
+	migrator.Migrations = []Migration{dupSortHashState}
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
@@ -67,6 +67,68 @@ func TestDupsortHashState(t *testing.T) {
 	require.Equal([]byte{1}, v)
 
 	keyLen := common.HashLength + common.IncarnationLength
+	k, v, err = c.Get([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:], lmdb.GetBothRange)
+	require.NoError(err)
+	require.Equal([]byte(storageKey)[:keyLen], k)
+	require.Equal([]byte(storageKey)[keyLen:], v[:common.HashLength])
+	require.Equal([]byte{2}, v[common.HashLength:])
+}
+
+func TestDupSortPlainState(t *testing.T) {
+	require, db := require.New(t), ethdb.NewMemDatabase()
+
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.PlainStateBucketOld1)
+	})
+	require.NoError(err)
+
+	accKey := string(common.FromHex(fmt.Sprintf("%040x", 0)))
+	inc := string(common.FromHex("0000000000000001"))
+	storageKey := accKey + inc + string(common.FromHex(fmt.Sprintf("%064x", 0)))
+
+	err = db.Put(dbutils.PlainStateBucketOld1, []byte(accKey), []byte{1})
+	require.NoError(err)
+	err = db.Put(dbutils.PlainStateBucketOld1, []byte(storageKey), []byte{2})
+	require.NoError(err)
+
+	migrator := NewMigrator()
+	migrator.Migrations = []Migration{dupSortPlainState}
+	err = migrator.Apply(db, "")
+	require.NoError(err)
+
+	// test high-level data access didn't change
+	i := 0
+	err = db.Walk(dbutils.PlainStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+		i++
+		return true, nil
+	})
+	require.NoError(err)
+	require.Equal(2, i)
+
+	v, err := db.Get(dbutils.PlainStateBucket, []byte(accKey))
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
+
+	v, err = db.Get(dbutils.PlainStateBucket, []byte(storageKey))
+	require.NoError(err)
+	require.Equal([]byte{2}, v)
+
+	// test low-level data layout
+	rawKV := db.KV().(*ethdb.LmdbKV)
+	env := rawKV.Env()
+	allDBI := rawKV.AllDBI()
+
+	tx, err := env.BeginTxn(nil, lmdb.Readonly)
+	require.NoError(err)
+	c, err := tx.OpenCursor(allDBI[dbutils.PlainStateBucket])
+	require.NoError(err)
+
+	k, v, err := c.Get([]byte(accKey), nil, lmdb.Set)
+	require.NoError(err)
+	require.Equal([]byte(accKey), k)
+	require.Equal([]byte{1}, v)
+
+	keyLen := common.AddressLength + common.IncarnationLength
 	k, v, err = c.Get([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:], lmdb.GetBothRange)
 	require.NoError(err)
 	require.Equal([]byte(storageKey)[:keyLen], k)
