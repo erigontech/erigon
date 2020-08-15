@@ -436,12 +436,13 @@ func (f *BlockFetcher) loop() {
 			for _, announce := range f.announced {
 				timeout := arriveTimeout - gatherSlack
 				if time.Since(announce.time) > timeout {
-					// Pick a random peer to retrieve from, reset all others
-					toForget[announce.hash] = struct{}{}
-
-					if f.getBlock(announce.hash) == nil {
-						request[announce.origin] = append(request[announce.origin], announce.hash)
-						toFetch = append(toFetch, announce)
+					if _, ok := toForget[announce.hash]; !ok {
+						// Pick a random peer to retrieve from, reset all others
+						if f.getBlock(announce.hash) == nil {
+							request[announce.origin] = append(request[announce.origin], announce.hash)
+							toFetch = append(toFetch, announce)
+						}
+						toForget[announce.hash] = struct{}{}
 					}
 				}
 			}

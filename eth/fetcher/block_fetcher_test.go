@@ -322,8 +322,7 @@ func verifyChainHeight(t *testing.T, fetcher *fetcherTester, height uint64) {
 
 // Tests that a fetcher accepts block announcements and initiates retrievals for
 // them, successfully importing into the local chain.
-func TestSequentialAnnouncements64(t *testing.T) { testSequentialAnnouncements(t, 64) }
-func TestSequentialAnnouncements65(t *testing.T) { testSequentialAnnouncements(t, 65) }
+func TestSequentialAnnouncements(t *testing.T) { testSequentialAnnouncements(t, false) }
 
 func testSequentialAnnouncements(t *testing.T, light bool) {
 	// Create a chain of blocks to import
@@ -360,8 +359,7 @@ func testSequentialAnnouncements(t *testing.T, light bool) {
 
 // Tests that if blocks are announced by multiple peers (or even the same buggy
 // peer), they will only get downloaded at most once.
-func TestConcurrentAnnouncements64(t *testing.T) { testConcurrentAnnouncements(t, 64) }
-func TestConcurrentAnnouncements65(t *testing.T) { testConcurrentAnnouncements(t, 65) }
+func TestConcurrentAnnouncements(t *testing.T) { testConcurrentAnnouncements(t, false) }
 
 func testConcurrentAnnouncements(t *testing.T, light bool) {
 	// Create a chain of blocks to import
@@ -386,8 +384,8 @@ func testConcurrentAnnouncements(t *testing.T, light bool) {
 		return secondHeaderFetcher(hash)
 	}
 	// Iteratively announce blocks until all are imported
-	imported := make(chan *types.Block, 1)
-	tester.fetcher.importedHook = func(block *types.Block) { imported <- block }
+	imported := make(chan interface{}, 1)
+	tester.fetcher.importedHook = func(header *types.Header, block *types.Block) {
 		if light {
 			if header == nil {
 				t.Fatalf("Fetcher try to import empty header")
@@ -400,6 +398,7 @@ func testConcurrentAnnouncements(t *testing.T, light bool) {
 			imported <- block
 		}
 	}
+
 	for i := len(hashes) - 2; i >= 0; i-- {
 		tester.fetcher.Notify("first", hashes[i], uint64(len(hashes)-i-1), time.Now().Add(-arriveTimeout), firstHeaderWrapper, firstBodyFetcher)
 		tester.fetcher.Notify("second", hashes[i], uint64(len(hashes)-i-1), time.Now().Add(-arriveTimeout+time.Millisecond), secondHeaderWrapper, secondBodyFetcher)
@@ -417,8 +416,7 @@ func testConcurrentAnnouncements(t *testing.T, light bool) {
 
 // Tests that announcements arriving while a previous is being fetched still
 // results in a valid import.
-func TestOverlappingAnnouncements64(t *testing.T) { testOverlappingAnnouncements(t, 64) }
-func TestOverlappingAnnouncements65(t *testing.T) { testOverlappingAnnouncements(t, 65) }
+func TestOverlappingAnnouncements(t *testing.T) { testOverlappingAnnouncements(t, false) }
 
 func testOverlappingAnnouncements(t *testing.T, light bool) {
 	// Create a chain of blocks to import
@@ -464,8 +462,7 @@ func testOverlappingAnnouncements(t *testing.T, light bool) {
 }
 
 // Tests that announces already being retrieved will not be duplicated.
-func TestPendingDeduplication64(t *testing.T) { testPendingDeduplication(t, 64) }
-func TestPendingDeduplication65(t *testing.T) { testPendingDeduplication(t, 65) }
+func TestPendingDeduplication64(t *testing.T) { testPendingDeduplication(t, false) }
 
 func testPendingDeduplication(t *testing.T, light bool) {
 	// Create a hash and corresponding block
@@ -513,8 +510,7 @@ func testPendingDeduplication(t *testing.T, light bool) {
 
 // Tests that announcements retrieved in a random order are cached and eventually
 // imported when all the gaps are filled in.
-func TestRandomArrivalImport64(t *testing.T) { testRandomArrivalImport(t, 64) }
-func TestRandomArrivalImport65(t *testing.T) { testRandomArrivalImport(t, 65) }
+func TestRandomArrivalImport(t *testing.T) { testRandomArrivalImport(t, false) }
 
 func testRandomArrivalImport(t *testing.T, light bool) {
 	// Create a chain of blocks to import, and choose one to delay
@@ -556,9 +552,6 @@ func testRandomArrivalImport(t *testing.T, light bool) {
 
 // Tests that direct block enqueues (due to block propagation vs. hash announce)
 // are correctly schedule, filling and import queue gaps.
-func TestQueueGapFill64(t *testing.T) { testQueueGapFill(t, 64) }
-func TestQueueGapFill65(t *testing.T) { testQueueGapFill(t, 65) }
-
 func TestQueueGapFill(t *testing.T) {
 	// Create a chain of blocks to import, and choose one to not announce at all
 	targetBlocks := maxQueueDist
@@ -588,8 +581,6 @@ func TestQueueGapFill(t *testing.T) {
 
 // Tests that blocks arriving from various sources (multiple propagations, hash
 // announces, etc) do not get scheduled for import multiple times.
-func TestImportDeduplication65(t *testing.T) { testImportDeduplication(t, 65) }
-
 func TestImportDeduplication(t *testing.T) {
 	// Create two blocks to import (one for duplication, the other for stalling)
 	hashes, blocks := makeChain(2, 0, genesis)
@@ -663,8 +654,7 @@ func TestDistantPropagationDiscarding(t *testing.T) {
 // Tests that announcements with numbers much lower or higher than out current
 // head get discarded to prevent wasting resources on useless blocks from faulty
 // peers.
-func TestDistantAnnouncementDiscarding64(t *testing.T) { testDistantAnnouncementDiscarding(t, 64) }
-func TestDistantAnnouncementDiscarding65(t *testing.T) { testDistantAnnouncementDiscarding(t, 65) }
+func TestDistantAnnouncementDiscarding(t *testing.T) { testDistantAnnouncementDiscarding(t, false) }
 
 func testDistantAnnouncementDiscarding(t *testing.T, light bool) {
 	// Create a long chain to import and define the discard boundaries
@@ -707,8 +697,7 @@ func testDistantAnnouncementDiscarding(t *testing.T, light bool) {
 
 // Tests that peers announcing blocks with invalid numbers (i.e. not matching
 // the headers provided afterwards) get dropped as malicious.
-func TestInvalidNumberAnnouncement64(t *testing.T) { testInvalidNumberAnnouncement(t, 64) }
-func TestInvalidNumberAnnouncement65(t *testing.T) { testInvalidNumberAnnouncement(t, 65) }
+func TestInvalidNumberAnnouncement(t *testing.T) { testInvalidNumberAnnouncement(t, false) }
 
 func testInvalidNumberAnnouncement(t *testing.T, light bool) {
 	// Create a single block to import and check numbers against
@@ -763,9 +752,6 @@ func testInvalidNumberAnnouncement(t *testing.T, light bool) {
 
 // Tests that if a block is empty (i.e. header only), no body request should be
 // made, and instead the header should be assembled into a whole block in itself.
-func TestEmptyBlockShortCircuit64(t *testing.T) { testEmptyBlockShortCircuit(t, 64) }
-func TestEmptyBlockShortCircuit65(t *testing.T) { testEmptyBlockShortCircuit(t, 65) }
-
 func TestEmptyBlockShortCircuit(t *testing.T) {
 	// Create a chain of blocks to import
 	hashes, blocks := makeChain(32, 0, genesis)
@@ -808,9 +794,6 @@ func TestEmptyBlockShortCircuit(t *testing.T) {
 // Tests that a peer is unable to use unbounded memory with sending infinite
 // block announcements to a node, but that even in the face of such an attack,
 // the fetcher remains operational.
-func TestHashMemoryExhaustionAttack64(t *testing.T) { testHashMemoryExhaustionAttack(t, 64) }
-func TestHashMemoryExhaustionAttack65(t *testing.T) { testHashMemoryExhaustionAttack(t, 65) }
-
 func TestHashMemoryExhaustionAttack(t *testing.T) {
 	// Create a tester with instrumented import hooks
 	tester := newTester(false)
@@ -864,8 +847,8 @@ func TestBlockMemoryExhaustionAttack(t *testing.T) {
 	tester := newTester(false)
 	defer tester.fetcher.Stop()
 
-	imported, enqueued := make(chan *types.Block, 1), int32(0)
-	tester.fetcher.importedHook = func(block *types.Block) { imported <- block }
+	imported, enqueued := make(chan interface{}, 1), int32(0)
+	tester.fetcher.importedHook = func(_ *types.Header, block *types.Block) { imported <- block }
 	tester.fetcher.queueChangeHook = func(hash common.Hash, added bool) {
 		if added {
 			atomic.AddInt32(&enqueued, 1)
