@@ -87,13 +87,9 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 			return true, nil
 		}
 
-		bodyRlp := v
-		if debug.IsBlockCompressionEnabled() && len(v) > 0 {
-			var err error
-			bodyRlp, err = snappy.Decode(nil, v)
-			if err != nil {
-				return false, fmt.Errorf("err on decode block: %s", err)
-			}
+		bodyRlp, err := rawdb.DecompressBlockBody(v)
+		if err != nil {
+			return false, err
 		}
 
 		body := new(types.Body)
@@ -200,13 +196,9 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return true, nil
 		}
 
-		bodyRlp := v
-		if debug.IsBlockCompressionEnabled() && len(v) > 0 {
-			var err error
-			bodyRlp, err = snappy.Decode(nil, v)
-			if err != nil {
-				return false, fmt.Errorf("err on decode block: %s", err)
-			}
+		bodyRlp, err := rawdb.DecompressBlockBody(v)
+		if err != nil {
+			return false, err
 		}
 
 		body := new(types.Body)

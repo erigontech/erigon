@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -82,14 +80,11 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir st
 			return false, err
 		}
 
-		bodyRlp := v
-		if debug.IsBlockCompressionEnabled() && len(v) > 0 {
-			var err error
-			bodyRlp, err = snappy.Decode(nil, v)
-			if err != nil {
-				return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err)
-			}
+		bodyRlp, err := rawdb.DecompressBlockBody(v)
+		if err != nil {
+			return false, err
 		}
+
 		body := new(types.Body)
 		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("unwindTxLookup, rlp decode err: %w", err)
