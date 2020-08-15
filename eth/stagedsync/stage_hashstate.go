@@ -60,10 +60,10 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
 	prom.TempDir = datadir
-	if err := prom.Unwind(s, u, false /* storage */, false /* codes */); err != nil {
+	if err := prom.Unwind(s, u, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Unwind(s, u, false /* storage */, true /* codes */); err != nil {
+	if err := prom.Unwind(s, u, false /* storage */, false /* codes */); err != nil {
 		return err
 	}
 	if err := prom.Unwind(s, u, true /* storage */, false /* codes */); err != nil {
@@ -264,7 +264,7 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	}
 }
 
-func getUnwindExtractFunc(changeSetBucket string) etl.ExtractFunc {
+func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
@@ -273,6 +273,41 @@ func getUnwindExtractFunc(changeSetBucket string) etl.ExtractFunc {
 				return err
 			}
 			return next(k, newK, v)
+		})
+	}
+}
+
+func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+
+			if len(v) == 0 {
+				return next(k, newK, v)
+			}
+
+			var acc accounts.Account
+			if err = acc.DecodeForStorage(v); err != nil {
+				return err
+			}
+			if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
+				return next(k, newK, v)
+			}
+
+			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+			}
+
+			value := make([]byte, acc.EncodingLengthForStorage())
+			acc.EncodeForStorage(value)
+
+			return next(k, newK, value)
 		})
 	}
 }
@@ -377,10 +412,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		loadBucket,
 		p.TempDir,
 		extract,
-		// here we avoid getting the state from changesets,
-		// we just care about the accounts that did change,
-		// so we can directly read from the PlainTextBuffer
-		l.LoadFunc,
+		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
@@ -411,9 +443,13 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 		extractFunc = getCodeUnwindExtractFunc(p.db)
 		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
-		loadBucket = dbutils.CurrentStateBucket
-		extractFunc = getUnwindExtractFunc(changeSetBucket)
 		l.innerLoadFunc = etl.IdentityLoadFunc
+		loadBucket = dbutils.CurrentStateBucket
+		if storage {
+			extractFunc = getUnwindExtractStorage(changeSetBucket)
+		} else {
+			extractFunc = getUnwindExtractAccounts(p.db, changeSetBucket)
+		}
 	}
 
 	return etl.Transform(
@@ -434,10 +470,10 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
-	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */); err != nil {
+	if err := prom.Promote(s, from, to, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Promote(s, from, to, false /* storage */, true /* codes */); err != nil {
+	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */); err != nil {
 		return err
 	}
 	if err := prom.Promote(s, from, to, true /* storage */, false /* codes */); err != nil {
