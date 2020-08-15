@@ -249,6 +249,10 @@ func (b boltBucket) Clear() error {
 	return nil
 }
 
+func (tx *boltTx) Get(bucket string, key []byte) (val []byte, err error) {
+	return tx.Bucket(bucket).(boltBucket).Get(key)
+}
+
 func (b boltBucket) Get(key []byte) (val []byte, err error) {
 	select {
 	case <-b.tx.ctx.Done():
@@ -279,8 +283,16 @@ func (b boltBucket) Delete(key []byte) error {
 	return b.bolt.Delete(key)
 }
 
+func (tx *boltTx) Cursor(bucket string) Cursor {
+	return tx.Bucket(bucket).(boltBucket).Cursor()
+}
+
 func (b boltBucket) Cursor() Cursor {
 	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
+}
+
+func (c *boltCursor) Get(key []byte) (val []byte, err error) {
+	return c.bucket.Get(key)
 }
 
 func (c *boltCursor) First() (k, v []byte, err error) {

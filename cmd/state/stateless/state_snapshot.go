@@ -158,12 +158,11 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 	diskDb := ethdb.MustOpen(filename)
 	defer diskDb.Close()
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		preimage := tx.Bucket(dbutils.PreimagePrefix)
+		c := tx.Cursor(dbutils.CurrentStateBucket)
+		preimage := tx.Cursor(dbutils.PreimagePrefix)
 		count := 0
 		if err := diskDb.KV().View(context.Background(), func(txDisk ethdb.Tx) error {
-			bDisk := txDisk.Bucket(dbutils.CurrentStateBucket)
-			cDisk := bDisk.Cursor()
+			cDisk := txDisk.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
 				if err != nil {
 					return err
@@ -171,8 +170,14 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) != 32 {
 					continue
 				}
-				vv, _ := b.Get(k)
-				p, _ := preimage.Get(k)
+				vv, err := c.Get(k)
+				if err != nil {
+					return err
+				}
+				p, err := preimage.Get(k)
+				if err != nil {
+					return err
+				}
 				if !bytes.Equal(v, vv) {
 					fmt.Printf("Diff for %x (%x): disk: %x, mem: %x\n", k, p, v, vv)
 				}
@@ -182,7 +187,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				}
 			}
 			count = 0
-			cDisk = bDisk.Cursor()
+			cDisk = txDisk.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
 				if err != nil {
 					return err
@@ -190,7 +195,11 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) == 32 {
 					continue
 				}
-				vv, _ := b.Get(k)
+				vv, err := c.Get(k)
+				if err != nil {
+					return err
+				}
+
 				if !bytes.Equal(v, vv) {
 					fmt.Printf("Diff for %x: disk: %x, mem: %x\n", k, v, vv)
 				}
@@ -200,7 +209,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				}
 			}
 			count = 0
-			c := b.Cursor()
+			c := tx.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -208,8 +217,14 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) != 32 {
 					continue
 				}
-				vv, _ := bDisk.Get(k)
-				p, _ := preimage.Get(k)
+				vv, err := cDisk.Get(k)
+				if err != nil {
+					return err
+				}
+				p, err := preimage.Get(k)
+				if err != nil {
+					return err
+				}
 				if len(vv) == 0 {
 					fmt.Printf("Diff for %x (%x): disk: %x, mem: %x\n", k, p, vv, v)
 				}
@@ -218,7 +233,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 					fmt.Printf("Compared %d records\n", count)
 				}
 			}
-			c = b.Cursor()
+			c = tx.Cursor(dbutils.CurrentStateBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -226,8 +241,14 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) == 32 {
 					continue
 				}
-				vv, _ := bDisk.Get(k)
-				p, _ := preimage.Get(k)
+				vv, err := cDisk.Get(k)
+				if err != nil {
+					return err
+				}
+				p, err := preimage.Get(k)
+				if err != nil {
+					return err
+				}
 				if len(vv) == 0 {
 					fmt.Printf("Diff for %x (%x): disk: %x, mem: %x\n", k, p, vv, v)
 				}

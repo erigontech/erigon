@@ -32,11 +32,11 @@ type IndexGenerator struct {
 }
 
 func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
-	v, ok := changeset.Mapper[string(changeSetBucket)]
+	v, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
+	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
@@ -59,12 +59,12 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Debug("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
+	log.Debug("Index generation successfully finished", "csbucket", changeSetBucket, "it took", time.Since(t))
 	return nil
 }
 
 func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) error {
-	vv, ok := changeset.Mapper[string(changeSetBucket)]
+	vv, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
@@ -141,9 +141,8 @@ func (ig *IndexGenerator) DropIndex(bucket string) error {
 	casted, ok := ig.db.(ethdb.NonTransactional)
 	if !ok {
 		return errors.New("imposible to drop")
-
 	}
-	log.Warn("Remove bucket", "bucket", string(bucket))
+	log.Warn("Remove bucket", "bucket", bucket)
 	return casted.ClearBuckets(bucket)
 }
 

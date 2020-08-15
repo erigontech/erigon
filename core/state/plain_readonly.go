@@ -173,7 +173,10 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		var codeHash []byte
 		if err := dbs.db.View(context.Background(), func(tx ethdb.Tx) error {
-			codeHash, _ = tx.Bucket(dbutils.PlainContractCodeBucket).Get(dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+			codeHash, err = tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+			if err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			return nil, err

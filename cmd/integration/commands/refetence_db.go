@@ -87,7 +87,7 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 		if err := refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
 			for _, bucket := range stateBuckets {
 				fmt.Printf("\nBucket: %s\n", bucket)
-				if err := compareBuckets(ctx, tx.Bucket(bucket), refTX.Bucket(bucket)); err != nil {
+				if err := compareBuckets(ctx, tx, bucket, refTX, bucket); err != nil {
 					return err
 				}
 			}
@@ -111,7 +111,7 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		return refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
-			return compareBuckets(ctx, tx.Bucket(bucket), refTX.Bucket(bucket))
+			return compareBuckets(ctx, tx, bucket, refTX, bucket)
 		})
 	}); err != nil {
 		return err
@@ -120,14 +120,14 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 	return nil
 }
 
-func compareBuckets(ctx context.Context, b ethdb.Bucket, refB ethdb.Bucket) error {
+func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, refB string) error {
 	count := 0
-	c := b.Cursor()
+	c := tx.Cursor(b)
 	k, v, e := c.First()
 	if e != nil {
 		return e
 	}
-	refC := refB.Cursor()
+	refC := refTx.Cursor(refB)
 	refK, refV, revErr := refC.First()
 	if revErr != nil {
 		return revErr

@@ -164,8 +164,7 @@ func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.H
 	}
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CodeBucket)
-		v, err := b.Get(codeHash[:])
+		v, err := tx.Get(dbutils.CodeBucket, codeHash[:])
 		val = v
 		return err
 	})

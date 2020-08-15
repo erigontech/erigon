@@ -68,15 +68,3 @@ func TestDB() string {
 	})
 	return testDB
 }
-
-var (
-	dupsortPlain    bool
-	getDupsortPlain sync.Once
-)
-
-func IsPlainStateDupsortEnabled() bool {
-	getDupsortPlain.Do(func() {
-		_, dupsortPlain = os.LookupEnv("DUPSORT_PLAIN")
-	})
-	return dupsortPlain
-}
