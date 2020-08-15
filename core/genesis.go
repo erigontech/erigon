@@ -172,25 +172,6 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 		} else {
 			log.Info("Writing custom genesis block")
 		}
-		block, err := genesis.Commit(db)
-		if err != nil {
-			return genesis.Config, common.Hash{}, err
-		}
-		return genesis.Config, block.Hash(), nil
-	}
-
-	// We have the genesis block in database(perhaps in ancient database)
-	// but the corresponding state is missing.
-	header := rawdb.ReadHeader(db, stored, 0)
-	if _, err := state.New(header.Root, state.NewDatabaseWithCache(db, 0, ""), nil); err != nil {
-		if genesis == nil {
-			genesis = DefaultGenesisBlock()
-		}
-		// Ensure the stored genesis matches with the given one.
-		hash := genesis.ToBlock(nil).Hash()
-		if hash != stored {
-			return genesis.Config, hash, &GenesisMismatchError{stored, hash}
-		}
 		block, stateDB1, err := genesis.Commit(db, history)
 		if err != nil {
 			return genesis.Config, common.Hash{}, nil, err
