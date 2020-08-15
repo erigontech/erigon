@@ -306,7 +306,10 @@ func TestPrepend(t *testing.T) {
 			t.Errorf("expected 5 tips, got %d", len(hd.tips))
 		}
 		if !hd.tips[h41.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 1010 + 2010 + 3010)) {
-			t.Errorf("cumulative difficulty of h41 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h4.Hash()].cumulativeDifficulty.ToBig())
+			t.Errorf("cumulative difficulty of h41 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h41.Hash()].cumulativeDifficulty.ToBig())
+		}
+		if hd.tips[h41.Hash()].anchorParent != h1.ParentHash {
+			t.Errorf("Expected h41 anchorParent to be %x, got %x", h1.ParentHash, hd.tips[h41.Hash()].anchorParent)
 		}
 	} else {
 		t.Errorf("prepend: %v", err)
@@ -366,6 +369,74 @@ func TestPrepend(t *testing.T) {
 		}
 		if len(hd.tips) != 5 {
 			t.Errorf("expected 5 tips, got %d", len(hd.tips))
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// trying to attach header not connected to any tips
+	var h6 types.Header
+	h6.Number = big.NewInt(6)
+	h6.Difficulty = big.NewInt(5010)
+	h6.ParentHash = h5.Hash()
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h6}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// Introduce h51 as a tip and prepend h6
+	if err := hd.addHeaderAsTip(&h5, h5.ParentHash, new(uint256.Int).SetUint64(2000)); err != nil {
+		t.Fatalf("setting up h5: %v", err)
+	}
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h6}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if !ok {
+			t.Errorf("expected to prepend")
+		}
+		if len(hd.tips) != 7 {
+			t.Errorf("expected 7 tips, got %d", len(hd.tips))
+		}
+		if !hd.tips[h6.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 5010)) {
+			t.Errorf("cumulative difficulty of h6 expected %d, got %d", 2000+5010, hd.tips[h6.Hash()].cumulativeDifficulty.ToBig())
+		}
+		if hd.tips[h6.Hash()].anchorParent != h5.ParentHash {
+			t.Errorf("Expected h6 anchorParent to be %x, got %x", h5.ParentHash, hd.tips[h6.Hash()].anchorParent)
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	var h7 types.Header
+	h7.Number = big.NewInt(7)
+	h7.Difficulty = big.NewInt(6010)
+	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
+	// Introduce hard-coded tip
+	if err := hd.addHardCodedTip(10, 5555, h7.Hash(), h7.ParentHash, new(uint256.Int).SetUint64(2000)); err != nil {
+		t.Fatalf("setting up h7: %v", err)
+	}
+
+	// Try to prepend to the hard-coded tip
+	var h8 types.Header
+	h8.Number = big.NewInt(8)
+	h8.Difficulty = big.NewInt(7010)
+	h8.ParentHash = h7.Hash()
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h8}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+		if len(hd.tips) != 8 {
+			t.Errorf("expected 8 tips, got %d", len(hd.tips))
 		}
 	} else {
 		t.Errorf("prepend: %v", err)
