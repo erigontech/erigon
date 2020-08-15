@@ -187,18 +187,19 @@ var (
 func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	// Generate test chain.
 	genesis, blocks := generateTestChain()
-
-	// Start Ethereum service.
-	var ethservice *eth.Ethereum
+	// Create node
 	n, err := node.New(&node.Config{})
-	n.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		config := &eth.Config{Genesis: genesis}
-		config.Ethash.PowMode = ethash.ModeFake
+	if err != nil {
+		t.Fatalf("can't create new node: %v", err)
+	}
+	// Create Ethereum Service
+	config := &eth.Config{Genesis: genesis}
+	config.Ethash.PowMode = ethash.ModeFake
 		config.Pruning = false
-		ethservice, err = eth.New(ctx, config)
-		return ethservice, err
-	})
-
+	ethservice, err := eth.New(n, config)
+	if err != nil {
+		t.Fatalf("can't create new ethereum service: %v", err)
+	}
 	// Import the test chain.
 	if err := n.Start(); err != nil {
 		t.Fatalf("can't start test node: %v", err)
@@ -236,7 +237,7 @@ func generateTestChain() (*core.Genesis, []*types.Block) {
 func TestHeader(t *testing.T) {
 	backend, chain := newTestBackend(t)
 	client, _ := backend.Attach()
-	defer backend.Stop()
+	defer backend.Close()
 	defer client.Close()
 
 	tests := map[string]struct {
@@ -280,7 +281,7 @@ func TestHeader(t *testing.T) {
 func TestBalanceAt(t *testing.T) {
 	backend, _ := newTestBackend(t)
 	client, _ := backend.Attach()
-	defer backend.Stop()
+	defer backend.Close()
 	defer client.Close()
 
 	tests := map[string]struct {
@@ -326,7 +327,7 @@ func TestBalanceAt(t *testing.T) {
 func TestTransactionInBlockInterrupted(t *testing.T) {
 	backend, _ := newTestBackend(t)
 	client, _ := backend.Attach()
-	defer backend.Stop()
+	defer backend.Close()
 	defer client.Close()
 
 	ec := NewClient(client)
@@ -344,7 +345,7 @@ func TestTransactionInBlockInterrupted(t *testing.T) {
 func TestChainID(t *testing.T) {
 	backend, _ := newTestBackend(t)
 	client, _ := backend.Attach()
-	defer backend.Stop()
+	defer backend.Close()
 	defer client.Close()
 	ec := NewClient(client)
 

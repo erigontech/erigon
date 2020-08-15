@@ -48,13 +48,13 @@ var (
 
 // Seal implements consensus.Engine, attempting to find a nonce that satisfies
 // the block's difficulty requirements.
-func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
 	// If we're running a fake PoW, simply return a 0 nonce immediately
 	if ethash.config.PowMode == ModeFake || ethash.config.PowMode == ModeFullFake {
 		header := block.Header()
 		header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 		select {
-		case results <- consensus.ResultWithContext{ctx, block.WithSeal(header)}:
+		case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
 		default:
 			ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", ethash.SealHash(block.Header()))
 		}
@@ -65,7 +65,6 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 		return ethash.shared.Seal(ctx, chain, block, results, stop)
 	}
 
-	// Create a runner and the multiple search threads it directs
 	ethash.lock.Lock()
 	threads := ethash.threads
 	if ethash.rand == nil {
