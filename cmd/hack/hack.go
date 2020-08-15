@@ -1657,11 +1657,7 @@ func supply(chaindata string) error {
 	supply := uint256.NewInt()
 	var a accounts.Account
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.PlainStateBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.PlainStateBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
