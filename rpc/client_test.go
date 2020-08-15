@@ -449,8 +449,8 @@ func TestClientSetHeader(t *testing.T) {
 	defer client.Close()
 
 	client.SetHeader("test", "ok")
-	if _, err := client.SupportedModules(); err != nil {
-		t.Fatal(err)
+	if _, err1 := client.SupportedModules(); err1 != nil {
+		t.Fatal(err1)
 	}
 	if !gotHeader {
 		t.Fatal("client did not set custom header")

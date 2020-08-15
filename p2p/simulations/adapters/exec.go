@@ -451,9 +451,9 @@ func startExecNodeStack() (*node.Node, error) {
 		if conf.Snapshots != nil {
 			ctx.Snapshot = conf.Snapshots[name]
 		}
-		service, err := lifecycleFunc(ctx, stack)
-		if err != nil {
-			return nil, err
+		service, err1 := lifecycleFunc(ctx, stack)
+		if err1 != nil {
+			return nil, err1
 		}
 		services[name] = service
 		stack.RegisterLifecycle(service)
