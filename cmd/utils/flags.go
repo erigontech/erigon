@@ -1730,7 +1730,9 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
 	fullNode := new(eth.Ethereum)
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		fullNodeInst, err := eth.New(ctx, cfg)
-		*fullNode = *fullNodeInst //nolint:govet
+		if err == nil {
+			*fullNode = *fullNodeInst //nolint:govet
+		}
 		return fullNode, err
 	}); err != nil {
 		Fatalf("Failed to register the Ethereum service: %v", err)
