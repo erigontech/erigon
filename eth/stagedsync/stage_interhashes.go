@@ -205,14 +205,10 @@ func (r *Receiver) Result() trie.SubTries {
 }
 
 func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNextFunc) error {
-	newK, err := transformPlainStateKey(k)
-	if err != nil {
-		return err
-	}
-	newKStr := string(newK)
+	newKStr := string(k)
 	if len(value) > 0 {
 		var a accounts.Account
-		if err = a.DecodeForStorage(value); err != nil {
+		if err := a.DecodeForStorage(value); err != nil {
 			return err
 		}
 		r.accountMap[newKStr] = &a
@@ -224,11 +220,7 @@ func (r *Receiver) accountLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNe
 }
 
 func (r *Receiver) storageLoad(k []byte, value []byte, _ etl.State, _ etl.LoadNextFunc) error {
-	newK, err := transformPlainStateKey(k)
-	if err != nil {
-		return err
-	}
-	newKStr := string(newK)
+	newKStr := string(k)
 	if len(value) > 0 {
 		r.storageMap[newKStr] = common.CopyBytes(value)
 	} else {
@@ -273,16 +265,14 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 	} else {
 		l.innerLoadFunc = r.accountLoad
 	}
+
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getExtractFunc2(changeSetBucket),
-		// here we avoid getting the state from changesets,
-		// we just care about the accounts that did change,
-		// so we can directly read from the PlainTextBuffer
-		getFromPlainStateAndLoad2(p.db, l.LoadFunc),
+		getExtractPlainState(changeSetBucket),
+		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
@@ -319,7 +309,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Re
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getUnwindExtractFunc(changeSetBucket),
+		getExtractPlainState(changeSetBucket),
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
@@ -342,16 +332,16 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, r); err != nil {
 		return err
 	}
-	for ks, acc := range r.accountMap {
-		// Fill the code hashes
-		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
-				copy(acc.CodeHash[:], codeHash)
-			} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
-			}
-		}
-	}
+	//for ks, acc := range r.accountMap {
+	//	// Fill the code hashes
+	//	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+	//		if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err == nil {
+	//			copy(acc.CodeHash[:], codeHash)
+	//		} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+	//			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", ks, acc.Incarnation, err)
+	//		}
+	//	}
+	//}
 	unfurl := trie.NewRetainList(0)
 	sort.Strings(r.unfurlList)
 	for _, ks := range r.unfurlList {

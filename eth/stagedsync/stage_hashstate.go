@@ -197,11 +197,15 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-func getExtractFunc(changeSetBucket string) etl.ExtractFunc {
+func getExtractPlainState(changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			return next(k, k, nil)
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, v)
 		})
 	}
 }
