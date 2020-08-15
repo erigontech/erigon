@@ -619,9 +619,6 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 					return err
 				}
 				counter++
-				if counter%100_000 == 0 && time.Since(t) < 30*time.Second {
-					fmt.Printf("tick\n")
-				}
 				t = fstl.logProgress(t, counter)
 			}
 			if fstl.itemPresent {
