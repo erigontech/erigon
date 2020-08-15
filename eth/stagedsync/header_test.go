@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -257,7 +258,114 @@ func TestPrepend(t *testing.T) {
 			t.Errorf("expected to prepend")
 		}
 		if len(hd.tips) != 2 {
-			t.Errorf("Expected 2 tips, got %d", len(hd.tips))
+			t.Errorf("expected 2 tips, got %d", len(hd.tips))
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// two connected headers attaching to the the highest tip
+	var h3, h4 types.Header
+	h3.Number = big.NewInt(3)
+	h3.Difficulty = big.NewInt(2010)
+	h3.ParentHash = h2.Hash()
+	h4.Number = big.NewInt(4)
+	h4.Difficulty = big.NewInt(3010)
+	h4.ParentHash = h3.Hash()
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h3, &h4}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if !ok {
+			t.Errorf("expected to prepend")
+		}
+		if len(hd.tips) != 4 {
+			t.Errorf("expected 4 tips, got %d", len(hd.tips))
+		}
+		if !hd.tips[h4.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 1010 + 2010 + 3010)) {
+			t.Errorf("cumulative difficulty of h4 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h4.Hash()].cumulativeDifficulty.ToBig())
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// one header attaching not to the highest tip
+	var h41 types.Header
+	h41.Number = big.NewInt(4)
+	h41.Difficulty = big.NewInt(3010)
+	h41.Extra = []byte("Extra")
+	h41.ParentHash = h3.Hash()
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h41}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if !ok {
+			t.Errorf("expected to prepend")
+		}
+		if len(hd.tips) != 5 {
+			t.Errorf("expected 5 tips, got %d", len(hd.tips))
+		}
+		if !hd.tips[h41.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 1010 + 2010 + 3010)) {
+			t.Errorf("cumulative difficulty of h41 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h4.Hash()].cumulativeDifficulty.ToBig())
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// trying to attach header with wrong block height
+	var h5 types.Header
+	h5.Number = big.NewInt(6) // Wrong (expected 5)
+	h5.Difficulty = big.NewInt(4010)
+	h5.ParentHash = h4.Hash()
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
+		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != WrongChildBlockHeightPenalty {
+			t.Errorf("expected WrongChildBlockHeight penalty, got %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+		if len(hd.tips) != 5 {
+			t.Errorf("expected 5 tips, got %d", len(hd.tips))
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// trying to attach header with wrong difficulty
+	h5.Number = big.NewInt(5)        // Now correct
+	h5.Difficulty = big.NewInt(4020) // Wrong - expected 4010
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
+		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != WrongChildDifficultyPenalty {
+			t.Errorf("expected WrongChildDifficulty penalty, got %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+		if len(hd.tips) != 5 {
+			t.Errorf("expected 5 tips, got %d", len(hd.tips))
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
+	}
+
+	// trying to attach header with wrong PoW
+	hd.verifySealFunc = func(header *types.Header) error {
+		if header.Nonce.Uint64() > 0 {
+			return fmt.Errorf("wrong nonce: %d", header.Nonce)
+		}
+		return nil
+	}
+	h5.Difficulty = big.NewInt(4010) // Now correct
+	h5.Nonce = types.EncodeNonce(1)
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
+		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != InvalidSealPenalty {
+			t.Errorf("expected InvalidSeal penalty, got %s", peerPenalty)
+		}
+		if ok {
+			t.Errorf("did not expect to prepend")
+		}
+		if len(hd.tips) != 5 {
+			t.Errorf("expected 5 tips, got %d", len(hd.tips))
 		}
 	} else {
 		t.Errorf("prepend: %v", err)
