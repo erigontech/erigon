@@ -116,9 +116,9 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 	// Go through the headers again, and filter out the headers that are not connected to the attachment header
 	anchorParent := attachmentTip.anchorParent
 	connectedHeaders := make(map[common.Hash]*uint256.Int)
-	diff, ok := uint256.FromBig(attachmentHeader.Difficulty)
-	if !ok {
-		return false, nil, fmt.Errorf("could not convert attachmentHeader.Difficulty to uint256: %s", attachmentHeader.Difficulty)
+	diff, overflow := uint256.FromBig(attachmentHeader.Difficulty)
+	if overflow {
+		return false, nil, fmt.Errorf("overflow when converting attachmentHeader.Difficulty to uint256: %s", attachmentHeader.Difficulty)
 	}
 	cumulativeDifficulty := new(uint256.Int).Add(&attachmentTip.cumulativeDifficulty, diff)
 	connectedHeaders[attachmentHeader.Hash()] = cumulativeDifficulty
@@ -127,9 +127,9 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 	}
 	for _, header := range chainSegment.headers[attachingFrom+1:] {
 		if cumDiff, connected := connectedHeaders[header.ParentHash]; connected {
-			diff, ok = uint256.FromBig(header.Difficulty)
-			if !ok {
-				return false, nil, fmt.Errorf("could not convert header.Difficulty to uint256: %s", header.Difficulty)
+			diff, overflow = uint256.FromBig(header.Difficulty)
+			if overflow {
+				return false, nil, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			newCumDiff := new(uint256.Int).Add(cumDiff, diff)
 			connectedHeaders[header.Hash()] = newCumDiff
@@ -168,9 +168,9 @@ func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash
 }
 
 func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) error {
-	diff, ok := uint256.FromBig(header.Difficulty)
-	if !ok {
-		return fmt.Errorf("could not convert header.Difficulty to uint256: %s", header.Difficulty)
+	diff, overflow := uint256.FromBig(header.Difficulty)
+	if overflow {
+		return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 	}
 	tip := &Tip{
 		anchorParent:         anchorParent,
@@ -179,19 +179,31 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent comm
 		difficulty:           *diff,
 		blockHeight:          header.Number.Uint64(),
 		uncleHash:            header.UncleHash,
-		noPrepend:            false, // TODO: Check
+		noPrepend:            false,
 	}
+	hd.tips[header.Hash()] = tip
 	tipItem := &TipItem{
 		tipHash:              header.Hash(),
 		cumulativeDifficulty: *cumulativeDifficulty,
 	}
 	hd.tipLimiter.ReplaceOrInsert(tipItem)
-	hd.tips[header.Hash()] = tip
 	// Enforce the limit
 	for hd.tipLimiter.Len() > hd.tipLimit {
 		deleted := hd.tipLimiter.DeleteMin()
 		deletedItem := deleted.(*TipItem)
 		delete(hd.tips, deletedItem.tipHash)
 	}
+	return nil
+}
+
+func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, hash, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) error {
+	tip := &Tip{
+		anchorParent:         anchorParent,
+		cumulativeDifficulty: *cumulativeDifficulty,
+		timestamp:            timestamp,
+		blockHeight:          blockHeight,
+		noPrepend:            true,
+	}
+	hd.tips[hash] = tip
 	return nil
 }

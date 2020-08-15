@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -235,6 +236,30 @@ func TestPrepend(t *testing.T) {
 			t.Errorf("did not expect to prepend")
 		}
 	} else {
-		t.Errorf("handle newBlock msg: %v", err)
+		t.Errorf("prepend: %v", err)
+	}
+
+	// single header attaching to a single existing tip
+	var h1, h2 types.Header
+	h1.Number = big.NewInt(1)
+	h1.Difficulty = big.NewInt(10)
+	h2.Number = big.NewInt(2)
+	h2.Difficulty = big.NewInt(1010)
+	h2.ParentHash = h1.Hash()
+	if err := hd.addHeaderAsTip(&h1, h1.ParentHash, new(uint256.Int).SetUint64(2000)); err != nil {
+		t.Fatalf("setting up h1: %v", err)
+	}
+	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h2}}, peer); err == nil {
+		if peerPenalty != nil {
+			t.Errorf("unexpected penalty: %s", peerPenalty)
+		}
+		if !ok {
+			t.Errorf("expected to prepend")
+		}
+		if len(hd.tips) != 2 {
+			t.Errorf("Expected 2 tips, got %d", len(hd.tips))
+		}
+	} else {
+		t.Errorf("prepend: %v", err)
 	}
 }
