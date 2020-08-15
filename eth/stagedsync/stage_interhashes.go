@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -109,6 +110,17 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, loa
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, nil)
+		})
+	}
+
 	var l OldestAppearedLoad
 	l.innerLoadFunc = load
 
@@ -117,7 +129,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, loa
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getExtractPlainStateForIH(changeSetBucket),
+		extract,
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
@@ -142,6 +154,17 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, nil)
+		})
+	}
+
 	var l OldestAppearedLoad
 	l.innerLoadFunc = load
 
@@ -150,7 +173,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getExtractPlainStateForIH(changeSetBucket),
+		extract,
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,

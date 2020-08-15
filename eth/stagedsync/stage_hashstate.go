@@ -151,22 +151,6 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 	return compositeKey, nil
 }
 
-func keyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
-	newK, err := transformPlainStateKey(k)
-	if err != nil {
-		return err
-	}
-	return next(k, newK, value)
-}
-
-func codeKeyTransformLoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
-	newK, err := transformContractCodeKey(k)
-	if err != nil {
-		return err
-	}
-	return next(k, newK, value)
-}
-
 type OldestAppearedLoad struct {
 	innerLoadFunc etl.LoadFunc
 	lastKey       bytes.Buffer
@@ -197,7 +181,7 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-func getExtractPlainState(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
@@ -211,19 +195,6 @@ func getExtractPlainState(db ethdb.Getter, changeSetBucket string) etl.ExtractFu
 				return err
 			}
 			return next(k, newK, value)
-		})
-	}
-}
-
-func getExtractPlainStateForIH(changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, v)
 		})
 	}
 }
@@ -341,47 +312,6 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 	}
 }
 
-func getFromPlainStateAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
-	return func(k []byte, v []byte, state etl.State, next etl.LoadNextFunc) error {
-		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
-		value, err := db.Get(dbutils.PlainStateBucket, k)
-		if err == nil || errors.Is(err, ethdb.ErrKeyNotFound) {
-			return loadFunc(k, value, state, next)
-		}
-		return err
-	}
-}
-
-func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
-	return func(k []byte, _ []byte, state etl.State, next etl.LoadNextFunc) error {
-		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
-		value, err := db.Get(dbutils.PlainStateBucket, k)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return err
-		}
-		if len(value) == 0 {
-			return nil
-		}
-		var a accounts.Account
-		if err = a.DecodeForStorage(value); err != nil {
-			return err
-		}
-		if a.Incarnation == 0 {
-			return nil
-		}
-		newK := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-		var codeHash []byte
-		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, newK)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", newK, a.Incarnation, err)
-		}
-		if codeHash == nil {
-			return nil
-		}
-		return loadFunc(newK, codeHash, state, next)
-	}
-}
-
 func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
@@ -394,16 +324,16 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
 	var l OldestAppearedLoad
+	l.innerLoadFunc = etl.IdentityLoadFunc
+
 	var loadBucket string
 	var extract etl.ExtractFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
 		extract = getExtractCode(p.db, changeSetBucket)
-		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
 		loadBucket = dbutils.CurrentStateBucket
-		extract = getExtractPlainState(p.db, changeSetBucket)
-		l.innerLoadFunc = etl.IdentityLoadFunc
+		extract = getExtractFunc(p.db, changeSetBucket)
 	}
 
 	return etl.Transform(

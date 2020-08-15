@@ -141,7 +141,6 @@ func (ig *IndexGenerator) DropIndex(bucket string) error {
 	casted, ok := ig.db.(ethdb.NonTransactional)
 	if !ok {
 		return errors.New("imposible to drop")
-
 	}
 	log.Warn("Remove bucket", "bucket", bucket)
 	return casted.ClearBuckets(bucket)
