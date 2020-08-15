@@ -271,7 +271,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, r *
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getExtractPlainState(changeSetBucket),
+		getExtractPlainStateForIH(changeSetBucket),
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,
@@ -309,7 +309,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, r *Re
 		changeSetBucket,
 		"",
 		p.TempDir,
-		getExtractPlainState(changeSetBucket),
+		getExtractPlainStateForIH(changeSetBucket),
 		l.LoadFunc,
 		etl.TransformArgs{
 			BufferType:      etl.SortableOldestAppearedBuffer,

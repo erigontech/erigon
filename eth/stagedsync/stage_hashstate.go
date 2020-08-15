@@ -197,7 +197,25 @@ type Promoter struct {
 	quitCh           chan struct{}
 }
 
-func getExtractPlainState(changeSetBucket string) etl.ExtractFunc {
+func getExtractPlainState(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
+			value, err := db.Get(dbutils.PlainStateBucket, k)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return err
+			}
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, value)
+		})
+	}
+}
+
+func getExtractPlainStateForIH(changeSetBucket string) etl.ExtractFunc {
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
@@ -206,6 +224,59 @@ func getExtractPlainState(changeSetBucket string) etl.ExtractFunc {
 				return err
 			}
 			return next(k, newK, v)
+		})
+	}
+}
+func getExtractPlainState2(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
+			value, err := db.Get(dbutils.PlainStateBucket, k)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return err
+			}
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, value)
+		})
+	}
+}
+
+func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
+		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			value, err := db.Get(dbutils.PlainStateBucket, k)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return err
+			}
+			if len(value) == 0 {
+				return nil
+			}
+			var a accounts.Account
+			if err = a.DecodeForStorage(value); err != nil {
+				return err
+			}
+			if a.Incarnation == 0 {
+				return nil
+			}
+			plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+			var codeHash []byte
+			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
+			}
+			if codeHash == nil {
+				return nil
+			}
+			newK, err := transformContractCodeKey(plainKey)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, codeHash)
 		})
 	}
 }
@@ -264,12 +335,6 @@ func getFromPlainStateAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFu
 	}
 }
 
-func getFromPlainStateAndLoad2(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
-	return func(k []byte, v []byte, state etl.State, next etl.LoadNextFunc) error {
-		return loadFunc(k, v, state, next)
-	}
-}
-
 func getFromPlainCodesAndLoad(db ethdb.Getter, loadFunc etl.LoadFunc) etl.LoadFunc {
 	return func(k []byte, _ []byte, state etl.State, next etl.LoadNextFunc) error {
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
@@ -307,18 +372,21 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Incremental promotion started", "from", from, "to", to, "csbucket", string(changeSetBucket))
+	log.Info("Incremental promotion started", "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
 	var l OldestAppearedLoad
 	var loadBucket string
+	var extract etl.ExtractFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
-		l.innerLoadFunc = getFromPlainCodesAndLoad(p.db, codeKeyTransformLoadFunc)
+		extract = getExtractCode(p.db, changeSetBucket)
+		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
 		loadBucket = dbutils.CurrentStateBucket
-		l.innerLoadFunc = getFromPlainStateAndLoad(p.db, keyTransformLoadFunc)
+		extract = getExtractPlainState(p.db, changeSetBucket)
+		l.innerLoadFunc = etl.IdentityLoadFunc
 	}
 
 	return etl.Transform(
@@ -326,7 +394,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 		changeSetBucket,
 		loadBucket,
 		p.TempDir,
-		getExtractFunc2(changeSetBucket),
+		extract,
 		// here we avoid getting the state from changesets,
 		// we just care about the accounts that did change,
 		// so we can directly read from the PlainTextBuffer
