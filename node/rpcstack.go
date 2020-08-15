@@ -138,7 +138,7 @@ func (h *httpServer) start() error {
 		return err
 	}
 	h.listener = listener
-	go h.server.Serve(listener)
+	go h.server.Serve(listener) // nolint:errcheck
 
 	// if server is websocket only, return after logging
 	if h.wsAllowed() && !h.rpcAllowed() {
@@ -215,7 +215,7 @@ func (h *httpServer) doStop() {
 		h.wsHandler.Store((*rpcHandler)(nil))
 		wsHandler.server.Stop()
 	}
-	h.server.Shutdown(context.Background())
+	h.server.Shutdown(context.Background()) //nolint:errcheck
 	h.listener.Close()
 	h.log.Info("HTTP server stopped", "endpoint", h.listener.Addr())
 

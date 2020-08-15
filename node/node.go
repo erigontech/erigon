@@ -178,7 +178,7 @@ func (n *Node) Start() error {
 	}
 	// Check if any lifecycle failed to start.
 	if err != nil {
-		n.stopServices(started)
+		n.stopServices(started) //nolint:errcheck
 		n.doClose(nil)
 	}
 	return err
@@ -384,7 +384,7 @@ func (n *Node) wsServerForPort(port int) *httpServer {
 func (n *Node) stopRPC() {
 	n.http.stop()
 	n.ws.stop()
-	n.ipc.stop()
+	n.ipc.stop() //nolint:errcheck
 	n.stopInProc()
 }
 

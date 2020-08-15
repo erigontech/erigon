@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/stretchr/testify/assert"
 )
 
 const OwerwriteBlockCacheItems = 1024
@@ -815,8 +816,8 @@ func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
 	chain := testChainBase.shorten(blockCacheItems - 15)
 
 	// Create peers of every type
-	tester.newPeer("peer 64", 64, chain)
-	tester.newPeer("peer 65", 65, chain)
+	assert.NoError(t, tester.newPeer("peer 64", 64, chain))
+	assert.NoError(t, tester.newPeer("peer 65", 65, chain))
 
 	// Synchronise with the requested peer and make sure all blocks were retrieved
 	if err := tester.sync(fmt.Sprintf("peer %d", protocol), nil, mode); err != nil {

@@ -192,7 +192,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 		},
 	})
 
-	stack.Start()
+	stack.Start() //nolint:errcheck
 	stack.Close()
 }
 
@@ -211,7 +211,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 		},
 	})
 
-	stack.Start()
+	stack.Start() //nolint:errcheck
 	stack.Close()
 }
 
@@ -397,7 +397,7 @@ func TestRegisterHandler_Successful(t *testing.T) {
 
 	// create and mount handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("success"))
+		w.Write([]byte("success")) //nolint:errcheck
 	})
 	node.RegisterHandler("test", "/test", handler)
 
@@ -432,7 +432,7 @@ func TestRegisterHandler_Unsuccessful(t *testing.T) {
 
 	// create and mount handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("success"))
+		w.Write([]byte("success")) //nolint:errcheck
 	})
 	node.RegisterHandler("test", "/test", handler)
 }

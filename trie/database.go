@@ -496,7 +496,7 @@ func (db *Database) SaveCachePeriodically(dir string, interval time.Duration, st
 	for {
 		select {
 		case <-ticker.C:
-			db.saveCache(dir, 1)
+			db.saveCache(dir, 1) //nolint:errcheck
 		case <-stopCh:
 			return
 		}
