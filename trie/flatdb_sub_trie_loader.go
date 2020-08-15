@@ -891,8 +891,7 @@ func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
 		return k, v, false, nil
 	}
 
-	//return k, v, isSequence(seek, k), nil // will release sequence another time
-	return k, v, false, nil
+	return k, v, isSequence(seek, k), nil
 }
 
 /*
