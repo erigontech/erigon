@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -85,8 +87,17 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 			return true, nil
 		}
 
+		bodyRlp := v
+		if debug.IsBlockCompressionEnabled() && len(v) > 0 {
+			var err error
+			bodyRlp, err = snappy.Decode(nil, v)
+			if err != nil {
+				return false, fmt.Errorf("err on decode block: %s", err)
+			}
+		}
+
 		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
+		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("txPoolUpdate: invalid block body RLP: %w", err)
 		}
 		for _, tx := range body.Transactions {
@@ -189,8 +200,17 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return true, nil
 		}
 
+		bodyRlp := v
+		if debug.IsBlockCompressionEnabled() && len(v) > 0 {
+			var err error
+			bodyRlp, err = snappy.Decode(nil, v)
+			if err != nil {
+				return false, fmt.Errorf("err on decode block: %s", err)
+			}
+		}
+
 		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
+		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("unwind TxPoolUpdate: invalid block body RLP: %w", err)
 		}
 		body.SendersToTxs(senders[blockNumber-from-1])

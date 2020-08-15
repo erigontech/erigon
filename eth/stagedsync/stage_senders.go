@@ -137,15 +137,13 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 				}
 			}
 
-			var bodyRlp []byte
+			bodyRlp := v
 			if debug.IsBlockCompressionEnabled() && len(v) > 0 {
 				var err error
 				bodyRlp, err = snappy.Decode(nil, v)
 				if err != nil {
 					return false, fmt.Errorf("err on decode block: %s", err)
 				}
-			} else {
-				bodyRlp = common.CopyBytes(v)
 			}
 
 			jobs <- &senderRecoveryJob{bodyRlp: bodyRlp, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}

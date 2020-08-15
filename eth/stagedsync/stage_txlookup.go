@@ -81,16 +81,17 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir st
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
-		data := v
-		if debug.IsBlockCompressionEnabled() && len(data) > 0 {
-			var err1 error
-			data, err1 = snappy.Decode(nil, v)
-			if err1 != nil {
-				return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err1)
+
+		bodyRlp := v
+		if debug.IsBlockCompressionEnabled() && len(v) > 0 {
+			var err error
+			bodyRlp, err = snappy.Decode(nil, v)
+			if err != nil {
+				return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err)
 			}
 		}
 		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
+		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("unwindTxLookup, rlp decode err: %w", err)
 		}
 		for _, tx := range body.Transactions {
