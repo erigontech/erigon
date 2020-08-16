@@ -95,60 +95,8 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	putTimer := time.Now()
-	count := 0
-	total := float64(len(tuples)) / 3
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		for bucketStart := 0; bucketStart < len(tuples); {
-			bucketEnd := bucketStart
-			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
-			}
-			c := tx.Cursor(string(tuples[bucketStart]))
-
-			// move cursor to a first element in batch
-			// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
-			// can apply optimisations for this case
-			firstKey, _, err := c.Seek(tuples[bucketStart+1])
-			if err != nil {
-				return err
-			}
-			isEndOfBucket := firstKey == nil
-
-			l := (bucketEnd - bucketStart) / 3
-			for i := 0; i < l; i++ {
-				k := tuples[bucketStart+3*i+1]
-				v := tuples[bucketStart+3*i+2]
-				if isEndOfBucket {
-					if v == nil {
-						// nothing to delete after end of bucket
-					} else {
-						if err := c.Append(k, v); err != nil {
-							return err
-						}
-					}
-				} else {
-					if v == nil {
-						if err := c.Delete(k); err != nil {
-							return err
-						}
-					} else {
-						if err := c.Put(k, v); err != nil {
-							return err
-						}
-					}
-				}
-
-				count++
-				if count%100_000 == 0 && time.Since(putTimer) > 30*time.Second {
-					progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
-					log.Info("Write to db", "progress", progress)
-					putTimer = time.Now()
-				}
-			}
-
-			bucketStart = bucketEnd
-		}
-		return nil
+		return MultiPut(tx, tuples...)
 	})
 	if err != nil {
 		return 0, err
