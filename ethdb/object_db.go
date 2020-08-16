@@ -266,87 +266,16 @@ func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([
 }
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
-	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		c := tx.Cursor(bucket)
-		k, v, err := c.Seek(startkey)
-		if err != nil {
-			return err
-		}
-		for k != nil && len(k) >= fixedbytes && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
-			goOn, err := walker(k, v)
-			if err != nil {
-				return err
-			}
-			if !goOn {
-				break
-			}
-			k, v, err = c.Next()
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+		return Walk(tx.Cursor(bucket), startkey, fixedbits, walker)
 	})
 	return err
 }
 
 func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	rangeIdx := 0 // What is the current range we are extracting
-	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
-	startkey := startkeys[rangeIdx]
-	err := db.kv.View(context.Background(), func(tx Tx) error {
-		c := tx.Cursor(bucket)
-		k, v, err := c.Seek(startkey)
-		if err != nil {
-			return err
-		}
-		for k != nil {
-			// Adjust rangeIdx if needed
-			if fixedbytes > 0 {
-				cmp := int(-1)
-				for cmp != 0 {
-					cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
-					if cmp == 0 {
-						k1 := k[fixedbytes-1] & mask
-						k2 := startkey[fixedbytes-1] & mask
-						if k1 < k2 {
-							cmp = -1
-						} else if k1 > k2 {
-							cmp = 1
-						}
-					}
-					if cmp < 0 {
-						k, v, err = c.Seek(startkey)
-						if err != nil {
-							return err
-						}
-						if k == nil {
-							return nil
-						}
-					} else if cmp > 0 {
-						rangeIdx++
-						if rangeIdx == len(startkeys) {
-							return nil
-						}
-						fixedbytes, mask = Bytesmask(fixedbits[rangeIdx])
-						startkey = startkeys[rangeIdx]
-					}
-				}
-			}
-			if len(v) > 0 {
-				if err = walker(rangeIdx, k, v); err != nil {
-					return err
-				}
-			}
-			k, v, err = c.Next()
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return MultiWalk(tx.Cursor(bucket), startkeys, fixedbits, walker)
 	})
-	return err
 }
 
 // Delete deletes the key from the queue and database
