@@ -414,7 +414,7 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 
 func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db, cursors: map[string]*LmdbCursor{}}
-	if err := batch.begin(); err != nil {
+	if err := batch.begin(nil); err != nil {
 		panic(err)
 	}
 	return batch, nil

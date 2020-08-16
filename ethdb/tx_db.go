@@ -27,7 +27,7 @@ func (m *TxDb) Close() {
 
 func (m *TxDb) Begin() (DbWithPendingMutations, error) {
 	batch := &TxDb{db: m.db, cursors: map[string]*LmdbCursor{}}
-	if err := batch.begin(); err != nil {
+	if err := batch.begin(m.Tx); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -52,8 +52,8 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 	panic("don't call me")
 }
 
-func (m *TxDb) begin() error {
-	tx, err := m.db.(HasKV).KV().Begin(context.Background(), nil, true)
+func (m *TxDb) begin(parent Tx) error {
+	tx, err := m.db.(HasKV).KV().Begin(context.Background(), parent, true)
 	if err != nil {
 		return err
 	}
