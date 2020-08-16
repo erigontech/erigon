@@ -245,15 +245,6 @@ type lmdbTx struct {
 	cursors []*lmdb.Cursor
 }
 
-type lmdbBucket struct {
-	isDupSort bool
-	dupFrom   int
-	dupTo     int
-	name      string
-	tx        *lmdbTx
-	dbi       lmdb.DBI
-}
-
 type LmdbCursor struct {
 	ctx        context.Context
 	tx         *lmdbTx
@@ -402,15 +393,6 @@ func (tx *lmdbTx) ExistsBucket(name string) bool {
 	return tx.db.buckets[name] != NonExistingDBI
 }
 
-func (tx *lmdbTx) Bucket(name string) Bucket {
-	cfg, ok := dbutils.BucketsCfg[name]
-	if !ok {
-		panic(fmt.Errorf("%w: %s", ErrUnknownBucket, name))
-	}
-
-	return &lmdbBucket{tx: tx, dbi: tx.db.buckets[name], isDupSort: cfg.IsDupSort, dupFrom: cfg.DupFromLen, dupTo: cfg.DupToLen, name: name}
-}
-
 func (tx *lmdbTx) Commit(ctx context.Context) error {
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
@@ -543,60 +525,8 @@ func (tx *lmdbTx) getDupSort(bucket string, dbi lmdb.DBI, cfg *dbutils.BucketCon
 	return val, nil
 }
 
-func (b lmdbBucket) Get(key []byte) ([]byte, error) {
-	if b.isDupSort {
-		return b.getDupSort(key)
-	}
-
-	val, err := b.tx.get(b.dbi, key)
-	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return val, nil
-}
-
-func (b lmdbBucket) getDupSort(key []byte) ([]byte, error) {
-	if len(key) == b.dupFrom {
-		c := b.tx.Cursor(b.name).(*LmdbCursor)
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-		_, v, err := c.getBothRange(key[:b.dupTo], key[b.dupTo:])
-		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if !bytes.Equal(key[b.dupTo:], v[:b.dupFrom-b.dupTo]) {
-			return nil, nil
-		}
-		return v[b.dupFrom-b.dupTo:], nil
-	}
-
-	val, err := b.tx.get(b.dbi, key)
-	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return val, nil
-}
-
-func (b *lmdbBucket) Put(key []byte, value []byte) error {
-	return b.tx.Cursor(b.name).Put(key, value)
-}
-
-func (b *lmdbBucket) Delete(key []byte) error {
-	return b.tx.Cursor(b.name).Delete(key)
-}
-
-func (b *lmdbBucket) Size() (uint64, error) {
-	st, err := b.tx.tx.Stat(b.dbi)
+func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
+	st, err := tx.tx.Stat(tx.db.buckets[name])
 	if err != nil {
 		return 0, err
 	}
@@ -937,7 +867,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	return c.put(key, newValue)
 }
 
-func (c *LmdbCursor) Get(key []byte) ([]byte, error) {
+func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
 	if c.cursor == nil {
 		if err := c.initCursor(); err != nil {
 			return nil, err

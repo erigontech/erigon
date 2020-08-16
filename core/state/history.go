@@ -226,15 +226,6 @@ func WalkAsOf(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixed
 
 func walkAsOfThinStorage(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(bucket)
-		if b == nil {
-			return fmt.Errorf("storageBucket not found")
-		}
-		hB := tx.Bucket(dbutils.StorageHistoryBucket)
-		if hB == nil {
-			return fmt.Errorf("storageHistoryBucket not found")
-		}
-
 		csBucket := dbutils.StorageChangeSetBucket
 		if bucket == dbutils.PlainStateBucket {
 			csBucket = dbutils.PlainStorageChangeSetBucket
@@ -246,11 +237,6 @@ func walkAsOfThinStorage(db ethdb.KV, bucket string, hBucket string, startkey []
 		}
 		if executedTo > generatedTo+MaxChangesetsSearch {
 			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
-		}
-
-		csB := tx.Bucket(csBucket)
-		if csB == nil {
-			return fmt.Errorf("storageChangeBucket not found")
 		}
 
 		startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
@@ -374,15 +360,6 @@ func walkAsOfThinStorage(db ethdb.KV, bucket string, hBucket string, startkey []
 func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(bucket)
-		if b == nil {
-			return fmt.Errorf("currentStateBucket not found")
-		}
-		hB := tx.Bucket(dbutils.AccountsHistoryBucket)
-		if hB == nil {
-			return fmt.Errorf("accountsHistoryBucket not found")
-		}
-
 		csBucket := dbutils.AccountChangeSetBucket
 		if bucket == dbutils.PlainStateBucket {
 			csBucket = dbutils.PlainAccountChangeSetBucket
@@ -394,11 +371,6 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 		}
 		if executedTo > generatedTo+MaxChangesetsSearch {
 			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
-		}
-
-		csB := tx.Bucket(csBucket)
-		if csB == nil {
-			return fmt.Errorf("accountChangeBucket not found")
 		}
 
 		mainCursor := tx.Cursor(bucket)

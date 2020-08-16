@@ -48,7 +48,7 @@ func TestBucketCRUD(t *testing.T) {
 		require.NoError(migrator.CreateBucket(deprecatedBucket))
 		require.True(migrator.ExistsBucket(deprecatedBucket))
 
-		err := tx.Bucket(deprecatedBucket).Put([]byte{1}, []byte{1})
+		err := tx.Cursor(deprecatedBucket).Put([]byte{1}, []byte{1})
 		require.NoError(err)
 		v, err := tx.Get(deprecatedBucket, []byte{1})
 		require.NoError(err)

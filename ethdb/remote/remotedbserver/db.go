@@ -28,7 +28,7 @@ func (s *DBServer) Size(ctx context.Context, in *remote.SizeRequest) (*remote.Si
 func (s *DBServer) BucketSize(ctx context.Context, in *remote.BucketSizeRequest) (*remote.BucketSizeReply, error) {
 	out := &remote.BucketSizeReply{}
 	if err := s.kv.View(ctx, func(tx ethdb.Tx) error {
-		sz, err := tx.Bucket(in.BucketName).Size()
+		sz, err := tx.BucketSize(in.BucketName)
 		if err != nil {
 			return err
 		}
