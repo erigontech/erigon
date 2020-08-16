@@ -914,6 +914,40 @@ func (c *LmdbCursor) getDupSort(key []byte) ([]byte, error) {
 	return val, nil
 }
 
+func (c *LmdbCursor) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, nil, err
+		}
+	}
+
+	k, v, err := c.getBothRange(key, value)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		return []byte{}, nil, err
+	}
+	return k, v, nil
+}
+
+func (c *LmdbCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, nil, err
+		}
+	}
+
+	k, v, err := c.getBoth(key, value)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		return []byte{}, nil, err
+	}
+	return k, v, nil
+}
+
 func (c *LmdbCursor) set(key []byte) ([]byte, []byte, error) {
 	return c.cursor.Get(key, nil, lmdb.Set)
 }
@@ -928,6 +962,14 @@ func (c *LmdbCursor) next() ([]byte, []byte, error) {
 
 func (c *LmdbCursor) getBothRange(key []byte, value []byte) ([]byte, []byte, error) {
 	k, v, err := c.cursor.Get(key, value, lmdb.GetBothRange)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	return k, v, nil
+}
+
+func (c *LmdbCursor) getBoth(key []byte, value []byte) ([]byte, []byte, error) {
+	k, v, err := c.cursor.Get(key, value, lmdb.GetBoth)
 	if err != nil {
 		return []byte{}, nil, err
 	}
