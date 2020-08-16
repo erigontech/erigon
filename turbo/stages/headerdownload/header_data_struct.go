@@ -1,4 +1,4 @@
-package stagedsync
+package headerdownload
 
 import (
 	"bytes"
