@@ -17,7 +17,10 @@
 // Package common contains various helper functions.
 package common
 
-import "encoding/hex"
+import (
+	"bytes"
+	"encoding/hex"
+)
 
 // ToHex returns the hex representation of b, prefixed with '0x'.
 // For empty slices, the return value is "0x0".
@@ -156,3 +159,18 @@ func TrimRightZeroes(s []byte) []byte {
 	}
 	return s[:idx]
 }
+
+
+func KeyCmp(key1, key2 []byte) (int, bool) {
+	switch {
+	case key1 == nil && key2 == nil:
+		return 0, true
+	case key1 == nil && key2 != nil:
+		return 1, false
+	case key1 != nil && key2 == nil:
+		return -1, false
+	default:
+		return bytes.Compare(key1, key2), false
+	}
+}
+

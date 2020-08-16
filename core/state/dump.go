@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -178,8 +179,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
+			Root:     strings.TrimPrefix(common.Bytes2Hex(emptyHash[:]),"0x"), // We cannot provide historical storage hash
+			CodeHash: strings.TrimPrefix(common.Bytes2Hex(emptyCodeHash[:]),"0x"),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)

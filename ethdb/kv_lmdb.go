@@ -667,6 +667,12 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 		return c.nextDupSort()
 	}
 
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			log.Error("init cursor", "err", err)
+		}
+	}
+
 	k, v, err = c.cursor.Get(nil, nil, lmdb.Next)
 	if err != nil {
 		if lmdb.IsNotFound(err) {

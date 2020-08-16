@@ -157,20 +157,25 @@ func main() {
 			rpctest.FixState(chaindata, gethURL)
 		},
 	}
+	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
 
+	tmpDataDir:="/media/b00ris/nvme/accrange"
+	tmpDataDirOrig:="/media/b00ris/nvme/accrangeorig"
+	needRegenerateGethData:=true
 	var compareAccountRange = &cobra.Command{
 		Use:   "compareAccountRange",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(tgURL, gethURL, os.TempDir(), blockNum)
+			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockNum, needRegenerateGethData)
 		},
 	}
-	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
+	compareAccountRange.Flags().BoolVar(&needRegenerateGethData, "regenGethData", false)
+
 
 	var rootCmd = &cobra.Command{Use: "test"}
-	rootCmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545",  "geth rpc url")
-	rootCmd.Flags().StringVar(&gethURL, "gethUrl", "http://192.168.1.252:8545",  "turboget rpc/rpcdaemon url")
+	rootCmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545",  "turbogeth rpcdaemon url")
+	rootCmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546",  "geth rpc url")
 	rootCmd.Flags().Uint64Var(&blockNum, "block", 2000000, "Block number")
 
 	rootCmd.AddCommand(

@@ -6,9 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"os"
-	"runtime/trace"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -329,12 +326,12 @@ func walkAsOfThinStorage(db ethdb.KV, bucket string, hBucket string, startkey []
 
 		goOn := true
 		for goOn {
-			cmp, br := keyCmp(addrHash, hAddrHash)
+			cmp, br := common.KeyCmp(addrHash, hAddrHash)
 			if br {
 				break
 			}
 			if cmp == 0 {
-				cmp, br = keyCmp(keyHash, hKeyHash)
+				cmp, br = common.KeyCmp(keyHash, hKeyHash)
 			}
 			if br {
 				break
@@ -460,7 +457,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 				k = nil
 			}
 			var cmp int
-			cmp, br := keyCmp(k, hK)
+			cmp, br := common.KeyCmp(k, hK)
 			if br {
 				break
 			}
@@ -509,18 +506,6 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 	return err
 }
 
-func keyCmp(key1, key2 []byte) (int, bool) {
-	switch {
-	case key1 == nil && key2 == nil:
-		return 0, true
-	case key1 == nil && key2 != nil:
-		return 1, false
-	case key1 != nil && key2 == nil:
-		return -1, false
-	default:
-		return bytes.Compare(key1, key2), false
-	}
-}
 
 func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byte, error), adapter func(v []byte) changeset.Walker) ([]byte, bool, error) {
 	index := dbutils.WrapHistoryIndex(hV)
@@ -705,12 +690,12 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		csd.kc1, csd.kc2, csd.kc3, csd.cv, csd.cerr = nil, nil, nil, nil, nil
 	}
 
-	cmp, br := keyCmp(csd.kd1, csd.kc1)
+	cmp, br := common.KeyCmp(csd.kd1, csd.kc1)
 	if br {
 		return nil, nil, nil, nil, nil
 	}
 	if cmp == 0 {
-		cmp, br = keyCmp(csd.kd2, csd.kc2)
+		cmp, br = common.KeyCmp(csd.kd2, csd.kc2)
 	}
 	if br {
 		return nil, nil, nil, nil, nil
@@ -784,12 +769,12 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 	return key1, key2, key3, val, err
 }
 func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, error) {
-	cmp, br := keyCmp(csd.kd1, csd.kc1)
+	cmp, br := common.KeyCmp(csd.kd1, csd.kc1)
 	if br {
 		return nil, nil, nil, nil, nil
 	}
 	if cmp == 0 {
-		cmp, br = keyCmp(csd.kd2, csd.kc2)
+		cmp, br = common.KeyCmp(csd.kd2, csd.kc2)
 	}
 	if br {
 		return nil, nil, nil, nil, nil

@@ -2310,3 +2310,94 @@ func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changes
 		t.Fatal("block result is incorrect")
 	}
 }
+
+//func TestName(t *testing.T) {
+//	tmpDataDir:="/media/b00ris/nvme/accrange/"
+//	tmpDataDirOrig:="/media/b00ris/nvme/accrangeorig/"
+//
+//	dbTg:=ethdb.NewLMDB().ReadOnly().Path(tmpDataDir).MustOpen()
+//	dbGeth:=ethdb.NewLMDB().ReadOnly().Path(tmpDataDirOrig).MustOpen()
+//
+//	tgTx,err:=dbTg.Begin(context.Background(), nil, false)
+//	if err!=nil {
+//		t.Fatal(err)
+//	}
+//	gethTx,err:=dbGeth.Begin(context.Background(), nil, false)
+//	if err!=nil {
+//		t.Fatal(err)
+//	}
+//	tgCursor:=tgTx.Bucket(dbutils.AccountsHistoryBucket).Cursor()
+//	gethCursor:=gethTx.Bucket(dbutils.AccountsHistoryBucket).Cursor()
+//
+//	tgKey, tgVal, err1:=tgCursor.Next()
+//	if err1!=nil {
+//		t.Fatal(err1)
+//	}
+//
+//	gethKey, gethVal, err2:=gethCursor.Next()
+//	if err2!=nil {
+//		t.Fatal(err2)
+//	}
+//
+//
+//	i:=0
+//	errsNum:=0
+//	tgMissed:=0
+//	gethMissed:=0
+//	for {
+//		//if i>1000 {
+//		//	break
+//		//}
+//		cmp, br:=keyCmp(tgKey, gethKey)
+//		if br {
+//			break
+//		}
+//		if cmp == 0 {
+//			var tgAcc,gethAcc DumpAccount
+//			err:=json.Unmarshal(gethVal, &gethAcc)
+//			if err!=nil {
+//				t.Error("rlp decode failed", err)
+//			}
+//			err = json.Unmarshal(tgVal, &tgAcc)
+//			if err!=nil {
+//				t.Error("rlp decode failed", err)
+//			}
+//			tgAcc.Root=strings.TrimPrefix(tgAcc.Root, "0x")
+//			tgAcc.CodeHash=strings.TrimPrefix(tgAcc.CodeHash, "0x")
+//
+//			if !reflect.DeepEqual(tgAcc,gethAcc) {
+//				errsNum++
+//				fmt.Println(string(tgVal))
+//				fmt.Println(string(gethVal))
+//				spew.Dump(tgAcc)
+//				spew.Dump(gethAcc)
+//				t.Fatal("not equal", common.Bytes2Hex(tgKey))
+//			}
+//
+//			tgKey, tgVal, err1=tgCursor.Next()
+//			if err1!=nil {
+//				t.Fatal(err1)
+//			}
+//			gethKey, gethVal, err2=gethCursor.Next()
+//			if err2!=nil {
+//				t.Fatal(err2)
+//			}
+//		} else if cmp<0 {
+//			t.Error("acc is not exist in gethdb", common.Bytes2Hex(tgKey), common.Bytes2Hex(gethKey))
+//			gethMissed++
+//			tgKey, tgVal, err1=tgCursor.Next()
+//			if err1!=nil {
+//				t.Fatal(err1)
+//			}
+//		} else if cmp>0 {
+//			t.Error("acc is not exist in tgdb", common.Bytes2Hex(tgKey), common.Bytes2Hex(gethKey))
+//			tgMissed++
+//			gethKey, gethVal, err2=gethCursor.Next()
+//			if err2!=nil {
+//				t.Fatal(err2)
+//			}
+//		}
+//		i++
+//	}
+//	t.Log(errsNum, gethMissed, tgMissed)
+//}
