@@ -60,6 +60,19 @@ func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header, peerHandle PeerH
 	return trees, nil, nil
 }
 
+// Checks whether child-parent relationship between two headers is correct
+// (excluding Proof Of Work validity)
+func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, Penalty) {
+	if parent.Number.Uint64()+1 != child.Number.Uint64() {
+		return false, WrongChildBlockHeightPenalty
+	}
+	childDifficulty := hd.calcDifficultyFunc(child.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	if child.Difficulty.Cmp(childDifficulty) != 0 {
+		return false, WrongChildDifficultyPenalty
+	}
+	return true, NoPenalty
+}
+
 // HandleNewBlockMsg converts message containing 1 header into one singleton chain segment
 func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle PeerHandle) ([]*ChainSegment, *PeerPenalty, error) {
 	headerHash := header.Hash()
@@ -141,20 +154,7 @@ func (hd *HeaderDownload) Prepend(chainSegment *ChainSegment, peerHandle PeerHan
 	return true, nil, nil
 }
 
-// Checks whether child-parent relationship between two headers is correct
-// (excluding Proof Of Work validity)
-func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, Penalty) {
-	if parent.Number.Uint64()+1 != child.Number.Uint64() {
-		return false, WrongChildBlockHeightPenalty
-	}
-	childDifficulty := hd.calcDifficultyFunc(child.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
-	if child.Difficulty.Cmp(childDifficulty) != 0 {
-		return false, WrongChildDifficultyPenalty
-	}
-	return true, NoPenalty
-}
-
-// Checks whether child-tip relationship between two headers is correct
+// childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct
 // (excluding Proof Of Work validity)
 func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash, tip *Tip) (bool, Penalty) {
 	if tip.blockHeight+1 != child.Number.Uint64() {
@@ -167,6 +167,7 @@ func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash
 	return true, NoPenalty
 }
 
+// addHeaderAsTip adds given header as a tip belonging to a given anchorParent
 func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) error {
 	diff, overflow := uint256.FromBig(header.Difficulty)
 	if overflow {
@@ -196,6 +197,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchorParent comm
 	return nil
 }
 
+// addHardCodedTip adds a hard-coded tip for which cimulative difficulty is known and no prepend is allowed
 func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, hash, anchorParent common.Hash, cumulativeDifficulty *uint256.Int) error {
 	tip := &Tip{
 		anchorParent:         anchorParent,
@@ -206,4 +208,67 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 	}
 	hd.tips[hash] = tip
 	return nil
+}
+
+// Append attempts to find a suitable anchor within the working chain segments to append the given (new) chain segment to
+// The first return value is true if the appending was done, false if a anchor tip was not found, or there is a
+// penalty or error
+func (hd *HeaderDownload) Append(chainSegment *ChainSegment) (bool, []common.Hash, error) {
+	if len(chainSegment.headers) == 0 {
+		return false, nil, fmt.Errorf("chainSegment must not be empty for Append, len %d", len(chainSegment.headers))
+	}
+	var tombstones []common.Hash
+	for i := len(chainSegment.headers) - 1; i >= 0; i-- {
+		header := chainSegment.headers[i]
+		anchorParent := header.Hash()
+		if anchors, attaching := hd.anchors[anchorParent]; attaching {
+			var removedAnchors []int
+			for anchorIdx, anchor := range anchors {
+				if valid := hd.anchorParentValid(anchor, header); !valid {
+					// Invalidate the entire chain segment that starts at anchor
+					for _, tipHash := range anchor.tips {
+						tipItem := &TipItem{tipHash: tipHash, cumulativeDifficulty: hd.tips[tipHash].cumulativeDifficulty}
+						delete(hd.tips, tipHash)
+						hd.tipLimiter.Delete(tipItem)
+					}
+					tombstones = append(tombstones, anchor.hash)
+					removedAnchors = append(removedAnchors, anchorIdx)
+				}
+			}
+			if len(removedAnchors) > 0 {
+				j := 0
+				var newAnchors []*Anchor
+				for k, anchor := range anchors {
+					if j < len(removedAnchors) && removedAnchors[j] == k {
+						// Skip this one
+						j++
+					} else {
+						newAnchors = append(newAnchors, anchor)
+					}
+				}
+				if len(newAnchors) > 0 {
+					hd.anchors[anchorParent] = newAnchors
+				} else {
+					delete(hd.anchors, anchorParent)
+				}
+			}
+		}
+	}
+	return false, tombstones, nil
+}
+
+// anchorParentValid checks whether child-parent relationship between an anchor and
+// its extension (parent) is correct
+// (excluding Proof Of Work validity)
+func (hd *HeaderDownload) anchorParentValid(anchor *Anchor, parent *types.Header) bool {
+	if anchor.blockHeight+1 != parent.Number.Uint64() {
+		//TODO: Log the reason
+		return false
+	}
+	childDifficulty := hd.calcDifficultyFunc(anchor.timestamp, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	if anchor.difficulty.ToBig().Cmp(childDifficulty) != 0 {
+		//TODO: Log the reason
+		return false
+	}
+	return true
 }

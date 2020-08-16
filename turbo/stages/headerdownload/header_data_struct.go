@@ -19,6 +19,8 @@ type Anchor struct {
 	totalDifficulty uint256.Int
 	tips            []common.Hash
 	difficulty      uint256.Int
+	hash            common.Hash
+	blockHeight     uint64
 	timestamp       uint64
 }
 

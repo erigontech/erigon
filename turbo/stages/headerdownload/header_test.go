@@ -478,3 +478,30 @@ func TestPrepend(t *testing.T) {
 		t.Errorf("prepend: %v", err)
 	}
 }
+
+func TestAppend(t *testing.T) {
+	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+		// To get child difficulty, we just add 1000 to the parent difficulty
+		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
+	}, func(header *types.Header) error {
+		return nil
+	},
+	)
+	// empty chain segment - returns error
+	if _, _, err := hd.Append(&ChainSegment{}); err == nil {
+		t.Errorf("append for empty segment - expected error")
+	}
+
+	// single header in the chain segment
+	var h types.Header
+	if ok, tombstones, err := hd.Append(&ChainSegment{headers: []*types.Header{&h}}); err == nil {
+		if len(tombstones) != 0 {
+			t.Errorf("unexpected tombstone: %d", len(tombstones))
+		}
+		if ok {
+			t.Errorf("did not expect to append")
+		}
+	} else {
+		t.Errorf("append: %v", err)
+	}
+}

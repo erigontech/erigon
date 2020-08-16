@@ -170,7 +170,16 @@ We do not allow prepending to the hard-coded tips (therefore tips need an extra 
 Proof Of Work verification happens only if other conditions have been satisfied.
 
 ### Append
-**Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no append point found", or penalty for the handle (tombstone creation)
+**Input**: chain segment. **Output**: updated structures (modified working chain segments) or "no append point found", or tombstones.
+There is an important difference between `Prepend` and `Append` algorithms with regards to error handling. Algorithm `Prepend` attaches
+"children" block headers to the existing "parent" block headers. Since "bad child" does not invalidate the parent, any verification errors during
+the `Prepend` algorithm does not cause the existing tips to disappear, only the peer who sent the new bad chain segment gets penalised.
+On the other hand, algorithm `Append` attaches "parent" block headers to the existng "children" block headers. Since "bad parent" DOES invalidate
+the children, any verification errors during `Append` algorithm cause the entire working chain segment to be discarded, as long as the hash chain
+points from the bad parents to the existing children.
+
+**TODO** Added two extra attributes to anchors: `hash` (to be able to return tombstones) and `blockHeight` (to be able to verify the
+anchor-parent relationship)
 
 ### Create anchor
 **Input**: chain segment + peer handle. **Output**: updated structures (new working chain segment) or "anchor too far in the future" or "anchor too far in the past", or penalty for the peer (e.g. invalid PoW)
