@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 const OwerwriteBlockCacheItems = 1024
@@ -521,6 +521,7 @@ func assertOwnForkedChain(t *testing.T, tester *downloadTester, common int, leng
 // In this test common ancestor lookup should be short circuited and not require
 // binary searching.
 func TestCanonicalSynchronisation64Full(t *testing.T) { testCanonicalSynchronisation(t, 64, FullSync) }
+func TestCanonicalSynchronisation65Full(t *testing.T) { testCanonicalSynchronisation(t, 65, FullSync) }
 
 func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -541,6 +542,7 @@ func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 // Tests that if a large batch of blocks are being downloaded, it is throttled
 // until the cached blocks are retrieved.
 func TestThrottling64Full(t *testing.T) { testThrottling(t, 64, FullSync) }
+func TestThrottling65Full(t *testing.T) { testThrottling(t, 65, FullSync) }
 
 func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -624,6 +626,7 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 // this test common ancestor lookup should *not* be short circuited, and a full
 // binary search should be executed.
 func TestForkedSync64Full(t *testing.T) { testForkedSync(t, 64, FullSync) }
+func TestForkedSync65Full(t *testing.T) { testForkedSync(t, 65, FullSync) }
 
 func testForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -650,6 +653,7 @@ func testForkedSync(t *testing.T, protocol int, mode SyncMode) {
 // Tests that synchronising against a much shorter but much heavyer fork works
 // corrently and is not dropped.
 func TestHeavyForkedSync64Full(t *testing.T) { testHeavyForkedSync(t, 64, FullSync) }
+func TestHeavyForkedSync65Full(t *testing.T) { testHeavyForkedSync(t, 65, FullSync) }
 
 func testHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -678,6 +682,7 @@ func testHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 // chain head, ensuring that malicious peers cannot waste resources by feeding
 // long dead chains.
 func TestBoundedForkedSync64Full(t *testing.T) { testBoundedForkedSync(t, 64, FullSync) }
+func TestBoundedForkedSync65Full(t *testing.T) { testBoundedForkedSync(t, 65, FullSync) }
 
 func testBoundedForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -705,6 +710,7 @@ func testBoundedForkedSync(t *testing.T, protocol int, mode SyncMode) {
 // chain head for short but heavy forks too. These are a bit special because they
 // take different ancestor lookup paths.
 func TestBoundedHeavyForkedSync64Full(t *testing.T) { testBoundedHeavyForkedSync(t, 64, FullSync) }
+func TestBoundedHeavyForkedSync65Full(t *testing.T) { testBoundedHeavyForkedSync(t, 65, FullSync) }
 
 func testBoundedHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -749,6 +755,7 @@ func TestInactiveDownloader63(t *testing.T) {
 
 // Tests that a canceled download wipes all previously accumulated state.
 func TestCancel64Full(t *testing.T) { testCancel(t, 64, FullSync) }
+func TestCancel65Full(t *testing.T) { testCancel(t, 65, FullSync) }
 
 func testCancel(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -775,6 +782,7 @@ func testCancel(t *testing.T, protocol int, mode SyncMode) {
 
 // Tests that synchronisation from multiple peers works as intended (multi thread sanity test).
 func TestMultiSynchronisation64Full(t *testing.T) { testMultiSynchronisation(t, 64, FullSync) }
+func TestMultiSynchronisation65Full(t *testing.T) { testMultiSynchronisation(t, 65, FullSync) }
 
 func testMultiSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -797,10 +805,9 @@ func testMultiSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 // Tests that synchronisations behave well in multi-version protocol environments
 // and not wreak havoc on other nodes in the network.
 func TestMultiProtoSynchronisation64Full(t *testing.T) { testMultiProtoSync(t, 64, FullSync) }
+func TestMultiProtoSynchronisation65Full(t *testing.T) { testMultiProtoSync(t, 65, FullSync) }
 
 func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
-	require := require.New(t)
-
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -809,10 +816,8 @@ func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
 	chain := testChainBase.shorten(blockCacheItems - 15)
 
 	// Create peers of every type
-	require.NoError(tester.newPeer("peer 62", 62, chain))
-	require.NoError(tester.newPeer("peer 63", 63, chain))
-	require.NoError(tester.newPeer("peer 64", 64, chain))
-	require.NoError(tester.newPeer("peer 65", 65, chain))
+	assert.NoError(t, tester.newPeer("peer 64", 64, chain))
+	assert.NoError(t, tester.newPeer("peer 65", 65, chain))
 
 	// Synchronise with the requested peer and make sure all blocks were retrieved
 	if err := tester.sync(fmt.Sprintf("peer %d", protocol), nil, mode); err != nil {
@@ -821,7 +826,7 @@ func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
 	assertOwnChain(t, tester, chain.len())
 
 	// Check that no peers have been dropped off
-	for _, version := range []int{62, 63, 64, 65} {
+	for _, version := range []int{64, 65} {
 		peer := fmt.Sprintf("peer %d", version)
 		if _, ok := tester.peers[peer]; !ok {
 			t.Errorf("%s dropped", peer)
@@ -832,6 +837,7 @@ func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
 // Tests that if a block is empty (e.g. header only), no body request should be
 // made, and instead the header should be assembled into a whole block in itself.
 func TestEmptyShortCircuit64Full(t *testing.T) { testEmptyShortCircuit(t, 64, FullSync) }
+func TestEmptyShortCircuit65Full(t *testing.T) { testEmptyShortCircuit(t, 65, FullSync) }
 
 func testEmptyShortCircuit(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -878,6 +884,7 @@ func testEmptyShortCircuit(t *testing.T, protocol int, mode SyncMode) {
 // Tests that headers are enqueued continuously, preventing malicious nodes from
 // stalling the downloader by feeding gapped header chains.
 func TestMissingHeaderAttack64Full(t *testing.T) { testMissingHeaderAttack(t, 64, FullSync) }
+func TestMissingHeaderAttack65Full(t *testing.T) { testMissingHeaderAttack(t, 65, FullSync) }
 
 func testMissingHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -903,6 +910,7 @@ func testMissingHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 // Tests that if requested headers are shifted (i.e. first is missing), the queue
 // detects the invalid numbering.
 func TestShiftedHeaderAttack64Full(t *testing.T) { testShiftedHeaderAttack(t, 64, FullSync) }
+func TestShiftedHeaderAttack65Full(t *testing.T) { testShiftedHeaderAttack(t, 65, FullSync) }
 
 func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -928,11 +936,6 @@ func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 	}
 	assertOwnChain(t, tester, chain.len())
 }
-
-// Tests that upon detecting an invalid header, the recent ones are rolled back
-// for various failure scenarios. Afterwards a full sync is attempted to make
-// sure no state was corrupted.
-func TestInvalidHeaderRollback64Light(t *testing.T) { testInvalidHeaderRollback(t, 64, LightSync) }
 
 func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -1021,6 +1024,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
 // Tests that a peer advertising a high TD doesn't get to stall the downloader
 // afterwards by not sending any useful hashes.
 func TestHighTDStarvationAttack64Full(t *testing.T) { testHighTDStarvationAttack(t, 64, FullSync) }
+func TestHighTDStarvationAttack65Full(t *testing.T) { testHighTDStarvationAttack(t, 65, FullSync) }
 
 func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
 	t.Skip("we ignore handshake TD")
@@ -1036,6 +1040,7 @@ func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
 
 // Tests that misbehaving peers are disconnected, whilst behaving ones are not.
 func TestBlockHeaderAttackerDropping64(t *testing.T) { testBlockHeaderAttackerDropping(t, 64) }
+func TestBlockHeaderAttackerDropping65(t *testing.T) { testBlockHeaderAttackerDropping(t, 65) }
 
 func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 	// Define the disconnection requirement for individual hash fetch errors
@@ -1087,6 +1092,7 @@ func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 // Tests that synchronisation progress (origin block number, current block number
 // and highest block number) is tracked and updated correctly.
 func TestSyncProgress64Full(t *testing.T) { testSyncProgress(t, 64, FullSync) }
+func TestSyncProgress65Full(t *testing.T) { testSyncProgress(t, 65, FullSync) }
 
 func testSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -1164,6 +1170,7 @@ func checkProgress(t *testing.T, d *Downloader, stage string, want ethereum.Sync
 // number) is tracked and updated correctly in case of a fork (or manual head
 // revertal).
 func TestForkedSyncProgress64Full(t *testing.T) { testForkedSyncProgress(t, 64, FullSync) }
+func TestForkedSyncProgress65Full(t *testing.T) { testForkedSyncProgress(t, 65, FullSync) }
 
 func testForkedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -1233,6 +1240,7 @@ func testForkedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 // origin is not updated in the next sync cycle, as it should be considered the
 // continuation of the previous sync and not a new instance.
 func TestFailedSyncProgress64Full(t *testing.T) { testFailedSyncProgress(t, 64, FullSync) }
+func TestFailedSyncProgress65Full(t *testing.T) { testFailedSyncProgress(t, 65, FullSync) }
 
 func testFailedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -1300,6 +1308,7 @@ func testFailedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 // Tests that if an attacker fakes a chain height, after the attack is detected,
 // the progress height is successfully reduced at the next sync invocation.
 func TestFakedSyncProgress64Full(t *testing.T) { testFakedSyncProgress(t, 64, FullSync) }
+func TestFakedSyncProgress65Full(t *testing.T) { testFakedSyncProgress(t, 65, FullSync) }
 
 func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
@@ -1535,6 +1544,7 @@ func TestRemoteHeaderRequestSpan(t *testing.T) {
 // Tests that peers below a pre-configured checkpoint block are prevented from
 // being fast-synced from, avoiding potential cheap eclipse attacks.
 func TestCheckpointEnforcement64Full(t *testing.T) { testCheckpointEnforcement(t, 64, FullSync) }
+func TestCheckpointEnforcement65Full(t *testing.T) { testCheckpointEnforcement(t, 65, FullSync) }
 
 func testCheckpointEnforcement(t *testing.T, protocol int, mode SyncMode) {
 	// Create a new tester with a particular hard coded checkpoint block

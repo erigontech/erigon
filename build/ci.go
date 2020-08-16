@@ -240,6 +240,7 @@ func doInstall(cmdline []string) {
 				dirs = append(dirs, "."+string(filepath.Separator)+path.Join(".", "cmd", cmd.Name()))
 			}
 		}
+		return
 	}
 
 	packages := []string{}

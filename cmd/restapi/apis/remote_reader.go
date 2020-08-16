@@ -35,20 +35,20 @@ type RemoteContext struct {
 type powEngine struct {
 }
 
-func (c *powEngine) VerifyHeader(chain consensus.ChainReader, header *types.Header, seal bool) error {
+func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
 	panic("must not be called")
 }
-func (c *powEngine) VerifySeal(chain consensus.ChainReader, header *types.Header) error {
+func (c *powEngine) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 	panic("must not be called")
 }
-func (c *powEngine) Prepare(chain consensus.ChainReader, header *types.Header) error {
+func (c *powEngine) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	panic("must not be called")
 }
 func (c *powEngine) Finalize(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header) {
@@ -58,16 +58,16 @@ func (c *powEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header 
 	uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	panic("must not be called")
 }
-func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
 	panic("must not be called")
 }
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
-func (c *powEngine) CalcDifficulty(_ consensus.ChainReader, _, _ uint64, _, _ *big.Int, _, _ common.Hash) *big.Int {
+func (c *powEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _, _ uint64, _, _ *big.Int, _, _ common.Hash) *big.Int {
 	panic("must not be called")
 }
-func (c *powEngine) APIs(chain consensus.ChainReader) []rpc.API {
+func (c *powEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	panic("must not be called")
 }
 

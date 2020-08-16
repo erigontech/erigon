@@ -64,17 +64,21 @@ type Deleter interface {
 	Delete(bucket string, key []byte) error
 }
 
+type Closer interface {
+	Close()
+}
+
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
 	Getter
 	Putter
 	Deleter
+	Closer
 
 	// MultiPut inserts or updates multiple entries.
 	// Entries are passed as an array:
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
-	Close()
 	NewBatch() DbWithPendingMutations // starts in-mem batch
 	Last(bucket string) ([]byte, []byte, error)
 

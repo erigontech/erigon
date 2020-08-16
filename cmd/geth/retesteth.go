@@ -208,11 +208,11 @@ func (e *NoRewardEngine) Author(header *types.Header) (common.Address, error) {
 	return e.inner.Author(header)
 }
 
-func (e *NoRewardEngine) VerifyHeader(chain consensus.ChainReader, header *types.Header, seal bool) error {
+func (e *NoRewardEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 	return e.inner.VerifyHeader(chain, header, seal)
 }
 
-func (e *NoRewardEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (e *NoRewardEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	return e.inner.VerifyHeaders(chain, headers, seals)
 }
 
@@ -220,11 +220,11 @@ func (e *NoRewardEngine) VerifyUncles(chain consensus.ChainReader, block *types.
 	return e.inner.VerifyUncles(chain, block)
 }
 
-func (e *NoRewardEngine) VerifySeal(chain consensus.ChainReader, header *types.Header) error {
+func (e *NoRewardEngine) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 	return e.inner.VerifySeal(chain, header)
 }
 
-func (e *NoRewardEngine) Prepare(chain consensus.ChainReader, header *types.Header) error {
+func (e *NoRewardEngine) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	return e.inner.Prepare(chain, header)
 }
 
@@ -260,7 +260,7 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 	}
 }
 
-func (e *NoRewardEngine) Seal(ctx consensus.Cancel, chain consensus.ChainReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+func (e *NoRewardEngine) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
 	return e.inner.Seal(ctx, chain, block, results, stop)
 }
 
@@ -268,11 +268,11 @@ func (e *NoRewardEngine) SealHash(header *types.Header) common.Hash {
 	return e.inner.SealHash(header)
 }
 
-func (e *NoRewardEngine) CalcDifficulty(chain consensus.ChainReader, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+func (e *NoRewardEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 	return e.inner.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash)
 }
 
-func (e *NoRewardEngine) APIs(chain consensus.ChainReader) []rpc.API {
+func (e *NoRewardEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return e.inner.APIs(chain)
 }
 

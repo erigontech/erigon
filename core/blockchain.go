@@ -114,6 +114,8 @@ const (
 type CacheConfig struct {
 	Pruning             bool
 	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
+	TrieCleanJournal    string        // Disk journal for saving clean cache entries.
+	TrieCleanRejournal  time.Duration // Time interval to dump clean cache to disk periodically
 	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk

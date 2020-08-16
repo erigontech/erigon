@@ -419,9 +419,6 @@ func (pool *TxPool) Stop() {
 // SubscribeNewTxsEvent registers a subscription of NewTxsEvent and
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription {
-	if !pool.IsStarted() {
-		return nil
-	}
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
 }
 
@@ -1052,7 +1049,10 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 	defer close(done)
 
 	var promoteAddrs []common.Address
-	if dirtyAccounts != nil {
+	if dirtyAccounts != nil && !reset {
+		// Only dirty accounts need to be promoted, unless we're resetting.
+		// For resets, all addresses in the tx queue will be promoted and
+		// the flatten operation can be avoided.
 		promoteAddrs = dirtyAccounts.flatten()
 	}
 	pool.mu.Lock()
@@ -1065,7 +1065,7 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 			}
 		}
 		// Reset needs promote for all addresses
-		promoteAddrs = promoteAddrs[:0]
+		promoteAddrs = make([]common.Address, 0, len(pool.queue))
 		for addr := range pool.queue {
 			promoteAddrs = append(promoteAddrs, addr)
 		}
