@@ -122,19 +122,28 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 			return err
 		}
 	}
+	mutation := ig.db.NewBatch()
 
 	for key, value := range historyEffects {
 		if value == nil {
-			if err := ig.db.Delete(vv.IndexBucket, []byte(key)); err != nil {
+			if err := mutation.Delete(vv.IndexBucket, []byte(key)); err != nil {
 				return err
 			}
 		} else {
-			if err := ig.db.Put(vv.IndexBucket, []byte(key), value); err != nil {
+			if err := mutation.Put(vv.IndexBucket, []byte(key), value); err != nil {
 				return err
 			}
 		}
+		if mutation.BatchSize() >= mutation.IdealBatchSize() {
+			_, err := mutation.Commit()
+			if err != nil {
+				return err
+			}
+			mutation = ig.db.NewBatch()
+		}
 	}
-	return nil
+	_, err := mutation.Commit()
+	return err
 }
 
 func (ig *IndexGenerator) DropIndex(bucket string) error {
