@@ -282,9 +282,6 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 }
 
 func (m *TxDb) Commit() (uint64, error) {
-	if m.db == nil {
-		return 0, nil
-	}
 	if m.Tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}

@@ -258,6 +258,7 @@ type LmdbCursor struct {
 	ctx        context.Context
 	tx         *lmdbTx
 	bucketName string
+	dbi        lmdb.DBI
 	bucketCfg  *dbutils.BucketConfigItem
 	prefix     []byte
 
@@ -602,12 +603,8 @@ func (b *lmdbBucket) Size() (uint64, error) {
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
-//func (b *lmdbBucket) Cursor() Cursor {
-//	return &LmdbCursor{bucket: b, ctx: b.tx.ctx}
-//}
-
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
-	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket]}
+	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket], dbi: tx.db.buckets[bucket]}
 }
 
 func (c *LmdbCursor) initCursor() error {
@@ -879,12 +876,6 @@ func (c *LmdbCursor) deleteDupSort(key []byte) error {
 }
 
 func (c *LmdbCursor) Put(key []byte, value []byte) error {
-	select {
-	case <-c.ctx.Done():
-		return c.ctx.Err()
-	default:
-	}
-
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
 	}
@@ -953,6 +944,10 @@ func (c *LmdbCursor) Get(key []byte) ([]byte, error) {
 		}
 	}
 
+	if c.bucketCfg.IsDupSort {
+		return c.getDupSort(key)
+	}
+
 	_, v, err := c.set(key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
@@ -961,6 +956,32 @@ func (c *LmdbCursor) Get(key []byte) ([]byte, error) {
 		return nil, err
 	}
 	return v, nil
+}
+
+func (c *LmdbCursor) getDupSort(key []byte) ([]byte, error) {
+	from, to := c.bucketCfg.DupFromLen, c.bucketCfg.DupToLen
+	if len(key) == from {
+		_, v, err := c.getBothRange(key[:to], key[to:])
+		if err != nil {
+			if lmdb.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if !bytes.Equal(key[to:], v[:from-to]) {
+			return nil, nil
+		}
+		return v[from-to:], nil
+	}
+
+	_, val, err := c.set(key)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return val, nil
 }
 
 func (c *LmdbCursor) set(key []byte) ([]byte, []byte, error) {

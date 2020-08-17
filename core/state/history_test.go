@@ -1542,7 +1542,7 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [60]byte
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(db.(ethdb.HasKV).KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1559,7 +1559,7 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(db.(ethdb.HasKV).KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1588,7 +1588,7 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(db.(ethdb.HasKV).KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
