@@ -87,12 +87,12 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(),
-		ethdb.NewLMDB().InMem().MustOpen(), // for remote2 db
+		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
+	rdb, _ := ethdb.NewRemote().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],

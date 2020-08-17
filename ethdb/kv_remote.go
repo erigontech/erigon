@@ -25,66 +25,66 @@ import (
 //go:generate protoc --go-grpc_out=. "./remote/db.proto"
 //go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto"
 
-type remote2Opts struct {
+type remoteOpts struct {
 	DialAddress string
 	inMemConn   *bufconn.Listener // for tests
 }
 
-type Remote2KV struct {
-	opts     remote2Opts
+type RemoteKV struct {
+	opts     remoteOpts
 	remoteKV remote.KVClient
 	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
 }
 
-type remote2Tx struct {
+type remoteTx struct {
 	ctx     context.Context
-	db      *Remote2KV
-	cursors []*remote2Cursor
+	db      *RemoteKV
+	cursors []*remoteCursor
 }
 
-type remote2Bucket struct {
-	tx   *remote2Tx
+type remoteBucket struct {
+	tx   *remoteTx
 	name string
 }
 
-type remote2Cursor struct {
+type remoteCursor struct {
 	initialized        bool
 	streamingRequested bool
 	prefetch           uint32
 	ctx                context.Context
-	bucket             *remote2Bucket
+	bucket             *remoteBucket
 	prefix             []byte
 	stream             remote.KV_SeekClient
 }
 
-type Remote2Backend struct {
-	opts             remote2Opts
+type RemoteBackend struct {
+	opts             remoteOpts
 	remoteEthBackend remote.ETHBACKENDClient
 	conn             *grpc.ClientConn
 	log              log.Logger
 }
 
-type remote2NoValuesCursor struct {
-	*remote2Cursor
+type remoteNoValuesCursor struct {
+	*remoteCursor
 }
 
-func (opts remote2Opts) ReadOnly() remote2Opts {
+func (opts remoteOpts) ReadOnly() remoteOpts {
 	return opts
 }
 
-func (opts remote2Opts) Path(path string) remote2Opts {
+func (opts remoteOpts) Path(path string) remoteOpts {
 	opts.DialAddress = path
 	return opts
 }
 
-func (opts remote2Opts) InMem(listener *bufconn.Listener) remote2Opts {
+func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	opts.inMemConn = listener
 	return opts
 }
 
-func (opts remote2Opts) Open() (KV, Backend, error) {
+func (opts remoteOpts) Open() (KV, Backend, error) {
 	var dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
 		grpc.WithInsecure(),
@@ -104,7 +104,7 @@ func (opts remote2Opts) Open() (KV, Backend, error) {
 		return nil, nil, err
 	}
 
-	db := &Remote2KV{
+	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
 		remoteKV: remote.NewKVClient(conn),
@@ -112,7 +112,7 @@ func (opts remote2Opts) Open() (KV, Backend, error) {
 		log:      log.New("remote_db", opts.DialAddress),
 	}
 
-	eth := &Remote2Backend{
+	eth := &RemoteBackend{
 		opts:             opts,
 		remoteEthBackend: remote.NewETHBACKENDClient(conn),
 		conn:             conn,
@@ -122,7 +122,7 @@ func (opts remote2Opts) Open() (KV, Backend, error) {
 	return db, eth, nil
 }
 
-func (opts remote2Opts) MustOpen() (KV, Backend) {
+func (opts remoteOpts) MustOpen() (KV, Backend) {
 	db, txPool, err := opts.Open()
 	if err != nil {
 		panic(err)
@@ -130,13 +130,13 @@ func (opts remote2Opts) MustOpen() (KV, Backend) {
 	return db, txPool
 }
 
-func NewRemote2() remote2Opts {
-	return remote2Opts{}
+func NewRemote() remoteOpts {
+	return remoteOpts{}
 }
 
 // Close
 // All transactions must be closed before closing the database.
-func (db *Remote2KV) Close() {
+func (db *RemoteKV) Close() {
 	if db.conn != nil {
 		if err := db.conn.Close(); err != nil {
 			db.log.Warn("failed to close remote DB", "err", err)
@@ -147,7 +147,7 @@ func (db *Remote2KV) Close() {
 	}
 }
 
-func (db *Remote2KV) DiskSize(ctx context.Context) (uint64, error) {
+func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	sizeReply, err := db.remoteDB.Size(ctx, &remote.SizeRequest{})
 	if err != nil {
 		return 0, err
@@ -155,30 +155,30 @@ func (db *Remote2KV) DiskSize(ctx context.Context) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (db *Remote2KV) IdealBatchSize() int {
+func (db *RemoteKV) IdealBatchSize() int {
 	panic("not supported")
 }
 
-func (db *Remote2KV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
 
-func (db *Remote2KV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	t := &remote2Tx{ctx: ctx, db: db}
+func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	t := &remoteTx{ctx: ctx, db: db}
 	defer t.Rollback()
 
 	return f(t)
 }
 
-func (db *Remote2KV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
-func (tx *remote2Tx) Commit(ctx context.Context) error {
+func (tx *remoteTx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")
 }
 
-func (tx *remote2Tx) Rollback() {
+func (tx *remoteTx) Rollback() {
 	for _, c := range tx.cursors {
 		if c.stream != nil {
 			_ = c.stream.CloseSend()
@@ -187,30 +187,30 @@ func (tx *remote2Tx) Rollback() {
 	}
 }
 
-func (tx *remote2Tx) Bucket(name string) Bucket {
-	return &remote2Bucket{tx: tx, name: name}
+func (tx *remoteTx) Bucket(name string) Bucket {
+	return &remoteBucket{tx: tx, name: name}
 }
 
-func (c *remote2Cursor) Prefix(v []byte) Cursor {
+func (c *remoteCursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
 }
 
-func (c *remote2Cursor) MatchBits(n uint) Cursor {
+func (c *remoteCursor) MatchBits(n uint) Cursor {
 	panic("not implemented yet")
 }
 
-func (c *remote2Cursor) Prefetch(v uint) Cursor {
+func (c *remoteCursor) Prefetch(v uint) Cursor {
 	c.prefetch = uint32(v)
 	return c
 }
 
-func (c *remote2Cursor) NoValues() NoValuesCursor {
+func (c *remoteCursor) NoValues() NoValuesCursor {
 	//c.remote = c.remote.NoValues()
-	return &remote2NoValuesCursor{remote2Cursor: c}
+	return &remoteNoValuesCursor{remoteCursor: c}
 }
 
-func (b *remote2Bucket) Size() (uint64, error) {
+func (b *remoteBucket) Size() (uint64, error) {
 	sizeReply, err := b.tx.db.remoteDB.BucketSize(b.tx.ctx, &remote.BucketSizeRequest{BucketName: b.name})
 	if err != nil {
 		return 0, err
@@ -218,14 +218,14 @@ func (b *remote2Bucket) Size() (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (b *remote2Bucket) Clear() error {
+func (b *remoteBucket) Clear() error {
 	panic("not supporte")
 }
 
-func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
+func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
 	defer func() {
-		if v, ok := c.(*remote2Cursor); ok {
+		if v, ok := c.(*remoteCursor); ok {
 			if v.stream == nil {
 				return
 			}
@@ -236,7 +236,7 @@ func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
 	return c.Get(key)
 }
 
-func (c *remote2Cursor) Get(key []byte) (val []byte, err error) {
+func (c *remoteCursor) Get(key []byte) (val []byte, err error) {
 	k, v, err := c.Seek(key)
 	if err != nil {
 		return nil, err
@@ -247,10 +247,10 @@ func (c *remote2Cursor) Get(key []byte) (val []byte, err error) {
 	return v, nil
 }
 
-func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
+func (b *remoteBucket) Get(key []byte) (val []byte, err error) {
 	c := b.Cursor()
 	defer func() {
-		if v, ok := c.(*remote2Cursor); ok {
+		if v, ok := c.(*remoteCursor); ok {
 			if v.stream == nil {
 				return
 			}
@@ -268,43 +268,43 @@ func (b *remote2Bucket) Get(key []byte) (val []byte, err error) {
 	return v, nil
 }
 
-func (b *remote2Bucket) Put(key []byte, value []byte) error {
+func (b *remoteBucket) Put(key []byte, value []byte) error {
 	panic("not supported")
 }
 
-func (b *remote2Bucket) Delete(key []byte) error {
+func (b *remoteBucket) Delete(key []byte) error {
 	panic("not supported")
 }
 
-func (tx *remote2Tx) Cursor(bucket string) Cursor {
-	return tx.Bucket(bucket).(*remote2Bucket).Cursor()
+func (tx *remoteTx) Cursor(bucket string) Cursor {
+	return tx.Bucket(bucket).(*remoteBucket).Cursor()
 }
 
-func (b *remote2Bucket) Cursor() Cursor {
-	c := &remote2Cursor{bucket: b, ctx: b.tx.ctx}
+func (b *remoteBucket) Cursor() Cursor {
+	c := &remoteCursor{bucket: b, ctx: b.tx.ctx}
 	b.tx.cursors = append(b.tx.cursors, c)
 	return c
 }
 
-func (c *remote2Cursor) Put(key []byte, value []byte) error {
+func (c *remoteCursor) Put(key []byte, value []byte) error {
 	panic("not supported")
 }
 
-func (c *remote2Cursor) Append(key []byte, value []byte) error {
+func (c *remoteCursor) Append(key []byte, value []byte) error {
 	panic("not supported")
 }
 
-func (c *remote2Cursor) Delete(key []byte) error {
+func (c *remoteCursor) Delete(key []byte) error {
 	panic("not supported")
 }
 
-func (c *remote2Cursor) First() ([]byte, []byte, error) {
+func (c *remoteCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
 
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
-func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
 		_ = c.stream.CloseSend()
 		c.stream = nil
@@ -330,7 +330,7 @@ func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 }
 
 // Next - returns next data element from server, request streaming (if configured by user)
-func (c *remote2Cursor) Next() ([]byte, []byte, error) {
+func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	if !c.initialized {
 		return c.First()
 	}
@@ -351,11 +351,11 @@ func (c *remote2Cursor) Next() ([]byte, []byte, error) {
 	return pair.Key, pair.Value, nil
 }
 
-func (c *remote2Cursor) Last() ([]byte, []byte, error) {
+func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
 }
 
-func (c *remote2Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
+func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -371,7 +371,7 @@ func (c *remote2Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-func (c *remote2NoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
+func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
 	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
@@ -387,12 +387,12 @@ func (c *remote2NoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, 
 	return nil
 }
 
-func (c *remote2NoValuesCursor) First() ([]byte, uint32, error) {
+func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {
 	return c.Seek(c.prefix)
 }
 
-func (c *remote2NoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
-	k, v, err := c.remote2Cursor.Seek(seek)
+func (c *remoteNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
+	k, v, err := c.remoteCursor.Seek(seek)
 	if err != nil {
 		return []byte{}, 0, err
 	}
@@ -400,8 +400,8 @@ func (c *remote2NoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	return k, uint32(len(v)), err
 }
 
-func (c *remote2NoValuesCursor) Next() ([]byte, uint32, error) {
-	k, v, err := c.remote2Cursor.Next()
+func (c *remoteNoValuesCursor) Next() ([]byte, uint32, error) {
+	k, v, err := c.remoteCursor.Next()
 	if err != nil {
 		return []byte{}, 0, err
 	}
@@ -409,7 +409,7 @@ func (c *remote2NoValuesCursor) Next() ([]byte, uint32, error) {
 	return k, uint32(len(v)), err
 }
 
-func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
+func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
 	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
 	if err != nil {
 		return common.Hash{}.Bytes(), err
@@ -417,7 +417,7 @@ func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
 	return res.Hash, nil
 }
 
-func (back *Remote2Backend) Etherbase() (common.Address, error) {
+func (back *RemoteBackend) Etherbase() (common.Address, error) {
 	res, err := back.remoteEthBackend.Etherbase(context.Background(), &remote.EtherbaseRequest{})
 	if err != nil {
 		return common.Address{}, err
@@ -426,7 +426,7 @@ func (back *Remote2Backend) Etherbase() (common.Address, error) {
 	return common.BytesToAddress(res.Hash), nil
 }
 
-func (back *Remote2Backend) NetVersion() uint64 {
+func (back *RemoteBackend) NetVersion() uint64 {
 	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
 	if err != nil {
 		log.Error("NetVersion call got an error", "err", err)
