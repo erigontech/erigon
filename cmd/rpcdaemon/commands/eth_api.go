@@ -17,7 +17,6 @@ import (
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
 	Coinbase(ctx context.Context) (common.Address, error)
-	NetVersion(ctx context.Context) uint64
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
