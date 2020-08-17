@@ -33,11 +33,10 @@ type PrivateDebugAPIImpl struct {
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		db:           db,
-		dbReader:     dbReader,
-		chainContext: chainContext,
+		db:       db,
+		dbReader: dbReader,
 	}
 }
 

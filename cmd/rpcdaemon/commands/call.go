@@ -110,7 +110,7 @@ func (api *APIImpl) doCall(ctx context.Context, args ethapi.CallArgs, blockNrOrH
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg := args.ToMessage(cfg.gascap)
+	msg := args.ToMessage(cfg.Gascap)
 
 	evmCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, api.dbReader)
 
@@ -167,7 +167,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 	//fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	hash := rawdb.ReadHeadBlockHash(api.dbReader)
 
-	return api.DoEstimateGas(ctx, args, rpc.BlockNumberOrHash{BlockHash: &hash}, big.NewInt(0).SetUint64(cfg.gascap))
+	return api.DoEstimateGas(ctx, args, rpc.BlockNumberOrHash{BlockHash: &hash}, big.NewInt(0).SetUint64(cfg.Gascap))
 }
 
 func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {

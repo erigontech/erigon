@@ -39,7 +39,6 @@ func NewChainContext(db rawdb.DatabaseReader) *chainContext {
 	return &chainContext{
 		db: db,
 	}
-
 }
 
 type powEngine struct {
@@ -140,7 +139,7 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 	chainContext := NewChainContext(dbReader)
 	apiImpl := NewAPI(db, dbReader, chainContext, eth)
 	netImpl := NewNetAPIImpl(eth)
-	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
+	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
 
 	for _, enabledAPI := range enabledApis {
 		switch enabledAPI {
@@ -174,21 +173,21 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 }
 
 func daemon(cmd *cobra.Command, cfg Config) {
-	vhosts := splitAndTrim(cfg.httpVirtualHost)
-	cors := splitAndTrim(cfg.httpCORSDomain)
+	vhosts := splitAndTrim(cfg.HttpVirtualHost)
+	cors := splitAndTrim(cfg.HttpCORSDomain)
 	enabledApis := splitAndTrim(cfg.API)
 
 	var db ethdb.KV
 	var txPool ethdb.Backend
 	var err error
-	if cfg.privateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote().Path(cfg.privateApiAddr).Open()
+	if cfg.PrivateApiAddr != "" {
+		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open()
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return
 		}
-	} else if cfg.chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.chaindata); errOpen == nil {
+	} else if cfg.Chaindata != "" {
+		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
 			db = database.KV()
 		} else {
 			err = errOpen
@@ -204,7 +203,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 
 	var rpcAPI = GetAPI(db, txPool, enabledApis)
 
-	httpEndpoint := fmt.Sprintf("%s:%d", cfg.httpListenAddress, cfg.httpPort)
+	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
 	// register apis and create handler stack
 	srv := rpc.NewServer()

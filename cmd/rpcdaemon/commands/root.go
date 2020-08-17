@@ -3,11 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
-	"runtime"
-	"runtime/pprof"
 	"strings"
 	"syscall"
 
@@ -18,48 +15,34 @@ import (
 )
 
 type Config struct {
-	privateApiAddr    string
-	chaindata         string
-	httpListenAddress string
-	httpPort          int
-	httpCORSDomain    string
-	httpVirtualHost   string
+	PrivateApiAddr    string
+	Chaindata         string
+	HttpListenAddress string
+	HttpPort          int
+	HttpCORSDomain    string
+	HttpVirtualHost   string
 	API               string
-	gascap            uint64
+	Gascap            uint64
 }
 
 var (
-	cpuprofile     string
-	cpuProfileFile io.WriteCloser
-
-	memprofile string
-	cfg        Config
+	cfg Config
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cpuprofile, "pprof.cpuprofile", "", "write cpu profile `file`")
-	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
-	rootCmd.Flags().StringVar(&cfg.privateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.Flags().StringVar(&cfg.chaindata, "chaindata", "", "path to the database")
-	rootCmd.Flags().StringVar(&cfg.httpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.Flags().IntVar(&cfg.httpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.Flags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.Flags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.Flags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	rootCmd.Flags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
+	rootCmd.Flags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.Flags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.Flags().StringVar(&cfg.HttpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
+	rootCmd.Flags().StringVar(&cfg.HttpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.Flags().StringVar(&cfg.API, "http.api", "", "API's offered over the HTTP-RPC interface")
-
-	rootCmd.Flags().Uint64Var(&cfg.gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
+	rootCmd.Flags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		startProfilingIfNeeded()
-
-	},
-	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		stopProfilingIfNeeded()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		daemon(cmd, cfg)
 		return nil
@@ -89,42 +72,4 @@ func rootContext() context.Context {
 		cancel()
 	}()
 	return ctx
-}
-
-func startProfilingIfNeeded() {
-	if cpuprofile != "" {
-		fmt.Println("starting CPU profiling")
-		cpuProfileFile, err := os.Create(cpuprofile)
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return
-		}
-		if err := pprof.StartCPUProfile(cpuProfileFile); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return
-		}
-	}
-}
-
-func stopProfilingIfNeeded() {
-	if cpuprofile != "" {
-		fmt.Println("stopping CPU profiling")
-		pprof.StopCPUProfile()
-	}
-
-	if cpuProfileFile != nil {
-		cpuProfileFile.Close()
-	}
-	if memprofile != "" {
-		f, err := os.Create(memprofile)
-		if err != nil {
-			log.Error("could not create mem profile", "error", err)
-			return
-		}
-		runtime.GC() // get up-to-date statistics
-		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Error("could not write memory profile", "error", err)
-			return
-		}
-	}
 }
