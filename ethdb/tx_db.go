@@ -90,7 +90,7 @@ func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
-	v, err := m.cursors[bucket].Get(key)
+	v, err := m.cursors[bucket].SeekExact(key)
 	if err != nil {
 		return nil, err
 	}
