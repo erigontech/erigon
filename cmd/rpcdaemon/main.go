@@ -1,30 +1,25 @@
 package main
 
 import (
-	"io"
 	"os"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	var (
-		ostream log.Handler
-		glogger *log.GlogHandler
-	)
+	cli.SetupDefaultLogger(log.LvlInfo)
 
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	output := io.Writer(os.Stderr)
-	if usecolor {
-		output = colorable.NewColorableStderr()
+	cmd := cli.RootCommand()
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		commands.Daemon(cmd, cli.DefaultConfig)
+		return nil
 	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-	glogger = log.NewGlogHandler(ostream)
-	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.LvlInfo)
 
-	commands.Execute()
+	if err := cmd.ExecuteContext(cli.RootContext()); err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
 }

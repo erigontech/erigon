@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"math/big"
 	"strings"
 
@@ -172,7 +173,7 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 	return rpcAPI
 }
 
-func daemon(cmd *cobra.Command, cfg Config) {
+func Daemon(cmd *cobra.Command, cfg cli.Flags) {
 	vhosts := splitAndTrim(cfg.HttpVirtualHost)
 	cors := splitAndTrim(cfg.HttpCORSDomain)
 	enabledApis := splitAndTrim(cfg.API)
