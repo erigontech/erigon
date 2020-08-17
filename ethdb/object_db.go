@@ -88,7 +88,7 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 	}
 
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Bucket(bucket).Put(key, value)
+		return tx.Cursor(bucket).Put(key, value)
 	})
 	return err
 }
@@ -230,7 +230,7 @@ func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits
 func (db *ObjectDatabase) Delete(bucket string, key []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Bucket(bucket).Delete(key)
+		return tx.Cursor(bucket).Delete(key)
 	})
 	return err
 }
@@ -333,7 +333,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 		for _, name := range dbutils.Buckets {
 			name := name
 			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
-				newBucketToWrite := writeTx.Bucket(name)
+				newBucketToWrite := writeTx.Cursor(name)
 				return readTx.Cursor(name).Walk(func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 						return false, err

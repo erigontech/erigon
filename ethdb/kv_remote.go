@@ -44,19 +44,15 @@ type remoteTx struct {
 	cursors []*remoteCursor
 }
 
-type remoteBucket struct {
-	tx   *remoteTx
-	name string
-}
-
 type remoteCursor struct {
 	initialized        bool
 	streamingRequested bool
 	prefetch           uint32
 	ctx                context.Context
-	bucket             *remoteBucket
 	prefix             []byte
 	stream             remote.KV_SeekClient
+	tx                 *remoteTx
+	bucketName         string
 }
 
 type RemoteBackend struct {
@@ -187,10 +183,6 @@ func (tx *remoteTx) Rollback() {
 	}
 }
 
-func (tx *remoteTx) Bucket(name string) Bucket {
-	return &remoteBucket{tx: tx, name: name}
-}
-
 func (c *remoteCursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
@@ -210,16 +202,12 @@ func (c *remoteCursor) NoValues() NoValuesCursor {
 	return &remoteNoValuesCursor{remoteCursor: c}
 }
 
-func (b *remoteBucket) Size() (uint64, error) {
-	sizeReply, err := b.tx.db.remoteDB.BucketSize(b.tx.ctx, &remote.BucketSizeRequest{BucketName: b.name})
+func (tx *remoteTx) BucketSize(name string) (uint64, error) {
+	sizeReply, err := tx.db.remoteDB.BucketSize(tx.ctx, &remote.BucketSizeRequest{BucketName: name})
 	if err != nil {
 		return 0, err
 	}
 	return sizeReply.Size, nil
-}
-
-func (b *remoteBucket) Clear() error {
-	panic("not supporte")
 }
 
 func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
@@ -233,10 +221,10 @@ func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 		}
 	}()
 
-	return c.Get(key)
+	return c.SeekExact(key)
 }
 
-func (c *remoteCursor) Get(key []byte) (val []byte, err error) {
+func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
 	k, v, err := c.Seek(key)
 	if err != nil {
 		return nil, err
@@ -245,44 +233,11 @@ func (c *remoteCursor) Get(key []byte) (val []byte, err error) {
 		return nil, nil
 	}
 	return v, nil
-}
-
-func (b *remoteBucket) Get(key []byte) (val []byte, err error) {
-	c := b.Cursor()
-	defer func() {
-		if v, ok := c.(*remoteCursor); ok {
-			if v.stream == nil {
-				return
-			}
-			_ = v.stream.CloseSend()
-		}
-	}()
-
-	k, v, err := c.Seek(key)
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(key, k) {
-		return nil, nil
-	}
-	return v, nil
-}
-
-func (b *remoteBucket) Put(key []byte, value []byte) error {
-	panic("not supported")
-}
-
-func (b *remoteBucket) Delete(key []byte) error {
-	panic("not supported")
 }
 
 func (tx *remoteTx) Cursor(bucket string) Cursor {
-	return tx.Bucket(bucket).(*remoteBucket).Cursor()
-}
-
-func (b *remoteBucket) Cursor() Cursor {
-	c := &remoteCursor{bucket: b, ctx: b.tx.ctx}
-	b.tx.cursors = append(b.tx.cursors, c)
+	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket}
+	tx.cursors = append(tx.cursors, c)
 	return c
 }
 
@@ -312,11 +267,11 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	c.initialized = true
 
 	var err error
-	c.stream, err = c.bucket.tx.db.remoteKV.Seek(c.ctx)
+	c.stream, err = c.tx.db.remoteKV.Seek(c.ctx)
 	if err != nil {
 		return []byte{}, nil, err
 	}
-	err = c.stream.Send(&remote.SeekRequest{BucketName: c.bucket.name, SeekKey: seek, Prefix: c.prefix, StartSreaming: false})
+	err = c.stream.Send(&remote.SeekRequest{BucketName: c.bucketName, SeekKey: seek, Prefix: c.prefix, StartSreaming: false})
 	if err != nil {
 		return []byte{}, nil, err
 	}

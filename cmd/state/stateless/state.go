@@ -292,10 +292,6 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		pre := tx.Bucket(dbutils.PreimagePrefix)
-		if pre == nil {
-			return nil
-		}
 		c := tx.Cursor(dbutils.CurrentStateBucket).Prefetch(CursorBatchSize).NoValues()
 		for k, _, err := c.Seek(r.AccountKey); k != nil; k, _, err = c.Next() {
 			if len(k) != 32 {

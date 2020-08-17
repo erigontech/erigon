@@ -208,7 +208,7 @@ func (tx *boltTx) Yield() {
 	tx.bolt.Yield()
 }
 
-func (tx *boltTx) Bucket(name string) Bucket {
+func (tx *boltTx) Bucket(name string) boltBucket {
 	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[name].ID}
 	b.bolt = tx.bolt.Bucket([]byte(name))
 	return b
@@ -232,8 +232,8 @@ func (c *boltCursor) NoValues() NoValuesCursor {
 	return &noValuesBoltCursor{boltCursor: c}
 }
 
-func (b boltBucket) Size() (uint64, error) {
-	st := b.bolt.Stats()
+func (tx *boltTx) BucketSize(name string) (uint64, error) {
+	st := tx.bolt.Bucket([]byte(name)).Stats()
 	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
 }
 
@@ -250,7 +250,7 @@ func (b boltBucket) Clear() error {
 }
 
 func (tx *boltTx) Get(bucket string, key []byte) (val []byte, err error) {
-	return tx.Bucket(bucket).(boltBucket).Get(key)
+	return tx.Bucket(bucket).Get(key)
 }
 
 func (b boltBucket) Get(key []byte) (val []byte, err error) {
@@ -284,14 +284,14 @@ func (b boltBucket) Delete(key []byte) error {
 }
 
 func (tx *boltTx) Cursor(bucket string) Cursor {
-	return tx.Bucket(bucket).(boltBucket).Cursor()
+	return tx.Bucket(bucket).Cursor()
 }
 
 func (b boltBucket) Cursor() Cursor {
 	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }
 
-func (c *boltCursor) Get(key []byte) (val []byte, err error) {
+func (c *boltCursor) SeekExact(key []byte) (val []byte, err error) {
 	return c.bucket.Get(key)
 }
 
