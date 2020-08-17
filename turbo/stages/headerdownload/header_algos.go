@@ -217,6 +217,8 @@ func (hd *HeaderDownload) Append(chainSegment *ChainSegment) (bool, []common.Has
 	if len(chainSegment.headers) == 0 {
 		return false, nil, fmt.Errorf("chainSegment must not be empty for Append, len %d", len(chainSegment.headers))
 	}
+	var newAnchor *Anchor
+	totalDifficulties := make(map[common.Hash]uint256.Int)
 	var tombstones []common.Hash
 	for i := len(chainSegment.headers) - 1; i >= 0; i-- {
 		header := chainSegment.headers[i]
@@ -224,7 +226,23 @@ func (hd *HeaderDownload) Append(chainSegment *ChainSegment) (bool, []common.Has
 		if anchors, attaching := hd.anchors[anchorParent]; attaching {
 			var removedAnchors []int
 			for anchorIdx, anchor := range anchors {
-				if valid := hd.anchorParentValid(anchor, header); !valid {
+				if valid := hd.anchorParentValid(anchor, header); valid {
+					if newAnchor == nil {
+						newPowDepth := anchor.powDepth
+						heightDiff := int(anchor.blockHeight - chainSegment.headers[0].Number.Uint64())
+						if newPowDepth > heightDiff {
+							newPowDepth -= heightDiff
+						} else {
+							newPowDepth = 0
+						}
+						newTotalDifficulty := anchor.totalDifficulty
+
+						newAnchor = &Anchor{
+							powDepth: newPowDepth,
+							totalDifficulty: ,
+						}
+					}
+				} else {
 					// Invalidate the entire chain segment that starts at anchor
 					for _, tipHash := range anchor.tips {
 						tipItem := &TipItem{tipHash: tipHash, cumulativeDifficulty: hd.tips[tipHash].cumulativeDifficulty}
@@ -237,17 +255,17 @@ func (hd *HeaderDownload) Append(chainSegment *ChainSegment) (bool, []common.Has
 			}
 			if len(removedAnchors) > 0 {
 				j := 0
-				var newAnchors []*Anchor
+				var filteredAnchors []*Anchor
 				for k, anchor := range anchors {
 					if j < len(removedAnchors) && removedAnchors[j] == k {
 						// Skip this one
 						j++
 					} else {
-						newAnchors = append(newAnchors, anchor)
+						filteredAnchors = append(filteredAnchors, anchor)
 					}
 				}
-				if len(newAnchors) > 0 {
-					hd.anchors[anchorParent] = newAnchors
+				if len(filteredAnchors) > 0 {
+					hd.anchors[anchorParent] = filteredAnchors
 				} else {
 					delete(hd.anchors, anchorParent)
 				}
