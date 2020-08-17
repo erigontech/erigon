@@ -51,7 +51,7 @@ type remoteCursor struct {
 	ctx                context.Context
 	prefix             []byte
 	stream             remote.KV_SeekClient
-	tx                 *remote2Tx
+	tx                 *remoteTx
 	bucketName         string
 }
 
