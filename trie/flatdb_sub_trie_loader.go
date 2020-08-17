@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"io"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
@@ -637,7 +637,13 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 func (fstl *FlatDbSubTrieLoader) logProgress(lastLogTime time.Time, counter uint64) time.Time {
 	if counter%100_000 == 0 && time.Since(lastLogTime) > 30*time.Second {
-		log.Info("Calculating Merkle root", "current key", makeCurrentKeyStr(fstl.accountKey))
+		var k string
+		if fstl.accountKey != nil {
+			k = makeCurrentKeyStr(fstl.accountKey)
+		} else {
+			k = makeCurrentKeyStr(fstl.ihK)
+		}
+		log.Info("Calculating Merkle root", "current key", k)
 		return time.Now()
 	}
 	return lastLogTime
