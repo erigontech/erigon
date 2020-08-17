@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"io"
 	"time"
 
@@ -610,11 +611,15 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		if err := fstl.iteration(c, ih, true /* first */); err != nil {
 			return err
 		}
+		var counter uint64
+		t := time.Now()
 		for fstl.rangeIdx < len(fstl.dbPrefixes) {
 			for !fstl.itemPresent {
 				if err := fstl.iteration(c, ih, false /* first */); err != nil {
 					return err
 				}
+				counter++
+				t = fstl.logProgress(t, counter)
 			}
 			if fstl.itemPresent {
 				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff); err != nil {
@@ -628,6 +633,26 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		return SubTries{}, err
 	}
 	return fstl.receiver.Result(), nil
+}
+
+func (fstl *FlatDbSubTrieLoader) logProgress(lastLogTime time.Time, counter uint64) time.Time {
+	if counter%100_000 == 0 && time.Since(lastLogTime) > 30*time.Second {
+		log.Info("Calculating Merkle root", "current key", makeCurrentKeyStr(fstl.accountKey))
+		return time.Now()
+	}
+	return lastLogTime
+}
+
+func makeCurrentKeyStr(k []byte) string {
+	var currentKeyStr string
+	if k == nil {
+		currentKeyStr = "final"
+	} else if len(k) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", k)
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+	}
+	return currentKeyStr
 }
 
 func (fstl *FlatDbSubTrieLoader) AttachRequestedCode(db ethdb.Getter, requests []*LoadRequestForCode) error {
