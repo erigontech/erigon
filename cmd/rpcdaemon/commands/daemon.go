@@ -174,7 +174,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	var txPool ethdb.Backend
 	var err error
 	if cfg.privateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		db, txPool, err = ethdb.NewRemote().Path(cfg.privateApiAddr).Open()
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return
