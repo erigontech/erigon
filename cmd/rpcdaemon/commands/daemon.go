@@ -178,25 +178,7 @@ func Daemon(cmd *cobra.Command, cfg cli.Flags) {
 	cors := splitAndTrim(cfg.HttpCORSDomain)
 	enabledApis := splitAndTrim(cfg.API)
 
-	var db ethdb.KV
-	var txPool ethdb.Backend
-	var err error
-	if cfg.PrivateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open()
-		if err != nil {
-			log.Error("Could not connect to remoteDb", "error", err)
-			return
-		}
-	} else if cfg.Chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
-			db = database.KV()
-		} else {
-			err = errOpen
-		}
-	} else {
-		err = fmt.Errorf("either remote db or bolt db must be specified")
-	}
-
+	db, txPool, err := cli.DefaultConnection(cfg)
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return

@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/mattn/go-colorable"
@@ -85,4 +87,30 @@ func SetupDefaultLogger(lvl log.Lvl) {
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
 	glogger.Verbosity(lvl)
+}
+
+func DefaultConnection(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
+	var db ethdb.KV
+	var txPool ethdb.Backend
+	var err error
+	if cfg.PrivateApiAddr != "" {
+		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open()
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
+		}
+	} else if cfg.Chaindata != "" {
+		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
+			db = database.KV()
+		} else {
+			err = errOpen
+		}
+	} else {
+		return nil, nil, fmt.Errorf("either remote db or bolt db must be specified")
+	}
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
+	}
+
+	return db, txPool, err
 }
