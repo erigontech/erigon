@@ -47,3 +47,7 @@ func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseReque
 	out.Hash = base.Hash().Bytes()
 	return out, nil
 }
+
+func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionRequest) (*remote.NetVersionReply, error) {
+	return &remote.NetVersionReply{Id: s.eth.NetVersion()}, nil
+}
