@@ -23,18 +23,11 @@ type KV interface {
 
 type Tx interface {
 	Cursor(bucket string) Cursor
-	Bucket(name string) Bucket
 	Get(bucket string, key []byte) (val []byte, err error)
 
 	Commit(ctx context.Context) error
 	Rollback()
-}
-
-type Bucket interface {
-	Put(key []byte, value []byte) error
-	Delete(key []byte) error
-
-	Size() (uint64, error)
+	BucketSize(name string) (uint64, error)
 }
 
 // Interface used for buckets migration, don't use it in usual app code
@@ -54,7 +47,7 @@ type Cursor interface {
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
-	Get(key []byte) ([]byte, error)
+	SeekExact(key []byte) ([]byte, error)
 	Next() ([]byte, []byte, error)
 	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error

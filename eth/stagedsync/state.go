@@ -2,7 +2,9 @@ package stagedsync
 
 import (
 	"fmt"
+	"runtime"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -127,6 +129,9 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 			return err
 		}
 	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	return nil
 }
 

@@ -161,6 +161,7 @@ func (m *mutation) Commit() (uint64, error) {
 			value, _ := bt.GetStr(key)
 			m.tuples = append(m.tuples, bucketB, []byte(key), value)
 		}
+		delete(m.puts.mp, bucketStr)
 	}
 	sort.Sort(m.tuples)
 
@@ -170,7 +171,7 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 
 	m.puts = newPuts()
-	m.tuples = m.tuples[:0]
+	m.tuples = nil
 	return written, nil
 }
 
@@ -178,7 +179,7 @@ func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts = newPuts()
-	m.tuples = m.tuples[:0]
+	m.tuples = nil
 }
 
 func (m *mutation) Keys() ([][]byte, error) {
@@ -209,6 +210,10 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	return mm
 }
 
+func (m *mutation) Begin() (DbWithPendingMutations, error) {
+	return m.db.Begin()
+}
+
 func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
@@ -218,10 +223,6 @@ func (m *mutation) panicOnEmptyDB() {
 func (m *mutation) MemCopy() Database {
 	m.panicOnEmptyDB()
 	return m.db
-}
-
-func (m *mutation) ID() uint64 {
-	return m.db.ID()
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

@@ -4,6 +4,6 @@ import (
 	"context"
 )
 
-func (api *APIImpl) NetVersion(_ context.Context) uint64 {
+func (api *NetAPIImpl) Version(_ context.Context) uint64 {
 	return api.ethBackend.NetVersion()
 }

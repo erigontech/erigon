@@ -138,6 +138,7 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
 	apiImpl := NewAPI(db, dbReader, chainContext, eth)
+	netImpl := NewNetAPIImpl(eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
 
 	for _, enabledAPI := range enabledApis {
@@ -154,6 +155,13 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 				Namespace: "debug",
 				Public:    true,
 				Service:   PrivateDebugAPI(dbgAPIImpl),
+				Version:   "1.0",
+			})
+		case "net":
+			rpcAPI = append(rpcAPI, rpc.API{
+				Namespace: "net",
+				Public:    true,
+				Service:   NetAPI(netImpl),
 				Version:   "1.0",
 			})
 
@@ -173,7 +181,7 @@ func daemon(cmd *cobra.Command, cfg Config) {
 	var txPool ethdb.Backend
 	var err error
 	if cfg.privateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote2().Path(cfg.privateApiAddr).Open()
+		db, txPool, err = ethdb.NewRemote().Path(cfg.privateApiAddr).Open()
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return

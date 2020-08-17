@@ -1115,7 +1115,7 @@ func repairCurrent() {
 	defer currentDb.Close()
 	check(historyDb.ClearBuckets(dbutils.CurrentStateBucket))
 	check(historyDb.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		newB := tx.Bucket(dbutils.CurrentStateBucket)
+		newB := tx.Cursor(dbutils.CurrentStateBucket)
 		count := 0
 		if err := currentDb.KV().View(context.Background(), func(ctx ethdb.Tx) error {
 			c := ctx.Cursor(dbutils.CurrentStateBucket)
