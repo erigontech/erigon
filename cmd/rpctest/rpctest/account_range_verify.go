@@ -122,8 +122,8 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 		fmt.Println("cmd/rpctest/rpctest/account_range_verify.go:107 err", err)
 		return
 	}
-	tgCursor:=tgTx.Bucket(dbutils.AccountsHistoryBucket).Cursor()
-	gethCursor:=gethTx.Bucket(dbutils.AccountsHistoryBucket).Cursor()
+	tgCursor:=tgTx.Cursor(dbutils.AccountsHistoryBucket)
+	gethCursor:=gethTx.Cursor(dbutils.AccountsHistoryBucket)
 
 	tgKey, tgVal, err1:=tgCursor.Next()
 	if err1!=nil {

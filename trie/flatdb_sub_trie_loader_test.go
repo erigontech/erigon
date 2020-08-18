@@ -577,6 +577,28 @@ func TestIsBefore(t *testing.T) {
 	assert.Equal(fmt.Sprintf("%x", cacheKey), fmt.Sprintf("%x", minKey))
 }
 
+func TestIsSequence(t *testing.T) {
+	assert := assert.New(t)
+
+	type tc struct {
+		prev, next string
+		expect     bool
+	}
+
+	cases := []tc{
+		{prev: "1234", next: "1235", expect: true},
+		{prev: "12ff", next: "13", expect: true},
+		{prev: "12ff", next: "13000000", expect: true},
+		{prev: "1234", next: "5678", expect: false},
+	}
+	for _, tc := range cases {
+		next, _ := dbutils.NextSubtree(common.FromHex(tc.prev))
+		res := isSequence(next, common.FromHex(tc.next))
+		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
+	}
+
+}
+
 func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) error {
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)

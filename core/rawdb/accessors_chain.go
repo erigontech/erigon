@@ -243,14 +243,11 @@ func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
 	data, _ := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
-	if debug.IsBlockCompressionEnabled() && len(data) > 0 {
-		var err error
-		data, err = snappy.Decode(nil, data)
-		if err != nil {
-			log.Warn("err on decode block", "err", err)
-		}
+	bodyRlp, err := DecompressBlockBody(data)
+	if err != nil {
+		log.Warn("err on decode block", "err", err)
 	}
-	return data
+	return bodyRlp
 }
 
 // WriteBodyRLP stores an RLP encoded block body into the database.

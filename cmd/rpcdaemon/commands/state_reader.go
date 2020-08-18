@@ -109,9 +109,11 @@ func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Ha
 	}
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CodeBucket)
-		v, err := b.Get(codeHash[:])
-		val = v
+		v, err := tx.Get(dbutils.CodeBucket, codeHash[:])
+		if err != nil {
+			return err
+		}
+		val = common.CopyBytes(v)
 		return err
 	})
 	if err != nil {

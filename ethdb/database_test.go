@@ -167,11 +167,11 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 		})
 	}()
 	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
-	err = writeTx.Bucket(dbutils.Buckets[0]).Put([]byte{1}, []byte{1})
+	err = writeTx.Cursor(dbutils.Buckets[0]).Put([]byte{1}, []byte{1})
 	require.NoError(t, err)
 	err = writeTx.Commit(context.Background())
 	require.NoError(t, err)
-	_, err = tx.Bucket(dbutils.Buckets[0]).Get([]byte{1})
+	_, err = tx.Get(dbutils.Buckets[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 

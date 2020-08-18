@@ -240,7 +240,7 @@ beginTx:
 	}
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.AccountsHistoryBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize).NoValues()
 
 		for k, vSize, err := c.Seek(r.HistoryKey); k != nil; k, vSize, err = c.Next() {
 			if err != nil {
@@ -292,11 +292,7 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		pre := tx.Bucket(dbutils.PreimagePrefix)
-		if pre == nil {
-			return nil
-		}
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		c := tx.Cursor(dbutils.CurrentStateBucket).Prefetch(CursorBatchSize).NoValues()
 		for k, _, err := c.Seek(r.AccountKey); k != nil; k, _, err = c.Next() {
 			if len(k) != 32 {
 				continue
@@ -466,7 +462,7 @@ beginTx:
 
 	// Go through the history of account first
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.StorageHistoryBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize).NoValues()
 		for k, vSize, err := c.Seek(r.HistoryKey); k != nil; k, vSize, err = c.Next() {
 			if err != nil {
 				return err
@@ -522,7 +518,7 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		c := tx.Cursor(dbutils.CurrentStateBucket).Prefetch(CursorBatchSize).NoValues()
 		for k, _, err := c.Seek(r.StorageKey); k != nil; k, _, err = c.Next() {
 			if len(k) == 32 {
 				continue
@@ -703,7 +699,7 @@ beginTx:
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		fmt.Println("Preloading block numbers...")
 
-		c := tx.Bucket(dbutils.HeaderPrefix).Cursor().Prefetch(CursorBatchSize)
+		c := tx.Cursor(dbutils.HeaderPrefix).Prefetch(CursorBatchSize)
 		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1453,11 +1449,7 @@ func storageUsage() {
 	count := 0
 	var leafSize uint64
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1468,7 +1460,10 @@ func storageUsage() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				vv, _ := b.Get(crypto.Keccak256(addr[:]))
+				vv, err := tx.Get(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				if err != nil {
+					return err
+				}
 				del = vv == nil
 				deleted[addr] = del
 				if del {
@@ -1569,11 +1564,7 @@ func tokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
@@ -1651,11 +1642,7 @@ func nonTokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
@@ -1796,11 +1783,7 @@ func dustEOA() {
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.CurrentStateBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
