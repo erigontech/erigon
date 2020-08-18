@@ -706,7 +706,7 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 	}
 
 	if c.cursor == nil {
-		if err := c.initCursor(); err != nil {
+		if err = c.initCursor(); err != nil {
 			log.Error("init cursor", "err", err)
 		}
 	}

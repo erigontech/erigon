@@ -20,7 +20,8 @@ var routes map[string]string
 // needCompare - if false - doesn't call TurboGeth and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(needCompare bool, fullTest bool) {
+func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool) {
+	setRoutes(tgURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -114,15 +115,16 @@ func Bench1(needCompare bool, fullTest bool) {
 						if sr.Error != nil {
 							fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
 							return
-						} else {
-							for k, v := range sr.Result.Storage {
-								sm[k] = v
-								if v.Key == nil {
-									fmt.Printf("%x: %x", k, v)
-								}
-							}
-							nextKey = sr.Result.NextKey
 						}
+
+						for k, v := range sr.Result.Storage {
+							sm[k] = v
+							if v.Key == nil {
+								fmt.Printf("%x: %x", k, v)
+							}
+						}
+						nextKey = sr.Result.NextKey
+
 					}
 
 					for nextKeyG != nil {
@@ -373,8 +375,6 @@ func Bench1(needCompare bool, fullTest bool) {
 	}
 }
 
-
-
 // vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
 // results to /$tmp$/turbo_geth_stress_test/results_*.csv
 // vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
@@ -449,5 +449,3 @@ func vegetaWrite(enabled bool, resultsCh chan CallResult) {
 		}
 	}
 }
-
-

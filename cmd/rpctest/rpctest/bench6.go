@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func Bench6() {
+func Bench6(turbogeth_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
 	req_id := 0
-	turbogeth_url := "http://localhost:8545"
+
 	req_id++
 	template := `
 {"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}

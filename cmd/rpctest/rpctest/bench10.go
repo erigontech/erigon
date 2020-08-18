@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func Bench10() error {
+func Bench10(tgUrl, gethUrl string, bn uint64) error {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -17,9 +17,9 @@ func Bench10() error {
 	}
 
 	reqGen.reqID++
-	bn := 4370000
+
 	var b EthBlockByNumber
-	res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+	res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(int(bn)), &b)
 	if res.Err != nil {
 		return fmt.Errorf("retrieve block (turbo-geth) %d: %v", bn, res.Err)
 	}

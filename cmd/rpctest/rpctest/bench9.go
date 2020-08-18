@@ -9,7 +9,8 @@ import (
 )
 
 // bench9 tests eth_getProof
-func Bench9(needCompare bool) {
+func Bench9(tgURL, gethURL string, needCompare bool) {
+	setRoutes(tgURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}

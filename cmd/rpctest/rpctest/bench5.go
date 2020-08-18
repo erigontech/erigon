@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-func Bench5() {
+func Bench5(turbogethURL string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogethURL := routes[TurboGeth]
+
 	file, err := os.Open("txs.txt")
 	if err != nil {
 		panic(err)

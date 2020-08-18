@@ -80,20 +80,13 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	if maxResults > eth.AccountRangeMaxResults || maxResults <= 0 {
 		maxResults = eth.AccountRangeMaxResults
 	}
-	//start = common.Hex2Bytes("000056b62a7660210a8381c691dbea894162d944")
-	fmt.Println("start", common.Bytes2Hex(start), common.BytesToAddress(start).String(), common.BytesToAddress(common.Hex2Bytes("52b1e6dd9d145a370c4bf3aa97644c95e5ff76f2")).String())
-	fmt.Println(string(start))
-	fmt.Println(start)
-	fmt.Println(start)
-	//start = common.Hex2Bytes(string(start))
-	//start = common.Hex2Bytes("52b1e6dd9d145a370c4bf3aa97644c95e5ff76f2")
-	fmt.Println(len(start), common.Bytes2Hex(start), start)
+
 	dumper := state.NewDumper(api.db, blockNumber)
 	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
-	fmt.Println("iterator stopped")
+
 	hash := rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
 	if hash != (common.Hash{}) {
 		header := rawdb.ReadHeader(api.dbReader, hash, blockNumber)
@@ -102,7 +95,6 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 	}
 
-	fmt.Println("end", err, len(res.Accounts), res.Root)
 	return res, nil
 }
 

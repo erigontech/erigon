@@ -90,7 +90,7 @@ func FixState(chaindata string, url string) {
 						}
 					}
 				}
-				fmt.Printf("Retrived %d storage items from geth archive node\n", len(sm))
+				fmt.Printf("Retrieved %d storage items from geth archive node\n", len(sm))
 				for key, entry := range sm {
 					var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 					copy(cKey[:], addrHash[:])

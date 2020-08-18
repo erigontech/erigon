@@ -9,12 +9,10 @@ import (
 	"time"
 )
 
-func Bench3() {
+func Bench3(turbogeth_url, geth_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	geth_url := "http://localhost:8545"
-	turbogeth_url := "http://localhost:9545"
 	blockhash := common.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
 

@@ -92,7 +92,6 @@ func compareBalances(balance, balanceg *EthBalance) bool {
 	return true
 }
 
-
 func extractAccountMap(ma *DebugModifiedAccounts) map[common.Address]struct{} {
 	r := ma.Result
 	rset := make(map[common.Address]struct{})
@@ -110,22 +109,22 @@ func printStorageRange(sm map[common.Hash]storageEntry) {
 
 func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 	for k, v := range sm {
-		if vg, ok := smg[k]; !ok {
+		vg, ok := smg[k]
+		if !ok {
 			fmt.Printf("%x not present in smg\n", k)
 			return false
-		} else {
-			if v.Key == nil {
-				fmt.Printf("v.Key == nil for %x\n", k)
-				return false
-			}
-			if k != crypto.Keccak256Hash(v.Key[:]) {
-				fmt.Printf("Sec key %x does not match key %x\n", k, *v.Key)
-				return false
-			}
-			if v.Value != vg.Value {
-				fmt.Printf("Different values for %x: %x %x [%x]\n", k, v.Value, vg.Value, *v.Key)
-				return false
-			}
+		}
+		if v.Key == nil {
+			fmt.Printf("v.Key == nil for %x\n", k)
+			return false
+		}
+		if k != crypto.Keccak256Hash(v.Key[:]) {
+			fmt.Printf("Sec key %x does not match key %x\n", k, *v.Key)
+			return false
+		}
+		if v.Value != vg.Value {
+			fmt.Printf("Different values for %x: %x %x [%x]\n", k, v.Value, vg.Value, *v.Key)
+			return false
 		}
 	}
 	for k, v := range smg {
@@ -140,8 +139,6 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 	}
 	return true
 }
-
-
 
 /*
 	// Derived fields. These fields are filled in by the node
@@ -170,8 +167,8 @@ func compareReceipts(receipt, receiptg *EthReceipt) bool {
 		return false
 	}
 	if r.Status != rg.Status {
-		//fmt.Printf("Different status: %d %d\n", r.Status, rg.Status)
-		//return false
+		fmt.Printf("Different status: %d %d\n", r.Status, rg.Status)
+		return false
 	}
 	if r.CumulativeGasUsed != rg.CumulativeGasUsed {
 		fmt.Printf("Different cumulativeGasUsed: %d %d\n", r.CumulativeGasUsed, rg.CumulativeGasUsed)
@@ -258,7 +255,6 @@ func compareLogs(logs, logsg *EthLogs) bool {
 	return true
 }
 
-
 func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	allAddresses := make(map[common.Address]struct{})
 	for k := range tg {
@@ -305,8 +301,6 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	}
 	return true
 }
-
-
 
 func compareProofs(proof, gethProof *EthGetProof) bool {
 	r := proof.Result
@@ -389,9 +383,6 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	return equal
 }
 
-
-
-
 func post(client *http.Client, url, request string, response interface{}) error {
 	log.Info("Getting", "url", url, "request", request)
 	start := time.Now()
@@ -433,4 +424,7 @@ func print(client *http.Client, url, request string) {
 	fmt.Printf("%s\n", buf[:l])
 }
 
-
+func setRoutes(tgUrl, gethURL string) {
+	routes[TurboGeth] = tgUrl
+	routes[Geth] = gethURL
+}

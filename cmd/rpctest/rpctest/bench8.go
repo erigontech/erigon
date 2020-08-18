@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-func Bench8() {
+func Bench8(turbogethURL string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogethURL := "http://localhost:8545"
+
 	reqID := 1
 	to := common.HexToAddress("0x9653c9859b18f8777fe4eec9a67c9f64f3d6f62a")
 
@@ -26,4 +26,3 @@ func Bench8() {
 		fmt.Printf("Error getting eth_getLogs: %d %s\n", logs.Error.Code, logs.Error.Message)
 	}
 }
-

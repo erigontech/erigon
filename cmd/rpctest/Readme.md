@@ -1,16 +1,16 @@
 
 ### Create files with sample requests
-`go run ./cmd/rpctest --action=bench1` will print tmpDir. 
+`go run ./cmd/rpctest/main.go bench1` will print tmpDir. 
 And create in tmpDir `results_*.csv` and `vegeta_*.txt` files. 
 
 Command takes long time. Kill it when `vegeta_turbo_geth_debug_storageRangeAt.txt` is few MB. 
 
 File `vegeta_turbo_geth_*.txt` will produce load to `turbo_geth` node, `vegeta_geth_*.txt` to `geth`.
-Change host/port in `cmd/rpctest/main.go:routes` variable. 
+Change host/port in `--gethUrl`, `--tgUrl` variable. 
 
-By default `go run ./cmd/rpctest --action=bench1` calling only Geth node 
-because `cmd/rpctest/main.go:main` calling it with first parameter `needCompare=false`.
-Set `needCompare=true` to call Geth and TurboGeth nodes and compare results.   
+By default `go run ./cmd/rpctest/main.go bench1` calling only turbogeth node 
+because `cmd/rpctest/rpctest/bench1.go` calling it with first parameter `needCompare=false`.
+Set `--needCompare` to call Geth and TurboGeth nodes and compare results.   
 
 ### Install Vegeta
 ```
@@ -31,8 +31,8 @@ open plot.html
 ### Results from my Macbook:
 start rpcdaemon with turbo_geth: 
 ```
-GODEBUG=remotedb.debug=1 go run ./cmd/geth --remote-db-listen-addr localhost:9997   --rpcport 8545  --rpc --rpcapi eth,debug --nodiscover
-GODEBUG=remotedb.debug=1 go run ./cmd/rpcdaemon --rpcapi eth,debug --rpcport 9545 --remote-db-addr 127.0.0.1:9997
+GODEBUG=remotedb.debug=1 go run ./cmd/tg --private.api.addr localhost:9997   --rpcport 8545  --rpc --rpcapi eth,debug --nodiscover
+GODEBUG=remotedb.debug=1 go run ./cmd/rpcdaemon --rpcapi eth,debug --rpcport 9545 --private.api.addr 127.0.0.1:9997
 ```
 
 On simple requests `eth_getBlockByNumber` RPC Daemon looks well:  

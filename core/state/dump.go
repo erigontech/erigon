@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -30,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"time"
 )
 
 type trieHasher interface {
@@ -152,14 +150,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 	if d.hashedState {
 		stateBucket = dbutils.CurrentStateBucket
 	}
-	fmt.Println("stateBucket", string(stateBucket))
-	t:=time.Now()
-	tt:=time.Now()
+
 	err = WalkAsOf(d.db, stateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
-		defer func() {
-			fmt.Println(common.Bytes2Hex(k),numberOfResults, maxResults, time.Since(tt))
-			tt=time.Now()
-		}()
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -171,7 +163,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		if len(k) > 32 {
 			return true, nil
 		}
-		fmt.Printf("Got account %x\n", k)
+		//fmt.Printf("Got account %x\n", k)
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
@@ -179,8 +171,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     strings.TrimPrefix(common.Bytes2Hex(emptyHash[:]),"0x"), // We cannot provide historical storage hash
-			CodeHash: strings.TrimPrefix(common.Bytes2Hex(emptyCodeHash[:]),"0x"),
+			Root:     strings.TrimPrefix(common.Bytes2Hex(emptyHash[:]), "0x"), // We cannot provide historical storage hash
+			CodeHash: strings.TrimPrefix(common.Bytes2Hex(emptyCodeHash[:]), "0x"),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
@@ -190,16 +182,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		numberOfResults++
 		return true, nil
 	})
-
-	fmt.Println("accounts", time.Since(t))
-	fmt.Printf("Number of accounts: %d\n", numberOfResults)
-
 	if err != nil {
 		return nil, err
 	}
-	t=time.Now()
+
 	for i, addrHash := range addrHashList {
-		tt=time.Now()
 		account := accountList[i]
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addrHash[:], incarnation)
@@ -218,8 +205,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
-					fmt.Println(addrHash.String(), "code hash with err", codeHash, common.Bytes2Hex(codeHash))
-					spew.Dump(account)
 					return nil, err
 				}
 				account.Code = common.Bytes2Hex(code)
@@ -227,7 +212,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		}
 
 		if !excludeStorage {
-			t:=trie.New(common.Hash{})
+			t := trie.New(common.Hash{})
 			err = WalkAsOf(d.db,
 				stateBucket,
 				dbutils.StorageHistoryBucket,
@@ -247,10 +232,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 			account.Root = t.Hash().String()
 		}
 		c.OnAccount(addrHash, *account)
-		fmt.Println(addrHash.String(), "storage", time.Since(tt))
-		tt=time.Now()
 	}
-	fmt.Println("storage", time.Since(tt))
+
 	return nextKey, nil
 }
 

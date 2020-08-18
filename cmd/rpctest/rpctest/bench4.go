@@ -7,16 +7,14 @@ import (
 	"time"
 )
 
-func Bench4() {
+func Bench4(turbogeth_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogeth_url := "http://localhost:9545"
+
 	blockhash := common.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
-	template := `
-{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}
-`
+	template := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
 	if err := post(client, turbogeth_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
 		fmt.Printf("Could not retrieve block %d: %v\n", 1720000, err)
@@ -28,9 +26,7 @@ func Bench4() {
 	for txindex := 0; txindex < 6; txindex++ {
 		txhash := b.Result.Transactions[txindex].Hash
 		req_id++
-		template = `
-{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}
-	`
+		template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 		var trace EthTxTrace
 		if err := post(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
 			fmt.Printf("Could not trace transaction %s: %v\n", txhash, err)
@@ -47,9 +43,7 @@ func Bench4() {
 	start := common.HexToHash("0xa283ff49a55f86420a4acd5835658d8f45180db430c7b0d7ae98da5c64f620dc")
 
 	req_id++
-	template = `
-{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}
-	`
+	template = `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
 	i := 6
 	nextKey := &start
 	for nextKey != nil {

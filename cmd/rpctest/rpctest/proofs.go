@@ -98,7 +98,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			reqID++
 			template := `{"jsonrpc":"2.0","method":"eth_getProof","params":["0x%x",[],"0x%x"],"id":%d}`
 			var proof EthGetProof
-			if err := post(client, url, fmt.Sprintf(template, account, block, reqID), &proof); err != nil {
+			if err = post(client, url, fmt.Sprintf(template, account, block, reqID), &proof); err != nil {
 				fmt.Printf("Could not get block number: %v\n", err)
 				return
 			}

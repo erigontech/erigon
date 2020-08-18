@@ -415,7 +415,7 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 		if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 			return err2
 		}
-		var counter uint64
+
 		goOn := true
 		var err error
 		for goOn {
@@ -432,24 +432,17 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 				break
 			}
 			if cmp < 0 {
-				fmt.Println("walker cmp<0", counter, common.Bytes2Hex(hK))
-				counter=0
 				goOn, err = walker(k, v)
 			} else {
 				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 					return err2
 				}
 				if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
-					fmt.Println("walker hV>0", counter, common.Bytes2Hex(hK))
-					counter=0
 					goOn, err = walker(hK, hV)
 				} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
-					fmt.Println("walker nih", counter, common.Bytes2Hex(hK))
-					counter=0
 					goOn, err = walker(k, v)
 				}
 			}
-			counter++
 			if goOn {
 				if cmp <= 0 {
 					k, v, err1 = mainCursor.Next()

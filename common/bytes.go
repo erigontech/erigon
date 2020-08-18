@@ -160,7 +160,6 @@ func TrimRightZeroes(s []byte) []byte {
 	return s[:idx]
 }
 
-
 func KeyCmp(key1, key2 []byte) (int, bool) {
 	switch {
 	case key1 == nil && key2 == nil:
@@ -173,4 +172,3 @@ func KeyCmp(key1, key2 []byte) (int, bool) {
 		return bytes.Compare(key1, key2), false
 	}
 }
-
