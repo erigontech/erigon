@@ -71,7 +71,7 @@ type HasStats interface {
 type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
-	NetVersion() uint64
+	NetVersion() (uint64, error)
 }
 
 type DbProvider uint8

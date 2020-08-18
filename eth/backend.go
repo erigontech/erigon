@@ -270,7 +270,11 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	// Start the RPC service
 	if config.SyncMode != downloader.StagedSync {
-		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, eth.NetVersion())
+		id, err := eth.NetVersion()
+		if err != nil {
+			return nil, err
+		}
+		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, id)
 	}
 
 	// Register the backend on the node
@@ -576,7 +580,7 @@ func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
 func (s *Ethereum) ChainKV() ethdb.KV                  { return s.chainKV }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) EthVersion() int                    { return int(ProtocolVersions[0]) }
-func (s *Ethereum) NetVersion() uint64                 { return s.networkID }
+func (s *Ethereum) NetVersion() (uint64, error)        { return s.networkID, nil }
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.protocolManager.downloader }
 func (s *Ethereum) Synced() bool                       { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
 func (s *Ethereum) ArchiveMode() bool                  { return !s.config.Pruning }

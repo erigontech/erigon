@@ -49,5 +49,9 @@ func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseReque
 }
 
 func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionRequest) (*remote.NetVersionReply, error) {
-	return &remote.NetVersionReply{Id: s.eth.NetVersion()}, nil
+	id, err := s.eth.NetVersion()
+	if err != nil {
+		return &remote.NetVersionReply{}, err
+	}
+	return &remote.NetVersionReply{Id: id}, nil
 }
