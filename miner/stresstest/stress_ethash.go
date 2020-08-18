@@ -29,8 +29,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
@@ -193,7 +191,7 @@ func makeMiner(genesis *core.Genesis) (*node.Node, *eth.Ethereum, error) {
 	err = stack.Start()
 	return stack, ethBackend, err
 	}); err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintf("cannot register stress test miner. config %v", ethConfig))
+		return nil, fmt.Errorf("cannot register stress test miner. config %v", ethConfig)
 	}
 	// Start the node and return if successful
 	return stack, stack.Start()

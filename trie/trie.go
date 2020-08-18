@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -327,7 +326,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 
 	accNode, gotValue := t.getAccount(t.root, hex, 0)
 	if accNode == nil || !gotValue {
-		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
+		return fmt.Errorf("account not found with key: %x, %w", key, ethdb.ErrKeyNotFound)
 	}
 
 	actualCodeHash := crypto.Keccak256(code)
@@ -356,7 +355,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 
 	accNode, gotValue := t.getAccount(t.root, hex, 0)
 	if accNode == nil || !gotValue {
-		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
+		return fmt.Errorf("account not found with key: %x, %w", key, ethdb.ErrKeyNotFound)
 	}
 
 	accNode.codeSize = codeSize

@@ -1,11 +1,11 @@
 package stagedsync
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 

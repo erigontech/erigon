@@ -55,7 +55,6 @@ require (
 	github.com/pborman/uuid v0.0.0-20170112150404-1b00554d8222
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v1.1.1-0.20190123174540-a2c9a5303de7
-	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
