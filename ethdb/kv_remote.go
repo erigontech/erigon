@@ -381,12 +381,11 @@ func (back *RemoteBackend) Etherbase() (common.Address, error) {
 	return common.BytesToAddress(res.Hash), nil
 }
 
-func (back *RemoteBackend) NetVersion() uint64 {
+func (back *RemoteBackend) NetVersion() (uint64, error) {
 	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
 	if err != nil {
-		log.Error("NetVersion call got an error", "err", err)
-		return 0
+		return 0, err
 	}
 
-	return res.Id
+	return res.Id, nil
 }

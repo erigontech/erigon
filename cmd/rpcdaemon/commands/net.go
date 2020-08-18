@@ -7,7 +7,7 @@ import (
 )
 
 type NetAPI interface {
-	Version(ctx context.Context) uint64
+	Version(ctx context.Context) (string, error)
 }
 
 type NetAPIImpl struct {
