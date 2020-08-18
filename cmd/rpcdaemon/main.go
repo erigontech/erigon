@@ -20,7 +20,7 @@ func main() {
 			return nil
 		}
 
-		var rpcAPI = commands.GetAPI(db, txPool, cfg.API)
+		var rpcAPI = commands.GetAPI(db, txPool, cfg.API, cfg.Gascap)
 		cli.StartRpcServer(cfg, rpcAPI)
 		sig := <-cmd.Context().Done()
 		log.Info("Exiting...", "signal", sig)

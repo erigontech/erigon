@@ -3,8 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"github.com/spf13/cobra"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -120,12 +118,12 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
+func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string, gascap uint64) []rpc.API {
 	var rpcAPI []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
 	chainContext := NewChainContext(dbReader)
-	apiImpl := NewAPI(db, dbReader, chainContext, eth)
+	apiImpl := NewAPI(db, dbReader, chainContext, eth, gascap)
 	netImpl := NewNetAPIImpl(eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
 

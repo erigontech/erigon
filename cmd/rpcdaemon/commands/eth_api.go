@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -33,15 +32,17 @@ type APIImpl struct {
 	ethBackend   ethdb.Backend
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
+	GasCap       uint64
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext, eth ethdb.Backend) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:           db,
 		dbReader:     dbReader,
 		chainContext: chainContext,
 		ethBackend:   eth,
+		GasCap:       gascap,
 	}
 }
 
