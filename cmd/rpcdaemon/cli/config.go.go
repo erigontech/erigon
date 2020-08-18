@@ -3,10 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -22,36 +22,48 @@ type Flags struct {
 	Chaindata         string
 	HttpListenAddress string
 	HttpPort          int
-	HttpCORSDomain    string
-	HttpVirtualHost   string
-	API               string
+	httpCORSDomain    string
+	HttpCORSDomain    []string
+	httpVirtualHost   string
+	HttpVirtualHost   []string
+	api               string
+	API               []string
 	Gascap            uint64
 }
-
-var (
-	DefaultConfig Flags
-)
 
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		commands.Daemon(cmd, DefaultConfig)
-		return nil
-	},
 }
 
-func RootCommand() *cobra.Command {
-	rootCmd.Flags().StringVar(&DefaultConfig.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.Flags().StringVar(&DefaultConfig.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.Flags().StringVar(&DefaultConfig.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.Flags().IntVar(&DefaultConfig.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.Flags().StringVar(&DefaultConfig.HttpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.Flags().StringVar(&DefaultConfig.HttpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.Flags().StringVar(&DefaultConfig.API, "http.api", "", "API's offered over the HTTP-RPC interface")
-	rootCmd.Flags().Uint64Var(&DefaultConfig.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
+func RootCommand() (*cobra.Command, Flags) {
+	var cfg Flags
 
-	return rootCmd
+	rootCmd.Flags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	rootCmd.Flags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
+	rootCmd.Flags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.Flags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.Flags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
+	rootCmd.Flags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.Flags().StringVar(&cfg.api, "http.api", "", "API's offered over the HTTP-RPC interface")
+	rootCmd.Flags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
+	rootCmd.Flags().StringVar(&cfg.api, "http.api", "", "API's offered over the HTTP-RPC interface")
+
+	cfg.HttpVirtualHost = splitAndTrim(cfg.httpVirtualHost)
+	cfg.HttpCORSDomain = splitAndTrim(cfg.httpCORSDomain)
+	cfg.API = splitAndTrim(cfg.api)
+
+	return rootCmd, cfg
+}
+
+// splitAndTrim splits input separated by a comma
+// and trims excessive white space from the substrings.
+func splitAndTrim(input string) []string {
+	result := strings.Split(input, ",")
+	for i, r := range result {
+		result[i] = strings.TrimSpace(r)
+	}
+	return result
 }
 
 func RootContext() context.Context {
@@ -113,4 +125,28 @@ func DefaultConnection(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	}
 
 	return db, txPool, err
+}
+
+func StartRpcServer(cfg Flags, rpcAPI []rpc.API) {
+	// register apis and create handler stack
+	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+	srv := rpc.NewServer()
+	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
+		log.Error("Could not start register RPC apis", "error", err)
+		return
+	}
+	handler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
+
+	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
+	if err != nil {
+		log.Error("Could not start RPC api", "error", err)
+		return
+	}
+	extapiURL := fmt.Sprintf("http://%s", httpEndpoint)
+	log.Info("HTTP endpoint opened", "url", extapiURL)
+
+	defer func() {
+		listener.Close()
+		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+	}()
 }

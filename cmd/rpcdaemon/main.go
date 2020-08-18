@@ -12,9 +12,18 @@ import (
 func main() {
 	cli.SetupDefaultLogger(log.LvlInfo)
 
-	cmd := cli.RootCommand()
+	cmd, cfg := cli.RootCommand()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		commands.Daemon(cmd, cli.DefaultConfig)
+		db, txPool, err := cli.DefaultConnection(cfg)
+		if err != nil {
+			log.Error("Could not connect to remoteDb", "error", err)
+			return nil
+		}
+
+		var rpcAPI = commands.GetAPI(db, txPool, cfg.API)
+		cli.StartRpcServer(cfg, rpcAPI)
+		sig := <-cmd.Context().Done()
+		log.Info("Exiting...", "signal", sig)
 		return nil
 	}
 

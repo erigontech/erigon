@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"math/big"
-	"strings"
-
 	"github.com/spf13/cobra"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -17,20 +15,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
-
-// splitAndTrim splits input separated by a comma
-// and trims excessive white space from the substrings.
-func splitAndTrim(input string) []string {
-	result := strings.Split(input, ",")
-	for i, r := range result {
-		result[i] = strings.TrimSpace(r)
-	}
-	return result
-}
 
 type chainContext struct {
 	db rawdb.DatabaseReader
@@ -171,45 +158,4 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string) []rpc.API {
 		}
 	}
 	return rpcAPI
-}
-
-func Daemon(cmd *cobra.Command, cfg cli.Flags) {
-	vhosts := splitAndTrim(cfg.HttpVirtualHost)
-	cors := splitAndTrim(cfg.HttpCORSDomain)
-	enabledApis := splitAndTrim(cfg.API)
-
-	db, txPool, err := cli.DefaultConnection(cfg)
-	if err != nil {
-		log.Error("Could not connect to remoteDb", "error", err)
-		return
-	}
-
-	var rpcAPI = GetAPI(db, txPool, enabledApis)
-
-	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
-
-	// register apis and create handler stack
-	srv := rpc.NewServer()
-	err = node.RegisterApisFromWhitelist(rpcAPI, enabledApis, srv, false)
-	if err != nil {
-		log.Error("Could not start register RPC apis", "error", err)
-		return
-	}
-	handler := node.NewHTTPHandlerStack(srv, cors, vhosts)
-
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
-	if err != nil {
-		log.Error("Could not start RPC api", "error", err)
-		return
-	}
-	extapiURL := fmt.Sprintf("http://%s", httpEndpoint)
-	log.Info("HTTP endpoint opened", "url", extapiURL)
-
-	defer func() {
-		listener.Close()
-		log.Info("HTTP endpoint closed", "url", httpEndpoint)
-	}()
-
-	sig := <-cmd.Context().Done()
-	log.Info("Exiting...", "signal", sig)
 }
