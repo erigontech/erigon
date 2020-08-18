@@ -114,6 +114,7 @@ without any branching. A tree can be divided into segments like this:
 
 When such decomposition is performed, the resulting segments are usually ordered in a specific (partial) order. If any segment is referenced
 by another segment, then the former needs to come before the latter in the ordering, as shown in the illustration.
+We will use chain segments instead of trees as much as possible, to simplify the algorithms.
 
 ## Principles and invariants
 

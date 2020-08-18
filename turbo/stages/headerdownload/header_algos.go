@@ -18,7 +18,8 @@ func (h HeadersByBlockHeight) Len() int {
 }
 
 func (h HeadersByBlockHeight) Less(i, j int) bool {
-	return h[i].Number.Cmp(h[j].Number) < 0
+	// Note - the ordering is the inverse ordering of the block heights
+	return h[i].Number.Cmp(h[j].Number) > 0
 }
 
 func (h HeadersByBlockHeight) Swap(i, j int) {
@@ -28,36 +29,42 @@ func (h HeadersByBlockHeight) Swap(i, j int) {
 // HandleHeadersMsg converts message containing headers into a collection of chain segments
 func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header, peerHandle PeerHandle) ([]*ChainSegment, *PeerPenalty, error) {
 	sort.Sort(HeadersByBlockHeight(msg))
-	// Now all headers are order from the lowest block height to the highest
-	vertices := make(map[common.Hash]*types.Header)
-	treeMembership := make(map[common.Hash]*ChainSegment)
-	var trees []*ChainSegment
+	// Now all headers are order from the highest block height to the lowest
+	var segments []*ChainSegment                         // Segments being built
+	segmentMap := make(map[common.Hash]int)              // Mapping of the header hash to the index of the chain segment it belongs
+	childrenMap := make(map[common.Hash][]*types.Header) // Mapping parent hash to the children
+	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
 	for _, header := range msg {
 		headerHash := header.Hash()
 		if _, bad := hd.badHeaders[headerHash]; bad {
 			return nil, &PeerPenalty{peerHandle: peerHandle, penalty: BadBlockPenalty}, nil
 		}
-		if _, alreadyMember := treeMembership[headerHash]; alreadyMember {
+		if _, duplicate := dedupMap[headerHash]; duplicate {
 			return nil, &PeerPenalty{peerHandle: peerHandle, penalty: DuplicateHeaderPenalty}, nil
 		}
-		if tree, hasEdge := treeMembership[header.ParentHash]; hasEdge {
-			if edgeEnd, hasVertex := vertices[header.ParentHash]; hasVertex {
-				if valid, penalty := hd.childParentValid(header, edgeEnd); !valid {
-					return nil, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
-				}
-			} else {
-				return nil, nil, fmt.Errorf("unexpected condition, tree membership true but not vertex hash for header %x and parentHash %x", headerHash, header.ParentHash)
+		dedupMap[headerHash] = struct{}{}
+		var segmentIdx int
+		children := childrenMap[headerHash]
+		for _, child := range children {
+			if valid, penalty := hd.childParentValid(child, header); !valid {
+				return nil, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
 			}
-			tree.headers = append(tree.headers, header)
-			treeMembership[headerHash] = tree
-		} else {
-			tree := &ChainSegment{headers: []*types.Header{header}}
-			trees = append(trees, tree)
-			treeMembership[headerHash] = tree
 		}
-		vertices[headerHash] = header
+		if len(children) == 1 {
+			// Single child, extract segmentIdx
+			segmentIdx = segmentMap[headerHash]
+		} else {
+			// No children, or more than one child, create new segment
+			segmentIdx = len(segments)
+			segments = append(segments, &ChainSegment{})
+		}
+		segments[segmentIdx].headers = append(segments[segmentIdx].headers, header)
+		segmentMap[header.ParentHash] = segmentIdx
+		siblings := childrenMap[header.ParentHash]
+		siblings = append(siblings, header)
+		childrenMap[header.ParentHash] = siblings
 	}
-	return trees, nil, nil
+	return segments, nil, nil
 }
 
 // Checks whether child-parent relationship between two headers is correct
@@ -218,7 +225,7 @@ func (hd *HeaderDownload) Append(chainSegment *ChainSegment) (bool, []common.Has
 		return false, nil, fmt.Errorf("chainSegment must not be empty for Append, len %d", len(chainSegment.headers))
 	}
 	var newAnchor *Anchor
-	totalDifficulties := make(map[common.Hash]uint256.Int)
+	//totalDifficulties := make(map[common.Hash]uint256.Int)
 	var tombstones []common.Hash
 	for i := len(chainSegment.headers) - 1; i >= 0; i-- {
 		header := chainSegment.headers[i]
@@ -235,11 +242,10 @@ func (hd *HeaderDownload) Append(chainSegment *ChainSegment) (bool, []common.Has
 						} else {
 							newPowDepth = 0
 						}
-						newTotalDifficulty := anchor.totalDifficulty
+						//newTotalDifficulty := anchor.totalDifficulty
 
 						newAnchor = &Anchor{
 							powDepth: newPowDepth,
-							totalDifficulty: ,
 						}
 					}
 				} else {

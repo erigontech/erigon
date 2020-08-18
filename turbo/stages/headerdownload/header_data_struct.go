@@ -40,7 +40,7 @@ type TipItem struct {
 }
 
 // First item in ChainSegment is the anchor
-// ChainSegment must be contiguous and must not include bad headers
+// ChainSegment must be contigous and must not include bad headers
 type ChainSegment struct {
 	headers []*types.Header
 }

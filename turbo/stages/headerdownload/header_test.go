@@ -85,8 +85,8 @@ func TestHandleHeadersMsg(t *testing.T) {
 		if len(chainSegments[0].headers) != 2 {
 			t.Errorf("expected chainSegment of the length 2, got %d", len(chainSegments[0].headers))
 		}
-		if chainSegments[0].headers[0] != &h1 {
-			t.Errorf("expected h1 to be the root")
+		if chainSegments[0].headers[0] != &h2 {
+			t.Errorf("expected h2 to be the root")
 		}
 	} else {
 		t.Errorf("handle header msg: %v", err)
@@ -130,13 +130,13 @@ func TestHandleHeadersMsg(t *testing.T) {
 		if peerPenalty != nil {
 			t.Errorf("unexpected penalty: %s", peerPenalty)
 		}
-		if len(chainSegments) != 1 {
-			t.Errorf("expected 1 chainSegments, got %d", len(chainSegments))
+		if len(chainSegments) != 3 {
+			t.Errorf("expected 3 chainSegments, got %d", len(chainSegments))
 		}
-		if len(chainSegments[0].headers) != 3 {
-			t.Errorf("expected chainSegment of the length 3, got %d", len(chainSegments[0].headers))
+		if len(chainSegments[0].headers) != 1 {
+			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].headers))
 		}
-		if chainSegments[0].headers[0] != &h1 {
+		if chainSegments[2].headers[0] != &h1 {
 			t.Errorf("expected h1 to be the root")
 		}
 	} else {
@@ -148,13 +148,13 @@ func TestHandleHeadersMsg(t *testing.T) {
 		if peerPenalty != nil {
 			t.Errorf("unexpected penalty: %s", peerPenalty)
 		}
-		if len(chainSegments) != 1 {
-			t.Errorf("expected 1 chainSegments, got %d", len(chainSegments))
+		if len(chainSegments) != 3 {
+			t.Errorf("expected 3 chainSegments, got %d", len(chainSegments))
 		}
-		if len(chainSegments[0].headers) != 3 {
-			t.Errorf("expected chainSegment of the length 3, got %d", len(chainSegments[0].headers))
+		if len(chainSegments[0].headers) != 1 {
+			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].headers))
 		}
-		if chainSegments[0].headers[0] != &h1 {
+		if chainSegments[2].headers[0] != &h1 {
 			t.Errorf("expected h1 to be the root")
 		}
 	} else {
