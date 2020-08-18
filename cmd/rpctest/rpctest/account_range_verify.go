@@ -76,7 +76,7 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 			}
 			if ar.Error!=nil {
 				spew.Dump(ar)
-				return fmt.Errorf("response error %w", ar.Error)
+				return fmt.Errorf("response error %v", ar.Error)
 			}
 			var addr common.Address
 			var acc state.DumpAccount
@@ -158,30 +158,32 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 			tgKey, tgVal, err1=tgCursor.Next()
 			if err1!=nil {
 				fmt.Println("cmd/rpctest/rpctest/account_range_verify.go:107 err", err1)
-				return
+				break
 			}
 			gethKey, gethVal, err2=gethCursor.Next()
 			if err2!=nil {
 				fmt.Println("cmd/rpctest/rpctest/account_range_verify.go:107 err", err2)
-				return
+				break
 			}
 		} else if cmp<0 {
 			gethMissed++
 			tgKey, tgVal, err1=tgCursor.Next()
 			if err1!=nil {
 				fmt.Println("cmd/rpctest/rpctest/account_range_verify.go:107 err", err1)
-				return
+				break
 			}
 		} else if cmp>0 {
 			tgMissed++
 			gethKey, gethVal, err2=gethCursor.Next()
 			if err2!=nil {
 				fmt.Println("cmd/rpctest/rpctest/account_range_verify.go:107 err", err2)
-				return
+				break
 			}
 		}
 		i++
 	}
-
+	fmt.Println("Errs", errsNum)
+	fmt.Println("Missed", tgMissed)
+	fmt.Println("geth Missed", gethMissed)
 }
 

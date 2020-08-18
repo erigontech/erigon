@@ -159,18 +159,19 @@ func main() {
 	}
 	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
 
-	tmpDataDir:="/media/b00ris/nvme/accrange"
-	tmpDataDirOrig:="/media/b00ris/nvme/accrangeorig"
-	needRegenerateGethData:=true
+	var tmpDataDir, tmpDataDirOrig string
+	var notRegenerateGethData bool
 	var compareAccountRange = &cobra.Command{
 		Use:   "compareAccountRange",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockNum, needRegenerateGethData)
+			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockNum, notRegenerateGethData)
 		},
 	}
-	compareAccountRange.Flags().BoolVar(&needRegenerateGethData, "regenGethData", false)
+	compareAccountRange.Flags().BoolVar(&notRegenerateGethData, "regenGethData", false, "")
+	compareAccountRange.Flags().StringVar(&tmpDataDir, "tmpdir", "/media/b00ris/nvme/accrange1", "dir for tmp db")
+	compareAccountRange.Flags().StringVar(&tmpDataDirOrig, "gethtmpdir", "/media/b00ris/nvme/accrangeorig1", "dir for tmp db")
 
 
 	var rootCmd = &cobra.Command{Use: "test"}
