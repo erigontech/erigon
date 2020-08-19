@@ -184,30 +184,4 @@ Date:   Wed Aug 19 11:31:13 2020 +0200
     
     * t8ntool: don't default to '.' basedir, allow absolute paths
 
-commit 560d44479c9d01dfa498fdfb80aa7eb014bf5936
-Merge: 2ff464b29 32b078d41
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Aug 19 10:29:54 2020 +0300
-
-    Merge pull request #21461 from karalabe/ppa-drop-disco
-    
-    build: drop disco, enable groovy on Ubuntu PPAs
-
-commit 32b078d418117a9cd52dcd655a065710c2e5ebff
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Aug 19 10:28:08 2020 +0300
-
-    build: drop disco, enable groovy on Ubuntu PPAs
-
-commit 2ff464b29da35f9590562ca4fba7283c96712f7e
-Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
-Date:   Wed Aug 19 08:54:21 2020 +0200
-
-    core/state: fixed some comments (#21450)
-
-commit f3bafecef7dfc573e68d9c04fbd1ad55fb3c0d2f
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Tue Aug 18 11:27:04 2020 +0200
-
-    metrics: make meter updates lock-free (#21446)
 
