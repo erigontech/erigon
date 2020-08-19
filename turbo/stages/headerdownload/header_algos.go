@@ -89,6 +89,75 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle Pee
 	return []*ChainSegment{{headers: []*types.Header{header}}}, nil, nil
 }
 
+type ConnectResult struct {
+}
+
+// Connect finds out whether a chain segment can be connected to any anchors, or any tip, or both
+func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) (bool, *PeerPenalty, error) {
+	var tombstones []common.Hash
+	var powDepth int // PoW verification depth of the first header in the segment (only matters if there is anchor attachment)
+	var anchorsAttaching []*Anchor
+	var attachmentTip *Tip
+	var attachmentHeader *types.Header
+	// Walk the segment from children towards parents
+	for _, header := range segment.headers {
+		headerHash := header.Hash()
+		// Check if the header can be attached to an anchor of a working tree
+		if anchors, attaching := hd.anchors[headerHash]; attaching {
+			var removedAnchors []int
+			for anchorIdx, anchor := range anchors {
+				if valid := hd.anchorParentValid(anchor, header); valid {
+					if len(anchorsAttaching) == 0 || anchor.powDepth < powDepth {
+						// Calculate minimal value of powDepth out of all anchors attaching
+						powDepth = anchor.powDepth
+					}
+					anchorsAttaching = append(anchorsAttaching, anchor)
+				} else {
+					// Invalidate the entire tree that is rooted at this anchor anchor
+					for _, tipHash := range anchor.tips {
+						tipItem := &TipItem{tipHash: tipHash, cumulativeDifficulty: hd.tips[tipHash].cumulativeDifficulty}
+						delete(hd.tips, tipHash)
+						hd.tipLimiter.Delete(tipItem)
+					}
+					tombstones = append(tombstones, anchor.hash)
+					removedAnchors = append(removedAnchors, anchorIdx)
+				}
+			}
+			if len(removedAnchors) > 0 {
+				j := 0
+				var filteredAnchors []*Anchor
+				for k, anchor := range anchors {
+					if j < len(removedAnchors) && removedAnchors[j] == k {
+						// Skip this one
+						j++
+					} else {
+						filteredAnchors = append(filteredAnchors, anchor)
+					}
+				}
+				if len(filteredAnchors) > 0 {
+					hd.anchors[headerHash] = filteredAnchors
+				} else {
+					delete(hd.anchors, headerHash)
+				}
+			}
+		}
+		// Check if the header can be attached to any tips
+		if tip, attaching := hd.tips[header.ParentHash]; attaching {
+			if tip.noPrepend {
+				break
+			}
+			// Before attaching, we must check the parent-child relationship
+			if valid, penalty := hd.childTipValid(header, header.ParentHash, tip); !valid {
+				return false, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
+			}
+			attachmentTip = tip
+			attachmentHeader = header
+			break
+		}
+	}
+	return false, nil, nil
+}
+
 // Prepend attempts to find a suitable tip within the working chain segments to prepend the given (new) chain segment to
 // The first return value is true if the prepending was done, false if a suitable tip was not found, or there is a
 // penalty or error
