@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -9,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
 type Flags struct {
@@ -17,11 +17,8 @@ type Flags struct {
 	Chaindata         string
 	HttpListenAddress string
 	HttpPort          int
-	httpCORSDomain    string
 	HttpCORSDomain    []string
-	httpVirtualHost   string
 	HttpVirtualHost   []string
-	api               string
 	API               []string
 	Gascap            uint64
 }
@@ -31,34 +28,20 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
 }
 
-func RootCommand() (*cobra.Command, Flags) {
+func RootCommand() (*cobra.Command, *Flags) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
-	var cfg Flags
-	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	cfg := &Flags{}
+	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.PersistentFlags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.PersistentFlags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.PersistentFlags().StringVar(&cfg.api, "http.api", "", "API's offered over the HTTP-RPC interface")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth"}, "API's offered over the HTTP-RPC interface")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 
-	cfg.HttpVirtualHost = splitAndTrim(cfg.httpVirtualHost)
-	cfg.HttpCORSDomain = splitAndTrim(cfg.httpCORSDomain)
-	cfg.API = splitAndTrim(cfg.api)
-
 	return rootCmd, cfg
-}
-
-// splitAndTrim splits input separated by a comma
-// and trims excessive white space from the substrings.
-func splitAndTrim(input string) []string {
-	result := strings.Split(input, ",")
-	for i, r := range result {
-		result[i] = strings.TrimSpace(r)
-	}
-	return result
 }
 
 func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
@@ -87,7 +70,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	return db, txPool, err
 }
 
-func StartRpcServer(cfg Flags, rpcAPI []rpc.API) {
+func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 	srv := rpc.NewServer()
@@ -109,4 +92,6 @@ func StartRpcServer(cfg Flags, rpcAPI []rpc.API) {
 		listener.Close()
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
+	sig := <-ctx.Done()
+	log.Info("Exiting...", "signal", sig)
 }

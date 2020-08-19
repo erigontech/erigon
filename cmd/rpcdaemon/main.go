@@ -18,16 +18,14 @@ func main() {
 	defer utils.StopDebug()
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		db, txPool, err := rpc.OpenDB(cfg)
+		db, txPool, err := rpc.OpenDB(*cfg)
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return nil
 		}
 
 		var rpcAPI = commands.GetAPI(db, txPool, cfg.API, cfg.Gascap)
-		rpc.StartRpcServer(cfg, rpcAPI)
-		sig := <-cmd.Context().Done()
-		log.Info("Exiting...", "signal", sig)
+		rpc.StartRpcServer(cmd.Context(), *cfg, rpcAPI)
 		return nil
 	}
 
