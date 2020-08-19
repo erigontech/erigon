@@ -376,17 +376,20 @@ func (s *Ethereum) APIs() []rpc.API {
 		//	Version:   "1.0",
 		//	Service:   NewPublicEthereumAPI(s),
 		//	Public:    true,
-		//}, {
+		//},
+		//{
 		//	Namespace: "eth",
 		//	Version:   "1.0",
 		//	Service:   NewPublicMinerAPI(s),
 		//	Public:    true,
-		//}, {
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   downloader.NewPublicDownloaderAPI(s.protocolManager.downloader, s.eventMux),
-		//	Public:    true,
-		//}, {
+		//},
+		{
+			Namespace: "eth",
+			Version:   "1.0",
+			Service:   downloader.NewPublicDownloaderAPI(s.protocolManager.downloader, s.eventMux),
+			Public:    true,
+		},
+		//{
 		//	Namespace: "miner",
 		//	Version:   "1.0",
 		//	Service:   NewPrivateMinerAPI(s),
@@ -402,7 +405,8 @@ func (s *Ethereum) APIs() []rpc.API {
 		//	Namespace: "admin",
 		//	Version:   "1.0",
 		//	Service:   NewPrivateAdminAPI(s),
-		//}, {
+		//},
+		//{
 		//	Namespace: "debug",
 		//	Version:   "1.0",
 		//	Service:   NewPublicDebugAPI(s),

@@ -168,6 +168,7 @@ type PrivateAdminAPI struct {
 	eth *Ethereum
 }
 
+
 // NewPrivateAdminAPI creates a new API definition for the full node private
 // admin methods of the Ethereum service.
 func NewPrivateAdminAPI(eth *Ethereum) *PrivateAdminAPI {
