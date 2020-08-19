@@ -24,7 +24,8 @@ func testGenCfg() error {
 	//absIntTestStorageVar03() // - PASSES
 	//absIntTestStaticLoop00() //- PASSES
 	//absIntTestStaticLoop01() - PASSES
-	absIntTestDepositContract() //FAILS - Imprecision
+	absIntTestPrivateFunction01()
+	//absIntTestDepositContract() //FAILS - Imprecision
 	return nil
 }
 
@@ -239,6 +240,31 @@ func absIntTestStaticLoop01() {
 		}
 	*/
 	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c8063fe0d94c114602d575b600080fd5b605660048036036020811015604157600080fd5b8101908080359060200190929190505050606c565b6040518082815260200191505060405180910390f35b60008082905060008090505b6001811015609157808201915080806001019150506078565b508091505091905056fea26469706673582212206a12d74a991e3b9cbf04e5abed951fe8a0042780f7a9fe889fd798624b44be1264736f6c63430006060033"
+	decoded, err := hex.DecodeString(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract.Code = decoded
+	vm.AbsIntCfgHarness(contract)
+}
+
+func absIntTestPrivateFunction01() {
+	/*
+		pragma solidity ^0.6.6;
+		contract PrivateFunction {
+			function f(uint a0) pure private {
+				require (a0 < 10);
+			}
+			function execute(uint a0) pure external returns(uint256) {
+			   f(a0);
+			   a0 = a0 + 1;
+			   f(a0);
+			}
+		}
+	*/
+	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c8063fe0d94c114602d575b600080fd5b605660048036036020811015604157600080fd5b8101908080359060200190929190505050606c565b6040518082815260200191505060405180910390f35b60006075826087565b6001820191506082826087565b919050565b600a8110609357600080fd5b5056fea26469706673582212201621427408bf92a9a07dd10d32e63a8421461a0778eeaba88b9fd84e3769b5ca64736f6c63430006060033"
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
 		log.Fatal(err)
