@@ -144,6 +144,10 @@ func (w *PlainStateWriter) CreateContract(address common.Address) error {
 }
 
 func (w *PlainStateWriter) WriteChangeSets() error {
+	db := w.db
+	if w.changeSetsDB != nil {
+		db = w.changeSetsDB
+	}
 	accountChanges, err := w.csw.GetAccountChanges()
 	if err != nil {
 		return err
@@ -154,7 +158,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		return err
 	}
 	key := dbutils.EncodeTimestamp(w.blockNumber)
-	if err = w.changeSetsDB.Put(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
+	if err = db.Put(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
 	storageChanges, err := w.csw.GetStorageChanges()
@@ -167,7 +171,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		if err != nil {
 			return err
 		}
-		if err = w.changeSetsDB.Put(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
+		if err = db.Put(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
 			return err
 		}
 	}
@@ -175,11 +179,15 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 }
 
 func (w *PlainStateWriter) WriteHistory() error {
+	db := w.db
+	if w.changeSetsDB != nil {
+		db = w.changeSetsDB
+	}
 	accountChanges, err := w.csw.GetAccountChanges()
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, w.changeSetsDB)
+	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, db)
 	if err != nil {
 		return err
 	}
@@ -188,7 +196,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, w.changeSetsDB)
+	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, db)
 	if err != nil {
 		return err
 	}
