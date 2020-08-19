@@ -31,8 +31,17 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 }
 
 //nolint
-func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
-	return ethapi.RPCMarshalBlock(block, inclTx, fullTx)
+func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
+	fields, err := ethapi.RPCMarshalBlock(b, inclTx, fullTx)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range additional {
+		fields[k] = v
+	}
+
+	return fields, err
 }
 
 //nolint

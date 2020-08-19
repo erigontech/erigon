@@ -3,12 +3,12 @@ package commands
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
 )
 
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
@@ -22,7 +22,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
-	response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
+	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -31,20 +31,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		}
 	}
 	return response, err
-}
-
-// rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
-func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
-	fields, err := ethapi.RPCMarshalBlock(b, inclTx, fullTx)
-	if err != nil {
-		return nil, err
-	}
-
-	for k, v := range additional {
-		fields[k] = v
-	}
-
-	return fields, err
 }
 
 func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.API) []rpc.API {
