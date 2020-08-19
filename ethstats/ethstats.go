@@ -17,6 +17,7 @@
 // Package ethstats implements the network stats reporting service.
 package ethstats
 
+/*
 import (
 	"context"
 	"encoding/json"
@@ -767,3 +768,4 @@ func (s *Service) reportStats(conn *connWrapper) error {
 	}
 	return conn.WriteJSON(report)
 }
+*/

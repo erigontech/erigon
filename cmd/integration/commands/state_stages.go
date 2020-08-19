@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -26,7 +27,7 @@ var stateStags = &cobra.Command{
 		`,
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := syncBySmallSteps(ctx, chaindata); err != nil {
 			log.Error("Error", "err", err)
 			return err

@@ -18,7 +18,6 @@ package debug
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -31,8 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/exp"
 
-	colorable "github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
@@ -140,18 +137,9 @@ var (
 	glogger *log.GlogHandler
 )
 
-func init() {
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	output := io.Writer(os.Stderr)
-	if usecolor {
-		output = colorable.NewColorableStderr()
-	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-	glogger = log.NewGlogHandler(ostream)
-}
-
 func SetupCobra(cmd *cobra.Command) error {
 	flags := cmd.Flags()
+
 	dbg, err := flags.GetBool(debugFlag.Name)
 	if err != nil {
 		return err
@@ -160,7 +148,6 @@ func SetupCobra(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-
 	vmodule, err := flags.GetString(vmoduleFlag.Name)
 	if err != nil {
 		return err
@@ -170,20 +157,8 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
-	// logging
+	ostream, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
 	log.PrintOrigins(dbg)
-	glogger.Verbosity(log.Lvl(lvl))
-	err = glogger.Vmodule(vmodule)
-	if err != nil {
-		return err
-	}
-	if backtrace != "" {
-		err = glogger.BacktraceAt(backtrace)
-		if err != nil {
-			return err
-		}
-	}
-	log.Root().SetHandler(glogger)
 
 	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
 	if err != nil {
@@ -263,10 +238,11 @@ func SetupCobra(cmd *cobra.Command) error {
 func Setup(ctx *cli.Context) error {
 	// logging
 	log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
-	glogger.Verbosity(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)))
-	glogger.Vmodule(ctx.GlobalString(vmoduleFlag.Name))
-	glogger.BacktraceAt(ctx.GlobalString(backtraceAtFlag.Name))
-	log.Root().SetHandler(glogger)
+	ostream, glogger = log.SetupDefaultTerminalLogger(
+		log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
+		ctx.GlobalString(vmoduleFlag.Name),
+		ctx.GlobalString(backtraceAtFlag.Name),
+	)
 
 	// profiling, tracing
 	if ctx.GlobalIsSet(legacyMemprofilerateFlag.Name) {

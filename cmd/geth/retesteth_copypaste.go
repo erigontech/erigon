@@ -16,6 +16,7 @@
 
 package main
 
+/*
 import (
 	"math/big"
 
@@ -146,3 +147,4 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool) (map[string]inter
 
 	return fields, nil
 }
+*/
