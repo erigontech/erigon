@@ -54,6 +54,10 @@ func (p *puts) Size() int {
 
 type putsBucket map[string][]byte //map[key]value
 
+func (pb putsBucket) Len() int {
+	return len(pb)
+}
+
 func (pb putsBucket) Get(key []byte) ([]byte, bool) {
 	value, ok := pb[string(key)]
 	if !ok {
