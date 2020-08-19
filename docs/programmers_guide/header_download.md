@@ -175,6 +175,13 @@ if we find that the total difficulty reported was wrong. But this is of a very m
 Therefore, we will only be looking at the block header part of the message. This algorithm is a degenerate version of the algorithm
 "Handle BlockHeadersMsg", because it only creates one chain segment and there is only one header in that segment.
 
+### FindAnchors
+**Input**: chain segment, **Output**: index in the chain segment where the header attaching to an anchor is found, possibly tombstones.
+Side-effects are the removal of the trees if their anchors are found to be incompatible with the chain segment (in that case tombsones
+are the hashes of such anchors)
+
+### FindTip
+
 ### Prepend
 **Input**: chain segment + peer handle. **Output**: updated structures (modified working chain segments) or "no prepend point found", or penalty for the handle (tombstone creation)
 We do not allow prepending to the hard-coded tips (therefore tips need an extra boolean attribute `noPrepend`)

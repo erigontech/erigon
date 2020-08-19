@@ -139,23 +139,25 @@ func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDif
 	}
 }
 
-func (pp PeerPenalty) String() string {
-	var penaltyStr string
-	switch pp.penalty {
+func (p Penalty) String() string {
+	switch p {
 	case NoPenalty:
-		penaltyStr = "None"
+		return "None"
 	case BadBlockPenalty:
-		penaltyStr = "BadBlock"
+		return "BadBlock"
 	case DuplicateHeaderPenalty:
-		penaltyStr = "DuplicateHeader"
+		return "DuplicateHeader"
 	case WrongChildBlockHeightPenalty:
-		penaltyStr = "WrongChildBlockHeight"
+		return "WrongChildBlockHeight"
 	case WrongChildDifficultyPenalty:
-		penaltyStr = "WrongChildDifficulty"
+		return "WrongChildDifficulty"
 	case InvalidSealPenalty:
-		penaltyStr = "InvalidSeal"
+		return "InvalidSeal"
 	default:
-		penaltyStr = fmt.Sprintf("Unknown(%d)", pp.penalty)
+		return fmt.Sprintf("Unknown(%d)", p)
 	}
-	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, penaltyStr, pp.err)
+}
+
+func (pp PeerPenalty) String() string {
+	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
 }

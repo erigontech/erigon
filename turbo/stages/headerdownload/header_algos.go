@@ -27,7 +27,7 @@ func (h HeadersByBlockHeight) Swap(i, j int) {
 }
 
 // HandleHeadersMsg converts message containing headers into a collection of chain segments
-func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header, peerHandle PeerHandle) ([]*ChainSegment, *PeerPenalty, error) {
+func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header) ([]*ChainSegment, Penalty, error) {
 	sort.Sort(HeadersByBlockHeight(msg))
 	// Now all headers are order from the highest block height to the lowest
 	var segments []*ChainSegment                         // Segments being built
@@ -37,17 +37,17 @@ func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header, peerHandle PeerH
 	for _, header := range msg {
 		headerHash := header.Hash()
 		if _, bad := hd.badHeaders[headerHash]; bad {
-			return nil, &PeerPenalty{peerHandle: peerHandle, penalty: BadBlockPenalty}, nil
+			return nil, BadBlockPenalty, nil
 		}
 		if _, duplicate := dedupMap[headerHash]; duplicate {
-			return nil, &PeerPenalty{peerHandle: peerHandle, penalty: DuplicateHeaderPenalty}, nil
+			return nil, DuplicateHeaderPenalty, nil
 		}
 		dedupMap[headerHash] = struct{}{}
 		var segmentIdx int
 		children := childrenMap[headerHash]
 		for _, child := range children {
 			if valid, penalty := hd.childParentValid(child, header); !valid {
-				return nil, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
+				return nil, penalty, nil
 			}
 		}
 		if len(children) == 1 {
@@ -64,7 +64,7 @@ func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header, peerHandle PeerH
 		siblings = append(siblings, header)
 		childrenMap[header.ParentHash] = siblings
 	}
-	return segments, nil, nil
+	return segments, NoPenalty, nil
 }
 
 // Checks whether child-parent relationship between two headers is correct
@@ -81,32 +81,17 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 }
 
 // HandleNewBlockMsg converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle PeerHandle) ([]*ChainSegment, *PeerPenalty, error) {
+func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header) ([]*ChainSegment, Penalty, error) {
 	headerHash := header.Hash()
 	if _, bad := hd.badHeaders[headerHash]; bad {
-		return nil, &PeerPenalty{peerHandle: peerHandle, penalty: BadBlockPenalty}, nil
+		return nil, BadBlockPenalty, nil
 	}
-	return []*ChainSegment{{headers: []*types.Header{header}}}, nil, nil
+	return []*ChainSegment{{headers: []*types.Header{header}}}, NoPenalty, nil
 }
 
-// ConnectResult bundles together various output values from the Connect algorithm
-type ConnectResult struct {
-	start, end       int          // slice start and end (element of the segment beyond these indices should be discarded)
-	powStart         int          // index of the element where pow verification should start (if powStart == end, no verification is required)
-	anchorsAttaching []*Anchor    // Anchors to which the segment can be attached (or empty slice if no such anchors found)
-	attachmentTip    *Tip         // Tip to which the segment can be attached (or nil if no such tip found)
-	penalty          *PeerPenalty // Penalty to the peer for producing an invalid segment in relation to an  sexisting tip
-	err              error
-}
-
-// Connect finds out whether a chain segment can be connected to any anchors, or any tip, or both
-func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) ConnectResult {
-	var tombstones []common.Hash
-	var powDepth int // PoW verification depth of the first header in the segment (only matters if there is anchor attachment)
-	var anchorsAttaching []*Anchor
-	var attachmentTip *Tip
-	start := 0
-	end := len(segment.headers)
+// FindAnchors attempts to find anchors to which given chain segment can be attached to
+// It can have side effects, removing the working trees that were find invalid in the process
+func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, tombstones []common.Hash) {
 	// Walk the segment from children towards parents
 	for i, header := range segment.headers {
 		headerHash := header.Hash()
@@ -114,29 +99,24 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) 
 		if anchors, attaching := hd.anchors[headerHash]; attaching {
 			var removedAnchors []int
 			for anchorIdx, anchor := range anchors {
-				if valid := hd.anchorParentValid(anchor, header); valid {
-					if len(anchorsAttaching) == 0 || anchor.powDepth < powDepth {
-						// Calculate minimal value of powDepth out of all anchors attaching
-						powDepth = anchor.powDepth
-					}
-					anchorsAttaching = append(anchorsAttaching, anchor)
-				} else {
+				if valid := hd.anchorParentValid(anchor, header); !valid {
 					// Invalidate the entire tree that is rooted at this anchor anchor
 					for _, tipHash := range anchor.tips {
 						tipItem := &TipItem{tipHash: tipHash, cumulativeDifficulty: hd.tips[tipHash].cumulativeDifficulty}
 						delete(hd.tips, tipHash)
 						hd.tipLimiter.Delete(tipItem)
 					}
-					tombstones = append(tombstones, anchor.hash)
 					removedAnchors = append(removedAnchors, anchorIdx)
 				}
 			}
+			var tombstones []common.Hash
 			if len(removedAnchors) > 0 {
 				j := 0
 				var filteredAnchors []*Anchor
 				for k, anchor := range anchors {
 					if j < len(removedAnchors) && removedAnchors[j] == k {
 						// Skip this one
+						tombstones = append(tombstones, anchor.hash)
 						j++
 					} else {
 						filteredAnchors = append(filteredAnchors, anchor)
@@ -148,28 +128,55 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) 
 					delete(hd.anchors, headerHash)
 				}
 			}
-			start = i
+			return true, i, tombstones
 		}
+	}
+	return false, 0, nil
+}
+
+// FindTip attempts to find tip of a tree that given chain segment can be attached to
+// the given chain segment may be found invalid relative to a working tree, in this case penalty for peer is returned
+func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, penalty Penalty) {
+	// Walk the segment from children towards parents
+	for i, header := range segment.headers {
 		// Check if the header can be attached to any tips
 		if tip, attaching := hd.tips[header.ParentHash]; attaching {
-			end = i + 1
-			if tip.noPrepend {
-				break
-			}
 			// Before attaching, we must check the parent-child relationship
 			if valid, penalty := hd.childTipValid(header, header.ParentHash, tip); !valid {
-				return ConnectResult{penalty: &PeerPenalty{peerHandle: peerHandle, penalty: penalty}}
+				return true, i + 1, penalty
 			}
-			attachmentTip = tip
-			break
+			return true, i + 1, NoPenalty
 		}
 	}
-	return ConnectResult{
-		start:            start,
-		end:              end,
-		anchorsAttaching: anchorsAttaching,
-		attachmentTip:    attachmentTip,
+	return false, len(segment.headers), NoPenalty
+}
+
+// VerifySeals verifies Proof Of Work for the part of the given chain segement
+// It reports first verification error, or returns the powDepth that the anchor of this
+// chain segment should have, if created
+func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, start, end int) (powDepth int, err error) {
+	var powDepthSet bool
+	if anchorFound {
+		if anchors, ok := hd.anchors[segment.headers[start].Hash()]; ok {
+			for _, anchor := range anchors {
+				if !powDepthSet || anchor.powDepth < powDepth {
+					powDepth = anchor.powDepth
+					powDepthSet = true
+				}
+			}
+		}
 	}
+	for _, header := range segment.headers[start:end] {
+		if !anchorFound || powDepth > 0 {
+			if err := hd.verifySealFunc(header); err != nil {
+				return powDepth, err
+			}
+		}
+		if anchorFound && powDepth > 0 {
+			powDepth--
+		}
+	}
+	return powDepth, nil
 }
 
 // Prepend attempts to find a suitable tip within the working chain segments to prepend the given (new) chain segment to
