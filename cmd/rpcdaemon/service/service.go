@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -8,7 +9,7 @@ import (
 )
 
 func New(db ethdb.HasKV, ethereum core.Backend, stack *node.Node) {
-	apis := commands.APIList(db.KV(), core.NewEthBackend(ethereum), []string{"eth", "debug"}, 0)
+	apis := commands.APIList(db.KV(), core.NewEthBackend(ethereum), cli.Flags{API: []string{"eth", "debug"}}, nil)
 
 	stack.RegisterAPIs(apis)
 }
