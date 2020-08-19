@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/turbo/state"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -21,7 +21,7 @@ type StorageEntry struct {
 	Value common.Hash  `json:"value"`
 }
 
-func StorageRangeAt(stateReader *StateReader, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
+func StorageRangeAt(stateReader *state.StateReader, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
 	//account, err := stateReader.ReadAccountData(contractAddress)
 	//if err != nil {
 	//	return StorageRangeResult{}, fmt.Errorf("error reading account %x: %v", contractAddress, err)

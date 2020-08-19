@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/state"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -52,7 +53,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 }
 
 func GetAccount(chainKV ethdb.KV, blockNumber uint64, address common.Address) (*accounts.Account, error) {
-	reader := NewStateReader(chainKV, blockNumber)
+	reader := state.NewStateReader(chainKV, blockNumber)
 	return reader.ReadAccountData(address)
 }
 

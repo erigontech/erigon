@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -26,7 +27,7 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 	}
 
 	bc := &blockGetter{db}
-	_, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0)
+	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0)
 	if err != nil {
 		return nil, err
 	}
