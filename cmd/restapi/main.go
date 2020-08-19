@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	log.SetupDefaultTerminalLogger(log.LvlInfo)
+	log.SetupDefaultTerminalLogger(log.LvlInfo, "", "")
 
 	commands.Execute()
 }

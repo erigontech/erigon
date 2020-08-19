@@ -138,7 +138,8 @@ var (
 )
 
 func SetupCobra(cmd *cobra.Command) error {
-	flags := cmd.Flags()
+	flags := cmd.PersistentFlags()
+
 	dbg, err := flags.GetBool(debugFlag.Name)
 	if err != nil {
 		return err

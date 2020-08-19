@@ -1,17 +1,15 @@
 package rpc
 
 import (
-	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 )
 
 type Flags struct {
@@ -34,8 +32,9 @@ var rootCmd = &cobra.Command{
 }
 
 func RootCommand() (*cobra.Command, Flags) {
-	var cfg Flags
+	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
+	var cfg Flags
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
@@ -62,27 +61,7 @@ func splitAndTrim(input string) []string {
 	return result
 }
 
-func RootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		defer cancel()
-
-		ch := make(chan os.Signal, 1)
-		defer close(ch)
-
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-	}()
-	return ctx
-}
-
-func DefaultConnection(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
+func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	var db ethdb.KV
 	var txPool ethdb.Backend
 	var err error

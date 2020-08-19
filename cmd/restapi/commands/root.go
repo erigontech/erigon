@@ -1,15 +1,11 @@
 package commands
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/restapi/rest"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/spf13/cobra"
+	"os"
 )
 
 var (
@@ -33,26 +29,8 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
+	if err := rootCmd.ExecuteContext(utils.RootContext()); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-}
-
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
 }

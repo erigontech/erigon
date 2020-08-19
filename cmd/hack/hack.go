@@ -1682,7 +1682,7 @@ func supply(chaindata string) error {
 func main() {
 	flag.Parse()
 
-	log.SetupDefaultTerminalLogger(log.Lvl(*verbosity))
+	log.SetupDefaultTerminalLogger(log.Lvl(*verbosity), "", "")
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)

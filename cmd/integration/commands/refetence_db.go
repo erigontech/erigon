@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -32,7 +33,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--reference_chaindata'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -49,7 +50,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--reference_chaindata'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}

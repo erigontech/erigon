@@ -3,10 +3,9 @@ package rpc
 // This file stores proxy-objects for `internal` package
 import (
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
 )
 
 type CallArgs struct {
@@ -26,13 +25,29 @@ type ExecutionResult struct {
 }
 
 type StructLogRes struct {
-	*ethapi.StructLogRes
+	ethapi.StructLogRes
 }
 
-func SetupCobra(cmd *cobra.Command) error {
-	return debug.SetupCobra(cmd)
+//nolint
+func FormatLogs(logs []vm.StructLog) []StructLogRes {
+	res := make([]StructLogRes, len(logs))
+	for i, r := range ethapi.FormatLogs(logs) {
+		res[i] = StructLogRes{r}
+	}
+	return res
 }
 
-func SetupUrfave(ctx *cli.Context) error {
-	return debug.Setup(ctx)
+//nolint
+func RPCMarshalHeader(head *types.Header) map[string]interface{} {
+	return ethapi.RPCMarshalHeader(head)
+}
+
+//nolint
+func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
+	return ethapi.RPCMarshalBlock(block, inclTx, fullTx)
+}
+
+//nolint
+type RPCTransaction struct {
+	*ethapi.RPCTransaction
 }

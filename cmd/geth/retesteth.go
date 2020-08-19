@@ -831,7 +831,7 @@ func splitAndTrim(input string) []string {
 }
 
 func retesteth(ctx *cli.Context) error {
-	log.SetupDefaultTerminalLogger(log.LvlInfo)
+	log.SetupDefaultTerminalLogger(log.LvlInfo, "", "")
 
 	log.Info("Welcome to retesteth!")
 	// register signer API with server
