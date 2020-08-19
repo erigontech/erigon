@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 	"math/big"
 )
@@ -53,7 +54,7 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 		args.From = new(common.Address)
 	}
 
-	blockNumber, hash, err := GetBlockNumber(blockNrOrHash, api.dbReader)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
 		return 0, err
 	}

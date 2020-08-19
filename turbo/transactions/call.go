@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -16,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 	"math/big"
 	"time"
 )
@@ -31,7 +31,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, kv ethdb.KV, dbReader raw
 		}
 	*/
 
-	blockNumber, hash, err := commands.GetBlockNumber(blockNrOrHash, dbReader)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbReader)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 
 func getHashGetter(requireCanonical bool, dbReader rawdb.DatabaseReader) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
-		hash, err := commands.GetHashByNumber(n, requireCanonical, dbReader)
+		hash, err := rpchelper.GetHashByNumber(n, requireCanonical, dbReader)
 		if err != nil {
 			log.Debug("can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 		}
