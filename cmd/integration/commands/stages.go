@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"runtime"
 	"time"
 
@@ -20,7 +21,7 @@ var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := stageSenders(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -33,7 +34,7 @@ var cmdStageExec = &cobra.Command{
 	Use:   "stage_exec",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := stageExec(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -46,7 +47,7 @@ var cmdStageIHash = &cobra.Command{
 	Use:   "stage_ih",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := stageIHash(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -59,7 +60,7 @@ var cmdStageHashState = &cobra.Command{
 	Use:   "stage_hash_state",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := stageHashState(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -72,7 +73,7 @@ var cmdStageHistory = &cobra.Command{
 	Use:   "stage_history",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := stageHistory(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -85,7 +86,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := stageTxLookup(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -97,7 +98,7 @@ var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := printAllStages(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err

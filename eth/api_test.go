@@ -14,12 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package eth
+package eth_test
+
+/*
+TODO: revive this tests for RPCDaemon - https://github.com/ledgerwatch/turbo-geth/issues/939
 
 import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"reflect"
 	"sort"
 	"strconv"
@@ -27,11 +31,12 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -70,7 +75,7 @@ func TestAccountRange(t *testing.T) {
 	var (
 		tds   = state.NewTrieDbState(common.Hash{}, db, 0)
 		sdb   = state.New(tds)
-		addrs = [AccountRangeMaxResults * 2]common.Address{}
+		addrs = [eth.AccountRangeMaxResults * 2]common.Address{}
 		m     = map[common.Address]bool{}
 	)
 
@@ -97,10 +102,10 @@ func TestAccountRange(t *testing.T) {
 
 	trie := tds.Trie()
 
-	accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
+	accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, eth.AccountRangeMaxResults/2, eth.AccountRangeMaxResults/2)
 	// test pagination
-	firstResult := accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, AccountRangeMaxResults, AccountRangeMaxResults)
-	secondResult := accountRangeTest(t, trie, db.KV(), 0, sdb, firstResult.Next, AccountRangeMaxResults, AccountRangeMaxResults)
+	firstResult := accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
+	secondResult := accountRangeTest(t, trie, db.KV(), 0, sdb, firstResult.Next, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
 
 	hList := make(resultHash, 0)
 	for addr1 := range firstResult.Accounts {
@@ -117,8 +122,8 @@ func TestAccountRange(t *testing.T) {
 	// Test to see if it's possible to recover from the middle of the previous
 	// set and get an even split between the first and second sets.
 	sort.Sort(hList)
-	middleH := hList[AccountRangeMaxResults/2]
-	middleResult := accountRangeTest(t, trie, db.KV(), 0, sdb, middleH, AccountRangeMaxResults, AccountRangeMaxResults)
+	middleH := hList[eth.AccountRangeMaxResults/2]
+	middleResult := accountRangeTest(t, trie, db.KV(), 0, sdb, middleH, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
 	missing, infirst, insecond := 0, 0, 0
 	for h := range middleResult.Accounts {
 		if _, ok := firstResult.Accounts[h]; ok {
@@ -132,11 +137,11 @@ func TestAccountRange(t *testing.T) {
 	if missing != 0 {
 		t.Fatalf("%d hashes in the 'middle' set were neither in the first not the second set", missing)
 	}
-	if infirst != AccountRangeMaxResults/2 {
-		t.Fatalf("Imbalance in the number of first-test results: %d != %d", infirst, AccountRangeMaxResults/2)
+	if infirst != eth.AccountRangeMaxResults/2 {
+		t.Fatalf("Imbalance in the number of first-test results: %d != %d", infirst, eth.AccountRangeMaxResults/2)
 	}
-	if insecond != AccountRangeMaxResults/2 {
-		t.Fatalf("Imbalance in the number of second-test results: %d != %d", insecond, AccountRangeMaxResults/2)
+	if insecond != eth.AccountRangeMaxResults/2 {
+		t.Fatalf("Imbalance in the number of second-test results: %d != %d", insecond, eth.AccountRangeMaxResults/2)
 	}
 }
 
@@ -151,7 +156,7 @@ func TestEmptyAccountRange(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	results, err1 := state.NewDumper(db.KV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
+	results, err1 := state.NewDumper(db.KV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), eth.AccountRangeMaxResults)
 	if err1 != nil {
 		t.Fatal(err1)
 	}
@@ -177,7 +182,7 @@ func TestStorageRangeAt(t *testing.T) {
 			common.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
 			common.HexToHash("5723d2c3a83af9b735e3b7f21531e5623d183a9095a56604ead41f3582fdfb75"),
 		}
-		storage = StorageMap{
+		storage = commands.StorageMap{
 			keys[0]: {Key: &common.Hash{0x02}, Value: common.Hash{0x01}},
 			keys[1]: {Key: &common.Hash{0x04}, Value: common.Hash{0x02}},
 			keys[2]: {Key: &common.Hash{0x01}, Value: common.Hash{0x03}},
@@ -214,34 +219,35 @@ func TestStorageRangeAt(t *testing.T) {
 	tests := []struct {
 		start []byte
 		limit int
-		want  StorageRangeResult
+		want  commands.StorageRangeResult
 	}{
 		{
 			start: []byte{}, limit: 0,
-			want: StorageRangeResult{StorageMap{}, &keys[0]},
+			want: commands.StorageRangeResult{commands.StorageMap{}, &keys[0]},
 		},
 		{
 			start: []byte{}, limit: 100,
-			want: StorageRangeResult{storage, nil},
+			want: commands.StorageRangeResult{storage, nil},
 		},
 		{
 			start: []byte{}, limit: 2,
-			want: StorageRangeResult{StorageMap{keys[0]: storage[keys[0]], keys[1]: storage[keys[1]]}, &keys[2]},
+			want: commands.StorageRangeResult{commands.StorageMap{keys[0]: storage[keys[0]], keys[1]: storage[keys[1]]}, &keys[2]},
 		},
 		{
 			start: []byte{0x00}, limit: 4,
-			want: StorageRangeResult{storage, nil},
+			want: commands.StorageRangeResult{storage, nil},
 		},
 		{
 			start: []byte{0x40}, limit: 2,
-			want: StorageRangeResult{StorageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
+			want: commands.StorageRangeResult{commands.StorageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
 		},
 	}
-	dbs := state.NewDbState(db.KV(), 1)
+
+	dbs := adapter.NewStateReader(db.KV(), 1)
 	for i, test := range tests {
 		test := test
 		t.Run("test_"+strconv.Itoa(i), func(t *testing.T) {
-			result, err := StorageRangeAt(dbs, addr, test.start, test.limit)
+			result, err := commands.StorageRangeAt(dbs, addr, test.start, test.limit)
 			if err != nil {
 				t.Error(err)
 			}
@@ -252,3 +258,4 @@ func TestStorageRangeAt(t *testing.T) {
 		})
 	}
 }
+*/

@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -25,14 +27,14 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 		return cached, nil
 	}
 
-	bc := &blockGetter{db}
-	_, _, ibs, dbstate, err := ComputeTxEnv(ctx, bc, params.MainnetChainConfig, &chainContext{db: db}, db.(ethdb.HasKV).KV(), hash, 0)
+	cc := adapter.NewChainContext(db)
+	bc := adapter.NewBlockGetter(db)
+	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, params.MainnetChainConfig, cc, db.(ethdb.HasKV).KV(), hash, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	var receipts types.Receipts
-	cc := &chainContext{db}
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	var usedGas = new(uint64)
 	for i, tx := range block.Transactions() {

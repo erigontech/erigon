@@ -2,6 +2,8 @@ package log
 
 import (
 	"fmt"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"io"
 	"net"
 	"os"
@@ -356,4 +358,46 @@ func (m muster) FileHandler(path string, fmtr Format) Handler {
 
 func (m muster) NetHandler(network, addr string, fmtr Format) Handler {
 	return must(NetHandler(network, addr, fmtr))
+}
+
+// verbosityPerModule sets the glog verbosity pattern.
+//
+// The syntax of the argument is a comma-separated list of pattern=N, where the
+// pattern is a literal file name or "glob" pattern matching and N is a V level:
+//  pattern="gopher.go=3"
+//   sets the V level to 3 in all Go files named "gopher.go"
+//
+//  pattern="foo=3"
+//   sets V to 3 in all files of any packages whose import path ends in "foo"
+//
+//  pattern="foo/*=3"
+//   sets V to 3 in all files of any packages whose import path contains "foo"
+//
+//
+//
+// backtraceAt sets the glog backtrace location. When set to a file and line
+// number holding a logging statement, a stack trace will be written to the Info
+// log whenever execution hits that statement.
+// Unlike verbosityPerModule, the ".go" must be present.
+//
+func SetupDefaultTerminalLogger(lvl Lvl, verbosityPerModule string, backtraceAt string) (ostream Handler, glogger *GlogHandler) {
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = StreamHandler(output, TerminalFormat(usecolor))
+	glogger = NewGlogHandler(ostream)
+	Root().SetHandler(glogger)
+	glogger.Verbosity(lvl)
+	if err := glogger.Vmodule(verbosityPerModule); err != nil {
+		panic(err)
+	}
+	if backtraceAt != "" {
+		if err := glogger.BacktraceAt(backtraceAt); err != nil {
+			panic(err)
+		}
+	}
+
+	return ostream, glogger
 }

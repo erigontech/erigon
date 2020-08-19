@@ -1,30 +1,36 @@
 package main
 
 import (
-	"io"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	var (
-		ostream log.Handler
-		glogger *log.GlogHandler
-	)
-
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	output := io.Writer(os.Stderr)
-	if usecolor {
-		output = colorable.NewColorableStderr()
+	cmd, cfg := cli.RootCommand()
+	if err := utils.SetupCobra(cmd); err != nil {
+		panic(err)
 	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-	glogger = log.NewGlogHandler(ostream)
-	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.LvlInfo)
+	defer utils.StopDebug()
 
-	commands.Execute()
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		db, txPool, err := cli.OpenDB(*cfg)
+		if err != nil {
+			log.Error("Could not connect to remoteDb", "error", err)
+			return nil
+		}
+
+		var rpcAPI = commands.APIList(db, txPool, *cfg, nil)
+		cli.StartRpcServer(cmd.Context(), *cfg, rpcAPI)
+		return nil
+	}
+
+	if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
 }

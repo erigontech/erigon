@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
 // PrivateDebugAPI
@@ -33,17 +35,18 @@ type PrivateDebugAPIImpl struct {
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		db:           db,
-		dbReader:     dbReader,
-		chainContext: chainContext,
+		db:       db,
+		dbReader: dbReader,
 	}
 }
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, stateReader, err := ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.db, blockHash, txIndex)
+	bc := adapter.NewBlockGetter(api.dbReader)
+	cc := adapter.NewChainContext(api.dbReader)
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, params.MainnetChainConfig, cc, api.db, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
