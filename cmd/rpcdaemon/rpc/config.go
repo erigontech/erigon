@@ -36,15 +36,14 @@ var rootCmd = &cobra.Command{
 func RootCommand() (*cobra.Command, Flags) {
 	var cfg Flags
 
-	rootCmd.Flags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.Flags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.Flags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.Flags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.Flags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.Flags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.Flags().StringVar(&cfg.api, "http.api", "", "API's offered over the HTTP-RPC interface")
-	rootCmd.Flags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
-	rootCmd.Flags().StringVar(&cfg.api, "http.api", "", "API's offered over the HTTP-RPC interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.PersistentFlags().StringVar(&cfg.httpCORSDomain, "http.corsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
+	rootCmd.PersistentFlags().StringVar(&cfg.httpVirtualHost, "http.vhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.PersistentFlags().StringVar(&cfg.api, "http.api", "", "API's offered over the HTTP-RPC interface")
+	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 
 	cfg.HttpVirtualHost = splitAndTrim(cfg.httpVirtualHost)
 	cfg.HttpCORSDomain = splitAndTrim(cfg.httpCORSDomain)
