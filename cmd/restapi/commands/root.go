@@ -1,11 +1,8 @@
 package commands
 
 import (
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/restapi/rest"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/spf13/cobra"
-	"os"
 )
 
 var (
@@ -28,9 +25,6 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Execute() {
-	if err := rootCmd.ExecuteContext(utils.RootContext()); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+func RootCommand() *cobra.Command {
+	return rootCmd
 }

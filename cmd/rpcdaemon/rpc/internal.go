@@ -29,12 +29,8 @@ type StructLogRes struct {
 }
 
 //nolint
-func FormatLogs(logs []vm.StructLog) []StructLogRes {
-	res := make([]StructLogRes, len(logs))
-	for i, r := range ethapi.FormatLogs(logs) {
-		res[i] = StructLogRes{r}
-	}
-	return res
+func FormatLogs(logs []vm.StructLog) []ethapi.StructLogRes {
+	return ethapi.FormatLogs(logs)
 }
 
 //nolint

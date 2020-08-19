@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
 
@@ -14,9 +13,9 @@ import (
 func main() {
 	cmd, cfg := rpc.RootCommand()
 	if err := utils.SetupCobra(cmd); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		panic(err)
 	}
+	defer utils.StopDebug()
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		db, txPool, err := rpc.OpenDB(cfg)

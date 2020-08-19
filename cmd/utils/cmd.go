@@ -320,6 +320,10 @@ func SetupCobra(cmd *cobra.Command) error {
 	return debug.SetupCobra(cmd)
 }
 
+func StopDebug() {
+	debug.Exit()
+}
+
 func SetupUrfave(ctx *cli.Context) error {
 	return debug.Setup(ctx)
 }

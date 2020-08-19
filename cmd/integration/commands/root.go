@@ -20,12 +20,9 @@ var rootCmd = &cobra.Command{
 			}
 		}
 	},
-	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		debug.Exit()
-	},
 }
 
-func GetRootCommand() *cobra.Command {
+func RootCommand() *cobra.Command {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 	return rootCmd
 }
