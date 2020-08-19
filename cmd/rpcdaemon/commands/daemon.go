@@ -3,11 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -47,15 +47,15 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string, gascap uint64) []rpc.API {
+func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.API) []rpc.API {
 	var rpcAPI []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
-	apiImpl := NewAPI(db, dbReader, eth, gascap)
+	apiImpl := NewAPI(db, dbReader, eth, cfg.Gascap)
 	netImpl := NewNetAPIImpl(eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
 
-	for _, enabledAPI := range enabledApis {
+	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
 		case "eth":
 			rpcAPI = append(rpcAPI, rpc.API{
@@ -80,8 +80,13 @@ func GetAPI(db ethdb.KV, eth ethdb.Backend, enabledApis []string, gascap uint64)
 			})
 
 		default:
-			log.Error("Unrecognised", "api", enabledAPI)
+			// TODO: enable validation after checking customApiList
+			//log.Error("Unrecognised", "api", enabledAPI)
 		}
+	}
+
+	for _, api := range customApiList {
+		rpcAPI = append(rpcAPI, api)
 	}
 	return rpcAPI
 }

@@ -8,7 +8,7 @@ import (
 )
 
 func New(db ethdb.HasKV, ethereum core.Backend, stack *node.Node) {
-	apis := commands.GetAPI(db.KV(), core.NewEthBackend(ethereum), []string{"eth", "debug"}, 0)
+	apis := commands.APIList(db.KV(), core.NewEthBackend(ethereum), []string{"eth", "debug"}, 0)
 
 	stack.RegisterAPIs(apis)
 }
