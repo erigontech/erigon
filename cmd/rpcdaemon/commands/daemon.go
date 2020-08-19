@@ -85,8 +85,5 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 		}
 	}
 
-	for _, api := range customApiList {
-		rpcAPI = append(rpcAPI, api)
-	}
-	return rpcAPI
+	return append(rpcAPI, customApiList...)
 }
