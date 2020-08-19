@@ -86,6 +86,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
+
 	hash := rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
 	if hash != (common.Hash{}) {
 		header := rawdb.ReadHeader(api.dbReader, hash, blockNumber)
@@ -94,7 +95,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 	}
 
-	return res, err
+	return res, nil
 }
 
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error) {
