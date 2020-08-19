@@ -3,7 +3,10 @@ package rpc
 // This file stores proxy-objects for `internal` package
 import (
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/spf13/cobra"
+	"github.com/urfave/cli"
 )
 
 type CallArgs struct {
@@ -24,4 +27,12 @@ type ExecutionResult struct {
 
 type StructLogRes struct {
 	*ethapi.StructLogRes
+}
+
+func SetupCobra(cmd *cobra.Command) error {
+	return debug.SetupCobra(cmd)
+}
+
+func SetupUrfave(ctx *cli.Context) error {
+	return debug.Setup(ctx)
 }

@@ -7,10 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -69,7 +66,11 @@ func splitAndTrim(input string) []string {
 func RootContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
+		defer cancel()
+
 		ch := make(chan os.Signal, 1)
+		defer close(ch)
+
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		defer signal.Stop(ch)
 
@@ -78,27 +79,8 @@ func RootContext() context.Context {
 			log.Info("Got interrupt, shutting down...")
 		case <-ctx.Done():
 		}
-
-		cancel()
 	}()
 	return ctx
-}
-
-func SetupDefaultLogger(lvl log.Lvl) {
-	var (
-		ostream log.Handler
-		glogger *log.GlogHandler
-	)
-
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	output := io.Writer(os.Stderr)
-	if usecolor {
-		output = colorable.NewColorableStderr()
-	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-	glogger = log.NewGlogHandler(ostream)
-	log.Root().SetHandler(glogger)
-	glogger.Verbosity(lvl)
 }
 
 func DefaultConnection(cfg Flags) (ethdb.KV, ethdb.Backend, error) {

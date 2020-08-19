@@ -5,14 +5,18 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/rpc"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	rpc.SetupDefaultLogger(log.LvlInfo)
-
 	cmd, cfg := rpc.RootCommand()
+	if err := debug.SetupCobra(cmd); err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
+
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		db, txPool, err := rpc.DefaultConnection(cfg)
 		if err != nil {

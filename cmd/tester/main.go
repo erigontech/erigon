@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -22,8 +21,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
 )
 
@@ -55,7 +52,7 @@ func init() {
 	app.Flags = append(app.Flags, flags...)
 
 	app.Before = func(ctx *cli.Context) error {
-		setupLogger(ctx)
+		log.SetupDefaultTerminalLogger(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)), "", "")
 		runtime.GOMAXPROCS(runtime.NumCPU())
 		if err := debug.Setup(ctx); err != nil {
 			return err
@@ -102,23 +99,6 @@ func rootContext() context.Context {
 		cancel()
 	}()
 	return ctx
-}
-
-func setupLogger(cliCtx *cli.Context) {
-	var (
-		ostream log.Handler
-		glogger *log.GlogHandler
-	)
-
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	output := io.Writer(os.Stderr)
-	if usecolor {
-		output = colorable.NewColorableStderr()
-	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-	glogger = log.NewGlogHandler(ostream)
-	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.Lvl(cliCtx.GlobalInt(VerbosityFlag.Name)))
 }
 
 func tester(cliCtx *cli.Context) error {
