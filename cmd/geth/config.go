@@ -143,7 +143,7 @@ func makeFullNode(ctx *cli.Context) (*node.Node, *eth.Ethereum) {
 		utils.RegisterGraphQLService(stack, backend.APIBackend, cfg.Node)
 	}
 
-	// Not supported by TurboGeth yet
+	// TurboGeth - moved all API's to RPCDaemon service
 	// Add the Ethereum Stats daemon if requested.
 	//if cfg.Ethstats.URL != "" {
 	//	utils.RegisterEthStatsService(stack, backend.APIBackend, cfg.Ethstats.URL)
