@@ -89,18 +89,26 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header, peerHandle Pee
 	return []*ChainSegment{{headers: []*types.Header{header}}}, nil, nil
 }
 
+// ConnectResult bundles together various output values from the Connect algorithm
 type ConnectResult struct {
+	start, end       int          // slice start and end (element of the segment beyond these indices should be discarded)
+	powStart         int          // index of the element where pow verification should start (if powStart == end, no verification is required)
+	anchorsAttaching []*Anchor    // Anchors to which the segment can be attached (or empty slice if no such anchors found)
+	attachmentTip    *Tip         // Tip to which the segment can be attached (or nil if no such tip found)
+	penalty          *PeerPenalty // Penalty to the peer for producing an invalid segment in relation to an  sexisting tip
+	err              error
 }
 
 // Connect finds out whether a chain segment can be connected to any anchors, or any tip, or both
-func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) (bool, *PeerPenalty, error) {
+func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) ConnectResult {
 	var tombstones []common.Hash
 	var powDepth int // PoW verification depth of the first header in the segment (only matters if there is anchor attachment)
 	var anchorsAttaching []*Anchor
 	var attachmentTip *Tip
-	var attachmentHeader *types.Header
+	start := 0
+	end := len(segment.headers)
 	// Walk the segment from children towards parents
-	for _, header := range segment.headers {
+	for i, header := range segment.headers {
 		headerHash := header.Hash()
 		// Check if the header can be attached to an anchor of a working tree
 		if anchors, attaching := hd.anchors[headerHash]; attaching {
@@ -140,22 +148,28 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, peerHandle PeerHandle) 
 					delete(hd.anchors, headerHash)
 				}
 			}
+			start = i
 		}
 		// Check if the header can be attached to any tips
 		if tip, attaching := hd.tips[header.ParentHash]; attaching {
+			end = i + 1
 			if tip.noPrepend {
 				break
 			}
 			// Before attaching, we must check the parent-child relationship
 			if valid, penalty := hd.childTipValid(header, header.ParentHash, tip); !valid {
-				return false, &PeerPenalty{peerHandle: peerHandle, penalty: penalty}, nil
+				return ConnectResult{penalty: &PeerPenalty{peerHandle: peerHandle, penalty: penalty}}
 			}
 			attachmentTip = tip
-			attachmentHeader = header
 			break
 		}
 	}
-	return false, nil, nil
+	return ConnectResult{
+		start:            start,
+		end:              end,
+		anchorsAttaching: anchorsAttaching,
+		attachmentTip:    attachmentTip,
+	}
 }
 
 // Prepend attempts to find a suitable tip within the working chain segments to prepend the given (new) chain segment to
