@@ -17,30 +17,33 @@
 package eth
 
 import (
-	"compress/gzip"
-	"context"
-	"errors"
-	"fmt"
-	"io"
-	"math/big"
-	"os"
-	"runtime"
-	"strings"
-	"time"
-
-	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 )
+
+// BadBlockArgs represents the entries in the list returned when bad blocks are queried.
+type BadBlockArgs struct {
+	Hash  common.Hash            `json:"hash"`
+	Block map[string]interface{} `json:"block"`
+	RLP   string                 `json:"rlp"`
+}
+
+// AccountRangeMaxResults is the maximum number of results to be returned per call
+const AccountRangeMaxResults = 256
+
+/*
+
+// StorageRangeResult is the result of a debug_storageRangeAt API call.
+type StorageRangeResult struct {
+	Storage StorageMap   `json:"storage"`
+	NextKey *common.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
+}
+
+type StorageMap map[common.Hash]StorageEntry
+
+type StorageEntry struct {
+	Key   *common.Hash `json:"key"`
+	Value common.Hash  `json:"value"`
+}
 
 // PublicEthereumAPI provides an API to access Ethereum full node-related
 // information.
@@ -321,13 +324,6 @@ func (api *PrivateDebugAPI) Preimage(ctx context.Context, hash common.Hash) (hex
 	return nil, errors.New("unknown preimage")
 }
 
-// BadBlockArgs represents the entries in the list returned when bad blocks are queried.
-type BadBlockArgs struct {
-	Hash  common.Hash            `json:"hash"`
-	Block map[string]interface{} `json:"block"`
-	RLP   string                 `json:"rlp"`
-}
-
 // GetBadBlocks returns a list of the last 'bad blocks' that the client has seen on the network
 // and returns them as a JSON list of block-hashes
 func (api *PrivateDebugAPI) GetBadBlocks(ctx context.Context) ([]*BadBlockArgs, error) {
@@ -350,9 +346,6 @@ func (api *PrivateDebugAPI) GetBadBlocks(ctx context.Context) ([]*BadBlockArgs, 
 	}
 	return results, nil
 }
-
-// AccountRangeMaxResults is the maximum number of results to be returned per call
-const AccountRangeMaxResults = 256
 
 // AccountRange enumerates all accounts in the given block and start point in paging request
 func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
@@ -380,19 +373,6 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 	}
 	dumper := state.NewDumper(api.eth.ChainKV(), blockNumber)
 	return dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
-}
-
-// StorageRangeResult is the result of a debug_storageRangeAt API call.
-type StorageRangeResult struct {
-	Storage StorageMap   `json:"storage"`
-	NextKey *common.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
-}
-
-type StorageMap map[common.Hash]StorageEntry
-
-type StorageEntry struct {
-	Key   *common.Hash `json:"key"`
-	Value common.Hash  `json:"value"`
 }
 
 // StorageRangeAt returns the storage at the given block height and transaction index.
@@ -496,3 +476,4 @@ func (api *PrivateDebugAPI) getModifiedAccounts(startBlock, endBlock *types.Bloc
 	dirty, err := ethdb.GetModifiedAccounts(api.eth.blockchain.ChainDb(), startNum, endNum)
 	return dirty, err
 }
+*/

@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
-	state2 "github.com/ledgerwatch/turbo-geth/turbo/state"
+	state2 "github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
 const (

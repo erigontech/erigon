@@ -50,7 +50,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethstats"
 	"github.com/ledgerwatch/turbo-geth/graphql"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
@@ -1746,11 +1745,11 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
 
 // RegisterEthStatsService configures the Ethereum Stats daemon and adds it to
 // the given node.
-func RegisterEthStatsService(stack *node.Node, backend ethapi.Backend, url string) {
-	if err := ethstats.New(stack, backend, backend.Engine(), url); err != nil {
-		Fatalf("Failed to register the Ethereum Stats service: %v", err)
-	}
-}
+//func RegisterEthStatsService(stack *node.Node, backend ethapi.Backend, url string) {
+//	if err := ethstats.New(stack, backend, backend.Engine(), url); err != nil {
+//		Fatalf("Failed to register the Ethereum Stats service: %v", err)
+//	}
+//}
 
 // RegisterGraphQLService is a utility function to construct a new service and register it against a node.
 func RegisterGraphQLService(stack *node.Node, backend ethapi.Backend, cfg node.Config) {

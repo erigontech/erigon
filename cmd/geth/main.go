@@ -241,7 +241,7 @@ func init() {
 		// See config.go
 		dumpConfigCommand,
 		// See retesteth.go
-		retestethCommand,
+		//retestethCommand,
 		// See cmd/utils/flags_legacy.go
 		utils.ShowDeprecated,
 	}

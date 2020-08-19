@@ -16,6 +16,7 @@
 
 package main
 
+/* Retesteth tool is deprecated
 import (
 	"bytes"
 	"context"
@@ -380,7 +381,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 		ParentHash: chainParams.Genesis.ParentHash,
 		Alloc:      accounts,
 	}
-	chainConfig, genesisHash, _, err := core.SetupGenesisBlock(ethDb, genesis, false /* history */, false /* overwrite */)
+	chainConfig, genesisHash, _, err := core.SetupGenesisBlock(ethDb, genesis, false, false)
 	if err != nil {
 		return false, err
 	}
@@ -907,3 +908,4 @@ func retesteth(ctx *cli.Context) error {
 	log.Info("Exiting...", "signal", sig)
 	return nil
 }
+*/
