@@ -58,12 +58,13 @@ func TestTestMode(t *testing.T) {
 // This test checks that cache lru logic doesn't crash under load.
 // It reproduces https://github.com/ledgerwatch/turbo-geth/issues/14943
 func TestCacheFileEvict(t *testing.T) {
+	// turbo-geth: all caches are in RAM, no files are actually used there
 	tmpdir, err := ioutil.TempDir("", "ethash-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpdir)
-	e := New(Config{CachesInMem: 3, CachesOnDisk: 10, CacheDir: tmpdir, PowMode: ModeTest}, nil, false)
+	e := New(Config{CachesInMem: 3, PowMode: ModeTest}, nil, false)
 	defer e.Close()
 
 	workers := 8
