@@ -33,37 +33,37 @@ func testGenCfg() error {
 func cfg0Test0() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
-	vm.Cfg0Harness(contract)
+	vm.AbsIntCfgHarness2(contract)
 }
 
 func cfg0Test1() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
-	vm.Cfg0Harness(contract)
+	vm.AbsIntCfgHarness2(contract)
 }
 
 func dfTest0() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, 0x0}
-	vm.SimpleConstPropHarness(contract)
+	vm.AbsIntCfgHarness2(contract)
 }
 
 func dfTest1() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
-	vm.SimpleConstPropHarness(contract)
+	vm.AbsIntCfgHarness2(contract)
 }
 
 func dfTest2() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x6, byte(vm.JUMP), 0x0}
-	vm.SimpleConstPropHarness(contract)
+	vm.AbsIntCfgHarness2(contract)
 }
 
 func dfTest3() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
-	vm.SimpleConstPropHarness(contract)
+	vm.AbsIntCfgHarness2(contract)
 }
 
 //should fail to find concrete jump
