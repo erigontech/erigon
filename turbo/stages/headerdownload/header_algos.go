@@ -190,10 +190,10 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, s
 // ExtendUp extends a working tree up from the tip, using given chain segment
 func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error {
 	// Find attachment tip again
-	attachingHeader := segment.headers[end-1]
-	if attachmentTip, attaching := hd.tips[attachingHeader.ParentHash]; attaching {
+	tipHeader := segment.headers[end-1]
+	if attachmentTip, attaching := hd.tips[tipHeader.ParentHash]; attaching {
 		if attachmentTip.noPrepend {
-			return fmt.Errorf("extendUp attachment tip had noPrepend flag on for %x", attachingHeader.ParentHash)
+			return fmt.Errorf("extendUp attachment tip had noPrepend flag on for %x", tipHeader.ParentHash)
 		}
 		newAnchor := attachmentTip.anchor
 		cumulativeDifficulty := attachmentTip.cumulativeDifficulty
@@ -210,7 +210,7 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 			}
 		}
 	} else {
-		return fmt.Errorf("extendUp attachment tip not found for %x", attachingHeader.ParentHash)
+		return fmt.Errorf("extendUp attachment tip not found for %x", tipHeader.ParentHash)
 	}
 	return nil
 }
@@ -219,8 +219,8 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 // it creates a new anchor and collects all the tips from the attached anchors to it
 func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powDepth int) error {
 	// Find attachement anchors again
-	attachingHeader := segment.headers[start]
-	if anchors, attaching := hd.anchors[attachingHeader.Hash()]; attaching {
+	anchorHeader := segment.headers[start]
+	if anchors, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
 		newAnchorHeader := segment.headers[end-1]
 		diff, overflow := uint256.FromBig(newAnchorHeader.Difficulty)
 		if overflow {
@@ -257,15 +257,51 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				newAnchor.tips = append(newAnchor.tips, tipHash)
 			}
 		}
-		delete(hd.anchors, attachingHeader.Hash())
+		delete(hd.anchors, anchorHeader.Hash())
 	} else {
-		return fmt.Errorf("extendDown attachment anchors not found for %x", attachingHeader.Hash())
+		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
 	return nil
 }
 
 // Connect connects some working trees using anchors of some, and a tip of another
-func (hb *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
+func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
+	// Find attachment tip again
+	tipHeader := segment.headers[end-1]
+	// Find attachement anchors again
+	anchorHeader := segment.headers[start]
+	attachmentTip, ok1 := hd.tips[tipHeader.ParentHash]
+	if !ok1 {
+		return fmt.Errorf("connect attachment tip not found for %x", tipHeader.ParentHash)
+	}
+	anchors, ok2 := hd.anchors[anchorHeader.Hash()]
+	if !ok2 {
+		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+	}
+	newAnchor := attachmentTip.anchor
+	cumulativeDifficulty := attachmentTip.cumulativeDifficulty
+	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
+	for i := end - 1; i >= start; i-- {
+		header := segment.headers[i]
+		diff, overflow := uint256.FromBig(header.Difficulty)
+		if overflow {
+			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+		}
+		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
+		if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty); err != nil {
+			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
+		}
+	}
+	// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
+	for _, anchor := range anchors {
+		for _, tipHash := range anchor.tips {
+			tip := hd.tips[tipHash]
+			tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
+			tip.anchor = newAnchor
+			newAnchor.tips = append(newAnchor.tips, tipHash)
+		}
+	}
+	delete(hd.anchors, anchorHeader.Hash())
 	return nil
 }
 
