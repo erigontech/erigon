@@ -5,20 +5,174 @@ import (
 	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 //////////////////////////////////////////////////
 type AbsValueKind int
+const (
+	absStackLen = 32
+)
 
+var DEBUG = false
 var STOP_ON_ERROR = true
+
+
+//////////////////////////
+
+type stmt struct {
+	pc             int
+	opcode         OpCode
+	operation      operation
+	value          uint256.Int
+	numBytes       int
+	inferredAsData bool
+	ends           bool
+}
+
+func (stmt stmt) String() string {
+	ends := ""
+	if stmt.ends {
+		ends = "ends"
+	}
+	valid := ""
+	if stmt.operation.valid {
+		valid = "valid"
+	}
+	return fmt.Sprintf("%v %v %v", stmt.opcode, ends, valid)
+}
+
+
+func getStmts(prog *Contract) []stmt {
+	jt := newIstanbulInstructionSet()
+
+	codeLen := len(prog.Code)
+	var stmts []stmt
+	inferIsData := make(map[int]bool)
+	for pc := 0; pc < codeLen; pc++ {
+		stmt := stmt{}
+		stmt.pc = pc
+		stmt.inferredAsData = inferIsData[pc]
+
+		op := prog.GetOp(uint64(pc))
+		stmt.opcode = op
+		stmt.operation = jt[op]
+		stmt.ends = stmt.operation.halts || stmt.operation.reverts || !stmt.operation.valid
+		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
+
+		if op.IsPush() {
+			pushByteSize := stmt.operation.opNum
+			startMin := pc + 1
+			if startMin >= codeLen {
+				startMin = codeLen
+			}
+			endMin := startMin + pushByteSize
+			if startMin+pushByteSize >= codeLen {
+				endMin = codeLen
+			}
+			integer := new(uint256.Int)
+			integer.SetBytes(prog.Code[startMin:endMin])
+			stmt.value = *integer
+			stmt.numBytes = pushByteSize + 1
+
+			if !stmt.inferredAsData {
+				for datapc := startMin; datapc < endMin; datapc++ {
+					inferIsData[datapc] = true
+				}
+			}
+		} else {
+			stmt.numBytes = 1
+		}
+
+		stmts = append(stmts, stmt)
+		if pc != len(stmts) - 1 {
+			panic("Invalid length")
+		}
+	}
+	return stmts
+}
+
+
+func printStmts(stmts []stmt) {
+	for i, stmt := range stmts {
+		fmt.Printf("%v %v\n", i, stmt)
+	}
+}
+
+////////////////////////
+
+type edge struct {
+	pc0 int
+	stmt stmt
+	pc1 int
+}
+
+func (e edge) String() string {
+	return fmt.Sprintf("%v %v %v", e.pc0, e.pc1, e.stmt.opcode)
+}
+
+func reverseSortEdges(edges []edge) {
+	sort.SliceStable(edges, func(i, j int) bool {
+		return edges[i].pc0 > edges[j].pc0
+	})
+}
+
+func sortEdges(edges []edge) {
+	sort.SliceStable(edges, func(i, j int) bool {
+		return edges[i].pc0 < edges[j].pc0
+	})
+}
+
+func printEdges(edges []edge) {
+	for _, edge := range edges {
+		fmt.Printf("%v\n", edge)
+	}
+}
+
+
+func getEntryReachableEdges(entry int, edges []edge) []edge {
+	pc2edges := make(map[int][]edge)
+	for _, e := range edges {
+		l := pc2edges[e.pc0]
+		l = append(l, e)
+		pc2edges[e.pc0] = l
+	}
+
+	workList := []int{entry}
+	visited := make(map[int]bool)
+	visited[entry] = true
+	for len(workList) > 0 {
+		var pc int
+		pc, workList = workList[0], workList[1:]
+
+		for _, edge := range pc2edges[pc] {
+			if !visited[edge.pc1] {
+				visited[edge.pc1] = true
+				workList = append(workList, edge.pc1)
+			}
+		}
+	}
+
+	var reachable []edge
+	for pc, exists := range visited {
+		if exists {
+			reachable = append(reachable, pc2edges[pc]...)
+		}
+	}
+	return reachable
+}
+
+////////////////////////
+
 
 const (
 	BotValue AbsValueKind = iota
 	TopValue
 	ConcreteValue
 )
+
 
 func (d AbsValueKind) String() string {
 	return [...]string{"⊥", "⊤", "AbsValue"}[d]
@@ -199,6 +353,12 @@ func (state state2) String(abbrev bool) string {
 
 //////////////////////////////////////////////////
 
+type ResolveResult struct {
+	edges []edge
+	resolved bool
+	badJump *stmt
+}
+
 func resolve2(prog *Contract, stmts []stmt, pc0 int, st0 state2, stmt stmt) ResolveResult {
 	if !stmt.operation.valid || stmt.ends {
 		return ResolveResult{resolved: true}
@@ -370,6 +530,18 @@ func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]s
 	}
 }
 
+func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
+
+	for pc1, pc0s := range prevEdgeMap {
+		for pc0 := range pc0s {
+			s := stmts[pc0]
+			if s.ends {
+				msg := fmt.Sprintf("Halt has successor: %v -> %v", pc0, pc1)
+				panic(msg)
+			}
+		}
+	}
+}
 func AbsIntCfgHarness2(prog *Contract) error {
 
 	stmts := getStmts(prog)
