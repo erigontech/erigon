@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
@@ -10,6 +11,8 @@ import (
 
 //////////////////////////////////////////////////
 type AbsValueKind int
+
+var STOP_ON_ERROR = true
 
 const (
 	BotValue AbsValueKind = iota
@@ -28,9 +31,9 @@ type AbsValue struct {
 	pc int 				//only when kind=TopValue
 }
 
-func (c0 AbsValue) String(showpc bool) string {
+func (c0 AbsValue) String(abbrev bool) string {
 	if c0.kind == BotValue || c0.kind == TopValue {
-		if showpc {
+		if !abbrev {
 			return fmt.Sprintf("%v%v", c0.kind.String(), c0.pc)
 		} else {
 			return c0.kind.String()
@@ -63,21 +66,29 @@ func (set ValueSet) Copy() ValueSet {
 	}
 }
 
-func (set ValueSet) String() string {
+func (set ValueSet) String(abbrev bool) string {
 	if set.isTop {
-		return "⊤"
+		return "⊤ˢ"
 	}
 
 	var strs []string
+	hasTop := false
 	for v, in := range set.values {
 		if in {
-			strs = append(strs, v.String(false))
+			strs = append(strs, v.String(abbrev))
+			if v.kind == TopValue {
+				hasTop = true
+			}
 		}
 	}
 
 	res := strings.Join(strs, " ")
 	if len(strs) == 0 {
 		return "⊥"
+	}
+
+	if abbrev && hasTop {
+		return "⊤"
 	} else if len(strs) == 1 {
 		return fmt.Sprintf("%v", res)
 	} else {
@@ -178,36 +189,47 @@ func botState() state2 {
 	return st
 }
 
-func (state state2) String() string {
+func (state state2) String(abbrev bool) string {
 	var strs []string
 	for _, c := range state.stack {
-		strs = append(strs, c.String())
+		strs = append(strs, c.String(abbrev))
 	}
 	return strings.Join(strs, " ")
 }
 
 //////////////////////////////////////////////////
 
-func resolve2(prog *Contract, pc0 int, st0 state2, stmt stmt) ResolveResult {
+func resolve2(prog *Contract, stmts []stmt, pc0 int, st0 state2, stmt stmt) ResolveResult {
 	if !stmt.operation.valid || stmt.ends {
 		return ResolveResult{resolved: true}
 	}
 
 	codeLen := len(prog.Code)
+
 	var edges []edge
+	isBadJump := false
 
 	if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 		jumpDestSet := st0.stack[0]
-		for jumpDest, _ := range jumpDestSet.values {
-			if jumpDest.kind == ConcreteValue {
-				if jumpDest.value.IsUint64() {
-					pc1 := int(jumpDest.value.Uint64())
-					edges = append(edges, edge{pc0, stmt, pc1})
-				} else {
-					return ResolveResult{resolved: false, badJump: &stmt}
+		if jumpDestSet.isTop {
+			isBadJump = true
+		} else {
+			for jumpDest, _ := range jumpDestSet.values {
+				if jumpDest.kind == ConcreteValue {
+					if jumpDest.value.IsUint64() {
+						pc1 := int(jumpDest.value.Uint64())
+
+						if stmts[pc1].opcode != JUMPDEST {
+							isBadJump = true
+						} else {
+							edges = append(edges, edge{pc0, stmt, pc1})
+						}
+					} else {
+						isBadJump = true
+					}
+				} else if jumpDest.kind == TopValue {
+					isBadJump = true
 				}
-			} else if jumpDest.kind == TopValue {
-				return ResolveResult{resolved: false, badJump: &stmt}
 			}
 		}
 	}
@@ -223,11 +245,17 @@ func resolve2(prog *Contract, pc0 int, st0 state2, stmt stmt) ResolveResult {
 		printEdges(edges)
 	}
 
-	return ResolveResult{edges: edges, resolved: true}
+	if isBadJump {
+		return ResolveResult{edges: edges, resolved: false, badJump: &stmt}
+	} else {
+		return ResolveResult{edges: edges, resolved: true, badJump: nil}
+	}
 }
 
-func post2(st0 state2, stmt stmt) state2 {
+func post2(st0 state2, stmt stmt) (state2, error) {
 	st1 := st0.Copy()
+
+	isStackTooShort := false
 
 	if stmt.opcode.IsPush() {
 		valueSet := ValueSet{values: make(map[AbsValue]bool)}
@@ -235,16 +263,21 @@ func post2(st0 state2, stmt stmt) state2 {
 		st1.Push(valueSet)
 	} else if stmt.operation.isDup {
 		valueSet := st1.stack[stmt.operation.opNum-1]
+		isStackTooShort = valueSet.isTop
 		st1.Push(valueSet)
 	} else if stmt.operation.isSwap {
 		opNum := stmt.operation.opNum
 		a := st1.stack[0]
 		b := st1.stack[opNum]
+
+		isStackTooShort =  a.isTop || b.isTop
+
 		st1.stack[0] = b
 		st1.stack[opNum] = a
 	} else {
 		for i := 0; i < stmt.operation.numPop; i++ {
-			st1.Pop()
+			s := st1.Pop()
+			isStackTooShort = isStackTooShort || s.isTop
 		}
 		for i := 0; i < stmt.operation.numPush; i++ {
 			valueSet := ValueSet{values: make(map[AbsValue]bool)}
@@ -253,9 +286,12 @@ func post2(st0 state2, stmt stmt) state2 {
 		}
 	}
 
-	return st1
+	if isStackTooShort {
+		return st1, errors.New("abstract stack too short: reached unmodelled depth")
+	} else {
+		return st1, nil
+	}
 }
-
 
 func leq2(st0 state2, st1 state2) bool {
 	if len(st0.stack) != len(st1.stack) || absStackLen != len(st0.stack) {
@@ -318,11 +354,11 @@ func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]s
 		}
 
 		if badJumps[pc] {
-			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 	aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 	aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(false))
 			fmt.Print(out)
 			badJumpList = append(badJumpList, out)
 		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 			aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc])
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 			aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(true))
 		} else {
 			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", 					aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), valueStr)
 		}
@@ -353,7 +389,7 @@ func AbsIntCfgHarness2(prog *Contract) error {
 
 	var workList []edge
 	{
-		resolution := resolve2(prog, startPC, D[startPC], stmts[startPC])
+		resolution := resolve2(prog, stmts, startPC, D[startPC], stmts[startPC])
 		if !resolution.resolved {
 			fmt.Printf("Unable to resolve at pc=%x\n", startPC)
 			return nil
@@ -389,7 +425,17 @@ func AbsIntCfgHarness2(prog *Contract) error {
 		}
 		preDpc0 := D[e.pc0]
 		preDpc1 := D[e.pc1]
-		post1 := post2(preDpc0, e.stmt)
+		post1, err := post2(preDpc0, e.stmt)
+		if err != nil {
+			if STOP_ON_ERROR  {
+				printAnlyState2(stmts, prevEdgeMap, D, nil)
+				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
+				return nil
+			} else {
+				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
+			}
+		}
+
 		if DEBUG {
 			fmt.Printf("post\t\t%v\n", post1);
 			fmt.Printf("Dprev\t\t%v\n", preDpc1)
@@ -420,12 +466,12 @@ func AbsIntCfgHarness2(prog *Contract) error {
 			}
 			D[e.pc1] = postDpc1
 
-			resolution := resolve2(prog, e.pc1, D[e.pc1], stmts[e.pc1])
+			resolution := resolve2(prog, stmts, e.pc1, D[e.pc1], stmts[e.pc1])
 
 			if !resolution.resolved {
 				badJumps[resolution.badJump.pc] = true
 				fmt.Printf("FAILURE: Unable to resolve: anlyCounter=%v pc=%x\n", aurora.Red(anlyCounter), aurora.Red(e.pc1))
-				if failOnBadJump {
+				if STOP_ON_ERROR {
 					badJumps := make(map[int]bool)
 					badJumps[resolution.badJump.pc] = true
 					printAnlyState2(stmts, prevEdgeMap, D, badJumps)
@@ -465,7 +511,7 @@ func AbsIntCfgHarness2(prog *Contract) error {
 	print("\nFinal resolve....")
 	var finalEdges []edge
 	for pc := 0; pc < codeLen; pc++ {
-		resolution := resolve2(prog, pc, D[pc], stmts[pc])
+		resolution := resolve2(prog, stmts, pc, D[pc], stmts[pc])
 		if !resolution.resolved {
 			badJumps[resolution.badJump.pc] = true
 			fmt.Println("Bad jump found during final resolve.")
