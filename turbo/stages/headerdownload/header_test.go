@@ -245,8 +245,12 @@ func TestPrepend(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if err := hd.addHeaderAsTip(&h1, h1.ParentHash, new(uint256.Int).SetUint64(2000)); err != nil {
-		t.Fatalf("setting up h1: %v", err)
+	if anchor, err := hd.addHeaderAsAnchor(&h1, 256, uint256.Int{}); err == nil {
+		if err := hd.addHeaderAsTip(&h1, anchor, new(uint256.Int).SetUint64(2000)); err != nil {
+			t.Fatalf("setting up h1 (tip): %v", err)
+		}
+	} else {
+		t.Errorf("setting up h1 (anchor): %v", err)
 	}
 	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h2}}, peer); err == nil {
 		if peerPenalty != nil {
@@ -306,8 +310,8 @@ func TestPrepend(t *testing.T) {
 		if !hd.tips[h41.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 1010 + 2010 + 3010)) {
 			t.Errorf("cumulative difficulty of h41 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h41.Hash()].cumulativeDifficulty.ToBig())
 		}
-		if hd.tips[h41.Hash()].anchorParent != h1.ParentHash {
-			t.Errorf("Expected h41 anchorParent to be %x, got %x", h1.ParentHash, hd.tips[h41.Hash()].anchorParent)
+		if hd.tips[h41.Hash()].anchor.hash != h1.Hash() {
+			t.Errorf("Expected h41 anchor to be %x, got %x", h1.Hash(), hd.tips[h41.Hash()].anchor.hash)
 		}
 	} else {
 		t.Errorf("prepend: %v", err)
@@ -389,8 +393,12 @@ func TestPrepend(t *testing.T) {
 	}
 
 	// Introduce h51 as a tip and prepend h6
-	if err := hd.addHeaderAsTip(&h5, h5.ParentHash, new(uint256.Int).SetUint64(10000)); err != nil {
-		t.Fatalf("setting up h5: %v", err)
+	if anchor, err := hd.addHeaderAsAnchor(&h5, 256, uint256.Int{}); err == nil {
+		if err := hd.addHeaderAsTip(&h5, anchor, new(uint256.Int).SetUint64(10000)); err != nil {
+			t.Fatalf("setting up h5 (tip): %v", err)
+		}
+	} else {
+		t.Errorf("setting up h5 (anchor): %v", err)
 	}
 	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h6}}, peer); err == nil {
 		if peerPenalty != nil {
@@ -405,8 +413,8 @@ func TestPrepend(t *testing.T) {
 		if !hd.tips[h6.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(10000 + 5010)) {
 			t.Errorf("cumulative difficulty of h6 expected %d, got %d", 10000+5010, hd.tips[h6.Hash()].cumulativeDifficulty.ToBig())
 		}
-		if hd.tips[h6.Hash()].anchorParent != h5.ParentHash {
-			t.Errorf("Expected h6 anchorParent to be %x, got %x", h5.ParentHash, hd.tips[h6.Hash()].anchorParent)
+		if hd.tips[h6.Hash()].anchor.hash != h5.Hash() {
+			t.Errorf("Expected h6 anchor to be %x, got %x", h5.Hash(), hd.tips[h6.Hash()].anchor.hash)
 		}
 	} else {
 		t.Errorf("prepend: %v", err)
@@ -417,8 +425,12 @@ func TestPrepend(t *testing.T) {
 	h7.Difficulty = big.NewInt(6010)
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
-	if err := hd.addHardCodedTip(10, 5555, h7.Hash(), h7.ParentHash, new(uint256.Int).SetUint64(2000)); err != nil {
-		t.Fatalf("setting up h7: %v", err)
+	if anchor, err := hd.addHeaderAsAnchor(&h7, 256, uint256.Int{}); err == nil {
+		if err := hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, new(uint256.Int).SetUint64(2000)); err != nil {
+			t.Fatalf("setting up h7 (hard-coded tip): %v", err)
+		}
+	} else {
+		t.Fatalf("settings up h7 (anchor): %v", err)
 	}
 
 	// Try to prepend to the hard-coded tip

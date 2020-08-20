@@ -25,7 +25,7 @@ type Anchor struct {
 }
 
 type Tip struct {
-	anchorParent         common.Hash
+	anchor               *Anchor
 	cumulativeDifficulty uint256.Int
 	timestamp            uint64
 	difficulty           uint256.Int
