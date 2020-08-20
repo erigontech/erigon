@@ -28,10 +28,10 @@ func TestManagedTx(t *testing.T) {
 	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
-	dbutils.BucketsCfg[bucket1].IsDupsort = true
+	dbutils.BucketsCfg[bucket1].IsDupSort = true
 	dbutils.BucketsCfg[bucket1].DupFromLen = 6
 	dbutils.BucketsCfg[bucket1].DupToLen = 4
-	dbutils.BucketsCfg[bucket2].IsDupsort = false
+	dbutils.BucketsCfg[bucket2].IsDupSort = false
 
 	writeDBs, readDBs, closeAll := setupDatabases()
 	defer closeAll()
@@ -87,12 +87,12 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(),
 		ethdb.NewLMDB().InMem().MustOpen(),
-		ethdb.NewLMDB().InMem().MustOpen(), // for remote2 db
+		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
+	rdb, _ := ethdb.NewRemote().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],
@@ -110,7 +110,9 @@ func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	return writeDBs, readDBs, func() {
 		grpcServer.Stop()
 
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			panic(err)
+		}
 
 		for _, db := range readDBs {
 			db.Close()
@@ -375,21 +377,21 @@ func TestMultipleBuckets(t *testing.T) {
 		msg := fmt.Sprintf("%T", db)
 		t.Run("FillBuckets "+msg, func(t *testing.T) {
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-				b := tx.Bucket(dbutils.Buckets[0])
+				c := tx.Cursor(dbutils.Buckets[0])
 				for i := uint8(0); i < 10; i++ {
-					require.NoError(t, b.Put([]byte{i}, []byte{i}))
+					require.NoError(t, c.Put([]byte{i}, []byte{i}))
 				}
-				b2 := tx.Bucket(dbutils.Buckets[1])
+				c2 := tx.Cursor(dbutils.Buckets[1])
 				for i := uint8(0); i < 12; i++ {
-					require.NoError(t, b2.Put([]byte{i}, []byte{i}))
+					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
 				}
 
 				// delete from first bucket key 5, then will seek on it and expect to see key 6
-				if err := b.Delete([]byte{5}); err != nil {
+				if err := c.Delete([]byte{5}); err != nil {
 					return err
 				}
 				// delete non-existing key
-				if err := b.Delete([]byte{6, 1}); err != nil {
+				if err := c.Delete([]byte{6, 1}); err != nil {
 					return err
 				}
 
@@ -459,7 +461,7 @@ func TestReadAfterPut(t *testing.T) {
 				}
 
 				for i := uint8(0); i < 10; i++ {
-					v, err := c.Get([]byte{i})
+					v, err := c.SeekExact([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
@@ -470,14 +472,14 @@ func TestReadAfterPut(t *testing.T) {
 				}
 
 				for i := uint8(0); i < 12; i++ {
-					v, err := c2.Get([]byte{i})
+					v, err := c2.SeekExact([]byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
 
 				{
 					require.NoError(t, c2.Delete([]byte{5}))
-					v, err := c2.Get([]byte{5})
+					v, err := c2.SeekExact([]byte{5})
 					require.NoError(t, err)
 					require.Nil(t, v)
 

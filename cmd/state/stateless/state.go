@@ -524,7 +524,6 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	defer w.Flush()
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
-	var processingDone bool
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 
@@ -543,69 +542,6 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 		}); err != nil {
 			return err
 		}
-		/*
-			for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				i++
-				r.HeaderPrefixKey1 = k
-				if r.interrupt(ctx, i, startTime) {
-					return nil
-				}
-
-				timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
-				if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
-					break
-				}
-
-				// skip bucket keys not useful for analysis
-				if !dbutils.IsHeaderHashKey(k) {
-					continue
-				}
-
-				mainHash := make([]byte, len(v))
-				copy(mainHash[:], v[:])
-				if err := r.mainHashes.Put(mainHash, 0); err != nil {
-					return err
-				}
-			}
-
-			fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
-			i = 0
-			for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return fmt.Errorf("loop break: %w", err)
-				}
-				i++
-				r.HeaderPrefixKey2 = k
-				if r.interrupt(ctx, i, startTime) {
-					return nil
-				}
-
-				timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
-				if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
-					continue
-				}
-
-				if !dbutils.IsHeaderKey(k) {
-					continue
-				}
-
-				if _, ok := r.mainHashes.Get(k[common.BlockNumberLength:]); !ok {
-					continue
-				}
-
-				header := new(types.Header)
-				if decodeErr := rlp.Decode(bytes.NewReader(v), header); decodeErr != nil {
-					log.Error("Invalid block header RLP", "blockNum", blockNum, "err", decodeErr)
-					return nil
-				}
-
-				fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
-				blockNum++
-			}*/
-		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)

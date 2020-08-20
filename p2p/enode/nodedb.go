@@ -109,7 +109,7 @@ func newPersistentDB(path string) (*DB, error) {
 	var blob []byte
 	if err := kv.Update(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.InodesBucket)
-		v, errGet := c.Get([]byte(dbVersionKey))
+		v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
 		}
@@ -223,7 +223,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
+		return tx.Cursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
@@ -250,7 +250,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
 	return db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
+		return tx.Cursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
@@ -296,7 +296,7 @@ func (db *DB) UpdateNode(node *Node) error {
 		return err
 	}
 	if err := db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
+		return tx.Cursor(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}

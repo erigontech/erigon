@@ -19,16 +19,16 @@ func RegisterDBAPI(router *gin.RouterGroup, e *Env) error {
 func (e *Env) BucketsStat(c *gin.Context) {
 	sizes := map[string]map[string]common.StorageSize{}
 	for _, name := range dbutils.Buckets {
-		sizes[string(name)] = map[string]common.StorageSize{}
+		sizes[name] = map[string]common.StorageSize{}
 	}
 
 	if err := e.KV.View(context.TODO(), func(tx ethdb.Tx) error {
 		for _, name := range dbutils.Buckets {
-			sz, err := tx.Bucket(name).Size()
+			sz, err := tx.BucketSize(name)
 			if err != nil {
 				return err
 			}
-			sizes[string(name)]["size"] = common.StorageSize(sz)
+			sizes[name]["size"] = common.StorageSize(sz)
 		}
 		return nil
 	}); err != nil {

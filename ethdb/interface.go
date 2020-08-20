@@ -64,18 +64,23 @@ type Deleter interface {
 	Delete(bucket string, key []byte) error
 }
 
+type Closer interface {
+	Close()
+}
+
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
 	Getter
 	Putter
 	Deleter
+	Closer
 
 	// MultiPut inserts or updates multiple entries.
 	// Entries are passed as an array:
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
-	Close()
-	NewBatch() DbWithPendingMutations // starts in-mem batch
+	NewBatch() DbWithPendingMutations       // starts in-mem batch
+	Begin() (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
@@ -87,8 +92,6 @@ type Database interface {
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)
 	TruncateAncients(items uint64) error
-
-	ID() uint64
 }
 
 // MinDatabase is a minimalistic version of the Database interface.

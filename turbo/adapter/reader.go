@@ -1,32 +1,21 @@
-package commands
+package adapter
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
-
 	"github.com/holiman/uint256"
-	"github.com/petar/GoLLRB/llrb"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"golang.org/x/net/context"
+	"github.com/petar/GoLLRB/llrb"
 )
-
-type storageItem struct {
-	key, seckey common.Hash
-	value       uint256.Int
-}
-
-func (a *storageItem) Less(b llrb.Item) bool {
-	bi := b.(*storageItem)
-	return bytes.Compare(a.key[:], bi.key[:]) < 0
-}
 
 type StateReader struct {
 	accountReads map[common.Address]struct{}
@@ -237,4 +226,24 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		return results < maxResults
 	})
 	return nil
+}
+
+type storageItem struct {
+	key, seckey common.Hash
+	value       uint256.Int
+}
+
+func (a *storageItem) Less(b llrb.Item) bool {
+	bi := b.(*storageItem)
+	return bytes.Compare(a.key[:], bi.key[:]) < 0
+}
+
+// computeIntraBlockState retrieves the state database associated with a certain block.
+// If no state is locally available for the given block, a number of blocks are
+// attempted to be reexecuted to generate the desired state.
+func ComputeIntraBlockState(chainKV ethdb.KV, block *types.Block) (*state.IntraBlockState, *StateReader) {
+	// If we have the state fully available, use that
+	reader := NewStateReader(chainKV, block.NumberU64())
+	statedb := state.New(reader)
+	return statedb, reader
 }

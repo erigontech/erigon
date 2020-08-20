@@ -81,9 +81,7 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 	{
 		Name: "ETHASH",
 		Flags: []cli.Flag{
-			utils.EthashCacheDirFlag,
 			utils.EthashCachesInMemoryFlag,
-			utils.EthashCachesOnDiskFlag,
 			utils.EthashCachesLockMmapFlag,
 			utils.EthashDatasetDirFlag,
 			utils.EthashDatasetsInMemoryFlag,
@@ -113,6 +111,8 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
 			utils.CacheTrieFlag,
+			utils.CacheTrieJournalFlag,
+			utils.CacheTrieRejournalFlag,
 			utils.CacheGCFlag,
 			utils.CacheNoPrefetchFlag,
 			utils.TrieCacheGenFlag,
@@ -146,8 +146,6 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.WSApiFlag,
 			utils.WSAllowedOriginsFlag,
 			utils.GraphQLEnabledFlag,
-			utils.GraphQLListenAddrFlag,
-			utils.GraphQLPortFlag,
 			utils.GraphQLCORSDomainFlag,
 			utils.GraphQLVirtualHostsFlag,
 			utils.RPCGlobalGasCap,
@@ -233,6 +231,8 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.LegacyWSApiFlag,
 			utils.LegacyGpoBlocksFlag,
 			utils.LegacyGpoPercentileFlag,
+			utils.LegacyGraphQLListenAddrFlag,
+			utils.LegacyGraphQLPortFlag,
 		}, debug.DeprecatedFlags...),
 	},
 	{

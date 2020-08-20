@@ -43,6 +43,8 @@ import (
 	"github.com/hashicorp/golang-lru/simplelru"
 )
 
+const doNotStoreCachesOnDisk = ""
+
 var ErrInvalidDumpMagic = errors.New("invalid dump magic")
 
 var (
@@ -50,7 +52,7 @@ var (
 	two256 = new(big.Int).Exp(big.NewInt(2), big.NewInt(256), big.NewInt(0))
 
 	// sharedEthash is a full instance that can be shared between multiple users.
-	sharedEthash = New(Config{"", 3, 0, false, "", 1, 0, false, ModeNormal, nil}, nil, false)
+	sharedEthash = New(Config{3, false, "", 1, 0, false, ModeNormal, nil}, nil, false)
 
 	// algorithmRevision is the data structure version used for file naming.
 	algorithmRevision = 23
@@ -403,9 +405,7 @@ const (
 
 // Config are the configuration parameters of the ethash.
 type Config struct {
-	CacheDir         string
 	CachesInMem      int
-	CachesOnDisk     int
 	CachesLockMmap   bool
 	DatasetDir       string
 	DatasetsInMem    int
@@ -450,9 +450,6 @@ func New(config Config, notify []string, noverify bool) *Ethash {
 	if config.CachesInMem <= 0 {
 		config.Log.Warn("One ethash cache must always be in memory", "requested", config.CachesInMem)
 		config.CachesInMem = 1
-	}
-	if config.CacheDir != "" && config.CachesOnDisk > 0 {
-		config.Log.Info("Disk storage enabled for ethash caches", "dir", config.CacheDir, "count", config.CachesOnDisk)
 	}
 	if config.DatasetDir != "" && config.DatasetsOnDisk > 0 {
 		config.Log.Info("Disk storage enabled for ethash DAGs", "dir", config.DatasetDir, "count", config.DatasetsOnDisk)
@@ -560,12 +557,12 @@ func (ethash *Ethash) cache(block uint64) *cache {
 	current := currentI.(*cache)
 
 	// Wait for generation finish.
-	current.generate(ethash.config.CacheDir, ethash.config.CachesOnDisk, ethash.config.CachesLockMmap, ethash.config.PowMode == ModeTest)
+	current.generate(doNotStoreCachesOnDisk, 0, ethash.config.CachesLockMmap, ethash.config.PowMode == ModeTest)
 
 	// If we need a new future cache, now's a good time to regenerate it.
 	if futureI != nil {
 		future := futureI.(*cache)
-		go future.generate(ethash.config.CacheDir, ethash.config.CachesOnDisk, ethash.config.CachesLockMmap, ethash.config.PowMode == ModeTest)
+		go future.generate(doNotStoreCachesOnDisk, 0, ethash.config.CachesLockMmap, ethash.config.PowMode == ModeTest)
 	}
 	return current
 }
@@ -658,7 +655,7 @@ func (ethash *Ethash) Hashrate() float64 {
 }
 
 // APIs implements consensus.Engine, returning the user facing RPC APIs.
-func (ethash *Ethash) APIs(chain consensus.ChainReader) []rpc.API {
+func (ethash *Ethash) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	// In order to ensure backward compatibility, we exposes ethash RPC APIs
 	// to both eth and ethash namespaces.
 	return []rpc.API{

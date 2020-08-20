@@ -32,11 +32,11 @@ type IndexGenerator struct {
 }
 
 func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
-	v, ok := changeset.Mapper[string(changeSetBucket)]
+	v, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
+	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
@@ -59,12 +59,12 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Debug("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
+	log.Debug("Index generation successfully finished", "csbucket", changeSetBucket, "it took", time.Since(t))
 	return nil
 }
 
 func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) error {
-	vv, ok := changeset.Mapper[string(changeSetBucket)]
+	vv, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
@@ -122,28 +122,36 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 			return err
 		}
 	}
+	mutation := ig.db.NewBatch()
 
 	for key, value := range historyEffects {
 		if value == nil {
-			if err := ig.db.Delete(vv.IndexBucket, []byte(key)); err != nil {
+			if err := mutation.Delete(vv.IndexBucket, []byte(key)); err != nil {
 				return err
 			}
 		} else {
-			if err := ig.db.Put(vv.IndexBucket, []byte(key), value); err != nil {
+			if err := mutation.Put(vv.IndexBucket, []byte(key), value); err != nil {
 				return err
 			}
 		}
+		if mutation.BatchSize() >= mutation.IdealBatchSize() {
+			_, err := mutation.Commit()
+			if err != nil {
+				return err
+			}
+			mutation = ig.db.NewBatch()
+		}
 	}
-	return nil
+	_, err := mutation.Commit()
+	return err
 }
 
 func (ig *IndexGenerator) DropIndex(bucket string) error {
 	casted, ok := ig.db.(ethdb.NonTransactional)
 	if !ok {
 		return errors.New("imposible to drop")
-
 	}
-	log.Warn("Remove bucket", "bucket", string(bucket))
+	log.Warn("Remove bucket", "bucket", bucket)
 	return casted.ClearBuckets(bucket)
 }
 

@@ -20,14 +20,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type trieHasher interface {
@@ -162,7 +163,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		if len(k) > 32 {
 			return true, nil
 		}
-		fmt.Printf("Got account %x\n", k)
+		//fmt.Printf("Got account %x\n", k)
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
@@ -170,8 +171,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
+			Root:     strings.TrimPrefix(common.Bytes2Hex(emptyHash[:]), "0x"), // We cannot provide historical storage hash
+			CodeHash: strings.TrimPrefix(common.Bytes2Hex(emptyCodeHash[:]), "0x"),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
@@ -181,9 +182,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		numberOfResults++
 		return true, nil
 	})
-
-	fmt.Printf("Number of accounts: %d\n", numberOfResults)
-
 	if err != nil {
 		return nil, err
 	}
@@ -207,31 +205,35 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
-					fmt.Println(addrHash.String(), "code hash with err", codeHash, common.Bytes2Hex(codeHash))
-					spew.Dump(account)
 					return nil, err
 				}
 				account.Code = common.Bytes2Hex(code)
 			}
 		}
+
 		if !excludeStorage {
+			t := trie.New(common.Hash{})
 			err = WalkAsOf(d.db,
-				dbutils.PlainStateBucket,
+				stateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
 				8*(common.AddressLength+common.IncarnationLength),
 				d.blockNumber,
 				func(ks, vs []byte) (bool, error) {
 					account.Storage[common.BytesToHash(ks[common.AddressLength:]).String()] = common.Bytes2Hex(vs)
+					h, _ := common.HashData(ks[common.AddressLength:])
+					t.Update(h.Bytes(), common.CopyBytes(vs))
 					return true, nil
 				})
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
 			}
 			fmt.Printf("Got walk storage for : %x\n", storagePrefix)
+			account.Root = t.Hash().String()
 		}
 		c.OnAccount(addrHash, *account)
 	}
+
 	return nextKey, nil
 }
 

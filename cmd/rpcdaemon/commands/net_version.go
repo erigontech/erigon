@@ -2,8 +2,13 @@ package commands
 
 import (
 	"context"
+	"strconv"
 )
 
-func (api *APIImpl) NetVersion(_ context.Context) uint64 {
-	return api.ethBackend.NetVersion()
+func (api *NetAPIImpl) Version(_ context.Context) (string, error) {
+	res, err := api.ethBackend.NetVersion()
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatUint(res, 10), nil
 }
