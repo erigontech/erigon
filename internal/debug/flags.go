@@ -24,12 +24,12 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/fjl/memsize/memsizeui"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/exp"
-
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
@@ -217,6 +217,10 @@ func SetupCobra(cmd *cobra.Command) error {
 	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
 	if err != nil {
 		return err
+	}
+
+	if metrics.Enabled {
+		go metrics.CollectProcessMetrics(3 * time.Second) // Start system runtime metrics collection
 	}
 
 	if metrics.Enabled && metricsAddr != "" {

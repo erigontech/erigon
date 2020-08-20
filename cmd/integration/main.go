@@ -9,10 +9,6 @@ import (
 
 func main() {
 	rootCmd := commands.RootCommand()
-	if err := utils.SetupCobra(rootCmd); err != nil {
-		panic(err)
-	}
-	defer utils.StopDebug()
 
 	if err := rootCmd.ExecuteContext(utils.RootContext()); err != nil {
 		fmt.Println(err)
