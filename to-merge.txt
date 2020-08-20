@@ -165,23 +165,3 @@ Date:   Thu Aug 20 13:01:24 2020 +0300
     * core, eth/downloader: fix review comments
     
     * core: revert a removed recovery mechanism
-
-commit 0bdd295cc0065e0f61e595ada4d3abe58f35c448
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Thu Aug 20 09:49:35 2020 +0200
-
-    core: more detailed metering for reorgs (#21420)
-
-commit 7ebc6c43ff5907117a4c5a097ccaca9df9a10b98
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Aug 19 11:31:13 2020 +0200
-
-    cmd/evm: statet8n output folder + tx hashes on trace filenames (#21406)
-    
-    * t8ntool: add output basedir
-    
-    * t8ntool: add txhash to trace filename
-    
-    * t8ntool: don't default to '.' basedir, allow absolute paths
-
-
