@@ -12,6 +12,10 @@ var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for turbo-geth",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if err := utils.SetupCobra(cmd); err != nil {
+			panic(err)
+		}
+
 		if len(chaindata) > 0 {
 			db := ethdb.MustOpen(chaindata)
 			defer db.Close()
@@ -19,6 +23,9 @@ var rootCmd = &cobra.Command{
 				panic(err)
 			}
 		}
+	},
+	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		defer utils.StopDebug()
 	},
 }
 
