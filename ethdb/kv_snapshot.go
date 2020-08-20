@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+)
+
+var (
+	_ KV = &SnapshotKV{}
+	_ Tx = &snapshotTX{}
+	_ Cursor = &snapshotCursor{}
 )
 
 
@@ -58,11 +63,11 @@ func (s SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 		}
 		s.snapshotDB=snapshotDB
 	}
-	snTx, err:=s.snapshotDB.Begin(ctx, false)
+	snTx, err:=s.snapshotDB.Begin(ctx, nil,false)
 	if err!=nil {
 		return err
 	}
-	dbTx,err:=s.db.Begin(ctx, false)
+	dbTx,err:=s.db.Begin(ctx, nil, false)
 	if err!=nil {
 		return err
 	}
@@ -88,11 +93,11 @@ func (s SnapshotKV) Close() {
 	}
 }
 
-func (s SnapshotKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+func (s SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
 	if !writable {
 
 	}
-	return s.db.Begin(ctx,writable)
+	return s.db.Begin(ctx, parentTx, writable)
 }
 
 func (s SnapshotKV) IdealBatchSize() int {
@@ -105,17 +110,6 @@ type snapshotTX struct {
 }
 
 
-func (s *snapshotTX) Bucket(name []byte) Bucket {
-	if bytes.Equal(name, dbutils.HeadHeaderKey) ||
-		bytes.Equal(name, dbutils.HeaderPrefix) ||
-		bytes.Equal(name, dbutils.HeaderNumberPrefix) {
-		return &snapshotBucket{
-			dbBucket: s.dbTX.Bucket(name),
-			snBucket: s.snTX.Bucket(name),
-		}
-	}
-	return s.dbTX.Bucket(name)
-}
 
 func (s *snapshotTX) Commit(ctx context.Context) error {
 	defer s.snTX.Rollback()
@@ -126,52 +120,63 @@ func (s *snapshotTX) Rollback() {
 	defer s.snTX.Rollback()
 	defer s.dbTX.Rollback()
 }
-
-type snapshotBucket struct {
-	dbBucket Bucket
-	snBucket Bucket
+func (s *snapshotTX) Cursor(bucket string) Cursor {
+	panic("implement me")
 }
 
-func (s *snapshotBucket) Get(key []byte) (val []byte, err error) {
-	v,err:=s.dbBucket.Get(key)
+func (s *snapshotTX) Get(bucket string, key []byte) (val []byte, err error) {
+	v,err:=s.snTX.Get(bucket, key)
 	if err==nil && v!=nil {
 		return v, nil
 	} else if err!=ErrKeyNotFound {
 		return nil, err
 	}
-	return s.snBucket.Get(key)
+	return s.dbTX.Get(bucket, key)
+
 }
 
-func (s *snapshotBucket) Put(key []byte, value []byte) error {
-	return s.dbBucket.Put(key, value)
-}
-
-func (s *snapshotBucket) Delete(key []byte) error {
-	return s.dbBucket.Delete(key)
-}
-
-func (s *snapshotBucket) Cursor() Cursor {
-	return &snapshotCursor{
-		snCursor: s.snBucket.Cursor(),
-		dbCursor: s.dbBucket.Cursor(),
-	}
-}
-
-func (s *snapshotBucket) Size() (uint64, error) {
-	dbSize,err:=s.dbBucket.Size()
+func (s *snapshotTX) BucketSize(name string) (uint64, error) {
+	dbSize,err:=s.snTX.BucketSize(name)
 	if err!=nil {
 		return 0, fmt.Errorf("db err %w", err)
 	}
-	snSize,err:=s.snBucket.Size()
+	snSize,err:=s.dbTX.BucketSize(name)
 	if err!=nil {
 		return 0, fmt.Errorf("Snapshot db err %w", err)
 	}
 	return dbSize+snSize, nil
+
 }
 
-func (s *snapshotBucket) Clear() error {
-	return s.dbBucket.Clear()
-}
+
+
+
+
+
+
+//func (s *snapshotTX) Bucket(name []byte) Bucket {
+//	if bytes.Equal(name, dbutils.HeadHeaderKey) ||
+//		bytes.Equal(name, dbutils.HeaderPrefix) ||
+//		bytes.Equal(name, dbutils.HeaderNumberPrefix) {
+//		return &snapshotBucket{
+//			dbBucket: s.dbTX.Bucket(name),
+//			snBucket: s.snTX.Bucket(name),
+//		}
+//	}
+//	return s.dbTX.Bucket(name)
+//}
+
+
+//func (s *snapshotBucket) Cursor() Cursor {
+//	return &snapshotCursor{
+//		snCursor: s.snBucket.Cursor(),
+//		dbCursor: s.dbBucket.Cursor(),
+//	}
+//}
+
+//func (s *snapshotBucket) Clear() error {
+//	return s.dbBucket.Clear()
+//}
 
 type snapshotCursor struct {
 	snCursor Cursor
@@ -241,14 +246,24 @@ func (s *snapshotCursor) Walk(walker func(k []byte, v []byte) (bool, error)) err
 }
 
 func (s *snapshotCursor) Put(key []byte, value []byte) error {
+	//return s.dbBucket.Put(key, value)
 	panic("implement me")
 }
 
 func (s *snapshotCursor) Delete(key []byte) error {
+	//return s.dbBucket.Delete(key)
 	panic("implement me")
 }
 
 func (s *snapshotCursor) Append(key []byte, value []byte) error {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) Last() ([]byte, []byte, error) {
 	panic("implement me")
 }
 

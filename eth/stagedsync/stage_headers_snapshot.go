@@ -42,7 +42,7 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 				return false, err
 			}
 			//write blocknum to header hash index
-			tuple = append(tuple, dbutils.HeaderNumberPrefix, dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes())
+			tuple = append(tuple, []byte(dbutils.HeaderNumberPrefix), dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes())
 			td = td.Add(td, header.Difficulty)
 			td, err := rlp.EncodeToBytes(td)
 			if err != nil {
@@ -50,9 +50,9 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 				return false, err
 			}
 			//write header number to td index
-			tuple=append(tuple,dbutils.HeaderPrefix, dbutils.HeaderTDKey(header.Number.Uint64(), header.Hash()), td)
+			tuple=append(tuple,[]byte(dbutils.HeaderPrefix), dbutils.HeaderTDKey(header.Number.Uint64(), header.Hash()), td)
 			//write canonical
-			tuple=append(tuple,dbutils.HeaderPrefix, dbutils.HeaderHashKey(header.Number.Uint64()), header.Hash().Bytes())
+			tuple=append(tuple,[]byte(dbutils.HeaderPrefix), dbutils.HeaderHashKey(header.Number.Uint64()), header.Hash().Bytes())
 			i++
 			if i%toCommit==0 {
 				currentKey=common.CopyBytes(k)

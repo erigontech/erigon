@@ -23,6 +23,7 @@ var (
 )
 
 func TestName(t *testing.T) {
+	t.Skip()
 	dd1:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd1"
 	dd2:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd2"
 	os.RemoveAll(dd1)
@@ -225,6 +226,7 @@ func TestName(t *testing.T) {
 
 
 func TestName2(t *testing.T) {
+	t.Skip()
 	cfg:=torrent.NewDefaultClientConfig()
 	cfg.DataDir = "/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd3"
 	cfg.Debug=false
@@ -244,6 +246,8 @@ func TestName2(t *testing.T) {
 }
 
 func TestName4(t *testing.T) {
+	t.Skip()
+
 	dd1:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd1"
 	dd2:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd2"
 	os.RemoveAll(dd1)
