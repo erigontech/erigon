@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -105,10 +106,27 @@ func extractBucketIntoFiles(
 	extractFunc ExtractFunc,
 	quit <-chan struct{},
 ) error {
+
+	i := 0
+	putTimer := time.Now()
+	var m runtime.MemStats
+
 	if err := db.Walk(bucket, startkey, fixedBits, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
+		i++
+		i, putTimer = printProgressIfNeeded(i, putTimer, k, func(progress int) {
+			runtime.ReadMemStats(&m)
+			log.Info(
+				"ETL [1/2] Extracting",
+				"from", bucket,
+				"keys", fmt.Sprintf("%.1fM", float64(i)/1_000_000),
+				"progress", progress, // extracting is the first stage, from 0..50
+				"current key", makeCurrentKeyStr(k),
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC),
+			)
+		})
 		if endkey != nil && bytes.Compare(k, endkey) > 0 {
 			return false, nil
 		}

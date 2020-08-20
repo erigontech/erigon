@@ -121,19 +121,20 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
+
 		i++
-		if i%1_000_000 == 0 && time.Since(putTimer) > 30*time.Second {
-			putTimer = time.Now()
+		i, putTimer = printProgressIfNeeded(i, putTimer, k, func(progress int) {
 			runtime.ReadMemStats(&m)
 			log.Info(
-				"Loading into bucket",
-				"bucket", bucket,
+				"ETL [2/2] Loading",
+				"into", bucket,
 				"size", common.StorageSize(batch.BatchSize()),
 				"keys", fmt.Sprintf("%.1fM", float64(i)/1_000_000),
+				"progress", progress+50, // loading is the second stage, from 50..100
 				"use append", canUseAppend,
 				"current key", makeCurrentKeyStr(originalK),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-		}
+		})
 
 		if canUseAppend && len(v) == 0 {
 			return nil // nothing to delete after end of bucket
