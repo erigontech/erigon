@@ -237,10 +237,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		"gen IH", generationIHTook,
 	)
 
-	if err := collector.Load(tx, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if _, err := tx.Commit(); err != nil {
 		return err
 	}
-	if _, err := tx.Commit(); err != nil {
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -312,10 +312,11 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		"root hash", subTries.Hashes[0].Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(tx, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if _, err := tx.Commit(); err != nil {
 		return err
 	}
-	if _, err := tx.Commit(); err != nil {
+
+	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
