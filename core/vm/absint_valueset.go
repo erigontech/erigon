@@ -22,6 +22,7 @@ var STOP_ON_ERROR = true
 
 //////////////////////////
 
+// stmt is the representation of an executable instruction - extension of an opcode
 type stmt struct {
 	pc             int
 	opcode         OpCode
@@ -333,6 +334,7 @@ func (state *state2) Pop() ValueSet {
 	return res
 }
 
+// botState generates initial state which is a stack of "bottom" values
 func botState() state2 {
 	st := EmptyState2()
 	st.stack = make([]ValueSet, absStackLen)
@@ -359,6 +361,10 @@ type ResolveResult struct {
 	badJump *stmt
 }
 
+// resolve analyses given executable instruction at given program counter in the context of given state
+// It either concludes that the execution of the instruction may result in a jump to an unpredictable
+// destination (in this case, attrubute resolved will be false), or returns one (for a non-JUMPI) or two (for JUMPI)
+// edges that contain program counters of destinations where the executions can possibly come next
 func resolve2(prog *Contract, stmts []stmt, pc0 int, st0 state2, stmt stmt) ResolveResult {
 	if !stmt.operation.valid || stmt.ends {
 		return ResolveResult{resolved: true}
