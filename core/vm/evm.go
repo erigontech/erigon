@@ -167,9 +167,7 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 		panic("No supported ewasm interpreter yet.")
 	}
 
-	if vmConfig.EVMInterpreter == "SaInterpreter" {
-		evm.interpreters = append(evm.interpreters, NewSaInterpreter(evm, vmConfig))
-	} else if vmConfig.EVMInterpreter != "" {
+	if vmConfig.EVMInterpreter != "" {
 		InitEVMCEVM(vmConfig.EVMInterpreter)
 		evm.interpreters = append(evm.interpreters, &EVMC{evmModule, evm, evmc.CapabilityEVM1, false})
 	} else {
