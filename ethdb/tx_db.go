@@ -19,7 +19,7 @@ import (
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
 	db      Database
-	tx      Tx
+	Tx      Tx
 	cursors map[string]*LmdbCursor
 	len     uint64
 }
@@ -30,7 +30,7 @@ func (m *TxDb) Close() {
 
 func (m *TxDb) Begin() (DbWithPendingMutations, error) {
 	batch := &TxDb{db: m.db, cursors: map[string]*LmdbCursor{}}
-	if err := batch.begin(m.tx); err != nil {
+	if err := batch.begin(m.Tx); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -63,7 +63,7 @@ func (m *TxDb) begin(parent Tx) error {
 	if err != nil {
 		return err
 	}
-	m.tx = tx
+	m.Tx = tx
 	for i := range dbutils.Buckets {
 		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
 		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
@@ -127,7 +127,7 @@ func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
 }
 
 func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
-	return 0, MultiPut(m.tx, tuples...)
+	return 0, MultiPut(m.Tx, tuples...)
 }
 
 func MultiPut(tx Tx, tuples ...[]byte) error {
@@ -282,30 +282,26 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 }
 
 func (m *TxDb) Commit() (uint64, error) {
-	if m.tx == nil {
+	if m.Tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}
-	if err := m.tx.Commit(context.Background()); err != nil {
+	if err := m.Tx.Commit(context.Background()); err != nil {
 		return 0, err
 	}
-	m.tx = nil
+	m.Tx = nil
 	m.cursors = nil
 	m.len = 0
 	return 0, nil
 }
 
 func (m *TxDb) Rollback() {
-	if m.tx == nil {
+	if m.Tx == nil {
 		return
 	}
-	m.tx.Rollback()
+	m.Tx.Rollback()
 	m.cursors = nil
-	m.tx = nil
+	m.Tx = nil
 	m.len = 0
-}
-
-func (m *TxDb) Tx() Tx {
-	return m.tx
 }
 
 func (m *TxDb) Keys() ([][]byte, error) {
