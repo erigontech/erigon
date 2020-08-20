@@ -1,9 +1,9 @@
 package ethdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -121,14 +121,17 @@ func (s *snapshotTX) Rollback() {
 	defer s.dbTX.Rollback()
 }
 func (s *snapshotTX) Cursor(bucket string) Cursor {
-	panic("implement me")
+	return &snapshotCursor{
+				snCursor: s.snTX.Cursor(bucket),
+				dbCursor: s.dbTX.Cursor(bucket),
+			}
 }
 
 func (s *snapshotTX) Get(bucket string, key []byte) (val []byte, err error) {
 	v,err:=s.snTX.Get(bucket, key)
 	if err==nil && v!=nil {
 		return v, nil
-	} else if err!=ErrKeyNotFound {
+	} else if err!=nil && err!=ErrKeyNotFound {
 		return nil, err
 	}
 	return s.dbTX.Get(bucket, key)
@@ -212,7 +215,7 @@ func (s *snapshotCursor) First() ([]byte, []byte, error) {
 
 func (s *snapshotCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	var err error
-	s.lastSNDBKey, s.lastDBVal, err = s.snCursor.Seek(seek)
+	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Seek(seek)
 	if err!=nil {
 		return nil, nil, err
 	}
@@ -220,7 +223,7 @@ func (s *snapshotCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err!=nil {
 		return nil, nil, err
 	}
-	cmp, br:=keyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br:=common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
 	if br {
 		return nil,nil,nil
 	}
@@ -238,7 +241,31 @@ func (s *snapshotCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 }
 
 func (s *snapshotCursor) Next() ([]byte, []byte, error) {
-	panic("implement me")
+	var err error
+	if s.keyCmp>=0 {
+		s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Next()
+	}
+	if err!=nil {
+		return nil, nil, err
+	}
+	if s.keyCmp<=0 {
+		s.lastDBKey, s.lastDBVal, err = s.dbCursor.Next()
+	}
+	if err!=nil {
+		return nil, nil, err
+	}
+
+	cmp, br:=common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	if br {
+		return nil,nil,nil
+	}
+
+	s.keyCmp=cmp
+	if cmp <=0 {
+		return s.lastDBKey, s.lastDBVal, nil
+	} else {
+		return s.lastSNDBKey, s.lastSNDBVal, nil
+	}
 }
 
 func (s *snapshotCursor) Walk(walker func(k []byte, v []byte) (bool, error)) error {
@@ -246,17 +273,15 @@ func (s *snapshotCursor) Walk(walker func(k []byte, v []byte) (bool, error)) err
 }
 
 func (s *snapshotCursor) Put(key []byte, value []byte) error {
-	//return s.dbBucket.Put(key, value)
-	panic("implement me")
+	return s.dbCursor.Put(key, value)
 }
 
 func (s *snapshotCursor) Delete(key []byte) error {
-	//return s.dbBucket.Delete(key)
-	panic("implement me")
+	return s.dbCursor.Delete(key)
 }
 
 func (s *snapshotCursor) Append(key []byte, value []byte) error {
-	panic("implement me")
+	return s.dbCursor.Append(key, value)
 }
 
 func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
@@ -268,18 +293,6 @@ func (s *snapshotCursor) Last() ([]byte, []byte, error) {
 }
 
 
-func keyCmp(key1, key2 []byte) (int, bool) {
-	switch {
-	case key1 == nil && key2 == nil:
-		return 0, true
-	case key1 == nil && key2 != nil:
-		return 1, false
-	case key1 != nil && key2 == nil:
-		return -1, false
-	default:
-		return bytes.Compare(key1, key2), false
-	}
-}
 /*
 number=10487424
 

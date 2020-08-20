@@ -28,7 +28,7 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 	for {
 		stop:=true
 		err:=db.Walk(dbutils.HeaderPrefix,currentKey, 0, func(k []byte, v []byte) (bool, error) {
-			fmt.Println(string(k), common.Bytes2Hex(k))
+			fmt.Println(common.Bytes2Hex(k), len(k), v)
 			if bytes.Equal(k, currentKey) {
 				return true, nil
 			}
@@ -42,7 +42,7 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 				return false, err
 			}
 			//write blocknum to header hash index
-			tuple = append(tuple, []byte(dbutils.HeaderNumberPrefix), dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes())
+			tuple = append(tuple, []byte(dbutils.HeaderNumberPrefix), header.Hash().Bytes(), dbutils.EncodeBlockNumber(header.Number.Uint64()))
 			td = td.Add(td, header.Difficulty)
 			td, err := rlp.EncodeToBytes(td)
 			if err != nil {

@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -18,13 +19,14 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	defer os.RemoveAll(snPath)
 	headers:=generateHeaders(10)
 	err:=snVK.Update(context.Background(), func(tx ethdb.Tx) error {
-		b:=tx.Bucket(dbutils.HeaderPrefix)
+		fmt.Println("Update")
 		for _,header:=range headers {
 			headerBytes,err:=rlp.EncodeToBytes(header)
 			if err!=nil {
 				panic(err)
 			}
-			err = b.Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			fmt.Println("Put", header.Number, len(headerBytes))
+			err = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if err!=nil {
 				panic(err)
 			}
@@ -47,6 +49,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	for i, header:=range headers {
 		td=td.Add(td, header.Difficulty)
 		canonical:=rawdb.ReadCanonicalHash(snDB,header.Number.Uint64())
+		fmt.Println(canonical)
 		if canonical!=header.Hash() {
 			t.Error(i, "canonical not correct", canonical)
 		}
