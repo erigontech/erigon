@@ -201,10 +201,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}
 
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
-	batch, err := stateDB.Begin()
-	if err != nil {
-		return err
-	}
+	batch := stateDB.NewBatch()
 	defer batch.Rollback()
 
 	rewindFunc := ethdb.RewindDataPlain
@@ -216,7 +213,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	writeAccountFunc := writeAccountPlain
 	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, err := rewindFunc(batch, s.BlockNumber, u.UnwindPoint)
+	accountMap, storageMap, err := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
 	if err != nil {
 		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
 	}
@@ -229,7 +226,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashFunc(&acc, batch, key)
+			recoverCodeHashFunc(&acc, stateDB, key)
 			if err = writeAccountFunc(batch, key, acc); err != nil {
 				return err
 			}
