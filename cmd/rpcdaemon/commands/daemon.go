@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -34,7 +33,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.API) []rpc.API {
-	var rpcAPI []rpc.API
+	var defaultAPIList []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
 	apiImpl := NewAPI(db, dbReader, eth, cfg.Gascap)
@@ -44,32 +43,29 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
 		case "eth":
-			rpcAPI = append(rpcAPI, rpc.API{
+			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "eth",
 				Public:    true,
 				Service:   EthAPI(apiImpl),
 				Version:   "1.0",
 			})
 		case "debug":
-			rpcAPI = append(rpcAPI, rpc.API{
+			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "debug",
 				Public:    true,
 				Service:   PrivateDebugAPI(dbgAPIImpl),
 				Version:   "1.0",
 			})
 		case "net":
-			rpcAPI = append(rpcAPI, rpc.API{
+			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "net",
 				Public:    true,
 				Service:   NetAPI(netImpl),
 				Version:   "1.0",
 			})
 
-		default:
-			// TODO: enable validation after checking customApiList
-			//log.Error("Unrecognised", "api", enabledAPI)
 		}
 	}
 
-	return append(rpcAPI, customApiList...)
+	return append(defaultAPIList, customApiList...)
 }
