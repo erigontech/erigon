@@ -6,7 +6,10 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/docker/docker/pkg/fileutils"
+	"github.com/stretchr/testify/require"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -42,10 +45,10 @@ func TestName(t *testing.T) {
 	//cfg1.Logger = cfg1.Logger.FilterLevel(log.Debug).WithText(func(msg log.Msg) string {
 	//	return "seeder " + msg.String()
 	//})
-	//cfg1.Seed=true
+	cfg1.Seed=true
 	//cfg1.Debug=true
-	//cfg1.NoDHT=true
-	//cfg1.DisableTrackers = true
+	cfg1.NoDHT=true
+	cfg1.DisableTrackers = true
 	//cfg1.NoDefaultPortForwarding = true
 	//cfg1.DisableAcceptRateLimiting = true
 
@@ -64,6 +67,7 @@ func TestName(t *testing.T) {
 	cfg2.DisableTrackers = true
 	cfg2.NoDefaultPortForwarding = true
 	cfg2.DisableAcceptRateLimiting = true
+	cfg2.DisableTrackers=true
 	cfg2.ListenPort = 0
 
 	//cfg2.PublicIp4=net.IP{127,0,0,1}
@@ -82,7 +86,7 @@ func TestName(t *testing.T) {
 	//
 	//cfg2.Seed=true
 	//cfg2.Debug=true
-	//cfg2.NoDHT=true
+	cfg2.NoDHT=true
 	//cfg2.DisableTrackers = true
 	//cfg2.NoDefaultPortForwarding = true
 	//cfg2.DisableAcceptRateLimiting = true
@@ -94,47 +98,51 @@ func TestName(t *testing.T) {
 	}
 	defer c2.Close()
 
-
-	mi := metainfo.MetaInfo{
-		//AnnounceList: builtinAnnounceList,
-	}
-	mi.SetDefaults()
-	mi.Comment = "lib test"
-	mi.CreatedBy = "tg"
-
-	info := metainfo.Info{
-		PieceLength: 256 * 1024,
-	}
-	err = info.BuildFromFilePath("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spew.Dump(info)
-
-	mi.InfoBytes, err = bencode.Marshal(info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trn,err:=c.AddTorrent(&mi)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println("Seeding", trn.Seeding())
+	time.Sleep(time.Second)
+	fmt.Println("make magnet+")
+	magnet:=makeMagnet(t, c, "/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir", "eln.zip")
+	fmt.Println("make magnet-")
+	//mi := metainfo.MetaInfo{
+	//	//AnnounceList: builtinAnnounceList,
+	//}
+	//mi.SetDefaults()
+	//mi.Comment = "lib test"
+	//mi.CreatedBy = "tg"
+	//
+	//info := metainfo.Info{
+	//	PieceLength: 256 * 1024,
+	//}
+	//err = info.BuildFromFilePath("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir/")
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//spew.Dump(info)
+	//
+	//mi.InfoBytes, err = bencode.Marshal(info)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//trn,err:=c.AddTorrent(&mi)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//trn.VerifyData()
+	//fmt.Println("Seeding", trn.Seeding())
 
 	//str:=storage.NewFile("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir")
 	//trn,new:=c.AddTorrentInfoHashWithStorage(metainfo.Hash{},str)
 
 	//fmt.Println("is new", new)
-	<-trn.GotInfo()
+	//<-trn.GotInfo()
 
-	time.Sleep(time.Second*10)
-	//fmt.Println(trn.)
-	fmt.Println("after sleep")
-	m2:=mi.Magnet("state trnt", mi.HashInfoBytes())
-	//t.Log(m)
-	t.Log(m2)
+	//time.Sleep(time.Second*10)
+	////fmt.Println(trn.)
+	//fmt.Println("after sleep")
+	//m2:=mi.Magnet("state trnt", mi.HashInfoBytes())
+	////t.Log(m)
+	//t.Log(m2)
 
-	trn2,err:=c2.AddMagnet(m2.String())
+	trn2,err:=c2.AddMagnet(magnet)
 	if err!=nil {
 		t.Fatal(err)
 	}
@@ -157,10 +165,11 @@ func TestName(t *testing.T) {
 		default:
 			fmt.Println(trn2)
 			fmt.Println(trn2.PeerConns())
-			time.Sleep(time.Second*10)
+			time.Sleep(time.Second*5)
 		}
 
 	}
+	trn2.VerifyData()
 	trn2.AllowDataDownload()
 	fmt.Println("got info after")
 	trn2.DownloadAll()
@@ -232,4 +241,98 @@ func TestName2(t *testing.T) {
 	t1.DownloadAll()
 	c.WaitAll()
 	t.Log("ermahgerd, torrent downloaded")
+}
+
+func TestName4(t *testing.T) {
+	dd1:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd1"
+	dd2:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd2"
+	os.RemoveAll(dd1)
+	os.RemoveAll(dd2)
+
+	cfg := TestingConfig(dd1)
+	cfg.Seed = true
+	cfg.DataDir = filepath.Join(cfg.DataDir, "server")
+	os.Mkdir(cfg.DataDir, 0755)
+	//seeder(cfg)
+	server, err := torrent.NewClient(cfg)
+	require.NoError(t, err)
+	//defer server.Close()
+	//defer testutil.ExportStatusWriter(server, "s")()
+	magnet1 := makeMagnet(t, server, cfg.DataDir, "eln.zip")
+	cfg = TestingConfig(dd2)
+	cfg.DataDir = filepath.Join(cfg.DataDir, "client")
+	//leecher(cfg)
+	client, err := torrent.NewClient(cfg)
+	require.NoError(t, err)
+	defer client.Close()
+
+	tr, err := client.AddMagnet(magnet1)
+	require.NoError(t, err)
+	tr.AddClientPeer(server)
+	<-tr.GotInfo()
+	tr.DownloadAll()
+	client.WaitAll()
+}
+func makeMagnet(t *testing.T, cl *torrent.Client, dir string, name string) string {
+	to:=dir+"/eln.zip"
+	fmt.Println("copy to", to)
+	_,err:=fileutils.CopyFile("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir/eln.zip", to)
+	require.NoError(t, err)
+
+	mi := metainfo.MetaInfo{}
+	mi.SetDefaults()
+	info := metainfo.Info{PieceLength: 256 * 1024}
+	err = info.BuildFromFilePath(filepath.Join(dir, name))
+	require.NoError(t, err)
+	mi.InfoBytes, err = bencode.Marshal(info)
+	require.NoError(t, err)
+	magnet := mi.Magnet(name, mi.HashInfoBytes()).String()
+	tr, err := cl.AddTorrent(&mi)
+	require.NoError(t, err)
+	require.True(t, tr.Seeding())
+	tr.VerifyData()
+	return magnet
+}
+
+//func makeMagnet(t *testing.T, cl *torrent.Client, dir string, name string) string {
+//	mi := metainfo.MetaInfo{}
+//	mi.SetDefaults()
+//	info := metainfo.Info{PieceLength: 256*1024}
+//	fmt.Println("build from path")
+//	err := info.BuildFromFilePath(dir)
+//	require.NoError(t, err)
+//	mi.InfoBytes, err = bencode.Marshal(info)
+//	require.NoError(t, err)
+//	fmt.Println("magnet")
+//	fmt.Println("add torrnet")
+//	tr, err := cl.AddTorrent(&mi)
+//	require.NoError(t, err)
+//	require.True(t, tr.Seeding())
+//	fmt.Println("verify")
+//	<-tr.GotInfo()
+//	tr.VerifyData()
+//	magnet := mi.Magnet(name, mi.HashInfoBytes()).String()
+//	return magnet
+//}
+
+
+func TestingConfig(dir string) *torrent.ClientConfig {
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.ListenHost = torrent.LoopbackListenHost
+	cfg.NoDHT = true
+	cfg.DataDir = dir
+	cfg.DisableTrackers = true
+	cfg.NoDefaultPortForwarding = true
+	cfg.DisableAcceptRateLimiting = true
+	cfg.ListenPort = 0
+	//cfg.Debug = true
+	//cfg.Logger = cfg.Logger.WithText(func(m log.Msg) string {
+	//	t := m.Text()
+	//	m.Values(func(i interface{}) bool {
+	//		t += fmt.Sprintf("\n%[1]T: %[1]v", i)
+	//		return true
+	//	})
+	//	return t
+	//})
+	return cfg
 }
