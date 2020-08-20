@@ -195,8 +195,8 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
 		for i := 1; i < len(k); i++ {
-			if err := tx.Delete(dbutils.IntermediateTrieHashBucket, k[:i]); err != nil {
-				return err
+			if err2 := tx.Delete(dbutils.IntermediateTrieHashBucket, k[:i]); err2 != nil {
+				return err2
 			}
 		}
 		return nil
@@ -220,7 +220,8 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(tx, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+	err = loader.Reset(tx, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false)
+	if err != nil {
 		return err
 	}
 	t := time.Now()
@@ -271,8 +272,8 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p.TempDir = datadir
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
 		for i := 1; i < len(k); i++ {
-			if err := tx.Delete(dbutils.IntermediateTrieHashBucket, k[:i]); err != nil {
-				return err
+			if err2 := tx.Delete(dbutils.IntermediateTrieHashBucket, k[:i]); err2 != nil {
+				return err2
 			}
 		}
 		return nil
@@ -296,7 +297,8 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(tx, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+	err = loader.Reset(tx, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false)
+	if err != nil {
 		return err
 	}
 	t := time.Now()
