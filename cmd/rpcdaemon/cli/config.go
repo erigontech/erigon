@@ -81,20 +81,18 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	return db, txPool, err
 }
 
-func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) {
+func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 	srv := rpc.NewServer()
 	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
-		log.Error("Could not start register RPC apis", "error", err)
-		return
+		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 	handler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
 
 	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
 	if err != nil {
-		log.Error("Could not start RPC api", "error", err)
-		return
+		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 	extapiURL := fmt.Sprintf("http://%s", httpEndpoint)
 	log.Info("HTTP endpoint opened", "url", extapiURL)
@@ -105,4 +103,5 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) {
 	}()
 	sig := <-ctx.Done()
 	log.Info("Exiting...", "signal", sig)
+	return nil
 }

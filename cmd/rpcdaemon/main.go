@@ -19,9 +19,8 @@ func main() {
 			return nil
 		}
 
-		var rpcAPI = commands.APIList(db, backend, *cfg, nil)
-		cli.StartRpcServer(cmd.Context(), *cfg, rpcAPI)
-		return nil
+		var apiList = commands.APIList(db, backend, *cfg, nil)
+		return cli.StartRpcServer(cmd.Context(), *cfg, apiList)
 	}
 
 	if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
