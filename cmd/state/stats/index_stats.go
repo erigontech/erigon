@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -15,11 +16,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func IndexStats(chaindata string, indexBucket []byte, statsFile string) error {
+func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := common.HashLength
-	if bytes.HasPrefix(indexBucket, dbutils.StorageHistoryBucket) {
+	if strings.HasPrefix(indexBucket, dbutils.StorageHistoryBucket) {
 		lenOfKey = common.HashLength*2 + common.IncarnationLength
 	}
 

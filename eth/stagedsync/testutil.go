@@ -24,14 +24,14 @@ func compareCurrentState(
 	t *testing.T,
 	db1 ethdb.Database,
 	db2 ethdb.Database,
-	buckets ...[]byte,
+	buckets ...string,
 ) {
 	for _, bucket := range buckets {
 		compareBucket(t, db1, db2, bucket)
 	}
 }
 
-func compareBucket(t *testing.T, db1, db2 ethdb.Database, bucketName []byte) {
+func compareBucket(t *testing.T, db1, db2 ethdb.Database, bucketName string) {
 	var err error
 
 	bucket1 := make(map[string][]byte)

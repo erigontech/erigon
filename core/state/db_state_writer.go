@@ -256,7 +256,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	return nil
 }
 
-func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket []byte, changeDb ethdb.Database) error {
+func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb ethdb.GetterPutter) error {
 	for _, change := range changes.Changes {
 		currentChunkKey := dbutils.CurrentChunkKey(change.Key)
 		indexBytes, err := changeDb.Get(bucket, currentChunkKey)

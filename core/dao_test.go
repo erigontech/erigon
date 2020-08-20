@@ -78,7 +78,6 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	// Try to expand both pro-fork and non-fork chains iteratively with other camp's blocks
 	for i := int64(0); i < params.DAOForkExtraRange.Int64(); i++ {
 		t.Run(strconv.Itoa(int(i)), func(t *testing.T) {
-
 			// Create a pro-fork block, and try to feed into the no-fork chain
 			db = ethdb.NewMemDatabase()
 			defer db.Close()

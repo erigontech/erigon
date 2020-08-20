@@ -59,6 +59,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	}
 
 	batch := stateDB.NewBatch()
+	//batch, err := stateDB.Begin()
+	//if err != nil {
+	//	return err
+	//}
+	defer batch.Rollback()
 
 	engine := chainContext.Engine()
 
@@ -72,12 +77,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		stageProgress = blockNum
 
-		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
-		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(batch, blockNum)
+		block := rawdb.ReadBlock(batch, blockHash, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
+		senders := rawdb.ReadSenders(batch, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
@@ -96,30 +101,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
 		}
 
-		if batch.BatchSize() >= stateDB.IdealBatchSize() {
+		if batch.BatchSize() >= batch.IdealBatchSize() {
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			start := time.Now()
-			sz := batch.BatchSize()
 			if _, err = batch.Commit(); err != nil {
 				return err
 			}
-			log.Info("Batch committed", "in", time.Since(start), "size", common.StorageSize(sz))
 		}
 
 		if prof {
 			if blockNum-s.BlockNumber == 100000 {
 				// Flush the CPU profiler
 				pprof.StopCPUProfile()
-
-				// And the memory profiler
-				f, _ := os.Create(fmt.Sprintf("mem-%d.prof", s.BlockNumber))
-				runtime.GC()
-				if err = pprof.WriteHeapProfile(f); err != nil {
-					log.Error("could not save memory profile", "error", err)
-				}
-				f.Close()
 			}
 		}
 
@@ -154,7 +148,7 @@ func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPend
 	log.Info("Executed blocks:",
 		"currentBlock", now,
 		"speed (blk/second)", speed,
-		"state batch", common.StorageSize(batch.BatchSize()),
+		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
@@ -170,6 +164,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	batch := stateDB.NewBatch()
+	defer batch.Rollback()
 
 	rewindFunc := ethdb.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
@@ -283,7 +278,7 @@ func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
 
 func cleanupContractCodeBucket(
 	db ethdb.Database,
-	bucket []byte,
+	bucket string,
 	acc accounts.Account,
 	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
 	getKeyForIncarnationFunc func(uint64) []byte,
@@ -327,7 +322,7 @@ func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
 	return rawdb.PlainDeleteAccount(db, address)
 }
 
-func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket []byte) error {
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
 	changeSetKey := dbutils.EncodeTimestamp(timestamp)
 	if err := batch.Delete(accountBucket, changeSetKey); err != nil {
 		return err

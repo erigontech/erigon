@@ -191,7 +191,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return 0, err
 	}
 	if manager.blockFetcher == nil {
-		manager.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+		manager.blockFetcher = fetcher.NewBlockFetcher(false, nil, blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, nil, inserter, manager.removePeer)
 	}
 
 	if manager.chainSync == nil {
@@ -406,7 +406,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// Make sure that we first exchange headers and only then announce transactions
 	p.HandshakeOrderMux.Lock()
 	// Register the peer locally
-	if err := pm.peers.Register(p); err != nil {
+	if err := pm.peers.Register(p, pm.removePeer); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
 		p.HandshakeOrderMux.Lock()
 		return err

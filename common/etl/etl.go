@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -53,7 +55,7 @@ func NextKey(key []byte) ([]byte, error) {
 // loaded from files into a DB
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
-type LoadCommitHandler func(ethdb.Putter, []byte, bool) error
+type LoadCommitHandler func(db ethdb.Putter, key []byte, isDone bool) error
 
 type TransformArgs struct {
 	ExtractStartKey []byte
@@ -68,8 +70,8 @@ type TransformArgs struct {
 
 func Transform(
 	db ethdb.Database,
-	fromBucket []byte,
-	toBucket []byte,
+	fromBucket string,
+	toBucket string,
 	datadir string,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
@@ -95,7 +97,7 @@ func Transform(
 
 func extractBucketIntoFiles(
 	db ethdb.Database,
-	bucket []byte,
+	bucket string,
 	startkey []byte,
 	endkey []byte,
 	fixedBits int,
@@ -120,17 +122,22 @@ func extractBucketIntoFiles(
 	return collector.flushBuffer(nil, true)
 }
 func disposeProviders(providers []dataProvider) {
+	totalSize := uint64(0)
 	for _, p := range providers {
-		err := p.Dispose()
+		providerSize, err := p.Dispose()
 		if err != nil {
 			log.Warn("promoting hashed state, error while disposing provider", "provier", p, "err", err)
 		}
+		totalSize += providerSize
+	}
+	if totalSize > 0 {
+		log.Info("etl: temp files removed successfully", "total size", datasize.ByteSize(totalSize).HumanReadable())
 	}
 }
 
 type bucketState struct {
 	getter ethdb.Getter
-	bucket []byte
+	bucket string
 	quit   <-chan struct{}
 }
 
@@ -143,6 +150,10 @@ func (s *bucketState) Stopped() error {
 }
 
 // IdentityLoadFunc loads entries as they are, without transformation
-func IdentityLoadFunc(k []byte, value []byte, _ State, next LoadNextFunc) error {
+var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ State, next LoadNextFunc) error {
 	return next(k, k, value)
+}
+
+func isIdentityLoadFunc(f LoadFunc) bool {
+	return f == nil || reflect.ValueOf(IdentityLoadFunc).Pointer() == reflect.ValueOf(f).Pointer()
 }

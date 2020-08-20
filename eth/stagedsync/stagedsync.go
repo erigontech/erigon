@@ -69,6 +69,16 @@ func PrepareStagedSync(
 			},
 		},
 		{
+			ID:          stages.BlockHashes,
+			Description: "Write block hashes",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnBlockHashStage(s, stateDB, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+		},
+		{
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
@@ -113,16 +123,6 @@ func PrepareStagedSync(
 			},
 		},
 		{
-			ID:          stages.IntermediateHashes,
-			Description: "Generate intermediate hashes and computing state root",
-			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
-			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return UnwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
-			},
-		},
-		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
 			ExecFunc: func(s *StageState, u Unwinder) error {
@@ -130,6 +130,16 @@ func PrepareStagedSync(
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindHashStateStage(u, s, stateDB, datadir, quitCh)
+			},
+		},
+		{
+			ID:          stages.IntermediateHashes,
+			Description: "Generate intermediate hashes and computing state root",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return SpawnIntermediateHashesStage(s, stateDB, datadir, quitCh)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return UnwindIntermediateHashesStage(u, s, stateDB, datadir, quitCh)
 			},
 		},
 		{
@@ -183,7 +193,8 @@ func PrepareStagedSync(
 	state := NewState(stages)
 	state.unwindOrder = []*Stage{
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-		stages[0], stages[1], stages[2], stages[9], stages[3], stages[4], stages[5], stages[6], stages[7], stages[8], stages[9], stages[10],
+		// Unwinding of IHashes needs to happen after unwinding HashState
+		stages[0], stages[1], stages[2], stages[3], stages[10], stages[4], stages[6], stages[5], stages[7], stages[8], stages[9], stages[10], stages[11],
 	}
 	if err := state.LoadUnwindInfo(stateDB); err != nil {
 		return nil, err

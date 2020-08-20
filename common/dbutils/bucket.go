@@ -1,39 +1,57 @@
 package dbutils
 
 import (
-	"bytes"
 	"sort"
+	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
-// The fields below define the low level database schema prefixing.
+// Buckets
 var (
 	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
 
-	// Contains Accounts:
-	//   key - address (unhashed)
-	//   value - account encoded for storage
-	// Contains Storage:
-	//   key - address (unhashed) + incarnation + storage key (unhashed)
-	//   value - storage value(common.hash)
-	PlainStateBucket = []byte("PLAIN-CST")
+	/*
+		Logical layout:
+			Contains Accounts:
+			  key - address (unhashed)
+			  value - account encoded for storage
+			Contains Storage:
+			  key - address (unhashed) + incarnation + storage key (unhashed)
+			  value - storage value(common.hash)
+
+		Physical layout:
+			PlainStateBucket and CurrentStateBucket utilises DupSort feature of LMDB (store multiple values inside 1 key).
+		-------------------------------------------------------------
+			   key              |            value
+		-------------------------------------------------------------
+		[acc_hash]              | [acc_value]
+		[acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
+								| [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+								| [storage3_hash]+[storage3_value]
+								| ...
+		[acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
+								| ...
+		[acc2_hash]             | [acc2_value]
+								...
+	*/
+	PlainStateBucket     = "PLAIN-CST2"
+	PlainStateBucketOld1 = "PLAIN-CST"
 
 	// "Plain State"
 	//key - address+incarnation
 	//value - code hash
-	PlainContractCodeBucket = []byte("PLAIN-contractCode")
+	PlainContractCodeBucket = "PLAIN-contractCode"
 
 	// PlainAccountChangeSetBucket keeps changesets of accounts ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - address v - account(encoded).
-	PlainAccountChangeSetBucket = []byte("PLAIN-ACS")
+	PlainAccountChangeSetBucket = "PLAIN-ACS"
 
 	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	PlainStorageChangeSetBucket = []byte("PLAIN-SCS")
+	PlainStorageChangeSetBucket = "PLAIN-SCS"
 
 	// Contains Accounts:
 	// key - address hash
@@ -41,7 +59,8 @@ var (
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	CurrentStateBucket = []byte("CST")
+	CurrentStateBucket     = "CST2"
+	CurrentStateBucketOld1 = "CST"
 
 	//current
 	//key - key + encoded timestamp(block number)
@@ -49,7 +68,7 @@ var (
 	//layout experiment
 	//key - address hash
 	//value - list of block where it's changed
-	AccountsHistoryBucket = []byte("hAT")
+	AccountsHistoryBucket = "hAT"
 
 	//current
 	//key - address hash + incarnation + storage key hash
@@ -57,107 +76,111 @@ var (
 	//layout experiment
 	//key - address hash
 	//value - list of block where it's changed
-	StorageHistoryBucket = []byte("hST")
+	StorageHistoryBucket = "hST"
 
 	//key - contract code hash
 	//value - contract code
-	CodeBucket = []byte("CODE")
+	CodeBucket = "CODE"
 
 	//key - addressHash+incarnation
 	//value - code hash
-	ContractCodeBucket = []byte("contractCode")
+	ContractCodeBucket = "contractCode"
 
 	// Incarnations for deleted accounts
 	//key - address
 	//value - incarnation of account when it was last deleted
-	IncarnationMapBucket = []byte("incarnationMap")
+	IncarnationMapBucket = "incarnationMap"
 
 	//AccountChangeSetBucket keeps changesets of accounts
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - addrHash v - account(encoded).
-	AccountChangeSetBucket = []byte("ACS")
+	AccountChangeSetBucket = "ACS"
 
 	// StorageChangeSetBucket keeps changesets of storage
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - compositeKey(for storage) v - originalValue(common.Hash)}.
-	StorageChangeSetBucket = []byte("SCS")
+	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	IntermediateTrieHashBucket = []byte("iTh")
+	IntermediateTrieHashBucket = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket = []byte("DBINFO")
+	DatabaseInfoBucket = "DBINFO"
 
 	// databaseVerisionKey tracks the current database version.
-	DatabaseVerisionKey = []byte("DatabaseVersion")
-
-	// headHeaderKey tracks the latest know header's hash.
-	HeadHeaderKey = []byte("LastHeader")
-
-	// headBlockKey tracks the latest know full block's hash.
-	HeadBlockKey = []byte("LastBlock")
-
-	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
-	HeadFastBlockKey = []byte("LastFast")
-
-	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
-	FastTrieProgressKey = []byte("TrieSync")
+	DatabaseVerisionKey = "DatabaseVersion"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefix       = []byte("h") // headerPrefix + num (uint64 big endian) + hash -> header
+	HeaderPrefix       = "h"         // headerPrefix + num (uint64 big endian) + hash -> header
 	HeaderTDSuffix     = []byte("t") // headerPrefix + num (uint64 big endian) + hash + headerTDSuffix -> td
 	HeaderHashSuffix   = []byte("n") // headerPrefix + num (uint64 big endian) + headerHashSuffix -> hash
-	HeaderNumberPrefix = []byte("H") // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix     = []byte("b") // blockBodyPrefix + num (uint64 big endian) + hash -> block body
-	BlockReceiptsPrefix = []byte("r") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
+	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
-	TxLookupPrefix  = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
-	BloomBitsPrefix = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
+	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
-	PreimagePrefix = []byte("secure-key-")      // preimagePrefix + hash -> preimage
-	ConfigPrefix   = []byte("ethereum-config-") // config prefix for the db
+	PreimagePrefix = "secure-key-"      // preimagePrefix + hash -> preimage
+	ConfigPrefix   = "ethereum-config-" // config prefix for the db
 
 	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
-	BloomBitsIndexPrefix      = []byte("iB")      // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
-	BloomBitsIndexPrefixShead = []byte("iBshead") // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefix = "iB" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
-	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
-	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
+	// Progress of sync stages: stageName -> stageData
+	SyncStageProgress     = "SSP2"
+	SyncStageProgressOld1 = "SSP"
+	// Position to where to unwind sync stages: stageName -> stageData
+	SyncStageUnwind     = "SSU2"
+	SyncStageUnwindOld1 = "SSU"
 
+	CliqueBucket = "clique-"
+
+	// this bucket stored in separated database
+	InodesBucket = "inodes"
+
+	// Transaction senders - stored separately from the block bodies
+	Senders = "txSenders"
+
+	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
+	FastTrieProgressKey = "TrieSync"
+	// headBlockKey tracks the latest know full block's hash.
+	HeadBlockKey = "LastBlock"
+	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
+	HeadFastBlockKey = "LastFast"
+
+	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
+	// it stores stages progress to understand in which context was executed migration
+	// in case of bug-report developer can ask content of this bucket
+	Migrations = "migrations"
+)
+
+// Keys
+var (
 	// last block that was pruned
 	// it's saved one in 5 minutes
 	LastPrunedBlockKey = []byte("LastPrunedBlock")
-
-	// LastAppliedMigration keep the name of tle last applied migration.
-	LastAppliedMigration = []byte("lastAppliedMigration")
-
 	//StorageModeHistory - does node save history.
 	StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
 	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
-	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
 
-	// Progress of sync stages
-	SyncStageProgress = []byte("SSP")
-	// Position to where to unwind sync stages
-	SyncStageUnwind = []byte("SSU")
-	CliqueBucket    = []byte("clique-")
+	HeadHeaderKey = "LastHeader"
+)
 
-	// this bucket stored in separated database
-	InodesBucket = []byte("inodes")
-
-	// Transaction senders - stored separately from the block bodies
-	Senders = []byte("txSenders")
+// Metrics
+var (
+	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
+	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
 // BucketsCfg - can be used to find index in sorted version of Buckets list by name
-var Buckets = [][]byte{
+var Buckets = []string{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
 	StorageHistoryBucket,
@@ -167,13 +190,7 @@ var Buckets = [][]byte{
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
 	DatabaseVerisionKey,
-	HeadHeaderKey,
-	HeadBlockKey,
-	HeadFastBlockKey,
-	FastTrieProgressKey,
 	HeaderPrefix,
-	HeaderTDSuffix,
-	HeaderHashSuffix,
 	HeaderNumberPrefix,
 	BlockBodyPrefix,
 	BlockReceiptsPrefix,
@@ -182,14 +199,8 @@ var Buckets = [][]byte{
 	PreimagePrefix,
 	ConfigPrefix,
 	BloomBitsIndexPrefix,
-	BloomBitsIndexPrefixShead,
-	LastPrunedBlockKey,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
-	LastAppliedMigration,
-	StorageModeHistory,
-	StorageModeReceipts,
-	StorageModeTxIndex,
 	CliqueBucket,
 	SyncStageProgress,
 	SyncStageUnwind,
@@ -199,63 +210,79 @@ var Buckets = [][]byte{
 	PlainStorageChangeSetBucket,
 	InodesBucket,
 	Senders,
+	FastTrieProgressKey,
+	HeadBlockKey,
+	HeadFastBlockKey,
+	HeadHeaderKey,
+	Migrations,
+}
+
+// DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
+var DeprecatedBuckets = []string{
+	SyncStageProgressOld1,
+	SyncStageUnwindOld1,
+	CurrentStateBucketOld1,
+	PlainStateBucketOld1,
 }
 
 var BucketsCfg = map[string]*BucketConfigItem{}
 
 type BucketConfigItem struct {
 	ID         int
-	IsDupsort  bool
+	IsDupSort  bool
 	DupToLen   int
 	DupFromLen int
 }
 
 type dupSortConfigEntry struct {
-	Bucket  []byte
-	ID      int
-	FromLen int
-	ToLen   int
+	Bucket    string
+	IsDupSort bool
+	ID        int
+	FromLen   int
+	ToLen     int
 }
 
 var dupSortConfig = []dupSortConfigEntry{
 	{
-		Bucket:  CurrentStateBucket,
-		ToLen:   40,
-		FromLen: 72,
+		Bucket:    CurrentStateBucket,
+		IsDupSort: true,
+		ToLen:     40,
+		FromLen:   72,
 	},
 	{
-		Bucket:  PlainStateBucket,
-		ToLen:   28,
-		FromLen: 60,
+		Bucket:    PlainStateBucket,
+		IsDupSort: true,
+		ToLen:     28,
+		FromLen:   60,
 	},
 }
 
 func init() {
 	sort.SliceStable(Buckets, func(i, j int) bool {
-		return bytes.Compare(Buckets[i], Buckets[j]) < 0
+		return strings.Compare(Buckets[i], Buckets[j]) < 0
 	})
 
 	for i := range Buckets {
-		BucketsCfg[string(Buckets[i])] = &BucketConfigItem{ID: i}
-
-		for _, cfg := range dupSortConfig {
-			if cfg.ID != i {
-				continue
-			}
-			bucketCfg, ok := BucketsCfg[string(cfg.Bucket)]
-			if !ok {
-				continue
-			}
-			cfg.FromLen = bucketCfg.DupFromLen
-			cfg.ToLen = bucketCfg.DupToLen
-
-			if bytes.Equal(cfg.Bucket, CurrentStateBucket) {
-				bucketCfg.IsDupsort = debug.IsHashedStateDupsortEnabled()
-			}
-			if bytes.Equal(cfg.Bucket, PlainStateBucket) {
-				bucketCfg.IsDupsort = debug.IsPlainStateDupsortEnabled()
-			}
-		}
+		BucketsCfg[Buckets[i]] = createBucketConfig(i, Buckets[i])
 	}
 
+	for i := range DeprecatedBuckets {
+		BucketsCfg[DeprecatedBuckets[i]] = createBucketConfig(len(Buckets)+i, DeprecatedBuckets[i])
+	}
+}
+
+func createBucketConfig(id int, name string) *BucketConfigItem {
+	cfg := &BucketConfigItem{ID: id}
+
+	for _, dupCfg := range dupSortConfig {
+		if dupCfg.Bucket != name {
+			continue
+		}
+
+		cfg.DupFromLen = dupCfg.FromLen
+		cfg.DupToLen = dupCfg.ToLen
+		cfg.IsDupSort = dupCfg.IsDupSort
+	}
+
+	return cfg
 }

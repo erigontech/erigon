@@ -20,13 +20,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
+	"strings"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type trieHasher interface {
@@ -69,28 +71,36 @@ type IteratorDump struct {
 	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
 }
 
-// Collector interface which the state trie calls during iteration
-type collector interface {
-	onRoot(common.Hash)
-	onAccount(common.Address, DumpAccount)
+// DumpCollector interface which the state trie calls during iteration
+type DumpCollector interface {
+	// OnRoot is called with the state root
+	OnRoot(common.Hash)
+	// OnAccount is called once for each account in the trie
+	OnAccount(common.Address, DumpAccount)
 }
 
-func (d *Dump) onRoot(root common.Hash) {
+// OnRoot implements DumpCollector interface
+func (d *Dump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
-func (d *Dump) onAccount(addr common.Address, account DumpAccount) {
+// OnAccount implements DumpCollector interface
+func (d *Dump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
-func (d *IteratorDump) onRoot(root common.Hash) {
+
+// OnRoot implements DumpCollector interface
+func (d *IteratorDump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
-func (d *IteratorDump) onAccount(addr common.Address, account DumpAccount) {
+// OnAccount implements DumpCollector interface
+func (d *IteratorDump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
-func (d iterativeDump) onAccount(addr common.Address, account DumpAccount) {
+// OnAccount implements DumpCollector interface
+func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 	dumpAccount := &DumpAccount{
 		Balance:   account.Balance,
 		Nonce:     account.Nonce,
@@ -108,7 +118,8 @@ func (d iterativeDump) onAccount(addr common.Address, account DumpAccount) {
 	d.Encode(dumpAccount)
 }
 
-func (d iterativeDump) onRoot(root common.Hash) {
+// OnRoot implements DumpCollector interface
+func (d iterativeDump) OnRoot(root common.Hash) {
 	//nolint:errcheck
 	d.Encoder.Encode(struct {
 		Root common.Hash `json:"root"`
@@ -123,14 +134,14 @@ func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var incarnationList []uint64
 	var addrHashList []common.Address
 
-	c.onRoot(emptyHash) // We do not calculate the root
+	c.OnRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
@@ -152,7 +163,7 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		if len(k) > 32 {
 			return true, nil
 		}
-		fmt.Printf("Got account %x\n", k)
+		//fmt.Printf("Got account %x\n", k)
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
@@ -160,8 +171,8 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
+			Root:     strings.TrimPrefix(common.Bytes2Hex(emptyHash[:]), "0x"), // We cannot provide historical storage hash
+			CodeHash: strings.TrimPrefix(common.Bytes2Hex(emptyCodeHash[:]), "0x"),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
@@ -171,9 +182,6 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 		numberOfResults++
 		return true, nil
 	})
-
-	fmt.Printf("Number of accounts: %d\n", numberOfResults)
-
 	if err != nil {
 		return nil, err
 	}
@@ -197,31 +205,35 @@ func (d *Dumper) dump(c collector, excludeCode, excludeStorage, _ bool, start []
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
-					fmt.Println(addrHash.String(), "code hash with err", codeHash, common.Bytes2Hex(codeHash))
-					spew.Dump(account)
 					return nil, err
 				}
 				account.Code = common.Bytes2Hex(code)
 			}
 		}
+
 		if !excludeStorage {
+			t := trie.New(common.Hash{})
 			err = WalkAsOf(d.db,
-				dbutils.PlainStateBucket,
+				stateBucket,
 				dbutils.StorageHistoryBucket,
 				storagePrefix,
 				8*(common.AddressLength+common.IncarnationLength),
 				d.blockNumber,
 				func(ks, vs []byte) (bool, error) {
 					account.Storage[common.BytesToHash(ks[common.AddressLength:]).String()] = common.Bytes2Hex(vs)
+					h, _ := common.HashData(ks[common.AddressLength:])
+					t.Update(h.Bytes(), common.CopyBytes(vs))
 					return true, nil
 				})
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
 			}
 			fmt.Printf("Got walk storage for : %x\n", storagePrefix)
+			account.Root = t.Hash().String()
 		}
-		c.onAccount(addrHash, *account)
+		c.OnAccount(addrHash, *account)
 	}
+
 	return nextKey, nil
 }
 
@@ -231,7 +243,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bo
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 	return *dump
 }
 
@@ -248,7 +260,7 @@ func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool)
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
@@ -257,7 +269,7 @@ func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimag
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
-	iterator.Next, err = d.dump(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
 	return *iterator, err
 }
 

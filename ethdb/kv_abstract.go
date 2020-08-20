@@ -2,6 +2,14 @@ package ethdb
 
 import (
 	"context"
+	"errors"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+)
+
+var (
+	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 )
 
 type KV interface {
@@ -9,25 +17,26 @@ type KV interface {
 	Update(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
-	Begin(ctx context.Context, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
 	IdealBatchSize() int
 }
 
 type Tx interface {
-	Bucket(name []byte) Bucket
+	Cursor(bucket string) Cursor
+	Get(bucket string, key []byte) (val []byte, err error)
 
 	Commit(ctx context.Context) error
 	Rollback()
+	BucketSize(name string) (uint64, error)
 }
 
-type Bucket interface {
-	Get(key []byte) (val []byte, err error)
-	Put(key []byte, value []byte) error
-	Delete(key []byte) error
-	Cursor() Cursor
-
-	Size() (uint64, error)
-	Clear() error
+// Interface used for buckets migration, don't use it in usual app code
+type BucketMigrator interface {
+	DropBucket(string) error
+	CreateBucket(string) error
+	ExistsBucket(string) bool
+	ClearBucket(string) error
+	ExistingBuckets() ([]string, error)
 }
 
 type Cursor interface {
@@ -38,8 +47,9 @@ type Cursor interface {
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
-	SeekTo(seek []byte) ([]byte, []byte, error)
+	SeekExact(key []byte) ([]byte, error)
 	Next() ([]byte, []byte, error)
+	Last() ([]byte, []byte, error)
 	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
@@ -58,11 +68,16 @@ type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
 }
 
+type Backend interface {
+	AddLocal([]byte) ([]byte, error)
+	Etherbase() (common.Address, error)
+	NetVersion() (uint64, error)
+}
+
 type DbProvider uint8
 
 const (
 	Bolt DbProvider = iota
-	Badger
 	Remote
 	Lmdb
 )

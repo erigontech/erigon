@@ -17,43 +17,11 @@
 package eth
 
 import (
-	"bufio"
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
-	"io/ioutil"
-	"math/big"
-	"os"
-	"runtime"
-	"sync"
-	"time"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/tracers"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-)
-
-const (
-	// defaultTraceTimeout is the amount of time a single transaction can execute
-	// by default before being forcefully aborted.
-	defaultTraceTimeout = 5 * time.Second
-
-	// defaultTraceReexec is the number of blocks the tracer is willing to go back
-	// and reexecute to produce missing historical state necessary to run a specific
-	// trace.
-	defaultTraceReexec = uint64(128)
 )
 
 // TraceConfig holds extra parameters to trace functions.
@@ -100,6 +68,20 @@ type txTraceTask struct {
 	statedb *state.IntraBlockState // Intermediate state prepped for tracing
 	index   int                    // Transaction offset in the block
 }
+
+/*
+
+const (
+	// defaultTraceTimeout is the amount of time a single transaction can execute
+	// by default before being forcefully aborted.
+	defaultTraceTimeout = 5 * time.Second
+
+	// defaultTraceReexec is the number of blocks the tracer is willing to go back
+	// and reexecute to produce missing historical state necessary to run a specific
+	// trace.
+	defaultTraceReexec = uint64(128)
+)
+
 
 // TraceChain returns the structured logs created during the execution of EVM
 // between two blocks (excluding start) and returns them as a JSON object.
@@ -518,12 +500,6 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 	if parent == nil {
 		return nil, fmt.Errorf("parent %#x not found", block.ParentHash())
 	}
-	/*
-		reexec := defaultTraceReexec
-		if config != nil && config.Reexec != nil {
-			reexec = *config.Reexec
-		}
-	*/
 	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainKV(), parent)
 	// Retrieve the tracing configurations, or use default values
 	var (
@@ -682,10 +658,15 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 	// Depending on the tracer type, format and return the output
 	switch tracer := tracer.(type) {
 	case *vm.StructLogger:
+		// If the result contains a revert reason, return it.
+		returnVal := fmt.Sprintf("%x", result.Return())
+		if len(result.Revert()) > 0 {
+			returnVal = fmt.Sprintf("%x", result.Revert())
+		}
 		return &ethapi.ExecutionResult{
 			Gas:         result.UsedGas,
 			Failed:      result.Failed(),
-			ReturnValue: fmt.Sprintf("%x", result.Return()),
+			ReturnValue: returnVal,
 			StructLogs:  ethapi.FormatLogs(tracer.StructLogs()),
 		}, nil
 
@@ -696,6 +677,8 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 		panic(fmt.Sprintf("bad tracer type %T", tracer))
 	}
 }
+
+
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
@@ -731,6 +714,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		case <-ctx.Done():
 			return nil, vm.Context{}, nil, nil, ctx.Err()
 		}
+		statedb.Prepare(tx.Hash(), blockHash, idx)
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
@@ -749,3 +733,4 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 	}
 	return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }
+*/

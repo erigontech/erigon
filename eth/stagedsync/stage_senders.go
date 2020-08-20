@@ -5,18 +5,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"math/big"
 	"os"
-	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
 	"sync"
 	"time"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
@@ -138,15 +136,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 				}
 			}
 
-			var bodyRlp []byte
-			if debug.IsBlockCompressionEnabled() && len(v) > 0 {
-				var err error
-				bodyRlp, err = snappy.Decode(nil, v)
-				if err != nil {
-					return false, fmt.Errorf("err on decode block: %s", err)
-				}
-			} else {
-				bodyRlp = common.CopyBytes(v)
+			bodyRlp, err := rawdb.DecompressBlockBody(data)
+			if err != nil {
+				return false, err
 			}
 
 			jobs <- &senderRecoveryJob{bodyRlp: bodyRlp, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}
@@ -162,11 +154,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	wg.Add(cfg.NumOfGoroutines)
 	for i := 0; i < cfg.NumOfGoroutines; i++ {
 		go func() {
-			runtime.LockOSThread()
-			defer func() {
-				wg.Done()
-				runtime.UnlockOSThread()
-			}()
+			defer wg.Done()
 
 			// each goroutine gets it's own crypto context to make sure they are really parallel
 			recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)
