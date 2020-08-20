@@ -1,7 +1,6 @@
 package headerdownload
 
 import (
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -211,7 +210,78 @@ func TestHandleNewBlockMsg(t *testing.T) {
 	}
 }
 
-func TestPrepend(t *testing.T) {
+func TestFindTip(t *testing.T) {
+	/*
+		hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+			// To get child difficulty, we just add 1000 to the parent difficulty
+			return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
+		}, func(header *types.Header) error {
+			return nil
+		},
+		)
+
+				// trying to attach header with wrong block height
+				var h5 types.Header
+				h5.Number = big.NewInt(6) // Wrong (expected 5)
+				h5.Difficulty = big.NewInt(4010)
+				h5.ParentHash = h4.Hash()
+				if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h5}}, 0, 1); err == nil {
+					if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != WrongChildBlockHeightPenalty {
+						t.Errorf("expected WrongChildBlockHeight penalty, got %s", peerPenalty)
+					}
+					if ok {
+						t.Errorf("did not expect to prepend")
+					}
+					if len(hd.tips) != 5 {
+						t.Errorf("expected 5 tips, got %d", len(hd.tips))
+					}
+				} else {
+					t.Errorf("prepend: %v", err)
+				}
+
+				// trying to attach header with wrong difficulty
+				h5.Number = big.NewInt(5)        // Now correct
+				h5.Difficulty = big.NewInt(4020) // Wrong - expected 4010
+				if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
+					if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != WrongChildDifficultyPenalty {
+						t.Errorf("expected WrongChildDifficulty penalty, got %s", peerPenalty)
+					}
+					if ok {
+						t.Errorf("did not expect to prepend")
+					}
+					if len(hd.tips) != 5 {
+						t.Errorf("expected 5 tips, got %d", len(hd.tips))
+					}
+				} else {
+					t.Errorf("prepend: %v", err)
+				}
+
+				// trying to attach header with wrong PoW
+				hd.verifySealFunc = func(header *types.Header) error {
+					if header.Nonce.Uint64() > 0 {
+						return fmt.Errorf("wrong nonce: %d", header.Nonce)
+					}
+					return nil
+				}
+			h5.Difficulty = big.NewInt(4010) // Now correct
+			h5.Nonce = types.EncodeNonce(1)
+			if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
+				if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != InvalidSealPenalty {
+					t.Errorf("expected InvalidSeal penalty, got %s", peerPenalty)
+				}
+				if ok {
+					t.Errorf("did not expect to prepend")
+				}
+				if len(hd.tips) != 5 {
+					t.Errorf("expected 5 tips, got %d", len(hd.tips))
+				}
+			} else {
+				t.Errorf("prepend: %v", err)
+			}
+	*/
+}
+
+func TestExtendUp(t *testing.T) {
 	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
@@ -219,23 +289,11 @@ func TestPrepend(t *testing.T) {
 		return nil
 	},
 	)
-	peer := PeerHandle(1)
-	// empty chain segment - returns error
-	if _, _, err := hd.Prepend(&ChainSegment{}, peer); err == nil {
-		t.Errorf("preprend for empty segment - expected error")
-	}
 
 	// single header in the chain segment
 	var h types.Header
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h}}, 0, 1); err == nil {
+		t.Errorf("extendUp without working tips - expected error")
 	}
 
 	// single header attaching to a single existing tip
@@ -246,24 +304,18 @@ func TestPrepend(t *testing.T) {
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
 	if anchor, err := hd.addHeaderAsAnchor(&h1, 256, uint256.Int{}); err == nil {
-		if err := hd.addHeaderAsTip(&h1, anchor, new(uint256.Int).SetUint64(2000)); err != nil {
+		if err := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000)); err != nil {
 			t.Fatalf("setting up h1 (tip): %v", err)
 		}
 	} else {
 		t.Errorf("setting up h1 (anchor): %v", err)
 	}
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h2}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if !ok {
-			t.Errorf("expected to prepend")
-		}
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h2}}, 0, 1); err == nil {
 		if len(hd.tips) != 2 {
 			t.Errorf("expected 2 tips, got %d", len(hd.tips))
 		}
 	} else {
-		t.Errorf("prepend: %v", err)
+		t.Errorf("extendUp: %v", err)
 	}
 
 	// two connected headers attaching to the the highest tip
@@ -274,13 +326,7 @@ func TestPrepend(t *testing.T) {
 	h4.Number = big.NewInt(4)
 	h4.Difficulty = big.NewInt(3010)
 	h4.ParentHash = h3.Hash()
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h3, &h4}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if !ok {
-			t.Errorf("expected to prepend")
-		}
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h4, &h3}}, 0, 2); err == nil {
 		if len(hd.tips) != 4 {
 			t.Errorf("expected 4 tips, got %d", len(hd.tips))
 		}
@@ -288,7 +334,7 @@ func TestPrepend(t *testing.T) {
 			t.Errorf("cumulative difficulty of h4 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h4.Hash()].cumulativeDifficulty.ToBig())
 		}
 	} else {
-		t.Errorf("prepend: %v", err)
+		t.Errorf("extendUp: %v", err)
 	}
 
 	// one header attaching not to the highest tip
@@ -297,13 +343,7 @@ func TestPrepend(t *testing.T) {
 	h41.Difficulty = big.NewInt(3010)
 	h41.Extra = []byte("Extra")
 	h41.ParentHash = h3.Hash()
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h41}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if !ok {
-			t.Errorf("expected to prepend")
-		}
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h41}}, 0, 1); err == nil {
 		if len(hd.tips) != 5 {
 			t.Errorf("expected 5 tips, got %d", len(hd.tips))
 		}
@@ -314,99 +354,31 @@ func TestPrepend(t *testing.T) {
 			t.Errorf("Expected h41 anchor to be %x, got %x", h1.Hash(), hd.tips[h41.Hash()].anchor.hash)
 		}
 	} else {
-		t.Errorf("prepend: %v", err)
+		t.Errorf("extendUp: %v", err)
 	}
 
-	// trying to attach header with wrong block height
 	var h5 types.Header
-	h5.Number = big.NewInt(6) // Wrong (expected 5)
+	h5.Number = big.NewInt(5)
 	h5.Difficulty = big.NewInt(4010)
 	h5.ParentHash = h4.Hash()
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
-		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != WrongChildBlockHeightPenalty {
-			t.Errorf("expected WrongChildBlockHeight penalty, got %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-		if len(hd.tips) != 5 {
-			t.Errorf("expected 5 tips, got %d", len(hd.tips))
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
-	}
-
-	// trying to attach header with wrong difficulty
-	h5.Number = big.NewInt(5)        // Now correct
-	h5.Difficulty = big.NewInt(4020) // Wrong - expected 4010
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
-		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != WrongChildDifficultyPenalty {
-			t.Errorf("expected WrongChildDifficulty penalty, got %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-		if len(hd.tips) != 5 {
-			t.Errorf("expected 5 tips, got %d", len(hd.tips))
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
-	}
-
-	// trying to attach header with wrong PoW
-	hd.verifySealFunc = func(header *types.Header) error {
-		if header.Nonce.Uint64() > 0 {
-			return fmt.Errorf("wrong nonce: %d", header.Nonce)
-		}
-		return nil
-	}
-	h5.Difficulty = big.NewInt(4010) // Now correct
-	h5.Nonce = types.EncodeNonce(1)
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h5}}, peer); err == nil {
-		if peerPenalty == nil || peerPenalty.peerHandle != peer || peerPenalty.penalty != InvalidSealPenalty {
-			t.Errorf("expected InvalidSeal penalty, got %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-		if len(hd.tips) != 5 {
-			t.Errorf("expected 5 tips, got %d", len(hd.tips))
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
-	}
-
 	// trying to attach header not connected to any tips
 	var h6 types.Header
 	h6.Number = big.NewInt(6)
 	h6.Difficulty = big.NewInt(5010)
 	h6.ParentHash = h5.Hash()
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h6}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h6}}, 0, 1); err == nil {
+		t.Errorf("extendUp not connected to tips - expected error")
 	}
 
-	// Introduce h51 as a tip and prepend h6
+	// Introduce h5 as a tip and prepend h6
 	if anchor, err := hd.addHeaderAsAnchor(&h5, 256, uint256.Int{}); err == nil {
-		if err := hd.addHeaderAsTip(&h5, anchor, new(uint256.Int).SetUint64(10000)); err != nil {
+		if err := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000)); err != nil {
 			t.Fatalf("setting up h5 (tip): %v", err)
 		}
 	} else {
 		t.Errorf("setting up h5 (anchor): %v", err)
 	}
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h6}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if !ok {
-			t.Errorf("expected to prepend")
-		}
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h6}}, 0, 1); err == nil {
 		if len(hd.tips) != 7 {
 			t.Errorf("expected 7 tips, got %d", len(hd.tips))
 		}
@@ -426,7 +398,7 @@ func TestPrepend(t *testing.T) {
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
 	if anchor, err := hd.addHeaderAsAnchor(&h7, 256, uint256.Int{}); err == nil {
-		if err := hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, new(uint256.Int).SetUint64(2000)); err != nil {
+		if err := hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000)); err != nil {
 			t.Fatalf("setting up h7 (hard-coded tip): %v", err)
 		}
 	} else {
@@ -438,58 +410,12 @@ func TestPrepend(t *testing.T) {
 	h8.Number = big.NewInt(8)
 	h8.Difficulty = big.NewInt(7010)
 	h8.ParentHash = h7.Hash()
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h8}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if ok {
-			t.Errorf("did not expect to prepend")
-		}
-		if len(hd.tips) != 8 {
-			t.Errorf("expected 8 tips, got %d", len(hd.tips))
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
-	}
-
-	// Try to introduce chain segment of size 4, which would mean the number of tips in the limiter would be 8 + 4 = 11
-	// and the tip limit would need to remove one tip, with the lowest cumulative difficulty (h1)
-	if _, ok := hd.tips[h1.Hash()]; !ok {
-		t.Errorf("expected h1 to be in the tips")
-	}
-	var h71, h9, h91 types.Header
-	h71.Number = big.NewInt(7)
-	h71.Difficulty = big.NewInt(6010)
-	h71.ParentHash = h6.Hash()
-	h8.Number = big.NewInt(8)
-	h8.Difficulty = big.NewInt(7010)
-	h8.ParentHash = h71.Hash()
-	h9.Number = big.NewInt(9)
-	h9.Difficulty = big.NewInt(8010)
-	h9.ParentHash = h8.Hash()
-	h91.Number = big.NewInt(9)
-	h91.Extra = []byte("Extra")
-	h91.Difficulty = big.NewInt(8010)
-	h91.ParentHash = h8.Hash()
-	if ok, peerPenalty, err := hd.Prepend(&ChainSegment{headers: []*types.Header{&h71, &h8, &h9, &h91}}, peer); err == nil {
-		if peerPenalty != nil {
-			t.Errorf("unexpected penalty: %s", peerPenalty)
-		}
-		if !ok {
-			t.Errorf("expected to prepend")
-		}
-		if len(hd.tips) != 11 {
-			t.Errorf("expected 11 tips, got %d", len(hd.tips))
-		}
-		if _, ok := hd.tips[h1.Hash()]; ok {
-			t.Errorf("expected h1 to be deleted from the tips by the tipLimiter")
-		}
-	} else {
-		t.Errorf("prepend: %v", err)
+	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h8}}, 0, 1); err == nil {
+		t.Errorf("extendUp to hard-coded tip - expected error")
 	}
 }
 
-func TestAppend(t *testing.T) {
+func TestExtendDown(t *testing.T) {
 	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
@@ -497,21 +423,10 @@ func TestAppend(t *testing.T) {
 		return nil
 	},
 	)
-	// empty chain segment - returns error
-	if _, _, err := hd.Append(&ChainSegment{}); err == nil {
-		t.Errorf("append for empty segment - expected error")
-	}
 
 	// single header in the chain segment
 	var h types.Header
-	if ok, tombstones, err := hd.Append(&ChainSegment{headers: []*types.Header{&h}}); err == nil {
-		if len(tombstones) != 0 {
-			t.Errorf("unexpected tombstone: %d", len(tombstones))
-		}
-		if ok {
-			t.Errorf("did not expect to append")
-		}
-	} else {
-		t.Errorf("append: %v", err)
+	if err := hd.ExtendDown(&ChainSegment{headers: []*types.Header{&h}}, 0, 1, 256); err == nil {
+		t.Errorf("extendDown without working trees - expected error")
 	}
 }
