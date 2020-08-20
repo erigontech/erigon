@@ -215,8 +215,12 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-	runtime.LockOSThread()
-	db.wg.Add(1)
+	isSubTx := parent != nil
+	if !isSubTx {
+		runtime.LockOSThread()
+		db.wg.Add(1)
+	}
+
 	flags := uint(0)
 	if !writable {
 		flags |= lmdb.Readonly
@@ -227,7 +231,9 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	}
 	tx, err := db.env.BeginTxn(parentTx, flags)
 	if err != nil {
-		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		if !isSubTx {
+			runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		}
 		return nil, err
 	}
 	tx.RawRead = true
@@ -235,7 +241,7 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 		db:      db,
 		ctx:     ctx,
 		tx:      tx,
-		isSubTx: parent != nil,
+		isSubTx: isSubTx,
 	}, nil
 }
 
@@ -404,8 +410,10 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	}
 	defer func() {
 		tx.tx = nil
-		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.isSubTx {
+			tx.db.wg.Done()
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 
@@ -438,13 +446,12 @@ func (tx *lmdbTx) Rollback() {
 	if tx.tx == nil {
 		return
 	}
-	if tx.tx == nil {
-		return
-	}
 	defer func() {
 		tx.tx = nil
-		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.isSubTx {
+			tx.db.wg.Done()
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 	tx.tx.Abort()

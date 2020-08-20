@@ -123,7 +123,6 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, loa
 
 	var l OldestAppearedLoad
 	l.innerLoadFunc = load
-
 	if err := etl.Transform(
 		p.db,
 		changeSetBucket,
@@ -187,13 +186,14 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 }
 
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	p := NewHashPromoter(db, quit)
-	p.TempDir = datadir
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	p := NewHashPromoter(tx, quit)
+	p.TempDir = datadir
 
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
 		for i := 1; i < len(k); i++ {
