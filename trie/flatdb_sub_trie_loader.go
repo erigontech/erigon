@@ -44,6 +44,7 @@ type FlatDbSubTrieLoader struct {
 	fixedbytes         []int
 	masks              []byte
 	cutoffs            []int
+	tx                 ethdb.Tx
 	kv                 ethdb.KV
 	nextAccountKey     [32]byte
 	k, v               []byte
@@ -125,11 +126,16 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	if len(dbPrefixes) == 0 {
 		return nil
 	}
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		fstl.kv = hasKV.KV()
+	if hasTx, ok := db.(ethdb.HasTx); ok {
+		fstl.tx = hasTx.Tx()
 	} else {
-		return fmt.Errorf("database doest not implement KV: %T", db)
+		if hasKV, ok := db.(ethdb.HasKV); ok {
+			fstl.kv = hasKV.KV()
+		} else {
+			return fmt.Errorf("database doest not implement KV: %T", db)
+		}
 	}
+
 	fixedbytes := make([]int, len(fixedbits))
 	masks := make([]byte, len(fixedbits))
 	cutoffs := make([]int, len(fixedbits))
@@ -588,49 +594,53 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	if len(fstl.dbPrefixes) == 0 {
 		return SubTries{}, nil
 	}
-	if err := fstl.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
-		var filter = func(k []byte) (bool, error) {
-
-			if fstl.rl.Retain(k) {
-				if fstl.hc != nil {
-					if err := fstl.hc(k, nil); err != nil {
-						return false, err
-					}
-				}
-				return false, nil
-			}
-
-			if len(k) < fstl.cutoffs[fstl.rangeIdx] {
-				return false, nil
-			}
-
-			return true, nil
+	if fstl.tx == nil {
+		var err error
+		fstl.tx, err = fstl.kv.Begin(context.Background(), nil, false)
+		if err != nil {
+			return SubTries{}, err
 		}
-		ih := IH(Filter(filter, tx.Cursor(dbutils.IntermediateTrieHashBucket)))
-		if err := fstl.iteration(c, ih, true /* first */); err != nil {
-			return err
-		}
-		var counter uint64
-		t := time.Now()
-		for fstl.rangeIdx < len(fstl.dbPrefixes) {
-			for !fstl.itemPresent {
-				if err := fstl.iteration(c, ih, false /* first */); err != nil {
-					return err
+		defer fstl.tx.Rollback()
+	}
+	tx := fstl.tx
+	c := tx.Cursor(dbutils.CurrentStateBucket)
+	var filter = func(k []byte) (bool, error) {
+
+		if fstl.rl.Retain(k) {
+			if fstl.hc != nil {
+				if err := fstl.hc(k, nil); err != nil {
+					return false, err
 				}
-				counter++
-				t = fstl.logProgress(t, counter)
 			}
-			if fstl.itemPresent {
-				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff); err != nil {
-					return err
-				}
-				fstl.itemPresent = false
-			}
+			return false, nil
 		}
-		return nil
-	}); err != nil {
+
+		if len(k) < fstl.cutoffs[fstl.rangeIdx] {
+			return false, nil
+		}
+
+		return true, nil
+	}
+	ih := IH(Filter(filter, tx.Cursor(dbutils.IntermediateTrieHashBucket)))
+	if err := fstl.iteration(c, ih, true /* first */); err != nil {
 		return SubTries{}, err
+	}
+	var counter uint64
+	t := time.Now()
+	for fstl.rangeIdx < len(fstl.dbPrefixes) {
+		for !fstl.itemPresent {
+			if err := fstl.iteration(c, ih, false /* first */); err != nil {
+				return SubTries{}, err
+			}
+			counter++
+			t = fstl.logProgress(t, counter)
+		}
+		if fstl.itemPresent {
+			if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff); err != nil {
+				return SubTries{}, err
+			}
+			fstl.itemPresent = false
+		}
 	}
 	return fstl.receiver.Result(), nil
 }
