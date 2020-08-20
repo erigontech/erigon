@@ -26,6 +26,17 @@ type Flags struct {
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
+
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := utils.SetupCobra(cmd); err != nil {
+			return err
+		}
+		return nil
+	},
+	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		utils.StopDebug()
+		return nil
+	},
 }
 
 func RootCommand() (*cobra.Command, *Flags) {

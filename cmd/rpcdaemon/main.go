@@ -12,19 +12,14 @@ import (
 
 func main() {
 	cmd, cfg := cli.RootCommand()
-	if err := utils.SetupCobra(cmd); err != nil {
-		panic(err)
-	}
-	defer utils.StopDebug()
-
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		db, txPool, err := cli.OpenDB(*cfg)
+		db, backend, err := cli.OpenDB(*cfg)
 		if err != nil {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return nil
 		}
 
-		var rpcAPI = commands.APIList(db, txPool, *cfg, nil)
+		var rpcAPI = commands.APIList(db, backend, *cfg, nil)
 		cli.StartRpcServer(cmd.Context(), *cfg, rpcAPI)
 		return nil
 	}

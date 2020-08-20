@@ -61,6 +61,7 @@ require (
 	github.com/rs/xhandler v0.0.0-20170707052532-1eb70cf1520d // indirect
 	github.com/shirou/gopsutil v2.20.5+incompatible
 	github.com/spf13/cobra v1.0.0
+	github.com/spf13/pflag v1.0.3
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
 	github.com/steakknife/bloomfilter v0.0.0-20180922174646-6819c0d2a570
 	github.com/steakknife/hamming v0.0.0-20180906055917-c99c65617cd3 // indirect

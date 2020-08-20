@@ -3,8 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/log"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -66,22 +64,6 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 				Version:   "1.0",
 			})
 
-		}
-	}
-
-	// validation
-	availableNamespaces := map[string]bool{}
-	for _, v := range customApiList {
-		availableNamespaces[v.Namespace] = true
-	}
-	for _, v := range defaultAPIList {
-		availableNamespaces[v.Namespace] = true
-	}
-
-	for i := range cfg.API {
-		_, ok := availableNamespaces[cfg.API[i]]
-		if !ok {
-			log.Error("Unrecognised", "api", cfg.API[i])
 		}
 	}
 
