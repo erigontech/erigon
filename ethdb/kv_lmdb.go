@@ -232,13 +232,15 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	}
 	tx.RawRead = true
 	return &lmdbTx{
-		db:  db,
-		ctx: ctx,
-		tx:  tx,
+		db:      db,
+		ctx:     ctx,
+		tx:      tx,
+		isSubTx: parent != nil,
 	}, nil
 }
 
 type lmdbTx struct {
+	isSubTx bool
 	tx      *lmdb.Txn
 	ctx     context.Context
 	db      *LmdbKV
@@ -416,13 +418,15 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	fsyncTimer := time.Now()
-	if err := tx.db.env.Sync(true); err != nil {
-		log.Warn("fsync after commit failed: \n", err)
-	}
-	fsyncTook := time.Since(fsyncTimer)
-	if fsyncTook > 1*time.Second {
-		log.Info("Batch", "fsync", fsyncTook)
+	if !tx.isSubTx { // call fsync only after main transaction commit
+		fsyncTimer := time.Now()
+		if err := tx.db.env.Sync(true); err != nil {
+			log.Warn("fsync after commit failed: \n", err)
+		}
+		fsyncTook := time.Since(fsyncTimer)
+		if fsyncTook > 1*time.Second {
+			log.Info("Batch", "fsync", fsyncTook)
+		}
 	}
 	return nil
 }

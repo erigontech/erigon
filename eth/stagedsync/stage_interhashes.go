@@ -189,9 +189,18 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	var exclude [][]byte
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
-		exclude = append(exclude, k)
+		for i := 1; i < len(k); i++ {
+			if err := tx.Delete(dbutils.IntermediateTrieHashBucket, k[0:i]); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if err := p.Promote(s, s.BlockNumber, to, false /* storage */, collect); err != nil {
@@ -200,12 +209,8 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, collect); err != nil {
 		return err
 	}
-	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
 
 	unfurl := trie.NewRetainList(0)
-	for i := range exclude {
-		unfurl.AddKey(exclude[i])
-	}
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
@@ -217,7 +222,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	}
 	loader := trie.NewFlatDbSubTrieLoader()
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+	if err := loader.Reset(tx, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -234,7 +239,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		"gen IH", generationIHTook,
 	)
 
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collector.Load(tx, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
