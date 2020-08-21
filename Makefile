@@ -1,6 +1,6 @@
 GOBIN = ./build/bin
 GOBUILD = env GO111MODULE=on go build
-GOTEST = go list ./... | xargs go test
+GOTEST = go test ./... -p 1
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
