@@ -27,7 +27,7 @@ func testGenCfg() error {
 	//absIntTestStaticLoop01() //- PASSES
 	//absIntTestPrivateFunction01()
 	//absIntTestDepositContract() //FAILS - Imprecision
-	//absIntTestDepositContract2()
+	absIntTestDepositContract2()
 	return nil
 }
 

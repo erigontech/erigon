@@ -54,6 +54,8 @@ type program struct {
 	contract* Contract
 	stmts []*stmt
 	blocks []*block
+	entry2block map[int]*block
+	exit2block map[int]*block
 }
 
 func toProgram(contract *Contract) *program {
@@ -123,13 +125,26 @@ func toProgram(contract *Contract) *program {
 		}
 	}
 
+	program.entry2block = make(map[int]*block)
+	program.exit2block = make(map[int]*block)
+
 	for entrypc, entry := range program.stmts {
 		if entry.isBlockEntry {
 			block := &block{entrypc: entrypc, stmts: make([]*stmt, 0) }
 			program.blocks = append(program.blocks, block)
-			for i := entrypc; i < len(program.stmts) && !program.stmts[i].isBlockExit; i++ {
+			for i := entrypc; i < len(program.stmts); i++ {
 				block.stmts = append(block.stmts, program.stmts[i])
+				if program.stmts[i].isBlockExit {
+					break
+				}
 			}
+
+			if len(block.stmts) > 0 {
+				block.exitpc = block.stmts[len(block.stmts)-1].pc
+			}
+
+			program.entry2block[block.entrypc] = block
+			program.exit2block[block.exitpc] = block
 		}
 	}
 
@@ -528,9 +543,8 @@ func lub(st0 state, st1 state) state {
 
 type block struct {
 	entrypc int
-	stmts []*stmt
-	preds []*block
-	succs []*block
+	exitpc  int
+	stmts   []*stmt
 }
 
 func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]state, badJumps map[int]bool) {
@@ -586,15 +600,31 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 	}
 
 	g := dot.NewGraph(dot.Directed)
+	block2node := make(map[*block]*dot.Node)
 	for _, block := range program.blocks {
-		g.Node(string(block.entrypc)).Box()
+		n := g.Node(fmt.Sprintf("%v\n%v", block.entrypc, block.exitpc)).Box()
+		block2node[block] = &n
 	}
-	/*
-	n2 := g.Node("testing a little").Box()
 
-	g.Edge(n1, n2)
-	g.Edge(n2, n1, "back").Attr("color", "red")
-*/
+	for pc1, _ := range prevEdgeMap {
+		for pc0, _ := range prevEdgeMap[pc1] {
+			block1 := program.entry2block[pc1]
+
+			if block1 == nil {
+				continue
+			}
+
+			block0 := program.exit2block[pc0]
+			if block0 == nil {
+				continue
+			}
+
+			n0 := block2node[block0]
+			n1 := block2node[block1]
+			g.Edge(*n0, *n1)
+		}
+	}
+
 	path := "cfg.dot"
 	os.Remove(path)
 
