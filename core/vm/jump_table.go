@@ -675,7 +675,7 @@ func newFrontierInstructionSet() JumpTable {
 			memorySize:  memoryMStore8,
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
-			
+
 			numPop: 	2,
 			numPush: 	0,
 			valid: true,
