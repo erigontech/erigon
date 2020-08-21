@@ -1,10 +1,13 @@
 package vm
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
+	"github.com/emicklei/dot"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +34,8 @@ type stmt struct {
 	numBytes       int
 	inferredAsData bool
 	ends           bool
+	isBlockEntry   bool
+	isBlockExit    bool
 }
 
 func (stmt stmt) String() string {
@@ -483,6 +488,13 @@ func lub2(st0 state2, st1 state2) state2 {
 	return newState
 }
 
+type block struct {
+	entrypc int
+	stmts []stmt
+	preds []block
+	succs []block
+}
+
 func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]state2, badJumps map[int]bool) {
 //	es := make([]edge, len(edges))
 //	copy(es, edges)
@@ -534,6 +546,64 @@ func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]s
 	for _, badJump := range badJumpList {
 		fmt.Println(badJump)
 	}
+
+	for pc, stmt := range stmts {
+		if !stmt.inferredAsData {
+			if pc == 0 {
+				stmt.isBlockEntry = true
+				print("HERE")
+			} else if stmt.opcode == JUMPDEST {
+				stmt.isBlockEntry = true
+			} else if stmt.opcode == JUMPI && pc < len(stmts) - 1 {
+				entry := stmts[pc+1]
+				entry.isBlockEntry = true
+			}
+
+			if pc == len(stmts) - 1 {
+				stmt.isBlockExit = true
+			} else if stmt.opcode == JUMP || stmt.opcode == JUMPI {
+				stmt.isBlockExit = true
+			}
+		}
+	}
+
+	var blocks []block
+	for entrypc, entry := range stmts {
+		if entry.isBlockEntry {
+			print("HERE2")
+			block := block{entrypc: entrypc, stmts: make([]stmt, 0) }
+			blocks = append(blocks, block)
+			for i := entrypc; i < len(stmts) && !stmts[i].isBlockExit; i++ {
+				block.stmts = append(block.stmts, stmts[i])
+			}
+		}
+	}
+	print(len(blocks))
+	g := dot.NewGraph(dot.Directed)
+	for _, block := range blocks {
+		g.Node(string(block.entrypc)).Box()
+	}
+	/*
+	n2 := g.Node("testing a little").Box()
+
+	g.Edge(n1, n2)
+	g.Edge(n2, n1, "back").Attr("color", "red")
+*/
+	path := "cfg.dot"
+	os.Remove(path)
+
+	f, errcr := os.Create(path)
+	if errcr != nil {
+		panic(errcr)
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	_, errwr := w.WriteString(g.String())
+	if errwr != nil {
+		panic(errwr)
+	}
+	w.Flush()
 }
 
 func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
@@ -548,6 +618,7 @@ func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
 		}
 	}
 }
+
 func AbsIntCfgHarness2(prog *Contract) error {
 
 	stmts := getStmts(prog)
