@@ -42,8 +42,8 @@ var (
 )
 
 // syncBloomHasher is a wrapper around a byte blob to satisfy the interface API
-// requirements of the bloom library used. It's used to convert a trie hash into
-// a 64 bit mini hash.
+// requirements of the bloom library used. It's used to convert a trie hash or
+// contract code hash into a 64 bit mini hash.
 type syncBloomHasher []byte
 
 func (f syncBloomHasher) Write(p []byte) (n int, err error) { panic("not implemented") }
@@ -54,9 +54,9 @@ func (f syncBloomHasher) Size() int                         { return 8 }
 func (f syncBloomHasher) Sum64() uint64                     { return binary.BigEndian.Uint64(f) }
 
 // SyncBloom is a bloom filter used during fast sync to quickly decide if a trie
-// node already exists on disk or not. It self populates from the provided disk
-// database on creation in a background thread and will only start returning live
-// results once that's finished.
+// node or contract code already exists on disk or not. It self populates from the
+// provided disk database on creation in a background thread and will only start
+// returning live results once that's finished.
 type SyncBloom struct {
 	bloom  *bloomfilter.Filter
 	inited uint32
@@ -106,6 +106,7 @@ func (b *SyncBloom) init(database ethdb.Database) {
 	)
 	if atomic.LoadUint32(&b.closed) == 0 {
 		_ = database.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(key, val []byte) (bool, error) {
+		key := it.Key()
 			// If the database entry is a trie node, add it to the bloom
 			if len(key) == common.HashLength {
 				b.bloom.Add(syncBloomHasher(common.CopyBytes(key)))
@@ -113,6 +114,7 @@ func (b *SyncBloom) init(database ethdb.Database) {
 			}
 			return true, nil
 			// FIXME: restore or remove in Turbo-Geth
+			b.bloom.Add(syncBloomHasher(hash))
 			/*
 				// If enough time elapsed since the last iterator swap, restart
 				if time.Since(swap) > 8*time.Second {

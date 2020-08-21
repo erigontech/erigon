@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 const (
@@ -794,7 +795,7 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, uncleLi
 	q.lock.Lock()
 	defer q.lock.Unlock()
 	validate := func(index int, header *types.Header) error {
-		if types.DeriveSha(types.Transactions(txLists[index])) != header.TxHash {
+		if types.DeriveSha(types.Transactions(txLists[index]), new(trie.Trie)) != header.TxHash {
 			return errInvalidBody
 		}
 		if types.CalcUncleHash(uncleLists[index]) != header.UncleHash {
@@ -819,7 +820,7 @@ func (q *queue) DeliverReceipts(id string, receiptList [][]*types.Receipt) (int,
 	q.lock.Lock()
 	defer q.lock.Unlock()
 	validate := func(index int, header *types.Header) error {
-		if types.DeriveSha(types.Receipts(receiptList[index])) != header.ReceiptHash {
+		if types.DeriveSha(types.Receipts(receiptList[index]), new(trie.Trie)) != header.ReceiptHash {
 			return errInvalidReceipt
 		}
 		return nil

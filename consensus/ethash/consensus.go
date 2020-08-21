@@ -592,7 +592,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, heade
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(chainConfig, state, header, uncles)
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, txs, uncles, receipts), nil
+	return types.NewBlock(header, txs, uncles, receipts, new(trie.Trie)), nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

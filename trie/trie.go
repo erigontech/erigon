@@ -1380,3 +1380,9 @@ func (t *Trie) evictSubtreeFromHashMap(n node) {
 func (t *Trie) HashMapSize() int {
 	return len(t.hashMap)
 }
+
+// Reset drops the referenced root node and cleans all internal state.
+func (t *Trie) Reset() {
+	t.root = nil
+	t.unhashed = 0
+}

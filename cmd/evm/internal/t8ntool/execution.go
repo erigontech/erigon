@@ -224,8 +224,8 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	root := roots[len(roots)-1]
 	execRs := &ExecutionResult{
 		StateRoot:   root,
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: types.DeriveSha(receipts),
+		TxRoot:      types.DeriveSha(includedTxs, new(trie.Trie)),
+		ReceiptRoot: types.DeriveSha(receipts, new(trie.Trie)),
 		Bloom:       types.CreateBloom(receipts),
 		LogsHash:    rlpHash(ibs.Logs()),
 		Receipts:    receipts,
