@@ -11,10 +11,6 @@ RUN go mod download
 ADD . .
 RUN make tg
 
-RUN pwd
-
-RUN sh
-
 FROM alpine:3
 
 RUN apk add --no-cache ca-certificates
