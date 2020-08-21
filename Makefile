@@ -6,6 +6,14 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
+docker:
+	docker build -t turbo-geth:latest .
+
+docker-alltools:
+	docker build -t turbo-geth-alltools:latest -f Dockerfile.alltools .
+
+docker-compose:
+	docker-compose up
 
 geth:
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/geth 
