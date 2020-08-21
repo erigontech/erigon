@@ -1,7 +1,9 @@
 **/*_test.go
 
+build/bin
 build/_workspace
 build/_bin
 tests/testdata
 debug-web-ui
 cmd/prometheus
+semantics

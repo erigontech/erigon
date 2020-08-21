@@ -2,12 +2,18 @@ FROM golang:1.14-alpine as builder
 
 RUN apk add --no-cache make gcc musl-dev linux-headers git
 
-# next 2 lines helping utilize docker cache
-COPY go.mod go.sum /app/
-RUN cd /app && go mod download
+WORKDIR /app
 
-ADD . /app
-RUN cd /app && make all
+# next 2 lines helping utilize docker cache
+COPY go.mod go.sum ./
+RUN go mod download
+
+ADD . .
+RUN make tg
+
+RUN pwd
+
+RUN sh
 
 FROM alpine:3
 
