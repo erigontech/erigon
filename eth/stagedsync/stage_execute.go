@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	logInterval = 30 // seconds
+	logInterval = 30 * time.Second
 )
 
 type HasChangeSetWriter interface {
@@ -68,7 +68,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	engine := chainContext.Engine()
 
 	stageProgress := s.BlockNumber
-	logTime, logBlock := time.Now(), stageProgress
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	logBlock := stageProgress
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -123,7 +125,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		logTime, logBlock = logProgress(logTime, logBlock, blockNum, batch)
+		select {
+		default:
+		case <-logEvery.C:
+			logBlock = logProgress(logBlock, blockNum, batch)
+		}
 	}
 
 	if err := s.Update(batch, stageProgress); err != nil {
@@ -137,11 +143,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	return nil
 }
 
-func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPendingMutations) (time.Time, uint64) {
-	if now%64 != 0 || time.Since(lastLogTime).Seconds() < logInterval {
-		return lastLogTime, prev // return old values because no logging happened
-	}
-
+func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	speed := float64(now-prev) / float64(logInterval)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -153,7 +155,7 @@ func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPend
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
 
-	return time.Now(), now
+	return now
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -210,6 +212,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
 	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
 		if err = deleteChangeSets(batch, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
@@ -217,6 +222,19 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		if writeReceipts {
 			blockHash := rawdb.ReadCanonicalHash(batch, i)
 			rawdb.DeleteReceipts(batch, blockHash, i)
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Executed blocks:",
+				"currentBlock", i,
+				"batch", common.StorageSize(batch.BatchSize()),
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
 		}
 	}
 

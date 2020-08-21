@@ -114,27 +114,30 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 	}
 	var canUseAppend bool
 
-	putTimer := time.Now()
-	i := 0
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	var initialized bool
 	loadNextFunc := func(originalK, k, v []byte) error {
-		if i == 0 {
+		if !initialized {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
+			initialized = true
 		}
 
-		i++
-		i, putTimer = printProgressIfNeeded(i, putTimer, k, func(progress int) {
+		select {
+		default:
+		case <-logEvery.C:
 			runtime.ReadMemStats(&m)
 			log.Info(
 				"ETL [2/2] Loading",
 				"into", bucket,
 				"size", common.StorageSize(batch.BatchSize()),
-				"keys", fmt.Sprintf("%.1fM", float64(i)/1_000_000),
-				"progress", progress+50, // loading is the second stage, from 50..100
+				"progress", progressFromKey(k)+50, // loading is the second stage, from 50..100
 				"use append", canUseAppend,
 				"current key", makeCurrentKeyStr(originalK),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-		})
+		}
 
 		if canUseAppend && len(v) == 0 {
 			return nil // nothing to delete after end of bucket
