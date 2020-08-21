@@ -38,7 +38,7 @@ type stmt struct {
 	isBlockExit    bool
 }
 
-func (stmt stmt) String() string {
+func (stmt *stmt) String() string {
 	ends := ""
 	if stmt.ends {
 		ends = "ends"
@@ -50,19 +50,25 @@ func (stmt stmt) String() string {
 	return fmt.Sprintf("%v %v %v", stmt.opcode, ends, valid)
 }
 
+type program struct {
+	contract* Contract
+	stmts []*stmt
+	blocks []*block
+}
 
-func getStmts(prog *Contract) []stmt {
+func toProgram(contract *Contract) *program {
 	jt := newIstanbulInstructionSet()
 
-	codeLen := len(prog.Code)
-	var stmts []stmt
+	program := &program{contract: contract}
+
+	codeLen := len(contract.Code)
 	inferIsData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
 		stmt := stmt{}
 		stmt.pc = pc
 		stmt.inferredAsData = inferIsData[pc]
 
-		op := prog.GetOp(uint64(pc))
+		op := contract.GetOp(uint64(pc))
 		stmt.opcode = op
 		stmt.operation = jt[op]
 		stmt.ends = stmt.operation.halts || stmt.operation.reverts || !stmt.operation.valid
@@ -79,7 +85,7 @@ func getStmts(prog *Contract) []stmt {
 				endMin = codeLen
 			}
 			integer := new(uint256.Int)
-			integer.SetBytes(prog.Code[startMin:endMin])
+			integer.SetBytes(contract.Code[startMin:endMin])
 			stmt.value = *integer
 			stmt.numBytes = pushByteSize + 1
 
@@ -92,12 +98,42 @@ func getStmts(prog *Contract) []stmt {
 			stmt.numBytes = 1
 		}
 
-		stmts = append(stmts, stmt)
-		if pc != len(stmts) - 1 {
+		program.stmts = append(program.stmts, &stmt)
+		if pc != len(program.stmts) - 1 {
 			panic("Invalid length")
 		}
 	}
-	return stmts
+
+	for pc, stmt := range program.stmts {
+		if !stmt.inferredAsData {
+			if pc == 0 {
+				stmt.isBlockEntry = true
+			} else if stmt.opcode == JUMPDEST {
+				stmt.isBlockEntry = true
+			} else if stmt.opcode == JUMPI && pc < len(program.stmts) - 1 {
+				entry := program.stmts[pc+1]
+				entry.isBlockEntry = true
+			}
+
+			if pc == len(program.stmts) - 1 {
+				stmt.isBlockExit = true
+			} else if stmt.opcode == JUMP || stmt.opcode == JUMPI {
+				stmt.isBlockExit = true
+			}
+		}
+	}
+
+	for entrypc, entry := range program.stmts {
+		if entry.isBlockEntry {
+			block := &block{entrypc: entrypc, stmts: make([]*stmt, 0) }
+			program.blocks = append(program.blocks, block)
+			for i := entrypc; i < len(program.stmts) && !program.stmts[i].isBlockExit; i++ {
+				block.stmts = append(block.stmts, program.stmts[i])
+			}
+		}
+	}
+
+	return program
 }
 
 
@@ -111,7 +147,7 @@ func printStmts(stmts []stmt) {
 
 type edge struct {
 	pc0 int
-	stmt stmt
+	stmt *stmt
 	pc1 int
 }
 
@@ -309,39 +345,39 @@ func ValueSetSingle(value uint256.Int, pc int) ValueSet {
 
 //////////////////////////////////////////////////
 
-type state2 struct {
+type state struct {
 	stack       []ValueSet
 	anlyCounter int
 	worklistLen int
 }
 
-func EmptyState2() state2 {
-	return state2{stack: nil, anlyCounter: -1, worklistLen: -1}
+func emptyState() state {
+	return state{stack: nil, anlyCounter: -1, worklistLen: -1}
 }
 
-func (state *state2) Copy() state2 {
-	newState := EmptyState2()
+func (state *state) Copy() state {
+	newState := emptyState()
 	for _, valueSet := range state.stack {
 		newState.stack = append(newState.stack, valueSet.Copy())
 	}
 	return newState
 }
 
-func (state *state2) Push(value ValueSet) {
+func (state *state) Push(value ValueSet) {
 	rest := state.stack[0: absStackLen-1]
 	state.stack = []ValueSet{value}
 	state.stack = append(state.stack, rest...)
 }
 
-func (state *state2) Pop() ValueSet {
+func (state *state) Pop() ValueSet {
 	res := state.stack[0]
 	state.stack = append(state.stack[1:], ValueSetTop())
 	return res
 }
 
 // botState generates initial state which is a stack of "bottom" values
-func botState() state2 {
-	st := EmptyState2()
+func botState() state {
+	st := emptyState()
 	st.stack = make([]ValueSet, absStackLen)
 
 	for i := range st.stack {
@@ -350,7 +386,7 @@ func botState() state2 {
 	return st
 }
 
-func (state state2) String(abbrev bool) string {
+func (state state) String(abbrev bool) string {
 	var strs []string
 	for _, c := range state.stack {
 		strs = append(strs, c.String(abbrev))
@@ -370,12 +406,14 @@ type ResolveResult struct {
 // It either concludes that the execution of the instruction may result in a jump to an unpredictable
 // destination (in this case, attrubute resolved will be false), or returns one (for a non-JUMPI) or two (for JUMPI)
 // edges that contain program counters of destinations where the executions can possibly come next
-func resolve2(prog *Contract, stmts []stmt, pc0 int, st0 state2, stmt stmt) ResolveResult {
+func resolve(program *program, pc0 int, st0 state) ResolveResult {
+	stmt := program.stmts[pc0]
+
 	if !stmt.operation.valid || stmt.ends {
 		return ResolveResult{resolved: true}
 	}
 
-	codeLen := len(prog.Code)
+	codeLen := len(program.contract.Code)
 
 	var edges []edge
 	isBadJump := false
@@ -390,7 +428,7 @@ func resolve2(prog *Contract, stmts []stmt, pc0 int, st0 state2, stmt stmt) Reso
 					if jumpDest.value.IsUint64() {
 						pc1 := int(jumpDest.value.Uint64())
 
-						if stmts[pc1].opcode != JUMPDEST {
+						if program.stmts[pc1].opcode != JUMPDEST {
 							isBadJump = true
 						} else {
 							edges = append(edges, edge{pc0, stmt, pc1})
@@ -417,13 +455,13 @@ func resolve2(prog *Contract, stmts []stmt, pc0 int, st0 state2, stmt stmt) Reso
 	}
 
 	if isBadJump {
-		return ResolveResult{edges: edges, resolved: false, badJump: &stmt}
+		return ResolveResult{edges: edges, resolved: false, badJump: stmt}
 	} else {
 		return ResolveResult{edges: edges, resolved: true, badJump: nil}
 	}
 }
 
-func post2(st0 state2, stmt stmt) (state2, error) {
+func post(st0 state, stmt *stmt) (state, error) {
 	st1 := st0.Copy()
 
 	isStackTooShort := false
@@ -464,7 +502,7 @@ func post2(st0 state2, stmt stmt) (state2, error) {
 	}
 }
 
-func leq2(st0 state2, st1 state2) bool {
+func leq(st0 state, st1 state) bool {
 	if len(st0.stack) != len(st1.stack) || absStackLen != len(st0.stack) {
 		panic("mismatched stack len")
 	}
@@ -477,8 +515,8 @@ func leq2(st0 state2, st1 state2) bool {
 	return true
 }
 
-func lub2(st0 state2, st1 state2) state2 {
-	newState := EmptyState2()
+func lub(st0 state, st1 state) state {
+	newState := emptyState()
 
 	for i := 0; i < absStackLen; i++ {
 		lub := ValueSetLub(st0.stack[i], st1.stack[i])
@@ -490,18 +528,18 @@ func lub2(st0 state2, st1 state2) state2 {
 
 type block struct {
 	entrypc int
-	stmts []stmt
-	preds []block
-	succs []block
+	stmts []*stmt
+	preds []*block
+	succs []*block
 }
 
-func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]state2, badJumps map[int]bool) {
+func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]state, badJumps map[int]bool) {
 //	es := make([]edge, len(edges))
 //	copy(es, edges)
 //	sortEdges(es)
 
 	var badJumpList []string
-	for pc, stmt := range stmts {
+	for pc, stmt := range program.stmts {
 		if stmt.inferredAsData {
 			//fmt.Printf("data: %v\n", stmt.inferredAsData)
 			continue
@@ -522,7 +560,7 @@ func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]s
 		showPC0s := false
 		for pc0, _ := range prevEdgeMap[pc] {
 			pc0s = append(pc0s, strconv.Itoa(pc0))
-			stmt0 := stmts[pc0]
+			stmt0 := program.stmts[pc0]
 			if pc0 + stmt0.numBytes != pc {
 				showPC0s = true
 			}
@@ -547,40 +585,8 @@ func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]s
 		fmt.Println(badJump)
 	}
 
-	for pc, stmt := range stmts {
-		if !stmt.inferredAsData {
-			if pc == 0 {
-				stmt.isBlockEntry = true
-				print("HERE")
-			} else if stmt.opcode == JUMPDEST {
-				stmt.isBlockEntry = true
-			} else if stmt.opcode == JUMPI && pc < len(stmts) - 1 {
-				entry := stmts[pc+1]
-				entry.isBlockEntry = true
-			}
-
-			if pc == len(stmts) - 1 {
-				stmt.isBlockExit = true
-			} else if stmt.opcode == JUMP || stmt.opcode == JUMPI {
-				stmt.isBlockExit = true
-			}
-		}
-	}
-
-	var blocks []block
-	for entrypc, entry := range stmts {
-		if entry.isBlockEntry {
-			print("HERE2")
-			block := block{entrypc: entrypc, stmts: make([]stmt, 0) }
-			blocks = append(blocks, block)
-			for i := entrypc; i < len(stmts) && !stmts[i].isBlockExit; i++ {
-				block.stmts = append(block.stmts, stmts[i])
-			}
-		}
-	}
-	print(len(blocks))
 	g := dot.NewGraph(dot.Directed)
-	for _, block := range blocks {
+	for _, block := range program.blocks {
 		g.Node(string(block.entrypc)).Box()
 	}
 	/*
@@ -606,11 +612,11 @@ func printAnlyState2(stmts []stmt, prevEdgeMap map[int]map[int]bool, D map[int]s
 	w.Flush()
 }
 
-func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
+func check(program *program, prevEdgeMap map[int]map[int]bool) {
 
 	for pc1, pc0s := range prevEdgeMap {
 		for pc0 := range pc0s {
-			s := stmts[pc0]
+			s := program.stmts[pc0]
 			if s.ends {
 				msg := fmt.Sprintf("Halt has successor: %v -> %v", pc0, pc1)
 				panic(msg)
@@ -619,16 +625,13 @@ func check(stmts []stmt, prevEdgeMap map[int]map[int]bool) {
 	}
 }
 
-func AbsIntCfgHarness2(prog *Contract) error {
+func AbsIntCfgHarness(contract *Contract) error {
 
-	stmts := getStmts(prog)
-	if DEBUG {
-		printStmts(stmts)
-	}
+	program := toProgram(contract)
 
 	startPC := 0
-	codeLen := len(prog.Code)
-	D := make(map[int]state2)
+	codeLen := len(program.contract.Code)
+	D := make(map[int]state)
 	for pc := 0; pc < codeLen; pc++ {
 		D[pc] = botState()
 	}
@@ -638,7 +641,7 @@ func AbsIntCfgHarness2(prog *Contract) error {
 
 	var workList []edge
 	{
-		resolution := resolve2(prog, stmts, startPC, D[startPC], stmts[startPC])
+		resolution := resolve(program, startPC, D[startPC])
 		if !resolution.resolved {
 			fmt.Printf("Unable to resolve at pc=%x\n", startPC)
 			return nil
@@ -653,7 +656,7 @@ func AbsIntCfgHarness2(prog *Contract) error {
 		workList = resolution.edges
 	}
 
-	check(stmts, prevEdgeMap)
+	check(program, prevEdgeMap)
 
 	anlyCounter := 0
 	badJumps := make(map[int]bool)
@@ -674,10 +677,10 @@ func AbsIntCfgHarness2(prog *Contract) error {
 		}
 		preDpc0 := D[e.pc0]
 		preDpc1 := D[e.pc1]
-		post1, err := post2(preDpc0, e.stmt)
+		post1, err := post(preDpc0, e.stmt)
 		if err != nil {
 			if STOP_ON_ERROR  {
-				printAnlyState2(stmts, prevEdgeMap, D, nil)
+				printAnlyState(program, prevEdgeMap, D, nil)
 				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
 				return nil
 			} else {
@@ -690,8 +693,8 @@ func AbsIntCfgHarness2(prog *Contract) error {
 			fmt.Printf("Dprev\t\t%v\n", preDpc1)
 		}
 
-		if !leq2(post1, preDpc1) {
-			postDpc1 := lub2(post1, preDpc1)
+		if !leq(post1, preDpc1) {
+			postDpc1 := lub(post1, preDpc1)
 			if false {
 
 				fmt.Printf("\nedge %v %v\n", e.pc0, e.pc1)
@@ -711,11 +714,11 @@ func AbsIntCfgHarness2(prog *Contract) error {
 					}
 				}*/
 				//fmt.Printf("lub\t\t\t%v\n", postDpc1)
-				printAnlyState2(stmts, prevEdgeMap, D, nil)
+				printAnlyState(program, prevEdgeMap, D, nil)
 			}
 			D[e.pc1] = postDpc1
 
-			resolution := resolve2(prog, stmts, e.pc1, D[e.pc1], stmts[e.pc1])
+			resolution := resolve(program, e.pc1, D[e.pc1])
 
 			if !resolution.resolved {
 				badJumps[resolution.badJump.pc] = true
@@ -723,7 +726,7 @@ func AbsIntCfgHarness2(prog *Contract) error {
 				if STOP_ON_ERROR {
 					badJumps := make(map[int]bool)
 					badJumps[resolution.badJump.pc] = true
-					printAnlyState2(stmts, prevEdgeMap, D, badJumps)
+					printAnlyState(program, prevEdgeMap, D, badJumps)
 					return nil
 				}
 			} else {
@@ -754,13 +757,13 @@ func AbsIntCfgHarness2(prog *Contract) error {
 		D[e.pc1] = decp1Copy
 		anlyCounter++
 
-		check(stmts, prevEdgeMap)
+		check(program, prevEdgeMap)
 	}
 
 	print("\nFinal resolve....")
 	var finalEdges []edge
 	for pc := 0; pc < codeLen; pc++ {
-		resolution := resolve2(prog, stmts, pc, D[pc], stmts[pc])
+		resolution := resolve(program, pc, D[pc])
 		if !resolution.resolved {
 			badJumps[resolution.badJump.pc] = true
 			fmt.Println("Bad jump found during final resolve.")
@@ -775,11 +778,11 @@ func AbsIntCfgHarness2(prog *Contract) error {
 	fmt.Printf("\n# of total edges: %v\n", len(finalEdges))
 	//printEdges(edges)
 
-	printAnlyState2(stmts, prevEdgeMap, D, nil)
+	printAnlyState(program, prevEdgeMap, D, nil)
 	println("done valueset")
 
 	if len(badJumps) > 0 {
-		printAnlyState2(stmts, prevEdgeMap, D, badJumps)
+		printAnlyState(program, prevEdgeMap, D, badJumps)
 	}
 
 	return nil

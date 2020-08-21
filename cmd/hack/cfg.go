@@ -27,58 +27,58 @@ func testGenCfg() error {
 	//absIntTestStaticLoop01() //- PASSES
 	//absIntTestPrivateFunction01()
 	//absIntTestDepositContract() //FAILS - Imprecision
-	absIntTestDepositContract2()
+	//absIntTestDepositContract2()
 	return nil
 }
 
 func cfg0Test0() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func cfg0Test1() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func dfTest0() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func dfTest1() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func dfTest2() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x6, byte(vm.JUMP), 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func dfTest3() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 //should fail to find concrete jump
 func absIntTest1() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 //should fail to find concrete jump
 func absIntTest2() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 
@@ -91,7 +91,7 @@ func absIntTest3() {
 							byte(vm.PUSH1), 0x0, //jump destination
 							byte(vm.JUMPI),
 							byte(vm.STOP)}
-	_ = vm.AbsIntCfgHarness2(contract)
+	_ = vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestSimple00() {
@@ -111,7 +111,7 @@ func absIntTestSimple00() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 
@@ -133,7 +133,7 @@ func absIntTestRequires00() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestCall01() {
@@ -159,7 +159,7 @@ func absIntTestCall01() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 
@@ -184,7 +184,7 @@ func absIntTestEcrecoverLoop02() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 
@@ -208,7 +208,7 @@ func absIntTestStorageVar03() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 
@@ -234,7 +234,7 @@ func absIntTestStaticLoop00() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestStaticLoop01() {
@@ -258,7 +258,7 @@ func absIntTestStaticLoop01() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestPrivateFunction01() {
@@ -283,7 +283,7 @@ func absIntTestPrivateFunction01() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestDepositContract() {
@@ -295,7 +295,7 @@ func absIntTestDepositContract() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestDepositContract2() {
@@ -307,7 +307,7 @@ func absIntTestDepositContract2() {
 
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
-	vm.AbsIntCfgHarness2(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 /////////////////////////////////////////////////////
 
