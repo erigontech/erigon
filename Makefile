@@ -6,6 +6,8 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
+all: tg hack tester rpctest state restapi pics rpcdaemon integration
+
 docker:
 	docker build -t turbo-geth:latest .
 
@@ -79,7 +81,6 @@ integration:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
-all: tg hack tester rpctest state restapi pics rpcdaemon integration
 
 test: semantics/z3/build/libz3.a
 	go test ./...
