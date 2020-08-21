@@ -1,5 +1,5 @@
 GOBIN = ./build/bin
-GOBUILD = env GO111MODULE=on go build
+GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
