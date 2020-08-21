@@ -22,8 +22,8 @@ import (
 )
 
 type (
-	executionFunc  func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error)
-	gasFunc        func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error)
+	gasFunc       func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*stack.Stack) (size uint64, overflow bool)
 )
@@ -38,6 +38,7 @@ type operation struct {
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int
+
 	numPop int
 	numPush int
 	isPush bool
@@ -674,6 +675,7 @@ func newFrontierInstructionSet() JumpTable {
 			memorySize:  memoryMStore8,
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
+			
 			numPop: 	2,
 			numPush: 	0,
 			valid: true,
