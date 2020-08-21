@@ -1,5 +1,6 @@
 GOBIN = ./build/bin
 GOBUILD = env GO111MODULE=on go build
+GOTEST = go list ./... | xargs go test
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
@@ -83,13 +84,13 @@ integration:
 
 
 test: semantics/z3/build/libz3.a
-	go test ./...
+	$(GOTEST)
 
 test-lmdb: semantics/z3/build/libz3.a
-	TEST_DB=lmdb go test ./...
+	TEST_DB=lmdb $(GOTEST)
 
 test-bolt: semantics/z3/build/libz3.a
-	TEST_DB=bolt go test ./...
+	TEST_DB=bolt $(GOTEST)
 
 lint: lintci
 
