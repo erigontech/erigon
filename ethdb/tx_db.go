@@ -13,14 +13,15 @@ import (
 
 // TxDb - provides Database interface around ethdb.Tx
 // It's not thread-safe!
-// It's not usable after .Commit()/.Rollback() call
+// TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
 // you can put unlimited amount of data into this class, call IdealBatchSize is unnecessary
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
-	db      Database
-	Tx      Tx
-	cursors map[string]*LmdbCursor
-	len     uint64
+	db       Database
+	Tx       Tx
+	ParentTx Tx
+	cursors  map[string]*LmdbCursor
+	len      uint64
 }
 
 func (m *TxDb) Close() {
@@ -63,6 +64,7 @@ func (m *TxDb) begin(parent Tx) error {
 		return err
 	}
 	m.Tx = tx
+	m.ParentTx = parent
 	for i := range dbutils.Buckets {
 		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
 		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
@@ -284,6 +286,15 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 	return nil
 }
 
+func (m *TxDb) CommitAndBegin() error {
+	_, err := m.Commit()
+	if err != nil {
+		return err
+	}
+
+	return m.begin(m.ParentTx)
+}
+
 func (m *TxDb) Commit() (uint64, error) {
 	if m.Tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
@@ -292,6 +303,7 @@ func (m *TxDb) Commit() (uint64, error) {
 		return 0, err
 	}
 	m.Tx = nil
+	m.ParentTx = nil
 	m.cursors = nil
 	m.len = 0
 	return 0, nil
@@ -304,6 +316,7 @@ func (m *TxDb) Rollback() {
 	m.Tx.Rollback()
 	m.cursors = nil
 	m.Tx = nil
+	m.ParentTx = nil
 	m.len = 0
 }
 
