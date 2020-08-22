@@ -46,7 +46,6 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 		runtime.ReadMemStats(&m)
 		log.Info(
 			"Flushed buffer file",
-			"current key", makeCurrentKeyStr(currentKey),
 			"name", bufferFile.Name(),
 			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	}()
