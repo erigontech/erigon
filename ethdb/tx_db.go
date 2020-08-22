@@ -29,7 +29,7 @@ func (m *TxDb) Close() {
 }
 
 func (m *TxDb) Begin() (DbWithPendingMutations, error) {
-	batch := &TxDb{db: m.db, cursors: map[string]*LmdbCursor{}}
+	batch := &TxDb{db: m.db}
 	if err := batch.begin(m.Tx); err != nil {
 		return nil, err
 	}
@@ -65,6 +65,7 @@ func (m *TxDb) begin(parent Tx) error {
 	}
 	m.Tx = tx
 	m.ParentTx = parent
+	m.cursors = make(map[string]*LmdbCursor, 16)
 	for i := range dbutils.Buckets {
 		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
 		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
