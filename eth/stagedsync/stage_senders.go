@@ -167,6 +167,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	}()
 
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for j := range out {
 		if j.err != nil {
 			return j.err
@@ -175,6 +177,11 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return err
 		}
 		k := make([]byte, 4)
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Senders recovery", "block", j.index)
+		}
 		binary.BigEndian.PutUint32(k, uint32(j.index))
 		if err := collector.Collect(k, j.senders); err != nil {
 			return err
