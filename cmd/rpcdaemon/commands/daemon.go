@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -24,6 +26,29 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+	return response, err
+}
+
+// GetBlockByHash see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbyhash
+// see internal/ethapi.PublicBlockChainAPI.GetBlockByHash
+func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (map[string]interface{}, error) {
+	additionalFields := make(map[string]interface{})
+
+	block := rawdb.ReadBlockByHash(api.dbReader, hash)
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %x", hash)
+	}
+	number := block.NumberU64()
+
+	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, hash, number)
+	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
+
+	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
