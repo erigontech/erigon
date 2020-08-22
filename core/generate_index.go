@@ -54,10 +54,12 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
 			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k)}
+				blockNum, _ := dbutils.DecodeTimestamp(k)
+				return []interface{}{"block", blockNum}
 			},
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+				blockNum, _ := dbutils.DecodeTimestamp(k)
+				return []interface{}{"block", blockNum} // loading is the second stage, from 50..100
 			},
 		},
 	)
