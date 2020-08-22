@@ -68,7 +68,7 @@ func PrepareStagedSync(
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				const batchSize = 10000
 				const blockSize = 4096
-				n := secp256k1.NumOfContexts() // we can only be as parallels as our crypto libary supports
+				n := secp256k1.NumOfContexts() // we can only be as parallels as our crypto library supports
 
 				cfg := Stage3Config{
 					BatchSize:       batchSize,
