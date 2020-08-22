@@ -60,7 +60,7 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 		ExtractStartKey: startKey,
 		ExtractEndKey:   endKey,
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", new(big.Int).SetBytes(v).Uint64()}
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	})
 }
