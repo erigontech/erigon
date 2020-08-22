@@ -53,6 +53,12 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
 		},
 	)
 	if err != nil {

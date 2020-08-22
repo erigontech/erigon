@@ -57,6 +57,7 @@ func NextKey(key []byte) ([]byte, error) {
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
 type LoadCommitHandler func(db ethdb.Putter, key []byte, isDone bool) error
+type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
 
 type TransformArgs struct {
 	ExtractStartKey []byte
@@ -67,6 +68,9 @@ type TransformArgs struct {
 	Quit            <-chan struct{}
 	OnLoadCommit    LoadCommitHandler
 	loadBatchSize   int // used in testing
+
+	LogDetailsExtract AdditionalLogArguments
+	LogDetailsLoad    AdditionalLogArguments
 }
 
 func Transform(
@@ -86,7 +90,7 @@ func Transform(
 	collector := NewCollector(datadir, buffer)
 
 	t := time.Now()
-	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit); err != nil {
+	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {
 		disposeProviders(collector.dataProviders)
 		return err
 	}
@@ -105,28 +109,31 @@ func extractBucketIntoFiles(
 	collector *Collector,
 	extractFunc ExtractFunc,
 	quit <-chan struct{},
+	additionalLogArguments AdditionalLogArguments,
 ) error {
-
-	i := 0
-	putTimer := time.Now()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	var m runtime.MemStats
 
 	if err := db.Walk(bucket, startkey, fixedBits, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
-		i++
-		i, putTimer = printProgressIfNeeded(i, putTimer, k, func(progress int) {
+
+		select {
+		default:
+		case <-logEvery.C:
+			logArs := []interface{}{"from", bucket}
+			if additionalLogArguments != nil {
+				logArs = append(logArs, additionalLogArguments(k, v)...)
+			} else {
+				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+			}
+
 			runtime.ReadMemStats(&m)
-			log.Info(
-				"ETL [1/2] Extracting",
-				"from", bucket,
-				"keys", fmt.Sprintf("%.1fM", float64(i)/1_000_000),
-				"progress", progress, // extracting is the first stage, from 0..50
-				"current key", makeCurrentKeyStr(k),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC),
-			)
-		})
+			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			log.Info("ETL [1/2] Extracting", logArs...)
+		}
 		if endkey != nil && bytes.Compare(k, endkey) > 0 {
 			return false, nil
 		}

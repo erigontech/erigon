@@ -611,21 +611,27 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		if err := fstl.iteration(c, ih, true /* first */); err != nil {
 			return err
 		}
-		var counter uint64
-		t := time.Now()
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+
 		for fstl.rangeIdx < len(fstl.dbPrefixes) {
 			for !fstl.itemPresent {
 				if err := fstl.iteration(c, ih, false /* first */); err != nil {
 					return err
 				}
-				counter++
-				t = fstl.logProgress(t, counter)
+
 			}
 			if fstl.itemPresent {
 				if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff); err != nil {
 					return err
 				}
 				fstl.itemPresent = false
+
+				select {
+				default:
+				case <-logEvery.C:
+					fstl.logProgress()
+				}
 			}
 		}
 		return nil
@@ -635,18 +641,14 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	return fstl.receiver.Result(), nil
 }
 
-func (fstl *FlatDbSubTrieLoader) logProgress(lastLogTime time.Time, counter uint64) time.Time {
-	if counter%100_000 == 0 && time.Since(lastLogTime) > 30*time.Second {
-		var k string
-		if fstl.accountKey != nil {
-			k = makeCurrentKeyStr(fstl.accountKey)
-		} else {
-			k = makeCurrentKeyStr(fstl.ihK)
-		}
-		log.Info("Calculating Merkle root", "current key", k)
-		return time.Now()
+func (fstl *FlatDbSubTrieLoader) logProgress() {
+	var k string
+	if fstl.accountKey != nil {
+		k = makeCurrentKeyStr(fstl.accountKey)
+	} else {
+		k = makeCurrentKeyStr(fstl.ihK)
 	}
-	return lastLogTime
+	log.Info("Calculating Merkle root", "current key", k)
 }
 
 func makeCurrentKeyStr(k []byte) string {
