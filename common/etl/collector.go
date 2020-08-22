@@ -128,15 +128,18 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		select {
 		default:
 		case <-logEvery.C:
+			logArs := []interface{}{"into", bucket}
+			if args.LogDetailsLoad != nil {
+				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
+			} else {
+				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+			}
+
 			runtime.ReadMemStats(&m)
-			log.Info(
-				"ETL [2/2] Loading",
-				"into", bucket,
-				"size", common.StorageSize(batch.BatchSize()),
-				"progress", ProgressFromKey(k)+50, // loading is the second stage, from 50..100
-				"use append", canUseAppend,
-				"current key", makeCurrentKeyStr(originalK),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+
+			runtime.ReadMemStats(&m)
+			log.Info("ETL [2/2] Loading", logArs...)
 		}
 
 		if canUseAppend && len(v) == 0 {

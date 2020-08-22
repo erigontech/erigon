@@ -243,7 +243,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 				return []interface{}{"progress", etl.ProgressFromKey(k)}
 			},
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k)}
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
 			},
 		},
 	); err != nil {
@@ -322,7 +322,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 				return []interface{}{"progress", etl.ProgressFromKey(k)}
 			},
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k)}
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
 			},
 		},
 	); err != nil {

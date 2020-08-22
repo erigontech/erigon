@@ -123,12 +123,11 @@ func extractBucketIntoFiles(
 		select {
 		default:
 		case <-logEvery.C:
-			logArs := []interface{}{
-				"from", bucket,
-				"current key", makeCurrentKeyStr(k),
-			}
+			logArs := []interface{}{"from", bucket}
 			if additionalLogArguments != nil {
 				logArs = append(logArs, additionalLogArguments(k, v)...)
+			} else {
+				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
 			runtime.ReadMemStats(&m)

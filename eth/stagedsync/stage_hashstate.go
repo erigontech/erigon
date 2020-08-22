@@ -397,7 +397,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 				return []interface{}{"progress", etl.ProgressFromKey(k)}
 			},
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k)}
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
 			},
 		},
 	)
