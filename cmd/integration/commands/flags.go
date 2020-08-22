@@ -1,6 +1,9 @@
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/spf13/cobra"
+)
 
 var (
 	chaindata          string
@@ -56,5 +59,5 @@ func withBucket(cmd *cobra.Command) {
 }
 
 func withDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", "", "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
 }
