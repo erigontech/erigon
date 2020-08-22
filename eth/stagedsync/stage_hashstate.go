@@ -393,6 +393,12 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 			BufferType:      etl.SortableOldestAppearedBuffer,
 			ExtractStartKey: startkey,
 			Quit:            p.quitCh,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
 		},
 	)
 }

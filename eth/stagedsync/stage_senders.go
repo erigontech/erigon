@@ -184,7 +184,19 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		index := int(binary.BigEndian.Uint32(k))
 		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
 	}
-	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+	if err := collector.Load(db,
+		dbutils.Senders,
+		loadFunc,
+		etl.TransformArgs{
+			Quit: quitCh,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			},
+		},
+	); err != nil {
 		return err
 	}
 	return s.DoneAndUpdate(db, to)

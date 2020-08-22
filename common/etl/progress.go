@@ -1,6 +1,6 @@
 package etl
 
-func progressFromKey(k []byte) int {
+func ProgressFromKey(k []byte) int {
 	if len(k) < 1 {
 		return 0
 	}

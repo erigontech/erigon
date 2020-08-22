@@ -133,7 +133,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 				"ETL [2/2] Loading",
 				"into", bucket,
 				"size", common.StorageSize(batch.BatchSize()),
-				"progress", progressFromKey(k)+50, // loading is the second stage, from 50..100
+				"progress", ProgressFromKey(k)+50, // loading is the second stage, from 50..100
 				"use append", canUseAppend,
 				"current key", makeCurrentKeyStr(originalK),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
