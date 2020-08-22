@@ -137,8 +137,6 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 			runtime.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-
-			runtime.ReadMemStats(&m)
 			log.Info("ETL [2/2] Loading", logArs...)
 		}
 
