@@ -47,6 +47,7 @@ import "C"
 import (
 	"errors"
 	"math/big"
+	"runtime"
 	"unsafe"
 )
 
@@ -54,12 +55,18 @@ type Context struct {
 	context *C.secp256k1_context
 }
 
-var context *C.secp256k1_context
-var DefaultContext *Context // to avoid allocating structures every time on `RecoverPubkey` w/o context
+var (
+	context            *C.secp256k1_context
+	contextsForThreads []*C.secp256k1_context
+	DefaultContext     *Context // to avoid allocating structures every time on `RecoverPubkey` w/o context
+)
 
 func init() {
 	context = initContext()
 	DefaultContext = &Context{context}
+	for i := 0; i < runtime.NumCPU(); i++ {
+		contextsForThreads = append(contextsForThreads, initContext())
+	}
 }
 
 func initContext() *C.secp256k1_context {
@@ -68,6 +75,14 @@ func initContext() *C.secp256k1_context {
 	C.secp256k1_context_set_illegal_callback(ctx, C.callbackFunc(C.secp256k1GoPanicIllegal), nil)
 	C.secp256k1_context_set_error_callback(ctx, C.callbackFunc(C.secp256k1GoPanicError), nil)
 	return ctx
+}
+
+func ContextForThread(threadNo int) *Context {
+	return &Context{contextsForThreads[threadNo]}
+}
+
+func NumOfContexts() int {
+	return len(contextsForThreads)
 }
 
 func NewContext() *Context {

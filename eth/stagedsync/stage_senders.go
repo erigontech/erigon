@@ -5,13 +5,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"math/big"
 	"os"
 	"runtime/pprof"
 	"runtime/trace"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -153,12 +154,11 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	wg := new(sync.WaitGroup)
 	wg.Add(cfg.NumOfGoroutines)
 	for i := 0; i < cfg.NumOfGoroutines; i++ {
-		go func() {
+		go func(threadNo int) {
 			defer wg.Done()
-
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)
-		}()
+			recoverSenders(secp256k1.ContextForThread(threadNo), config, jobs, out, quitCh)
+		}(i)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.NumOfGoroutines)
 	go func() {
