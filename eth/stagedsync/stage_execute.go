@@ -144,7 +144,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 }
 
 func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
-	speed := float64(now-prev) / float64(logInterval)
+	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Executed blocks:",
