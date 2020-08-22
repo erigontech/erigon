@@ -73,14 +73,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	}
 
 	batch := tx.NewBatch()
-	defer func() {
-		tx.Rollback()
-	}()
+	defer tx.Rollback()
 
 	batch := tx.NewBatch()
-	defer func() {
-		batch.Rollback()
-	}()
+	defer batch.Rollback()
 
 	engine := chainContext.Engine()
 
@@ -132,15 +128,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return err
 				}
 			}
-			if _, err = tx.Commit(); err != nil {
-				return err
-			}
-
-			tx, err = stateDB.Begin()
-			if err != nil {
-				return err
-			}
-			batch = tx.NewBatch()
 		}
 
 		if prof {
