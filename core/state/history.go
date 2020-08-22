@@ -120,7 +120,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			return nil, ethdb.ErrKeyNotFound
 		}
 	} else if plain {
-		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
+		fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
 		var lastChangesetBlock, lastIndexBlock uint64
 		v1, err1 := tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution])
 		if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
@@ -140,7 +140,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		if len(v1) > 0 {
 			lastIndexBlock = binary.BigEndian.Uint64(v1[:8])
 		}
-		//fmt.Printf("lastChangesetBlock=%d, lastIndexBlock=%d\n", lastChangesetBlock, lastIndexBlock)
+		fmt.Printf("lastChangesetBlock=%d, lastIndexBlock=%d\n", lastChangesetBlock, lastIndexBlock)
 		if lastChangesetBlock > lastIndexBlock {
 			// iterate over changeset to compensate for lacking of the history index
 			csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
@@ -468,7 +468,6 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 	})
 	return err
 }
-
 
 func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byte, error), adapter func(v []byte) changeset.Walker) ([]byte, bool, error) {
 	index := dbutils.WrapHistoryIndex(hV)
