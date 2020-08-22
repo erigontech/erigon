@@ -57,10 +57,6 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 				blockNum, _ := dbutils.DecodeTimestamp(k)
 				return []interface{}{"block", blockNum}
 			},
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				blockNum, _ := dbutils.DecodeTimestamp(k)
-				return []interface{}{"block", blockNum} // loading is the second stage, from 50..100
-			},
 		},
 	)
 	if err != nil {
