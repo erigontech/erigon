@@ -117,13 +117,13 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	var initialized bool
+	i := 0
 	loadNextFunc := func(originalK, k, v []byte) error {
-		if !initialized {
+		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
-			initialized = true
 		}
+		i++
 
 		select {
 		default:
@@ -195,7 +195,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		"Committed batch",
 		"bucket", bucket,
 		"commit", commitTook,
-		"size", common.StorageSize(batch.BatchSize()),
+		"records", i,
 		"current key", makeCurrentKeyStr(nil),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
