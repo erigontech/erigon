@@ -226,14 +226,6 @@ func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	}
 }
 
-func (s *State) WrapExecFunc(id stages.SyncStage, f func(ExecFunc) ExecFunc) {
-	for i := range s.stages {
-		if s.stages[i].ID == id {
-			s.stages[i].ExecFunc = f(s.stages[i].ExecFunc)
-		}
-	}
-}
-
 func (s *State) BeforeStageRun(id stages.SyncStage, f func() error) {
 	s.beforeStageRun[id] = f
 }

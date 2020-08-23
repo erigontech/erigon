@@ -588,21 +588,15 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 		// begin tx at stage right after head/body download Or at first unwind stage
 		// it's temporary solution
-		d.stagedSync.WrapExecFunc(stages.Senders, func(execFunc stagedsync.ExecFunc) stagedsync.ExecFunc {
-			return func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-				if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
-					return execFunc(s, u)
-				}
-
-				fmt.Printf("Begin Tx at Senders\n")
-				var errTx error
-				tx, errTx = d.stateDB.Begin()
-				if errTx != nil {
-					return errTx
-				}
-
-				return execFunc(s, u)
+		d.stagedSync.BeforeStageRun(stages.Senders, func() error {
+			if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+				return nil
 			}
+
+			fmt.Printf("Begin Tx at Senders\n")
+			var errTx error
+			tx, errTx = d.stateDB.Begin()
+			return errTx
 		})
 		d.stagedSync.BeforeUnwind(func() error {
 			if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
