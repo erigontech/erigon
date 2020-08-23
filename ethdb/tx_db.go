@@ -36,10 +36,8 @@ func NewTxDbWithoutTransaction(db Database) *TxDb {
 }
 
 func (m *TxDb) Begin() (DbWithPendingMutations, error) {
-	fmt.Printf("m: %#v\n", m)
 	batch := m
 	if m.tx != nil {
-		fmt.Printf("create new tx_db: %#v\n", m)
 		batch = &TxDb{db: m.db}
 	}
 

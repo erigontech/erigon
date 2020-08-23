@@ -108,7 +108,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			return nil
 		}
 
-		fmt.Printf("Begin Tx at Senders\n")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
@@ -118,13 +117,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			return nil
 		}
 
-		fmt.Printf("Begin Tx Unwind\n")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
 	})
 	st.AfterUnwind(func() error {
-		fmt.Printf("Commit Tx Unwind\n")
 		_, errCommit := tx.Commit()
 		return errCommit
 	})

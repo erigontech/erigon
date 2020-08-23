@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -35,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -593,7 +593,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			fmt.Printf("Begin Tx at Senders\n")
 			var errTx error
 			tx, errTx = tx.Begin()
 			return errTx
@@ -603,13 +602,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			fmt.Printf("Begin Tx Unwind\n")
 			var errTx error
 			tx, errTx = tx.Begin()
 			return errTx
 		})
 		d.stagedSync.AfterUnwind(func() error {
-			fmt.Printf("Commit Tx Unwind\n")
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
@@ -622,7 +619,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Commit tx!\n")
 		return nil
 	}
 
