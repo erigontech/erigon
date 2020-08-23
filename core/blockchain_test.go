@@ -695,7 +695,7 @@ func TestFastVsFullChains(t *testing.T) {
 		}
 	}, false /* intemediateHashes */)
 	if err1 != nil {
-		t.Fatalf("generate chain: %v", err)
+		t.Fatalf("generate chain: %v", err1)
 	}
 	// Import the chain as an archive node for the comparison baseline
 	archiveDb := ethdb.NewMemDatabase()
