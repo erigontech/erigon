@@ -1679,7 +1679,8 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	var stopped bool
 	var err error
 	if execute {
-		index, err = stagedsync.InsertBlocksInStages(d.stateDB, d.chainConfig, d.blockchain.Engine(), blocks, d.blockchain.(*core.BlockChain))
+		index, err = d.blockchain.InsertChain1(context.Background(), blocks)
+		//index, err = stagedsync.InsertBlocksInStages(d.stateDB, d.chainConfig, d.blockchain.Engine(), blocks, d.blockchain.(*core.BlockChain))
 	} else {
 		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
 		if stopped {

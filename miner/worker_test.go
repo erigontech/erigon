@@ -130,7 +130,7 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 		blocks, _, _ := core.GenerateChain(chainConfig, genesis, engine, objectDB, n, func(i int, gen *core.BlockGen) {
 			gen.SetCoinbase(testBankAddress)
 		}, false)
-		if _, err := chain.InsertChain(context.TODO(), blocks); err != nil {
+		if _, err := chain.InsertChain1(context.TODO(), blocks); err != nil {
 			t.Fatalf("failed to insert origin chain: %v", err)
 		}
 	}
@@ -244,7 +244,7 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 		select {
 		case ev := <-sub.Chan():
 			block := ev.Data.(core.NewMinedBlockEvent).Block
-			if _, err := chain.InsertChain(context.TODO(), []*types.Block{block}); err != nil {
+			if _, err := chain.InsertChain1(context.TODO(), []*types.Block{block}); err != nil {
 				t.Fatalf("failed to insert new mined block %d: %v", block.NumberU64(), err)
 			}
 		case <-time.After(3 * time.Second): // Worker needs 1s to include new changes.

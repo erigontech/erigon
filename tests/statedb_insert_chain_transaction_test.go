@@ -54,13 +54,13 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	var kv ethdb.KV
-	blockchain, kv, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
+	var db *ethdb.ObjectDatabase
+	blockchain, db, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(data.addresses[1], to, uint256.NewInt().SetUint64(5000)),
 			data.keys[1],
@@ -71,11 +71,11 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -121,13 +121,13 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	var kv ethdb.KV
-	blockchain, kv, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
+	var db *ethdb.ObjectDatabase
+	blockchain, db, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(5000)),
 			fromKey,
@@ -138,11 +138,11 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -182,13 +182,13 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	var kv ethdb.KV
-	blockchain, kv, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
+	var db *ethdb.ObjectDatabase
+	blockchain, db, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -199,11 +199,11 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -243,13 +243,13 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	var kv ethdb.KV
-	blockchain, kv, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
+	var db *ethdb.ObjectDatabase
+	blockchain, db, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -260,11 +260,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -303,13 +303,13 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	var kv ethdb.KV
-	blockchain, kv, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
+	var db *ethdb.ObjectDatabase
+	blockchain, db, blocks, _, clear, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -320,11 +320,11 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -346,7 +346,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, kv, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, db, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -362,11 +362,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -380,11 +380,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[1].Transactions(), blocks[1].Uncles(), receipts[1])
 
 	// BLOCK 2 - INCORRECT
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
-	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -394,11 +394,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2 - CORRECT
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -417,7 +417,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, kv, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, db, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -437,11 +437,11 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -451,11 +451,11 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -469,12 +469,12 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[2].Transactions(), blocks[2].Uncles(), receipts[2])
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 3
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -488,7 +488,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, kv, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, db, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -512,11 +512,11 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -526,11 +526,11 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -540,7 +540,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -549,12 +549,12 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -568,7 +568,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	blockchain, kv, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
+	blockchain, db, blocks, receipts, clear, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -592,11 +592,11 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -606,11 +606,11 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(kv, blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -620,7 +620,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -629,12 +629,12 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -692,7 +692,7 @@ type tx struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV, []*types.Block, []types.Receipts, func(), error) {
+func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, *ethdb.ObjectDatabase, []*types.Block, []types.Receipts, func(), error) {
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
 	genesis := gspec.MustCommit(db)
@@ -748,7 +748,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, ethdb.KV,
 		db.Close()
 		genesisDb.Close()
 	}
-	return blockchain, db.KV(), blocks, receipts, clear, err
+	return blockchain, db, blocks, receipts, clear, err
 }
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)

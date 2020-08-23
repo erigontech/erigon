@@ -195,7 +195,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	// Create Ethereum Service
 	config := &eth.Config{Genesis: genesis}
 	config.Ethash.PowMode = ethash.ModeFake
-		config.Pruning = false
+	config.Pruning = false
 	ethservice, err := eth.New(n, config)
 	if err != nil {
 		t.Fatalf("can't create new ethereum service: %v", err)
@@ -204,7 +204,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	if err := n.Start(); err != nil {
 		t.Fatalf("can't start test node: %v", err)
 	}
-	if _, err := ethservice.BlockChain().InsertChain(context.Background(), blocks[1:]); err != nil {
+	if _, err := ethservice.BlockChain().InsertChain1(context.Background(), blocks[1:]); err != nil {
 		t.Fatalf("can't import test blocks: %v", err)
 	}
 	return n, blocks

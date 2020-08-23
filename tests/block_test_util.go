@@ -19,6 +19,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -184,7 +184,8 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if err := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), cb, blockchain); err != nil {
+		if _, err := blockchain.InsertChain1(context.Background(), []*types.Block{cb}); err != nil {
+			//if err := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), cb, blockchain); err != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {

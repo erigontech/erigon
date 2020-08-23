@@ -1153,7 +1153,6 @@ func TestLogRebirth(t *testing.T) {
 	blockchain.SubscribeLogsEvent(newLogCh)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 
-	fmt.Printf("Generate chain\n")
 	// This chain contains a single log.
 	chain, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *BlockGen) {
 		if i == 1 {
@@ -1167,7 +1166,6 @@ func TestLogRebirth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	fmt.Printf("Generate fork\n")
 	// Generate long reorg chain containing another log. Inserting the
 	// chain removes one log and adds one.
 	forkChain, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *BlockGen) {
@@ -1183,29 +1181,33 @@ func TestLogRebirth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate fork chain: %v", err)
 	}
-
-	fmt.Printf("Insert chain\n")
-	if _, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
-		t.Fatalf("failed to insert chain: %v", err)
-	}
-	checkLogEvents(t, newLogCh, rmLogsCh, 1, 0)
 	// This chain segment is rooted in the original chain, but doesn't contain any logs.
 	// When inserting it, the canonical chain switches away from forkChain and re-emits
 	// the log event for the old chain, as well as a RemovedLogsEvent for forkChain.
-	fmt.Printf("Generate newBlocks\n")
-	newBlocks, _, err := GenerateChain(params.TestChainConfig, chain[len(chain)-1], engine, db, 1, func(i int, gen *BlockGen) {}, false /* intemediateHashes */)
+	newBlocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 3, func(i int, gen *BlockGen) {
+		if i == 1 {
+			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
+			if err != nil {
+				t.Fatalf("failed to create tx: %v", err)
+			}
+			gen.AddTx(tx)
+		}
+	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate new blocks: %v", err)
 	}
 
-	fmt.Printf("Insert fork\n")
+	if _, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
+		t.Fatalf("failed to insert chain: %v", err)
+	}
+	checkLogEvents(t, newLogCh, rmLogsCh, 1, 0)
+
 	if _, err := blockchain.InsertChain1(context.Background(), forkChain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 1)
 
-	fmt.Printf("Insert newBlocks\n")
-	if _, err := blockchain.InsertChain1(context.Background(), newBlocks); err != nil {
+	if _, err := blockchain.InsertChain1(context.Background(), newBlocks[2:]); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 1)
@@ -2957,11 +2959,9 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	diskdb := ethdb.NewMemDatabase()
-	gspec.MustCommit(diskdb)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
+	chain, err := NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
@@ -3035,18 +3035,6 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	}
 	genesis := gspec.MustCommit(db)
 
-	cacheConfig := &CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
-	}
-
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, txCacher)
-	defer blockchain.Stop()
-
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 1, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
@@ -3062,11 +3050,8 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	diskdb := ethdb.NewMemDatabase()
-	defer diskdb.Close()
-	gspec.MustCommit(diskdb)
 	txCacher1 := NewTxSenderCacher(runtime.NumCPU())
-	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher1)
+	chain, err := NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher1)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
@@ -3215,18 +3200,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		return tx
 	}
 
-	cacheConfig := &CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
-	}
-
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, txCacher)
-	defer blockchain.Stop()
-
 	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 150, func(i int, b *BlockGen) {
 		var exp = new(expectation)
 		exp.blocknum = i + 1
@@ -3256,14 +3229,11 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	diskdb := ethdb.NewMemDatabase()
-	defer diskdb.Close()
-	gspec.MustCommit(diskdb)
-	txCacher1 := NewTxSenderCacher(runtime.NumCPU())
-	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{
+	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	chain, err := NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{
 		//Debug:  true,
 		//Tracer: vm.NewJSONLogger(nil, os.Stdout),
-	}, nil, txCacher1)
+	}, nil, txCacher)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}

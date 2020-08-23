@@ -111,7 +111,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -120,7 +120,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,14 +135,14 @@ func TestSelfDestructReceive(t *testing.T) {
 	blockchain1.EnableReceipts(true)
 
 	// BLOCK 2
-	if _, err := blockchain1.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain1.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
 	// and that means that the state of the accounts written in the first block was correct.
 	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
-	st = state.New(state.NewDbState(db.KV(), blockchain1.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}

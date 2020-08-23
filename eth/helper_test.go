@@ -82,7 +82,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
 
-	if _, err = blockchain.InsertChain(context.Background(), chain); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), chain); err != nil {
 		return nil, nil, err
 	}
 	cht := &params.TrustedCheckpoint{}

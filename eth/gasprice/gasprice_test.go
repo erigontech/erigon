@@ -89,7 +89,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err != nil {
 		t.Fatalf("Failed to create local chain, %v", err)
 	}
-	_, err = chain.InsertChain(context.TODO(), blocks)
+	_, err = chain.InsertChain1(context.TODO(), blocks)
 	if err != nil {
 		t.Error(err)
 	}

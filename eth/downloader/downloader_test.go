@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -61,6 +62,7 @@ type downloadTester struct {
 	stateDb *ethdb.ObjectDatabase // Database used by the tester for syncing from peers
 	peerDb  *ethdb.ObjectDatabase // Database of the peers containing all data
 	peers   map[string]*downloadTesterPeer
+	engine  consensus.Engine
 
 	ownHashes   []common.Hash                  // Hash chain belonging to the tester
 	ownHeaders  map[common.Hash]*types.Header  // Headers belonging to the tester
@@ -93,6 +95,7 @@ func newTester() *downloadTester {
 		ancientBlocks:   map[common.Hash]*types.Block{testGenesis.Hash(): testGenesis},
 		ancientReceipts: map[common.Hash]types.Receipts{testGenesis.Hash(): nil},
 		ancientChainTd:  map[common.Hash]*big.Int{testGenesis.Hash(): testGenesis.Difficulty()},
+		engine:          ethash.NewFaker(),
 	}
 	tester.stateDb = ethdb.NewMemDatabase()
 	err := tester.stateDb.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(testGenesis.NumberU64(), testGenesis.Root()), []byte{0x00})
@@ -309,7 +312,7 @@ func (dl *downloadTester) GetVMConfig() *vm.Config {
 }
 
 // InsertChain injects a new batch of blocks into the simulated chain.
-func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
+func (dl *downloadTester) InsertChain1(_ context.Context, blocks types.Blocks) (i int, err error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 	for i, block := range blocks {
@@ -410,7 +413,7 @@ func (dl *downloadTester) GetBlockByNumber(number uint64) *types.Block {
 }
 
 func (dl *downloadTester) Engine() consensus.Engine {
-	panic("not implemented and should not be called")
+	return dl.engine
 }
 
 func (dl *downloadTester) GetHeader(common.Hash, uint64) *types.Header {

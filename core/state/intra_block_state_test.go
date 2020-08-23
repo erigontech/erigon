@@ -363,7 +363,7 @@ func (test *snapshotTest) run() bool {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
-		ds           = NewDbState(db.KV(), 0)
+		ds           = NewDbStateReader(db)
 		state        = New(ds)
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
@@ -378,7 +378,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewDbState(db.KV(), 0)
+		checkds := NewDbStateReader(db)
 		checkstate := New(checkds)
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
@@ -393,7 +393,7 @@ func (test *snapshotTest) run() bool {
 }
 
 // checkEqual checks that methods of state and checkstate return the same values.
-func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, checkds *DbState) error {
+func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, checkds *DbStateReader) error {
 	for _, addr := range test.addrs {
 		addr := addr // pin
 		var err error
@@ -412,7 +412,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 			return true
 		}
 		// Check basic accessor methods.
-		checkeq("Exist", state.Exist(addr), checkstate.Exist(addr))
+		if !checkeq("Exist", state.Exist(addr), checkstate.Exist(addr)) {
+			return err
+		}
 		checkeq("HasSuicided", state.HasSuicided(addr), checkstate.HasSuicided(addr))
 		checkeqBigInt("GetBalance", state.GetBalance(addr).ToBig(), checkstate.GetBalance(addr).ToBig())
 		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
@@ -421,25 +423,22 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
 		// Check storage.
 		if obj := state.getStateObject(addr); obj != nil {
-			err = ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
+			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
 				checkstate.GetState(addr, &key, &out)
-				return checkeq("GetState("+key.Hex()+")", out, value)
-			}, 1000)
-			if err != nil {
-				return err
-			}
-			err = checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey common.Hash, value uint256.Int) bool {
-				var out uint256.Int
-				state.GetState(addr, &key, &out)
-				return checkeq("GetState("+key.Hex()+")", out, value)
-			}, 1000)
-			if err != nil {
-				return err
+				if !checkeq("GetState("+key.Hex()+")", out, value) {
+					return err
+				}
 			}
 		}
-		if err != nil {
-			return err
+		if obj := checkstate.getStateObject(addr); obj != nil {
+			for key, value := range obj.dirtyStorage {
+				var out uint256.Int
+				state.GetState(addr, &key, &out)
+				if !checkeq("GetState("+key.Hex()+")", out, value) {
+					return err
+				}
+			}
 		}
 	}
 
