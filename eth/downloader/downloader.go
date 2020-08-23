@@ -563,7 +563,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// create empty TxDb object, it's not usable before .Begin() call which will use this object
 		// It allows inject tx object to stages now, define rollback now,
 		// but call .Begin() after hearer/body download stages
-		var tx ethdb.DbWithPendingMutations = &ethdb.TxDb{}
+		var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(d.stateDB)
 		defer tx.Rollback()
 
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
@@ -595,7 +595,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			fmt.Printf("Begin Tx at Senders\n")
 			var errTx error
-			tx, errTx = d.stateDB.Begin()
+			tx, errTx = tx.Begin()
 			return errTx
 		})
 		d.stagedSync.BeforeUnwind(func() error {
@@ -605,7 +605,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			fmt.Printf("Begin Tx Unwind\n")
 			var errTx error
-			tx, errTx = d.stateDB.Begin()
+			tx, errTx = tx.Begin()
 			return errTx
 		})
 		d.stagedSync.AfterUnwind(func() error {

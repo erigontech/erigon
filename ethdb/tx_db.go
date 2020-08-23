@@ -28,9 +28,18 @@ func (m *TxDb) Close() {
 	panic("don't call me")
 }
 
+// NewTxDbWithoutTransaction creates TxDb object without opening transaction,
+// such TxDb not usable before .Begin() call on it
+// It allows inject TxDb object into class hierarchy, but open write transaction later
+func NewTxDbWithoutTransaction(db Database) *TxDb {
+	return &TxDb{db: db}
+}
+
 func (m *TxDb) Begin() (DbWithPendingMutations, error) {
+	fmt.Printf("m: %#v\n", m)
 	batch := m
 	if m.tx != nil {
+		fmt.Printf("create new tx_db: %#v\n", m)
 		batch = &TxDb{db: m.db}
 	}
 
@@ -80,10 +89,7 @@ func (m *TxDb) begin(parent Tx) error {
 }
 
 func (m *TxDb) KV() KV {
-	if casted, ok := m.db.(HasKV); ok {
-		return casted.KV()
-	}
-	return nil
+	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 
 // Can only be called from the worker thread

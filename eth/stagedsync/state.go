@@ -124,6 +124,12 @@ func (s *State) Run(db ethdb.Getter, tx ethdb.GetterPutter) error {
 
 		index, stage := s.CurrentStage()
 
+		if hook, ok := s.beforeStageRun[stage.ID]; ok {
+			if err := hook(); err != nil {
+				return err
+			}
+		}
+
 		if stage.Disabled {
 			message := fmt.Sprintf(
 				"Sync stage %d/%d. %v disabled. %s",

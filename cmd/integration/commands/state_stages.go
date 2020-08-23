@@ -85,7 +85,13 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	bc, st, progress := newSync(ch, db, changeSetHook)
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	bc, st, progress := newSync(ch, tx, changeSetHook)
 	defer bc.Stop()
 
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
@@ -96,6 +102,32 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	if block > 0 && block < senderStageProgress {
 		stopAt = block
 	}
+
+	st.BeforeStageRun(stages.Execution, func() error {
+		if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+			return nil
+		}
+
+		fmt.Printf("Begin Tx at Senders\n")
+		var errTx error
+		tx, errTx = tx.Begin()
+		return errTx
+	})
+	st.BeforeUnwind(func() error {
+		if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+			return nil
+		}
+
+		fmt.Printf("Begin Tx Unwind\n")
+		var errTx error
+		tx, errTx = tx.Begin()
+		return errTx
+	})
+	st.AfterUnwind(func() error {
+		fmt.Printf("Commit Tx Unwind\n")
+		_, errCommit := tx.Commit()
+		return errCommit
+	})
 
 	for progress(stages.Execution).BlockNumber < stopAt {
 		select {
@@ -113,13 +145,17 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, db, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
 		})
 
-		if err := st.Run(db, db); err != nil {
+		if err := st.Run(db, tx); err != nil {
+			return err
+		}
+		err = tx.CommitAndBegin()
+		if err != nil {
 			return err
 		}
 
@@ -139,7 +175,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		execStage := progress(stages.Execution)
 		to := execStage.BlockNumber - unwind
 
-		if err := st.UnwindTo(to, db); err != nil {
+		if err := st.UnwindTo(to, tx); err != nil {
 			return err
 		}
 	}
