@@ -234,7 +234,19 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		"gen IH", generationIHTook,
 	)
 
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collector.Load(db,
+		dbutils.IntermediateTrieHashBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
+		},
+	); err != nil {
 		return err
 	}
 	return nil
@@ -301,7 +313,19 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		"root hash", subTries.Hashes[0].Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collector.Load(db,
+		dbutils.IntermediateTrieHashBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
+		},
+	); err != nil {
 		return err
 	}
 	return nil

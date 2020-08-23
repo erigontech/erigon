@@ -59,6 +59,9 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 		Quit:            quitCh,
 		ExtractStartKey: startKey,
 		ExtractEndKey:   endKey,
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
 	})
 }
 

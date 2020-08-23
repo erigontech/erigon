@@ -131,7 +131,9 @@ func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
 }
 
 func MultiPut(tx Tx, tuples ...[]byte) error {
-	putTimer := time.Now()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	count := 0
 	total := float64(len(tuples)) / 3
 	for bucketStart := 0; bucketStart < len(tuples); {
@@ -174,10 +176,12 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 			}
 
 			count++
-			if count%100_000 == 0 && time.Since(putTimer) > 30*time.Second {
+
+			select {
+			default:
+			case <-logEvery.C:
 				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
 				log.Info("Write to db", "progress", progress)
-				putTimer = time.Now()
 			}
 		}
 
