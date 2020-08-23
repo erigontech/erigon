@@ -996,8 +996,8 @@ func TestChainTxReorgs(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	// Import the chain. This runs all block validation rules.
-	if i, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
-		t.Fatalf("failed to insert original chain[%d]: %v", i, err)
+	if i, err1 := blockchain.InsertChain1(context.Background(), chain); err1 != nil {
+		t.Fatalf("failed to insert original chain[%d]: %v", i, err1)
 	}
 	defer blockchain.Stop()
 
@@ -1098,8 +1098,8 @@ func TestLogReorgs(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if _, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
-		t.Fatalf("failed to insert chain: %v", err)
+	if _, err1 := blockchain.InsertChain1(context.Background(), chain); err1 != nil {
+		t.Fatalf("failed to insert chain: %v", err1)
 	}
 
 	chain, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), genesisDB, 3, func(i int, gen *BlockGen) {}, false /* intemediateHashes */)
@@ -1317,7 +1317,7 @@ func TestReorgSideEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	if _, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), chain); err != nil {
 		t.Fatalf("failed to insert chain: %v", err)
 	}
 
@@ -1503,7 +1503,7 @@ func TestEIP155Transition(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if _, err := blockchain.InsertChain1(context.Background(), blocks); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 	block := blockchain.GetBlockByNumber(1)
@@ -1518,7 +1518,7 @@ func TestEIP155Transition(t *testing.T) {
 	if !block.Transactions()[1].Protected() {
 		t.Error("Expected block[3].txs[1] to be replay protected")
 	}
-	if _, err := blockchain.InsertChain1(context.Background(), blocks[4:]); err != nil {
+	if _, err = blockchain.InsertChain1(context.Background(), blocks[4:]); err != nil {
 		t.Fatal(err)
 	}
 

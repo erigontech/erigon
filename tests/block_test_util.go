@@ -184,7 +184,7 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if _, err := blockchain.InsertChain1(context.Background(), []*types.Block{cb}); err != nil {
+		if _, err = blockchain.InsertChain1(context.Background(), []*types.Block{cb}); err != nil {
 			//if err := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), cb, blockchain); err != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
