@@ -85,9 +85,9 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return err
+	tx, errBegin := db.Begin()
+	if errBegin != nil {
+		return errBegin
 	}
 	defer tx.Rollback()
 
@@ -151,8 +151,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		if err := st.Run(db, tx); err != nil {
 			return err
 		}
-		err = tx.CommitAndBegin()
-		if err != nil {
+
+		if err := tx.CommitAndBegin(); err != nil {
 			return err
 		}
 
