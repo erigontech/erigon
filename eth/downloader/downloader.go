@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -559,12 +560,19 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
+		// create empty TxDb object, it's not usable before .Begin() call which will use this object
+		// It allows inject tx object to stages now, define rollback now,
+		// but call .Begin() after hearer/body download stages
+		var tx ethdb.DbWithPendingMutations = &ethdb.TxDb{}
+		defer tx.Rollback()
+
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
 			d.chainConfig,
 			d.blockchain,
 			d.blockchain.GetVMConfig(),
 			d.stateDB,
+			tx,
 			p.id,
 			d.storageMode,
 			d.datadir,
@@ -577,7 +585,51 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
-		return d.stagedSync.Run(d.stateDB)
+
+		// begin tx at stage right after head/body download Or at first unwind stage
+		// it's temporary solution
+		d.stagedSync.WrapExecFunc(stages.Senders, func(execFunc stagedsync.ExecFunc) stagedsync.ExecFunc {
+			return func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+					return execFunc(s, u)
+				}
+
+				fmt.Printf("Begin Tx at Senders\n")
+				var errTx error
+				tx, errTx = d.stateDB.Begin()
+				if errTx != nil {
+					return errTx
+				}
+
+				return execFunc(s, u)
+			}
+		})
+		d.stagedSync.BeforeUnwind(func() error {
+			if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+				return nil
+			}
+
+			fmt.Printf("Begin Tx Unwind\n")
+			var errTx error
+			tx, errTx = d.stateDB.Begin()
+			return errTx
+		})
+		d.stagedSync.AfterUnwind(func() error {
+			fmt.Printf("Commit Tx Unwind\n")
+			_, errCommit := tx.Commit()
+			return errCommit
+		})
+
+		err = d.stagedSync.Run(d.stateDB, tx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Commit()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Commit tx!\n")
+		return nil
 	}
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync

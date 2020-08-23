@@ -359,7 +359,7 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 	if err != nil {
 		panic(err)
 	}
-	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, db, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}

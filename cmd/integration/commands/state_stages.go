@@ -119,7 +119,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			return nil
 		})
 
-		if err := st.Run(db); err != nil {
+		if err := st.Run(db, db); err != nil {
 			return err
 		}
 
