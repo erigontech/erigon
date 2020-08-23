@@ -114,8 +114,8 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB    *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
-	stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
+	stateDB    ethdb.Database  // Database to state sync into (and deduplicate via)
+	stateBloom *trie.SyncBloom // Bloom filter for fast trie node existence checks
 
 	// Statistics
 	syncStatsChainOrigin uint64       // Origin block number where syncing started at
@@ -218,7 +218,7 @@ type BlockChain interface {
 	InsertChain(context.Context, types.Blocks) (int, error)
 
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(context.Context, types.Blocks) (bool, error)
+	InsertBodyChain(context.Context, ethdb.Database, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -554,7 +554,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
-		func() error { return d.processHeaders(origin+1, pivot, blockNumber) },
+		func() error { return d.processHeaders(d.stateDB, origin+1, pivot, blockNumber) },
+	}
+
+	processHeaders := func(db ethdb.Database) error {
+		return d.processHeaders(db, origin+1, pivot, blockNumber)
 	}
 
 	// Turbo-Geth's staged sync goes here
@@ -569,7 +573,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			d.storageMode,
 			d.datadir,
 			d.quitCh,
-			fetchers,
+			fetchers[0],
+			processHeaders,
 			txPool,
 			poolStart,
 			nil,
@@ -1454,7 +1459,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
+func (d *Downloader) processHeaders(db ethdb.Database, origin uint64, pivot uint64, blockNumber uint64) error {
 	// Keep a count of uncertain headers to roll back
 	var (
 		rollback    []*types.Header
@@ -1574,10 +1579,10 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(db, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
-							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
+							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, db); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
 							}
 						}
@@ -1585,7 +1590,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
 					if err == nil && mode == StagedSync && d.headersState != nil {
-						if err1 := d.headersState.Update(d.stateDB, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
+						if err1 := d.headersState.Update(db, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
@@ -1651,13 +1656,13 @@ func (d *Downloader) processFullSyncContent() error {
 		if d.chainInsertHook != nil {
 			d.chainInsertHook(results)
 		}
-		if _, err := d.importBlockResults(results, true /* execute */); err != nil {
+		if _, err := d.importBlockResults(nil, results, true /* execute */); err != nil {
 			return err
 		}
 	}
 }
 
-func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (uint64, error) {
+func (d *Downloader) importBlockResults(db ethdb.Database, results []*fetchResult, execute bool) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
 		return 0, nil
@@ -1681,7 +1686,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
+		stopped, err = d.blockchain.InsertBodyChain(context.Background(), db, blocks)
 		if stopped {
 			index = 0
 		} else {
@@ -1701,7 +1706,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
 	}
 	if d.getMode() == StagedSync && index > 0 && d.bodiesState != nil {
-		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
+		if err1 := d.bodiesState.Update(db, blocks[index-1].NumberU64()); err1 != nil {
 			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
 		}
 		return blocks[index-1].NumberU64() + 1, nil

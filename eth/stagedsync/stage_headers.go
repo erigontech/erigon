@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
+func SpawnHeaderDownloadStage(db ethdb.Database, s *StageState, u Unwinder, d DownloaderGlue, headersFetchers func() error, processHeaders func(db ethdb.Database) error) error {
 	if prof {
 		f, err := os.Create("cpu-headers.prof")
 		if err != nil {
@@ -36,7 +36,7 @@ func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, heade
 		defer pprof.StopCPUProfile()
 	}
 
-	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
+	err := d.SpawnHeaderDownloadStage(db, headersFetchers, processHeaders, s, u)
 	if err == nil {
 		s.Done()
 	}

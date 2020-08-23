@@ -145,9 +145,9 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db            *ethdb.ObjectDatabase // Low level persistent database to store final content in
-	triegc        *prque.Prque          // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration         // Accumulates canonical block processing for trie dumping
+	db            ethdb.Database // Low level persistent database to store final content in
+	triegc        *prque.Prque   // Priority queue mapping block numbers to tries to gc
+	gcproc        time.Duration  // Accumulates canonical block processing for trie dumping
 	txLookupLimit uint64
 
 	hc            *HeaderChain
@@ -199,7 +199,7 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -1217,7 +1217,7 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 
 // InsertBodyChain attempts to insert the given batch of block into the
 // canonical chain, without executing those blocks
-func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (bool, error) {
+func (bc *BlockChain) InsertBodyChain(ctx context.Context, db ethdb.Database, chain types.Blocks) (bool, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return true, nil
@@ -1251,11 +1251,15 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 		bc.doneJob()
 	}()
 
+	if db == nil {
+		db = bc.db
+	}
+
 	return InsertBodies(
 		ctx,
 		&bc.procInterrupt,
 		chain,
-		bc.db,
+		db,
 		bc.Config(),
 		bc.NoHistory(),
 		bc.IsNoHistory,
@@ -2176,7 +2180,7 @@ func InsertBodies(
 	ctx context.Context,
 	procInterrupt *int32,
 	chain types.Blocks,
-	db *ethdb.ObjectDatabase,
+	db ethdb.Database,
 	config *params.ChainConfig,
 	noHistory bool,
 	isNoHistory func(currentBlock *big.Int) bool,

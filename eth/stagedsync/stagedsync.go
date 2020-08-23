@@ -19,12 +19,13 @@ func PrepareStagedSync(
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,
 	vmConfig *vm.Config,
-	stateDB *ethdb.ObjectDatabase,
+	stateDB ethdb.Database,
 	pid string,
 	storageMode ethdb.StorageMode,
 	datadir string,
 	quitCh <-chan struct{},
-	headersFetchers []func() error,
+	headersFetch func() error,
+	headersProcess func(db ethdb.Database) error,
 	txPool *core.TxPool,
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
@@ -36,7 +37,7 @@ func PrepareStagedSync(
 			ID:          stages.Headers,
 			Description: "Download headers",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnHeaderDownloadStage(s, u, d, headersFetchers)
+				return SpawnHeaderDownloadStage(stateDB, s, u, d, headersFetch, headersProcess)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return u.Done(stateDB)
@@ -56,7 +57,7 @@ func PrepareStagedSync(
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnBodyDownloadStage(s, u, d, pid)
+				return spawnBodyDownloadStage(stateDB, s, u, d, pid)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindBodyDownloadStage(u, stateDB)

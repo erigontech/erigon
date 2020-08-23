@@ -9,12 +9,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // externsions for downloader needed for staged sync
-func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState, u stagedsync.Unwinder) (bool, error) {
+func (d *Downloader) SpawnBodyDownloadStage(db ethdb.Database, id string, s *stagedsync.StageState, u stagedsync.Unwinder) (bool, error) {
 	d.bodiesState = s
 	d.bodiesUnwinder = u
 	defer func() {
@@ -29,6 +30,7 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 	d.cancelPeer = id
 	d.cancelLock.Unlock()
 
+	defer d.queue.Close()
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
 	// Figure out how many headers we have
 	currentNumber := origin + 1
@@ -98,20 +100,26 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 	}
 
 	// Now fetch all the bodies
-	fetchers := []func() error{
-		func() error { return d.fetchBodies(from) },
-		func() error { return d.processBodiesStage(to) },
+	errc := make(chan error)
+	d.cancelWg.Add(1)
+	go func() {
+		defer d.cancelWg.Done()
+		defer close(errc)
+		err := d.fetchBodies(from)
+		d.queue.Close()
+		errc <- err
+	}()
+
+	if err := d.processBodiesStage(db, to); err != nil {
+		return true, err
 	}
 
-	if err := d.spawnSync(fetchers); err != nil {
-		return false, err
-	}
-	return true, nil
+	return true, <-errc
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
-func (d *Downloader) processBodiesStage(to uint64) error {
+func (d *Downloader) processBodiesStage(db ethdb.Database, to uint64) error {
 	for {
 		if err := common.Stopped(d.quitCh); err != nil {
 			return err
@@ -121,7 +129,7 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 		if len(results) == 0 {
 			return nil
 		}
-		lastNumber, err := d.importBlockResults(results, false /* execute */)
+		lastNumber, err := d.importBlockResults(db, results, false /* execute */)
 		if err != nil {
 			return err
 		}
@@ -137,7 +145,9 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 }
 
 func (d *Downloader) SpawnHeaderDownloadStage(
-	fetchers []func() error,
+	db ethdb.Database,
+	download func() error,
+	process func(db ethdb.Database) error,
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
 ) error {
@@ -154,6 +164,23 @@ func (d *Downloader) SpawnHeaderDownloadStage(
 	d.cancelLock.Lock()
 	d.cancelCh = make(chan struct{})
 	d.cancelLock.Unlock()
+	defer d.queue.Close()
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
-	return d.spawnSync(fetchers)
+
+	errc := make(chan error)
+	d.cancelWg.Add(1)
+	go func() {
+		defer d.cancelWg.Done()
+		defer close(errc)
+		err := download()
+		d.queue.Close()
+		errc <- err
+	}()
+
+	if err := process(db); err != nil {
+		return err
+	}
+
+	// Wait for the first error, then terminate the others.
+	return <-errc
 }
