@@ -79,7 +79,7 @@ func TestHeaderVerification(t *testing.T) {
 			case <-time.After(25 * time.Millisecond):
 			}
 		}
-		if _, err := chain.InsertChain(context.Background(), blocks[i:i+1]); err != nil {
+		if _, err := chain.InsertChain1(context.Background(), blocks[i:i+1]); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 	}

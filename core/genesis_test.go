@@ -136,7 +136,7 @@ func TestSetupGenesis(t *testing.T) {
 				if err != nil {
 					return nil, common.Hash{}, nil, err
 				}
-				_, _ = bc.InsertChain(context.Background(), blocks)
+				_, _ = bc.InsertChain1(context.Background(), blocks)
 				bc.CurrentBlock()
 				// This should return a compatibility error.
 				return SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)

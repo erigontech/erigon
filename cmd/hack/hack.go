@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -587,77 +586,6 @@ func trieChart() {
 	check(err)
 	err = ioutil.WriteFile("chart5.png", buffer.Bytes(), 0644)
 	check(err)
-}
-
-func execToBlock(chaindata string, block uint64, fromScratch bool) {
-	state.MaxTrieCacheSize = 100 * 1024
-	blockDb := ethdb.MustOpen(chaindata)
-	defer blockDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
-	defer bcb.Stop()
-	if fromScratch {
-		os.Remove("statedb")
-	}
-	stateDB := ethdb.MustOpen("statedb")
-	defer stateDB.Close()
-
-	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */, true /* overwrite */)
-	check(err)
-	bcTxCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, bcTxCacher)
-	check(err)
-	defer bc.Stop()
-	tds, err := bc.GetTrieDbState()
-	check(err)
-
-	importedBn := tds.GetBlockNr()
-	if importedBn == 0 {
-		importedBn = 1
-	}
-
-	//bc.SetNoHistory(true)
-	blocks := types.Blocks{}
-	var lastBlock *types.Block
-
-	now := time.Now()
-
-Loop:
-	for i := importedBn; i <= block; i++ {
-		lastBlock = bcb.GetBlockByNumber(i)
-		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 1000 || i == block {
-			_, err = bc.InsertChain(context.Background(), blocks)
-			if err != nil {
-				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
-				// Try to insert blocks one by one to keep the latest state
-				for j := 0; j < len(blocks); j++ {
-					if _, err1 := bc.InsertChain(context.Background(), blocks[j:j+1]); err1 != nil {
-						log.Error("Could not insert block", "error", err1)
-						break Loop
-					}
-				}
-				break
-			}
-			blocks = types.Blocks{}
-		}
-		if i%10000 == 0 {
-			fmt.Printf("Inserted %dK, %s \n", i/1000, time.Since(now))
-		}
-	}
-
-	root := tds.LastRoot()
-	fmt.Printf("Root hash: %x\n", root)
-	fmt.Printf("Last block root hash: %x\n", lastBlock.Root())
-	filename := fmt.Sprintf("right_%d.txt", lastBlock.NumberU64())
-	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		tds.PrintTrie(f)
-	}
 }
 
 func extractTrie(block int) {
@@ -1737,9 +1665,6 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	//printBranches(uint64(*block))
-	if *action == "execToBlock" {
-		execToBlock(*chaindata, uint64(*block), false)
-	}
 	//extractTrie(*block)
 	//repair()
 	if *action == "readAccount" {

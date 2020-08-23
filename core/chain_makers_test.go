@@ -100,12 +100,12 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if i, err := blockchain.InsertChain(context.Background(), chain); err != nil {
+	if i, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
 		fmt.Printf("insert error (block %d): %v\n", chain[i].NumberU64(), err)
 		return
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	fmt.Printf("last block: #%d\n", blockchain.CurrentBlock().Number())
 	fmt.Println("balance of addr1:", st.GetBalance(addr1))
 	fmt.Println("balance of addr2:", st.GetBalance(addr2))

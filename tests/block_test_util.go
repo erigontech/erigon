@@ -19,7 +19,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -35,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -136,7 +136,7 @@ func (t *BlockTest) Run(_ bool) error {
 	if common.Hash(t.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	newDB := state.New(state.NewDbState(db.KV(), chain.CurrentBlock().NumberU64()))
+	newDB := state.New(state.NewPlainDBState(db.KV(), chain.CurrentBlock().NumberU64()))
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}
@@ -184,13 +184,11 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		blocks := types.Blocks{cb}
-		i, err := blockchain.InsertChain(context.Background(), blocks)
-		if err != nil {
+		if err := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), cb, blockchain); err != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
-				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", blocks[i].Number(), err)
+				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err)
 			}
 		}
 		if b.BlockHeader == nil {

@@ -17,7 +17,6 @@
 package clique
 
 import (
-	"context"
 	"math/big"
 	"runtime"
 	"testing"
@@ -29,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -100,7 +100,7 @@ func TestReimportMirroredState(t *testing.T) {
 	chain1, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher1)
 	defer chain1.Stop()
 
-	if _, err := chain1.InsertChain(context.Background(), blocks[:2]); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, params.AllCliqueProtocolChanges, engine, blocks[:2], chain1); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
 	if head := chain1.CurrentBlock().NumberU64(); head != 2 {
@@ -114,7 +114,7 @@ func TestReimportMirroredState(t *testing.T) {
 	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
 	defer chain2.Stop()
 
-	if _, err := chain2.InsertChain(context.Background(), blocks[2:]); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, params.AllCliqueProtocolChanges, chain2.Engine(), blocks[2:], chain2); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
 	if head := chain2.CurrentBlock().NumberU64(); head != 3 {

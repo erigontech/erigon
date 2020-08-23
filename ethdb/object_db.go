@@ -197,7 +197,7 @@ func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([
 
 	var dat []byte
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(dbutils.ChangeSetByIndexBucket(true /* plain */, storage), key)
+		v, err := tx.Get(dbutils.ChangeSetByIndexBucket(storage), key)
 		if err != nil {
 			return err
 		}
