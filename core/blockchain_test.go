@@ -1186,9 +1186,9 @@ func TestLogRebirth(t *testing.T) {
 	// the log event for the old chain, as well as a RemovedLogsEvent for forkChain.
 	newBlocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, db, 3, func(i int, gen *BlockGen) {
 		if i == 1 {
-			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
-			if err != nil {
-				t.Fatalf("failed to create tx: %v", err)
+			tx, err1 := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
+			if err1 != nil {
+				t.Fatalf("failed to create tx: %v", err1)
 			}
 			gen.AddTx(tx)
 		}
