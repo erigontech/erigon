@@ -384,7 +384,7 @@ func (test *snapshotTest) run() bool {
 			action.fn(action, checkstate)
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex])
-		if err := test.checkEqual(state, checkstate, ds, checkds); err != nil {
+		if err := test.checkEqual(state, checkstate); err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%v", sindex, err)
 			return false
 		}
@@ -393,7 +393,7 @@ func (test *snapshotTest) run() bool {
 }
 
 // checkEqual checks that methods of state and checkstate return the same values.
-func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, checkds *DbStateReader) error {
+func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 	for _, addr := range test.addrs {
 		addr := addr // pin
 		var err error
