@@ -82,7 +82,7 @@ func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatab
 	if full {
 		// Full block-chain requested
 		blocks := makeBlockChain(genesis, n, engine, db, canonicalSeed)
-		_, err := blockchain.InsertChain1(context.Background(), blocks)
+		_, err = blockchain.InsertChain1(context.Background(), blocks)
 		return db, blockchain, err
 	}
 	// Header-only chain requested
@@ -676,7 +676,7 @@ func TestFastVsFullChains(t *testing.T) {
 		genesis = gspec.MustCommit(gendb)
 		signer  = types.NewEIP155Signer(gspec.Config.ChainID)
 	)
-	blocks, receipts, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, 1024, func(i int, block *BlockGen) {
+	blocks, receipts, err1 := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, 1024, func(i int, block *BlockGen) {
 		block.SetCoinbase(common.Address{0x00})
 
 		// If the block number is multiple of 3, send a few bonus transactions to the miner
@@ -694,7 +694,7 @@ func TestFastVsFullChains(t *testing.T) {
 			block.AddUncle(&types.Header{ParentHash: block.PrevBlock(i - 1).Hash(), Number: big.NewInt(int64(i - 1))})
 		}
 	}, false /* intemediateHashes */)
-	if err != nil {
+	if err1 != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
 	// Import the chain as an archive node for the comparison baseline
