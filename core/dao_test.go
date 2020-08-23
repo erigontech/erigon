@@ -129,7 +129,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate blocks: %v", err)
 			}
-			if _, err := proBc.InsertChain1(context.Background(), blocks); err == nil {
+			if _, err = proBc.InsertChain1(context.Background(), blocks); err == nil {
 				t.Fatalf("pro-fork chain accepted contra-fork block: %v", blocks[0])
 			}
 			// Create a proper pro-fork block for the pro-forker
@@ -154,7 +154,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	for j := 0; j < len(blocks)/2; j++ {
 		blocks[j], blocks[len(blocks)-1-j] = blocks[len(blocks)-1-j], blocks[j]
 	}
-	if _, err := bc.InsertChain1(context.Background(), blocks); err != nil {
+	if _, err = bc.InsertChain1(context.Background(), blocks); err != nil {
 		t.Fatalf("failed to import contra-fork chain for expansion: %v", err)
 	}
 	blocks, _, err = GenerateChain(&proConf, conBc.CurrentBlock(), ethash.NewFaker(), conDb, 1, func(i int, gen *BlockGen) {}, false /* intermediateHashes */)
