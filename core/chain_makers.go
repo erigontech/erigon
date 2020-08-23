@@ -191,7 +191,7 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 	return b.receipts
 }
 
-var GenerateTrace bool
+var GenerateTrace bool = true
 
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
@@ -297,6 +297,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			if subTries, err := loader.LoadSubTries(); err == nil {
 				b.header.Root = subTries.Hashes[0]
+				fmt.Printf("header.Root=%x\n", b.header.Root)
 			} else {
 				return nil, nil, fmt.Errorf("call to LoadSubTries: %w", err)
 			}
