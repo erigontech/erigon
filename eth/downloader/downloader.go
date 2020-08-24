@@ -564,7 +564,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// It allows inject tx object to stages now, define rollback now,
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(d.stateDB)
-		defer tx.Rollback()
+		defer func() {
+			log.Debug("cycle: rollback transaction")
+			tx.Rollback()
+		}()
 
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
@@ -593,6 +596,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
+			log.Debug("cycle: begin transaction")
 			var errTx error
 			tx, errTx = tx.Begin()
 			return errTx
@@ -601,12 +605,13 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
 				return nil
 			}
-
+			log.Debug("cycle unwind: begin transaction")
 			var errTx error
 			tx, errTx = tx.Begin()
 			return errTx
 		})
 		d.stagedSync.AfterUnwind(func() error {
+			log.Debug("cycle unwind: commit transaction")
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
@@ -615,6 +620,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
+		log.Debug("cycle: commit transaction")
 		_, err = tx.Commit()
 		if err != nil {
 			return err
