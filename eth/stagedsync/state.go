@@ -156,7 +156,7 @@ func (s *State) Run(db ethdb.Getter, tx ethdb.GetterPutter) error {
 }
 
 func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
-	if tx.(ethdb.HasTx).Tx() != nil {
+	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		db = tx
 	}
 	stageState, err := s.StageState(stage.ID, db)
