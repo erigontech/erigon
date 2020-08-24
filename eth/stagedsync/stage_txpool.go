@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func spawnTxPool(s *StageState, db ethdb.Database, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
+func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -27,7 +27,7 @@ func spawnTxPool(s *StageState, db ethdb.Database, pool *core.TxPool, poolStart 
 		log.Info("Starting tx pool after sync", "from", s.BlockNumber, "to", to)
 		headHash := rawdb.ReadCanonicalHash(db, to)
 		headHeader := rawdb.ReadHeader(db, headHash, to)
-		if err := pool.Start(headHeader.GasLimit, to); err != nil {
+		if err := pool.Start(db, headHeader.GasLimit, to); err != nil {
 			return fmt.Errorf("txPoolUpdate start pool phase 1: %w", err)
 		}
 		if err := poolStart(); err != nil {
@@ -42,10 +42,10 @@ func spawnTxPool(s *StageState, db ethdb.Database, pool *core.TxPool, poolStart 
 	return s.DoneAndUpdate(db, to)
 }
 
-func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Database, quitCh <-chan struct{}) error {
+func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
-	pool.ResetHead(headHeader.GasLimit, to)
+	pool.ResetHead(db, headHeader.GasLimit, to)
 	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
@@ -106,7 +106,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Databa
 	return nil
 }
 
-func unwindTxPool(u *UnwindState, s *StageState, db ethdb.Database, pool *core.TxPool, quitCh <-chan struct{}) error {
+func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *core.TxPool, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -122,10 +122,10 @@ func unwindTxPool(u *UnwindState, s *StageState, db ethdb.Database, pool *core.T
 	return nil
 }
 
-func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Database, quitCh <-chan struct{}) error {
+func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, from)
 	headHeader := rawdb.ReadHeader(db, headHash, from)
-	pool.ResetHead(headHeader.GasLimit, from)
+	pool.ResetHead(db, headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
