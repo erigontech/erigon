@@ -106,7 +106,7 @@ type ProtocolManager struct {
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
 // with the Ethereum network.
-func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
+func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash, snapshotMode ethdb.SnapshotMode) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	manager := &ProtocolManager{
 		networkID:   networkID,
@@ -153,7 +153,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		manager.checkpointHash = checkpoint.SectionHead
 	}
 
-	initPm(manager, engine, config, blockchain, chaindb)
+	initPm(manager, engine, config, blockchain, chaindb, snapshotMode)
 
 	return manager, nil
 }
@@ -165,7 +165,7 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase) {
+func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, snapshotMode ethdb.SnapshotMode) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
@@ -174,7 +174,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	if manager.downloader != nil {
 		manager.downloader.Cancel()
 	}
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm, snapshotMode)
 	manager.downloader.SetDataDir(manager.datadir)
 
 	// Construct the fetcher (short sync)

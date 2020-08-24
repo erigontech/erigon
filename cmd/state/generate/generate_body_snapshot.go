@@ -20,7 +20,7 @@ func GenerateBittorrentBodySnapshot(dbPath, snapshotPath string, toBlock uint64)
 	for i:=uint64(0); i<=toBlock; i++ {
 		hash:=rawdb.ReadCanonicalHash(db, i)
 		body:=rawdb.ReadBodyRLP(db, hash, i)
-		tuples=append(tuples, dbutils.HeaderPrefix, dbutils.HeaderKey(i, hash), body)
+		tuples=append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)
 		if len(tuples) >= chunkFile {
 			log.Info("Commited","block", i)
 			_, err:=sndb.MultiPut(tuples...)

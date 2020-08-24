@@ -19,7 +19,6 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	defer os.RemoveAll(snPath)
 	headers:=generateHeaders(10)
 	err:=snVK.Update(context.Background(), func(tx ethdb.Tx) error {
-		fmt.Println("Update")
 		for _,header:=range headers {
 			headerBytes,err:=rlp.EncodeToBytes(header)
 			if err!=nil {

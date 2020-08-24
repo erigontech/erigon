@@ -160,6 +160,8 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	storageMode ethdb.StorageMode
+	snapshotMode ethdb.SnapshotMode
+
 	datadir     string
 
 	headersState    *stagedsync.StageState
@@ -242,7 +244,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, snm ethdb.SnapshotMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -266,6 +268,7 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.Sync
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
 		storageMode:   sm,
+		snapshotMode:   snm,
 	}
 	go dl.qosTuner()
 	return dl
@@ -573,6 +576,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			nil,
+			d.snapshotMode,
 		)
 		if err != nil {
 			return err

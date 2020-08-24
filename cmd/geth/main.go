@@ -111,6 +111,7 @@ var (
 		utils.TrieCacheGenFlag,
 		utils.DownloadOnlyFlag,
 		utils.StorageModeFlag,
+		utils.SnapshotModeFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
 		utils.LMDBMapSizeFlag,

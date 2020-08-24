@@ -412,6 +412,16 @@ var (
 * t - write tx lookup index to the DB`,
 		Value: ethdb.DefaultStorageMode.ToString(),
 	}
+	SnapshotModeFlag = cli.StringFlag{
+		Name: "snapshot-mode",
+		Usage: `Configures the storage mode of the app:
+* h - download headers snapshot
+* b - download bodies snapshot
+* s - download state snapshot
+* r - download receipts snapshot
+`,
+		Value: ethdb.DefaultSnapshotMode.ToString(),
+	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
 		Usage: "When to switch from full to archive sync",
@@ -1584,8 +1594,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-
 	cfg.StorageMode = mode
+
+	snMode, err := ethdb.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	if err != nil {
+		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	cfg.SnapshotMode = snMode
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {

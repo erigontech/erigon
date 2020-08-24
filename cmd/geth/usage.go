@@ -56,6 +56,7 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.WhitelistFlag,
 			utils.DownloadOnlyFlag,
 			utils.StorageModeFlag,
+			utils.SnapshotModeFlag,
 			utils.ArchiveSyncInterval,
 		},
 	},

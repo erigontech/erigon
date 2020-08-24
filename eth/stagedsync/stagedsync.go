@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"runtime"
 	"time"
 
@@ -29,33 +28,21 @@ func PrepareStagedSync(
 	txPool *core.TxPool,
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
+	snapshotMode ethdb.SnapshotMode,
 ) (*State, error) {
+	panic(snapshotMode.ToString())
 	defer log.Info("Staged sync finished")
-	sndb:=debug.SnapshotDB()
 	stages := []*Stage{
 		{
-			ID:          stages.BittorentHeaders,
+			ID:          stages.DownloadHeadersSnapshot,
 			Description: "Download headers snapshot",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-
 				return SpawnHeadersSnapshotDownload(s,stateDB,datadir, quitCh )
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return u.Done(stateDB)
 			},
-			Disabled: sndb=="",
-			DisabledDescription: "Experimental stage",
-		},
-		{
-			ID:          stages.BittorentBodies,
-			Description: "Download bodies snapshot",
-			ExecFunc: func(s *StageState, u Unwinder) error {
-				return nil
-			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return u.Done(stateDB)
-			},
-			Disabled: sndb=="",
+			Disabled: !snapshotMode.Headers,
 			DisabledDescription: "Experimental stage",
 		},
 		{
@@ -77,6 +64,18 @@ func PrepareStagedSync(
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return u.Done(stateDB)
 			},
+		},
+		{
+			ID:          stages.DownloadBodiesSnapshot,
+			Description: "Download bodies snapshot",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+			Disabled: !snapshotMode.Bodies,
+			DisabledDescription: "Experimental stage",
 		},
 		{
 			ID:          stages.Bodies,
@@ -111,6 +110,28 @@ func PrepareStagedSync(
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindSendersStage(u, stateDB)
 			},
+		},
+		{
+			ID:          stages.DownloadStateStateSnapshot,
+			Description: "Download state snapshot",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+			Disabled: !snapshotMode.State,
+		},
+		{
+			ID:          stages.DownloadReceiptsSnapshot,
+			Description: "Download receipts snapshot",
+			ExecFunc: func(s *StageState, u Unwinder) error {
+				return nil
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				return u.Done(stateDB)
+			},
+			Disabled: !snapshotMode.Receipts,
 		},
 		{
 			ID:          stages.Execution,

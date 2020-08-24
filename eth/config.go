@@ -121,6 +121,7 @@ type Config struct {
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
 	StorageMode ethdb.StorageMode
+	SnapshotMode ethdb.SnapshotMode
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them

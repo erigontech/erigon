@@ -40,7 +40,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.downloader = New(uint64(StagedSync), tester.db, nil /* syncBloom */, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(StagedSync), tester.db, nil /* syncBloom */, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode, ethdb.SnapshotMode{})
 	clear := func() {
 		tester.db.Close()
 	}

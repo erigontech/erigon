@@ -2,11 +2,11 @@ package core
 
 import (
 	"fmt"
+	"github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/docker/docker/pkg/fileutils"
 	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
@@ -21,6 +21,10 @@ var (
 		{"udp://tracker.istole.it:6969"},
 	}
 )
+
+func TestNameSeed(t *testing.T) {
+
+}
 
 func TestName(t *testing.T) {
 	t.Skip()
@@ -277,16 +281,55 @@ func TestName4(t *testing.T) {
 	tr.DownloadAll()
 	client.WaitAll()
 }
-func makeMagnet(t *testing.T, cl *torrent.Client, dir string, name string) string {
-	to:=dir+"/eln.zip"
-	fmt.Println("copy to", to)
-	_,err:=fileutils.CopyFile("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir/eln.zip", to)
+
+func TestName5(t *testing.T) {
+	dd1:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd1"
+	//dd2:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd2"
+	//os.RemoveAll(dd1)
+	//os.RemoveAll(dd2)
+
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir=dd1
+	cfg.Logger=cfg.Logger.FilterLevel(log.Info)
+	cfg.NoDHT = false
+	cfg.DisableTrackers = false
+	cfg.Seed = true
+	cfg.DataDir = filepath.Join(cfg.DataDir, "server")
+	//os.Mkdir(cfg.DataDir, 0755)
+	//seeder(cfg)
+	server, err := torrent.NewClient(cfg)
 	require.NoError(t, err)
+	//defer server.Close()
+	//defer testutil.ExportStatusWriter(server, "s")()
+	magnet1 := makeMagnet(t, server, cfg.DataDir, "ulc_long.mp4")
+	fmt.Println(magnet1)
+	c:=make(chan struct{})
+	<-c
+	//cfg = TestingConfig(dd2)
+	//cfg.DataDir = filepath.Join(cfg.DataDir, "client")
+	////leecher(cfg)
+	//client, err := torrent.NewClient(cfg)
+	//require.NoError(t, err)
+	//defer client.Close()
+	//
+	//tr, err := client.AddMagnet(magnet1)
+	//require.NoError(t, err)
+	//tr.AddClientPeer(server)
+	//<-tr.GotInfo()
+	//tr.DownloadAll()
+	//client.WaitAll()
+}
+func makeMagnet(t *testing.T, cl *torrent.Client, dir string, name string) string {
+	//to:=dir+"/eln.zip"
+	//fmt.Println("copy to", to)
+	//_,err:=fileutils.CopyFile("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir/eln.zip", to)
+	//require.NoError(t, err)
 
 	mi := metainfo.MetaInfo{}
 	mi.SetDefaults()
+	mi.AnnounceList=builtinAnnounceList
 	info := metainfo.Info{PieceLength: 256 * 1024}
-	err = info.BuildFromFilePath(filepath.Join(dir, name))
+	err := info.BuildFromFilePath(filepath.Join(dir, name))
 	require.NoError(t, err)
 	mi.InfoBytes, err = bencode.Marshal(info)
 	require.NoError(t, err)
@@ -295,6 +338,13 @@ func makeMagnet(t *testing.T, cl *torrent.Client, dir string, name string) strin
 	require.NoError(t, err)
 	require.True(t, tr.Seeding())
 	tr.VerifyData()
+	go func() {
+		for {
+			fmt.Println(tr.PeerConns(), tr.Seeding())
+			time.Sleep(time.Second*60)
+
+		}
+	}()
 	return magnet
 }
 
