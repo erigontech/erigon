@@ -97,10 +97,10 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 	}
 
 	var tx ethdb.DbWithPendingMutations
-	var useExistingTx bool
+	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		tx = db.(ethdb.DbWithPendingMutations)
-		useExistingTx = true
+		useExternalTx = true
 	} else {
 		var err error
 		tx, err = db.Begin()
@@ -193,7 +193,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		}
 	}
 	commitTimer := time.Now()
-	if !useExistingTx {
+	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
 			return err
 		}
