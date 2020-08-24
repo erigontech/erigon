@@ -91,7 +91,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	bc, st, progress := newSync(ch, tx, changeSetHook)
+	bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 
 	st.BeforeStageRun(stages.Execution, func() error {
