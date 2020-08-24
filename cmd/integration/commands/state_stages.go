@@ -116,13 +116,17 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		return errTx
 	})
 	st.OnBeforeUnwind(func(id stages.SyncStage) error {
+		fmt.Printf("OnBeforeUnwind: %d, %T\n", id, tx)
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			fmt.Printf("OnBeforeUnwind0\n")
 			return nil
 		}
+		fmt.Printf("OnBeforeUnwind 1\n")
 		if id < stages.Bodies || id >= stages.TxPool {
+			fmt.Printf("OnBeforeUnwind 000\n")
 			return nil
 		}
-		fmt.Printf("5: %d\n", id)
+		fmt.Printf("OnBeforeUnwind 2\n")
 		log.Debug("cycle unwind: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
