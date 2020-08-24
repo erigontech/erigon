@@ -188,7 +188,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		execStage := progress(stages.Execution)
 		to := execStage.BlockNumber - unwind
 
-		if err := st.UnwindTo(to, tx); err != nil {
+		if err := st.UnwindTo(to, db); err != nil {
 			return err
 		}
 	}
