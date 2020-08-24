@@ -104,9 +104,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		return errTx
 	})
 	st.BeforeStageRun(stages.TxPool, func() error {
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-			return nil
-		}
 		log.Debug("cycle: commit transaction")
 		var errTx error
 		_, errTx = tx.Commit()
@@ -122,9 +119,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		return errTx
 	})
 	st.AfterUnwind(func() error {
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-			return nil
-		}
 		log.Debug("cycle unwind: commit transaction")
 		_, errCommit := tx.Commit()
 		return errCommit
