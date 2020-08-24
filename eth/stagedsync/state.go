@@ -82,7 +82,7 @@ func NewState(stages []*Stage) *State {
 }
 
 func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
-	for _, stage := range s.stages {
+	for _, stage := range s.unwindOrder {
 		if err := s.unwindStack.AddFromDB(db, stage.ID); err != nil {
 			return err
 		}
@@ -105,6 +105,9 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 				if err := s.UnwindStage(unwind, db); err != nil {
 					return err
 				}
+			}
+			if err := s.SetCurrentStage(0); err != nil {
+				return err
 			}
 		}
 
@@ -189,9 +192,6 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
 		return err
 	}
 
-	if err := s.SetCurrentStage(stage.ID); err != nil {
-		return err
-	}
 	log.Info("Unwinding... DONE!")
 	return nil
 }
