@@ -138,6 +138,11 @@ func (m *mutation) Delete(bucket string, key []byte) error {
 	return nil
 }
 
+func (m *mutation) CommitAndBegin() error {
+	_, err := m.Commit()
+	return err
+}
+
 func (m *mutation) Commit() (uint64, error) {
 	if metrics.Enabled {
 		if m.puts.Size() >= m.db.IdealBatchSize() {

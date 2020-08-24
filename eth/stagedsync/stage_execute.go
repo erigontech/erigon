@@ -58,11 +58,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	batch := stateDB.NewBatch()
-	//batch, err := stateDB.Begin()
-	//if err != nil {
-	//	return err
-	//}
+	tx, err := stateDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	batch := tx.NewBatch()
 	defer batch.Rollback()
 
 	engine := chainContext.Engine()
@@ -79,12 +81,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		stageProgress = blockNum
 
-		blockHash := rawdb.ReadCanonicalHash(batch, blockNum)
-		block := rawdb.ReadBlock(batch, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(tx, blockNum)
+		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(batch, blockHash, blockNum)
+		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
@@ -107,7 +109,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			if _, err = batch.Commit(); err != nil {
+			if err = batch.CommitAndBegin(); err != nil {
+				return err
+			}
+			if err = tx.CommitAndBegin(); err != nil {
 				return err
 			}
 		}
@@ -137,6 +142,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
+	}
+	if _, err = tx.Commit(); err != nil {
+		return err
 	}
 	log.Info("Completed on", "block", stageProgress)
 	s.Done()
