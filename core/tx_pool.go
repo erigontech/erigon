@@ -1177,6 +1177,9 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 // pending limit. The algorithm tries to reduce transaction counts by an approximately
 // equal number for all for accounts with many pending transactions.
 func (pool *TxPool) truncatePending() {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
 	pending := uint64(0)
 	for _, list := range pool.pending {
 		pending += uint64(list.Len())
