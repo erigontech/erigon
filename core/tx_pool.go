@@ -208,6 +208,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
+	chaindb      *ethdb.ObjectDatabase
 	gasPrice     *big.Int
 	txFeed       event.Feed
 	scope        event.SubscriptionScope
@@ -250,7 +251,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, senderCacher *TxSenderCacher) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -258,6 +259,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, senderCache
 	pool := &TxPool{
 		config:         config,
 		chainconfig:    chainconfig,
+		chaindb:        chaindb,
 		signer:         types.NewEIP155Signer(chainconfig.ChainID),
 		pending:        make(map[common.Address]*txList),
 		queue:          make(map[common.Address]*txList),
@@ -275,7 +277,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, senderCache
 	return pool
 }
 
-func (pool *TxPool) Start(db ethdb.Getter, gasLimit uint64, headNumber uint64) error {
+func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	pool.reorgShutdownCh = make(chan struct{}, 1)
 
 	pool.locals = newAccountSet(pool.signer)
@@ -284,7 +286,7 @@ func (pool *TxPool) Start(db ethdb.Getter, gasLimit uint64, headNumber uint64) e
 		pool.locals.add(addr)
 	}
 	pool.priced = newTxPricedList(pool.all)
-	pool.resetHead(db, gasLimit, headNumber)
+	pool.resetHead(gasLimit, headNumber)
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
@@ -380,17 +382,17 @@ func (pool *TxPool) loop() {
 	}
 }
 
-func (pool *TxPool) resetHead(db ethdb.Getter, blockGasLimit uint64, blockNumber uint64) {
+func (pool *TxPool) resetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	pool.currentState = state.New(state.NewPlainStateReader(db))
+	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
 	pool.pendingNonces = newTxNoncer(pool.currentState)
 	pool.currentMaxGas = blockGasLimit
 	pool.istanbul = pool.chainconfig.IsIstanbul(big.NewInt(int64(blockNumber + 1)))
 }
 
-func (pool *TxPool) ResetHead(db ethdb.Getter, blockGasLimit uint64, blockNumber uint64) {
-	pool.resetHead(db, blockGasLimit, blockNumber)
+func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
+	pool.resetHead(blockGasLimit, blockNumber)
 	<-pool.requestReset(nil, nil)
 }
 
@@ -1175,9 +1177,6 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 // pending limit. The algorithm tries to reduce transaction counts by an approximately
 // equal number for all for accounts with many pending transactions.
 func (pool *TxPool) truncatePending() {
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
 	pending := uint64(0)
 	for _, list := range pool.pending {
 		pending += uint64(list.Len())

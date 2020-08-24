@@ -85,6 +85,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
+	log.Debug("cycle1: begin transaction")
 	tx, errBegin := db.Begin()
 	if errBegin != nil {
 		return errBegin
@@ -93,6 +94,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 	bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
+
+	log.Debug("cycle1: commit transaction")
+	if _, err := tx.Commit(); err != nil {
+		return err
+	}
 
 	st.BeforeStageRun(stages.Execution, func() error {
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -109,16 +115,23 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		_, errTx = tx.Commit()
 		return errTx
 	})
-	st.BeforeStageUnwind(stages.TxLookup, func() error {
+	st.OnBeforeUnwind(func(id stages.SyncStage) error {
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 			return nil
 		}
+		if id < stages.Bodies || id >= stages.TxPool {
+			return nil
+		}
+		fmt.Printf("5: %d\n", id)
 		log.Debug("cycle unwind: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
 	})
 	st.BeforeStageUnwind(stages.TxPool, func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+			return nil
+		}
 		log.Debug("cycle unwind: commit transaction")
 		_, errCommit := tx.Commit()
 		return errCommit

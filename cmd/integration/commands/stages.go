@@ -350,7 +350,7 @@ func printAllStages(_ context.Context) error {
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
 func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(db)
+	chainConfig, bc, err := newBlockChain(tx)
 	if err != nil {
 		panic(err)
 	}
@@ -365,6 +365,13 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	}
 
 	progress := func(stage stages.SyncStage) *stagedsync.StageState {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			s, err := st.StageState(stage, tx)
+			if err != nil {
+				panic(err)
+			}
+			return s
+		}
 		s, err := st.StageState(stage, db)
 		if err != nil {
 			panic(err)

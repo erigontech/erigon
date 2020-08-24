@@ -222,7 +222,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, txCacher)
+	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
 	if stack.Config().PrivateApiAddr != "" {
 		remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr)
@@ -633,7 +633,7 @@ func (s *Ethereum) StartTxPool() error {
 	headHash := rawdb.ReadHeadHeaderHash(s.chainDb)
 	headNumber := rawdb.ReadHeaderNumber(s.chainDb, headHash)
 	head := rawdb.ReadHeader(s.chainDb, headHash, *headNumber)
-	if err := s.txPool.Start(s.chainDb, head.GasLimit, *headNumber); err != nil {
+	if err := s.txPool.Start(head.GasLimit, *headNumber); err != nil {
 		return err
 	}
 	if err := s.protocolManager.StartTxPool(); err != nil {
