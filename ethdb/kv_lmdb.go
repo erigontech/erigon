@@ -557,6 +557,7 @@ func (c *LmdbCursor) initCursor() error {
 	var err error
 	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName])
 	if err != nil {
+		panic("su-tx")
 		return err
 	}
 

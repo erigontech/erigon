@@ -95,24 +95,36 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	defer bc.Stop()
 
 	st.BeforeStageRun(stages.Execution, func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			return nil
+		}
 		log.Debug("cycle: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
 	})
 	st.BeforeStageRun(stages.TxPool, func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			return nil
+		}
 		log.Debug("cycle: commit transaction")
 		var errTx error
 		_, errTx = tx.Commit()
 		return errTx
 	})
 	st.BeforeUnwind(func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			return nil
+		}
 		log.Debug("cycle unwind: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
 	})
 	st.AfterUnwind(func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			return nil
+		}
 		log.Debug("cycle unwind: commit transaction")
 		_, errCommit := tx.Commit()
 		return errCommit
