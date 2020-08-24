@@ -210,11 +210,6 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 		return err
 	}
 
-	if hook, ok := s.beforeStageRun[stage.ID]; ok {
-		if err := hook(); err != nil {
-			return err
-		}
-	}
 	log.Info("Unwinding... DONE!")
 	return nil
 }
