@@ -612,7 +612,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil { // if tx started already, just use it
 				return nil
 			}
 
@@ -621,11 +621,24 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			tx, errTx = tx.Begin()
 			return errTx
 		})
+		d.stagedSync.BeforeStageRun(stages.TxPool, func() error {
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil { // if tx started already, just use it
+				return nil
+			}
+
+			log.Debug("cycle: commit transaction")
+			_, errTx := tx.Commit()
+			return errTx
+		})
 		d.stagedSync.BeforeUnwind(func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil { // if tx started already, just use it
 				return nil
 			}
 			log.Debug("cycle unwind: begin transaction")
@@ -637,6 +650,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil { // if tx started already, just use it
+				return nil
+			}
 			log.Debug("cycle unwind: commit transaction")
 			_, errCommit := tx.Commit()
 			return errCommit
@@ -646,13 +662,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
-		if canRunCycleInOneTransaction {
-			log.Debug("cycle: commit transaction")
-			_, err = tx.Commit()
-			if err != nil {
-				return err
-			}
-		}
+
 		return nil
 	}
 
