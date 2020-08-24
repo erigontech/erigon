@@ -19,6 +19,7 @@ package clique
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"errors"
 	"runtime"
 	"sort"
 	"testing"
@@ -475,8 +476,7 @@ func TestClique(t *testing.T) {
 		if failed {
 			continue
 		}
-		//nolint:err113
-		if _, err = stagedsync.InsertBlocksInStages(db, &config, engine, batches[len(batches)-1], chain); err != tt.failure {
+		if _, err = stagedsync.InsertBlocksInStages(db, &config, engine, batches[len(batches)-1], chain); !errors.Is(err, tt.failure) {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 		}
 		if tt.failure != nil {

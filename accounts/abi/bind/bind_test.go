@@ -1658,7 +1658,7 @@ var bindTests = []struct {
 				break
 			}
 			if !gotEvent {
-				//t.Fatal("Expect to receive event emitted by receive")
+				t.Fatal("Expect to receive event emitted by receive")
 			}
 	
 			// Test fallback function
@@ -1677,7 +1677,7 @@ var bindTests = []struct {
 				break
 			}
 			if !gotEvent {
-				//t.Fatal("Expect to receive event emitted by fallback")
+				t.Fatal("Expect to receive event emitted by fallback")
 			}
 	   `,
 		nil,
