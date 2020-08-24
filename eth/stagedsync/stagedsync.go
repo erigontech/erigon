@@ -168,8 +168,9 @@ func PrepareStagedSync(
 	state := NewState(stages)
 	state.unwindOrder = []*Stage{
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		// also tx pool is before senders because senders unwind is inside cycle transaction
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		stages[0], stages[1], stages[2], stages[3], stages[10], stages[4], stages[6], stages[5], stages[7], stages[8], stages[9],
+		stages[0], stages[1], stages[2], stages[10], stages[3], stages[4], stages[6], stages[5], stages[7], stages[8], stages[9],
 	}
 	if err := state.LoadUnwindInfo(db); err != nil {
 		return nil, err
