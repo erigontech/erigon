@@ -175,6 +175,7 @@ func (b *SimulatedBackend) Commit() {
 	if err := b.pendingState.CommitBlock(ctx, stateWriter); err != nil {
 		panic(fmt.Errorf("committing block %d failed: %v", b.pendingBlock.NumberU64(), err))
 	}
+	//nolint:prealloc
 	var allLogs []*types.Log
 	for _, r := range b.pendingReceipts {
 		allLogs = append(allLogs, r.Logs...)
