@@ -95,20 +95,18 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	defer bc.Stop()
 
 	st.BeforeStageRun(stages.Execution, func() error {
-		if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
-			return nil
-		}
-
 		log.Debug("cycle: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
 	})
+	st.BeforeStageRun(stages.TxPool, func() error {
+		log.Debug("cycle: commit transaction")
+		var errTx error
+		_, errTx = tx.Commit()
+		return errTx
+	})
 	st.BeforeUnwind(func() error {
-		if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
-			return nil
-		}
-
 		log.Debug("cycle unwind: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
@@ -152,11 +150,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		})
 
 		if err := st.Run(db, tx); err != nil {
-			return err
-		}
-
-		log.Debug("cycle: commit transaction")
-		if err := tx.CommitAndBegin(); err != nil {
 			return err
 		}
 
