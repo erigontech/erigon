@@ -123,7 +123,7 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 	chain, _ := core.NewBlockChain(objectDB, &core.CacheConfig{}, gspec.Config, engine, vm.Config{}, nil, nil)
 
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	txpool := core.NewTxPool(testTxPoolConfig, chainConfig, txCacher)
+	txpool := core.NewTxPool(testTxPoolConfig, chainConfig, objectDB, txCacher)
 
 	// Generate a small n-block chain and an uncle block for it
 	if n > 0 {
