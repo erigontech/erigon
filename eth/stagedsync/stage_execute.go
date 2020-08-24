@@ -75,9 +75,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	batch := tx.NewBatch()
 	defer tx.Rollback()
 
-	batch := tx.NewBatch()
-	defer batch.Rollback()
-
 	engine := chainContext.Engine()
 
 	stageProgress := s.BlockNumber
