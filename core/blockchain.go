@@ -1131,7 +1131,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		if err := stateDb.CommitBlock(ctx, blockWriter); err != nil {
 			return NonStatTy, err
 		}
-		plainBlockWriter := state.NewPlainStateWriter(bc.db, block.NumberU64())
+		plainBlockWriter := state.NewPlainStateWriter(bc.db, bc.db, block.NumberU64())
 		if err := stateDb.CommitBlock(ctx, plainBlockWriter); err != nil {
 			return NonStatTy, err
 		}
