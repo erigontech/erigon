@@ -40,7 +40,6 @@ func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
 func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 	log.Info("UnwindTo", "block", blockNumber)
 	for _, stage := range s.unwindOrder {
-		fmt.Printf("Adding to unwind stack: %d, %s\n", stage.ID, stages.DBKeys[stage.ID])
 		if stage.Disabled {
 			continue
 		}
