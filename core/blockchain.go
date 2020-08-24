@@ -1525,7 +1525,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 
 		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
-			fmt.Printf("Reorg from %d to %d\n", bc.CurrentBlock().NumberU64(), readBlockNr)
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr,
 				"root", root.String(), "parentRoot", parentRoot.String())
 

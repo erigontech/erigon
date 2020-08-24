@@ -18,6 +18,7 @@ package checkpointoracle
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"errors"
@@ -165,7 +166,6 @@ func (a Accounts) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a Accounts) Less(i, j int) bool { return bytes.Compare(a[i].addr.Bytes(), a[j].addr.Bytes()) < 0 }
 
 func TestCheckpointRegister(t *testing.T) {
-	t.Skip("Simulated backend does not support events for now")
 	// Initialize test accounts
 	var accounts Accounts
 	for i := 0; i < 3; i++ {
@@ -190,8 +190,9 @@ func TestCheckpointRegister(t *testing.T) {
 
 	// getRecent returns block height and hash of the head parent.
 	getRecent := func() (*big.Int, common.Hash) {
-		parentNumber := new(big.Int).Sub(contractBackend.Blockchain().CurrentHeader().Number, big.NewInt(1))
-		parentHash := contractBackend.Blockchain().CurrentHeader().ParentHash
+		h, _ := contractBackend.HeaderByNumber(context.Background(), nil)
+		parentNumber := new(big.Int).Sub(h.Number, big.NewInt(1))
+		parentHash := h.ParentHash
 		return parentNumber, parentHash
 	}
 	// collectSig generates specified number signatures.

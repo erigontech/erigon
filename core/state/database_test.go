@@ -159,19 +159,17 @@ func TestCreate2Revive(t *testing.T) {
 	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	/*
-		var it *contracts.ReviveDeployEventIterator
-		it, err = revive.FilterDeployEvent(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !it.Next() {
-			t.Error("Expected DeployEvent")
-		}
-		if it.Event.D != create2address {
-			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
-		}
-	*/
+	var it *contracts.ReviveDeployEventIterator
+	it, err = revive.FilterDeployEvent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !it.Next() {
+		t.Error("Expected DeployEvent")
+	}
+	if it.Event.D != create2address {
+		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	}
 	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
@@ -197,18 +195,16 @@ func TestCreate2Revive(t *testing.T) {
 	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
-	/*
-		it, err = revive.FilterDeployEvent(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !it.Next() {
-			t.Error("Expected DeployEvent")
-		}
-		if it.Event.D != create2address {
-			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
-		}
-	*/
+	it, err = revive.FilterDeployEvent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !it.Next() {
+		t.Error("Expected DeployEvent")
+	}
+	if it.Event.D != create2address {
+		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	}
 	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
@@ -374,19 +370,17 @@ func TestCreate2Polymorth(t *testing.T) {
 	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	/*
-		var it *contracts.PolyDeployEventIterator
-		it, err = poly.FilterDeployEvent(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !it.Next() {
-			t.Error("Expected DeployEvent")
-		}
-		if it.Event.D != create2address {
-			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
-		}
-	*/
+	var it *contracts.PolyDeployEventIterator
+	it, err = poly.FilterDeployEvent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !it.Next() {
+		t.Error("Expected DeployEvent")
+	}
+	if it.Event.D != create2address {
+		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	}
 	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
@@ -411,18 +405,16 @@ func TestCreate2Polymorth(t *testing.T) {
 	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
-	/*
-		it, err = poly.FilterDeployEvent(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !it.Next() {
-			t.Error("Expected DeployEvent")
-		}
-		if it.Event.D != create2address {
-			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
-		}
-	*/
+	it, err = poly.FilterDeployEvent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !it.Next() {
+		t.Error("Expected DeployEvent")
+	}
+	if it.Event.D != create2address {
+		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	}
 	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 4", create2address.String())
@@ -438,18 +430,16 @@ func TestCreate2Polymorth(t *testing.T) {
 	if _, err = blockchain.InsertChain1(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
-	/*
-		it, err = poly.FilterDeployEvent(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !it.Next() {
-			t.Error("Expected DeployEvent")
-		}
-		if it.Event.D != create2address {
-			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
-		}
-	*/
+	it, err = poly.FilterDeployEvent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !it.Next() {
+		t.Error("Expected DeployEvent")
+	}
+	if it.Event.D != create2address {
+		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	}
 	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 5", create2address.String())
