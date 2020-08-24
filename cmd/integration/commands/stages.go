@@ -163,7 +163,7 @@ func stageSenders(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -203,7 +203,7 @@ func stageExec(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset { //nolint:staticcheck
@@ -226,7 +226,7 @@ func stageIHash(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -255,7 +255,7 @@ func stageHashState(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -284,7 +284,7 @@ func stageHistory(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -319,7 +319,7 @@ func stageTxLookup(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
