@@ -16,8 +16,6 @@ type State struct {
 	unwindOrder  []*Stage
 	currentStage uint
 
-	beforeUnwind      func() error
-	afterUnwind       func() error
 	beforeStageRun    map[stages.SyncStage]func() error
 	beforeStageUnwind map[stages.SyncStage]func() error
 }
