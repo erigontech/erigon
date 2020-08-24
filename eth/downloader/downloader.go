@@ -560,13 +560,12 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
-		execProgress, _, err := stages.GetStageProgress(d.stateDB, stages.HashState) // because later stages can be disabled
+		hashStateStageProgress, _, err := stages.GetStageProgress(d.stateDB, stages.HashState) // because later stages can be disabled
 		if err != nil {
 			return err
 		}
 
-		// 2 months of downtime
-		canRunCycleInOneTransaction := height-origin < 400_000 && height-execProgress < 400_000
+		canRunCycleInOneTransaction := height-origin < 16 && height-hashStateStageProgress < 16
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
