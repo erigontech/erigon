@@ -16,9 +16,10 @@ type State struct {
 	unwindOrder  []*Stage
 	currentStage uint
 
-	beforeUnwind   func() error
-	afterUnwind    func() error
-	beforeStageRun map[stages.SyncStage]func() error
+	beforeUnwind      func() error
+	afterUnwind       func() error
+	beforeStageRun    map[stages.SyncStage]func() error
+	beforeStageUnwind map[stages.SyncStage]func() error
 }
 
 func (s *State) Len() int {
@@ -79,10 +80,11 @@ func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 
 func NewState(stagesList []*Stage) *State {
 	return &State{
-		stages:         stagesList,
-		currentStage:   0,
-		unwindStack:    NewPersistentUnwindStack(),
-		beforeStageRun: make(map[stages.SyncStage]func() error),
+		stages:            stagesList,
+		currentStage:      0,
+		unwindStack:       NewPersistentUnwindStack(),
+		beforeStageRun:    make(map[stages.SyncStage]func() error),
+		beforeStageUnwind: make(map[stages.SyncStage]func() error),
 	}
 }
 
@@ -106,10 +108,12 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 func (s *State) Run(db ethdb.Getter, tx ethdb.GetterPutter) error {
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
-			if err := s.beforeUnwind(); err != nil {
-				return err
-			}
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
+				if hook, ok := s.beforeStageRun[unwind.Stage]; ok {
+					if err := hook(); err != nil {
+						return err
+					}
+				}
 				if err := s.UnwindStage(unwind, tx); err != nil {
 					return err
 				}
@@ -236,10 +240,6 @@ func (s *State) BeforeStageRun(id stages.SyncStage, f func() error) {
 	s.beforeStageRun[id] = f
 }
 
-func (s *State) BeforeUnwind(f func() error) {
-	s.beforeUnwind = f
-}
-
-func (s *State) AfterUnwind(f func() error) {
-	s.afterUnwind = f
+func (s *State) BeforeStageUnwind(id stages.SyncStage, f func() error) {
+	s.beforeStageRun[id] = f
 }

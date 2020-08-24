@@ -625,7 +625,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			_, errTx := tx.Commit()
 			return errTx
 		})
-		d.stagedSync.BeforeUnwind(func() error {
+		d.stagedSync.BeforeStageUnwind(stages.TxLookup, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -634,7 +634,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.AfterUnwind(func() error {
+		d.stagedSync.BeforeStageUnwind(stages.TxPool, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
