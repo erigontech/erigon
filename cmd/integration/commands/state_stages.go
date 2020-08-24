@@ -85,7 +85,10 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db)
+	tx, errBegin := db.Begin()
+	if errBegin != nil {
+		return errBegin
+	}
 	defer tx.Rollback()
 
 	bc, st, progress := newSync(ch, tx, changeSetHook)
