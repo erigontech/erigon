@@ -18,8 +18,8 @@ package clique
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
+	"errors"
 	"runtime"
 	"sort"
 	"testing"
@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -466,7 +467,7 @@ func TestClique(t *testing.T) {
 		failed := false
 		var k int
 		for j := 0; j < len(batches)-1; j++ {
-			if k, err = chain.InsertChain(context.Background(), batches[j]); err != nil {
+			if k, err = stagedsync.InsertBlocksInStages(db, &config, engine, batches[j], chain); err != nil {
 				t.Errorf("test %d: failed to import batch %d, block %d: %v", i, j, k, err)
 				failed = true
 				break
@@ -475,7 +476,7 @@ func TestClique(t *testing.T) {
 		if failed {
 			continue
 		}
-		if _, err = chain.InsertChain(context.Background(), batches[len(batches)-1]); err != tt.failure {
+		if _, err = stagedsync.InsertBlocksInStages(db, &config, engine, batches[len(batches)-1], chain); !errors.Is(err, tt.failure) {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 		}
 		if tt.failure != nil {

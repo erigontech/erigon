@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"math/big"
 	"math/rand"
 	"reflect"
 	"sort"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
@@ -160,7 +161,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := GetAsOf(db.KV(), true /* plain */, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
+			res, err := GetAsOf(db.KV(), true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
