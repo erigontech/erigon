@@ -81,8 +81,11 @@ type SimulatedBackend struct {
 
 	events *filters.EventSystem // Event system for filtering log events live
 
-	config   *params.ChainConfig
-	txCacher *core.TxSenderCacher
+	config     *params.ChainConfig
+	txCacher   *core.TxSenderCacher
+	rmLogsFeed event.Feed
+	chainFeed  event.Feed
+	logsFeed   event.Feed
 }
 
 // NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
@@ -105,9 +108,9 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
-		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
 		txCacher:     txCacher,
 	}
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend}, false)
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -133,9 +136,9 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
-		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
 		txCacher:     txCacher,
 	}
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend}, false)
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -172,6 +175,11 @@ func (b *SimulatedBackend) Commit() {
 	if err := b.pendingState.CommitBlock(ctx, stateWriter); err != nil {
 		panic(fmt.Errorf("committing block %d failed: %v", b.pendingBlock.NumberU64(), err))
 	}
+	var allLogs []*types.Log
+	for _, r := range b.pendingReceipts {
+		allLogs = append(allLogs, r.Logs...)
+	}
+	b.logsFeed.Send(allLogs)
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
@@ -668,7 +676,7 @@ func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.Filter
 	var filter *filters.Filter
 	if query.BlockHash != nil {
 		// Block filter requested, construct a single-shot filter
-		filter = filters.NewBlockFilter(&filterBackend{b.database, b.blockchain}, *query.BlockHash, query.Addresses, query.Topics)
+		filter = filters.NewBlockFilter(&filterBackend{b.database, b}, *query.BlockHash, query.Addresses, query.Topics)
 	} else {
 		// Initialize unset filter boundaried to run from genesis to chain head
 		from := int64(0)
@@ -680,7 +688,7 @@ func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.Filter
 			to = query.ToBlock.Int64()
 		}
 		// Construct the range filter
-		filter = filters.NewRangeFilter(&filterBackend{b.database, b.blockchain}, from, to, query.Addresses, query.Topics)
+		filter = filters.NewRangeFilter(&filterBackend{b.database, b}, from, to, query.Addresses, query.Topics)
 	}
 	// Run the filter and return all the logs
 	logs, err := filter.Logs(ctx)
@@ -798,7 +806,7 @@ func (m callmsg) Data() []byte           { return m.CallMsg.Data }
 // taking bloom-bits acceleration structures into account.
 type filterBackend struct {
 	db ethdb.Database
-	bc *core.BlockChain
+	b  *SimulatedBackend
 }
 
 func (fb *filterBackend) ChainDb() ethdb.Database  { return fb.db }
@@ -806,13 +814,13 @@ func (fb *filterBackend) EventMux() *event.TypeMux { panic("not supported") }
 
 func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
 	if block == rpc.LatestBlockNumber {
-		return fb.bc.CurrentHeader(), nil
+		return fb.b.HeaderByNumber(ctx, nil)
 	}
-	return fb.bc.GetHeaderByNumber(uint64(block.Int64())), nil
+	return fb.b.HeaderByNumber(ctx, big.NewInt(block.Int64()))
 }
 
 func (fb *filterBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	return fb.bc.GetHeaderByHash(hash), nil
+	return fb.b.HeaderByHash(ctx, hash)
 }
 
 func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
@@ -820,7 +828,7 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number, fb.bc.Config()), nil
+	return rawdb.ReadReceipts(fb.db, hash, *number, fb.b.config), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -828,7 +836,7 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number, fb.bc.Config())
+	receipts := rawdb.ReadReceipts(fb.db, hash, *number, fb.b.config)
 	if receipts == nil {
 		return nil, nil
 	}
@@ -844,15 +852,15 @@ func (fb *filterBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.
 }
 
 func (fb *filterBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
-	return fb.bc.SubscribeChainEvent(ch)
+	return fb.b.chainFeed.Subscribe(ch)
 }
 
 func (fb *filterBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
-	return fb.bc.SubscribeRemovedLogsEvent(ch)
+	return fb.b.rmLogsFeed.Subscribe(ch)
 }
 
 func (fb *filterBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return fb.bc.SubscribeLogsEvent(ch)
+	return fb.b.logsFeed.Subscribe(ch)
 }
 
 func (fb *filterBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
