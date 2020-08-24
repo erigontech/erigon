@@ -19,10 +19,10 @@ import (
 //MaxChangesetsSearch -
 const MaxChangesetsSearch = 256
 
-func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func GetAsOf(db ethdb.KV, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := FindByHistory(tx, plain, storage, key, timestamp)
+		v, err := FindByHistory(tx, storage, key, timestamp)
 		if err == nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
@@ -32,13 +32,7 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 			return err
 		}
 		{
-			var bucket string
-			if plain {
-				bucket = dbutils.PlainStateBucket
-			} else {
-				bucket = dbutils.CurrentStateBucket
-			}
-			v, err := tx.Get(bucket, key)
+			v, err := tx.Get(dbutils.PlainStateBucket, key)
 			if err != nil {
 				return err
 			}
@@ -53,7 +47,7 @@ func GetAsOf(db ethdb.KV, plain, storage bool, key []byte, timestamp uint64) ([]
 	return dat, err
 }
 
-func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var hBucket string
 	if storage {
 		hBucket = dbutils.StorageHistoryBucket
@@ -69,16 +63,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		return nil, ethdb.ErrKeyNotFound
 	}
 	if storage {
-		if plain {
-			if !bytes.Equal(k[:common.AddressLength], key[:common.AddressLength]) ||
-				!bytes.Equal(k[common.AddressLength:common.AddressLength+common.HashLength], key[common.AddressLength+common.IncarnationLength:]) {
-				return nil, ethdb.ErrKeyNotFound
-			}
-		} else {
-			if !bytes.Equal(k[:common.HashLength], key[:common.HashLength]) ||
-				!bytes.Equal(k[common.HashLength:common.HashLength+common.HashLength], key[common.HashLength+common.IncarnationLength:]) {
-				return nil, ethdb.ErrKeyNotFound
-			}
+		if !bytes.Equal(k[:common.AddressLength], key[:common.AddressLength]) ||
+			!bytes.Equal(k[common.AddressLength:common.AddressLength+common.HashLength], key[common.AddressLength+common.IncarnationLength:]) {
+			return nil, ethdb.ErrKeyNotFound
 		}
 	} else {
 		if !bytes.HasPrefix(k, key) {
@@ -95,23 +82,17 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		if set && !storage {
 			return []byte{}, nil
 		}
-		csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
+		csBucket := dbutils.ChangeSetByIndexBucket(storage)
 		csKey := dbutils.EncodeTimestamp(changeSetBlock)
 		changeSetData, err := tx.Get(csBucket, csKey)
 		if err != nil {
 			return nil, err
 		}
 
-		if plain {
-			if storage {
-				data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithIncarnation(key)
-			} else {
-				data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
-			}
-		} else if storage {
-			data, err = changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
+		if storage {
+			data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithIncarnation(key)
 		} else {
-			data, err = changeset.AccountChangeSetBytes(changeSetData).Find(key)
+			data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
 		}
 		if err != nil {
 			if !errors.Is(err, changeset.ErrNotFound) {
@@ -119,7 +100,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 			}
 			return nil, ethdb.ErrKeyNotFound
 		}
-	} else if plain {
+	} else {
 		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
 		var lastChangesetBlock, lastIndexBlock uint64
 		v1, err1 := tx.Get(dbutils.SyncStageProgress, stages.DBKeys[stages.Execution])
@@ -143,7 +124,7 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		//fmt.Printf("lastChangesetBlock=%d, lastIndexBlock=%d\n", lastChangesetBlock, lastIndexBlock)
 		if lastChangesetBlock > lastIndexBlock {
 			// iterate over changeset to compensate for lacking of the history index
-			csBucket := dbutils.ChangeSetByIndexBucket(plain, storage)
+			csBucket := dbutils.ChangeSetByIndexBucket(storage)
 			c := tx.Cursor(csBucket)
 			var startTimestamp uint64
 			if timestamp < lastIndexBlock {
@@ -172,8 +153,6 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		} else {
 			return nil, ethdb.ErrKeyNotFound
 		}
-	} else {
-		return nil, ethdb.ErrKeyNotFound
 	}
 
 	//restore codehash
@@ -185,16 +164,9 @@ func FindByHistory(tx ethdb.Tx, plain, storage bool, key []byte, timestamp uint6
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			var codeHash []byte
 			var err error
-			if plain {
-				codeHash, err = tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				codeHash, err = tx.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(key, acc.Incarnation))
-				if err != nil {
-					return nil, err
-				}
+			codeHash, err = tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+			if err != nil {
+				return nil, err
 			}
 			if len(codeHash) > 0 {
 				acc.CodeHash = common.BytesToHash(codeHash)
@@ -468,7 +440,6 @@ func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey [
 	})
 	return err
 }
-
 
 func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byte, error), adapter func(v []byte) changeset.Walker) ([]byte, bool, error) {
 	index := dbutils.WrapHistoryIndex(hV)

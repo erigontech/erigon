@@ -302,4 +302,3 @@ func TestUnwind(t *testing.T) {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
 	}
 }
-

@@ -21,8 +21,6 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
 	"io"
 	"os"
 	"os/signal"
@@ -30,12 +28,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/spf13/cobra"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -165,7 +167,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 			log.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
 		}
-		if _, err := chain.InsertChain(context.Background(), missing); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(chain.ChainDb(), chain.Config(), chain.Engine(), missing, chain); err != nil {
 			return fmt.Errorf("invalid block %d: %v", n, err)
 		}
 	}

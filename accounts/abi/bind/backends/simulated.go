@@ -70,18 +70,22 @@ type SimulatedBackend struct {
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
-	mu            sync.Mutex
-	prependBlock  *types.Block
-	pendingHeader *types.Header
-	gasPool       *core.GasPool
-	pendingBlock  *types.Block // Currently pending block that will be imported on request
-	pendingTds    *state.TrieDbState
-	pendingState  *state.IntraBlockState // Currently pending state that will be the active on request
+	mu              sync.Mutex
+	prependBlock    *types.Block
+	pendingReceipts types.Receipts
+	pendingHeader   *types.Header
+	gasPool         *core.GasPool
+	pendingBlock    *types.Block // Currently pending block that will be imported on request
+	pendingReader   *state.PlainStateReader
+	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
 	events *filters.EventSystem // Event system for filtering log events live
 
-	config   *params.ChainConfig
-	txCacher *core.TxSenderCacher
+	config     *params.ChainConfig
+	txCacher   *core.TxSenderCacher
+	rmLogsFeed event.Feed
+	chainFeed  event.Feed
+	logsFeed   event.Feed
 }
 
 // NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
@@ -104,9 +108,9 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
-		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
 		txCacher:     txCacher,
 	}
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend}, false)
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -119,7 +123,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher := core.NewTxSenderCacher(1)
 	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		panic(err)
@@ -132,9 +136,9 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
-		events:       filters.NewEventSystem(&filterBackend{database, blockchain}, false),
 		txCacher:     txCacher,
 	}
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend}, false)
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -162,9 +166,21 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := b.blockchain.InsertChain(context.Background(), []*types.Block{b.pendingBlock}); err != nil {
-		panic(err)
+	stateWriter := state.NewPlainStateWriter(b.database, b.pendingBlock.NumberU64())
+	ctx := b.config.WithEIPsFlags(context.Background(), b.pendingHeader.Number)
+	rawdb.WriteBlock(ctx, b.database, b.pendingBlock)
+	rawdb.WriteCanonicalHash(b.database, b.pendingBlock.Hash(), b.pendingBlock.NumberU64())
+	rawdb.WriteTxLookupEntries(b.database, b.pendingBlock)
+	rawdb.WriteReceipts(b.database, b.pendingBlock.Hash(), b.pendingBlock.NumberU64(), b.pendingReceipts)
+	if err := b.pendingState.CommitBlock(ctx, stateWriter); err != nil {
+		panic(fmt.Errorf("committing block %d failed: %v", b.pendingBlock.NumberU64(), err))
 	}
+	//nolint:prealloc
+	var allLogs []*types.Log
+	for _, r := range b.pendingReceipts {
+		allLogs = append(allLogs, r.Logs...)
+	}
+	b.logsFeed.Send(allLogs)
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
@@ -179,26 +195,26 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blocks, _, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
+	blocks, receipts, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
 	b.pendingBlock = blocks[0]
+	b.pendingReceipts = receipts[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.database.NewBatch(), b.prependBlock.NumberU64())
-	b.pendingState = state.New(b.pendingTds)
-	b.pendingTds.StartNewBuffer()
+	b.pendingReader = state.NewPlainStateReader(b.database)
+	b.pendingState = state.New(b.pendingReader)
 }
 
 func (b *SimulatedBackend) prependingState() *state.IntraBlockState {
-	tds := state.NewTrieDbState(b.prependBlock.Root(), b.database.NewBatch(), b.prependBlock.NumberU64())
-	return state.New(tds)
+	dbs := state.NewPlainDBState(b.kv, b.prependBlock.NumberU64())
+	return state.New(dbs)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, blockNumber *big.Int) (*state.IntraBlockState, error) {
-	if blockNumber == nil || blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) == 0 {
-		return state.New(state.NewDbState(b.kv, b.blockchain.CurrentBlock().NumberU64())), nil
+	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
+		return state.New(state.NewPlainDBState(b.kv, b.pendingBlock.NumberU64())), nil
 	}
-	return state.New(state.NewDbState(b.kv, uint64(blockNumber.Int64()))), nil
+	return state.New(state.NewPlainDBState(b.kv, uint64(blockNumber.Int64()))), nil
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -288,7 +304,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 		return b.pendingBlock, nil
 	}
 
-	block := b.blockchain.GetBlockByHash(hash)
+	block := rawdb.ReadBlockByHash(b.database, hash)
 	if block != nil {
 		return block, nil
 	}
@@ -308,11 +324,12 @@ func (b *SimulatedBackend) BlockByNumber(ctx context.Context, number *big.Int) (
 // blockByNumberNoLock retrieves a block from the database by number, caching it
 // (associated with its hash) if found without Lock.
 func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.Int) (*types.Block, error) {
-	if number == nil || number.Cmp(b.pendingBlock.Number()) == 0 {
-		return b.blockchain.CurrentBlock(), nil
+	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
+		return b.prependBlock, nil
 	}
 
-	block := b.blockchain.GetBlockByNumber(uint64(number.Int64()))
+	hash := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	block := rawdb.ReadBlock(b.database, hash, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -329,7 +346,11 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 		return b.pendingBlock.Header(), nil
 	}
 
-	header := b.blockchain.GetHeaderByHash(hash)
+	number := rawdb.ReadHeaderNumber(b.database, hash)
+	if number == nil {
+		return nil, errBlockDoesNotExist
+	}
+	header := rawdb.ReadHeader(b.database, hash, *number)
 	if header == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -339,15 +360,16 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 
 // HeaderByNumber returns a block header from the current canonical chain. If number is
 // nil, the latest known header is returned.
-func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, block *big.Int) (*types.Header, error) {
+func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if block == nil || block.Cmp(b.pendingBlock.Number()) == 0 {
-		return b.blockchain.CurrentHeader(), nil
+	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
+		return b.prependBlock.Header(), nil
 	}
-
-	return b.blockchain.GetHeaderByNumber(uint64(block.Int64())), nil
+	hash := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	header := rawdb.ReadHeader(b.database, hash, number.Uint64())
+	return header, nil
 }
 
 // TransactionCount returns the number of transactions in a given block
@@ -359,7 +381,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
 
-	block := b.blockchain.GetBlockByHash(blockHash)
+	block := rawdb.ReadBlockByHash(b.database, blockHash)
 	if block == nil {
 		return uint(0), errBlockDoesNotExist
 	}
@@ -381,7 +403,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 		return transactions[index], nil
 	}
 
-	block := b.blockchain.GetBlockByHash(blockHash)
+	block := rawdb.ReadBlockByHash(b.database, blockHash)
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -437,11 +459,11 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
+	if blockNumber != nil && blockNumber.Cmp(b.pendingBlock.Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	s := state.New(state.NewDbState(b.kv, b.blockchain.CurrentBlock().NumberU64()))
-	res, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), s)
+	s := state.New(state.NewPlainStateReader(b.database))
+	res, err := b.callContract(ctx, call, b.pendingBlock, s)
 	if err != nil {
 		return nil, err
 	}
@@ -621,16 +643,17 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	}
 
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
+	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
 		b.config, b.blockchain,
 		&b.pendingHeader.Coinbase, b.gasPool,
-		b.pendingState, b.pendingTds.TrieStateWriter(),
+		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
 		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
+	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
@@ -639,8 +662,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("==== End producing block %d\n", (b.prependBlock.NumberU64() + 1))
+	//fmt.Printf("==== End producing block %d\n", b.pendingBlock.NumberU64())
 	b.pendingBlock = blocks[0]
+	b.pendingReceipts = receipts[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	return nil
 }
@@ -653,7 +677,7 @@ func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.Filter
 	var filter *filters.Filter
 	if query.BlockHash != nil {
 		// Block filter requested, construct a single-shot filter
-		filter = filters.NewBlockFilter(&filterBackend{b.database, b.blockchain}, *query.BlockHash, query.Addresses, query.Topics)
+		filter = filters.NewBlockFilter(&filterBackend{b.database, b}, *query.BlockHash, query.Addresses, query.Topics)
 	} else {
 		// Initialize unset filter boundaried to run from genesis to chain head
 		from := int64(0)
@@ -665,7 +689,7 @@ func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.Filter
 			to = query.ToBlock.Int64()
 		}
 		// Construct the range filter
-		filter = filters.NewRangeFilter(&filterBackend{b.database, b.blockchain}, from, to, query.Addresses, query.Topics)
+		filter = filters.NewRangeFilter(&filterBackend{b.database, b}, from, to, query.Addresses, query.Topics)
 	}
 	// Run the filter and return all the logs
 	logs, err := filter.Logs(ctx)
@@ -783,7 +807,7 @@ func (m callmsg) Data() []byte           { return m.CallMsg.Data }
 // taking bloom-bits acceleration structures into account.
 type filterBackend struct {
 	db ethdb.Database
-	bc *core.BlockChain
+	b  *SimulatedBackend
 }
 
 func (fb *filterBackend) ChainDb() ethdb.Database  { return fb.db }
@@ -791,13 +815,13 @@ func (fb *filterBackend) EventMux() *event.TypeMux { panic("not supported") }
 
 func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
 	if block == rpc.LatestBlockNumber {
-		return fb.bc.CurrentHeader(), nil
+		return fb.b.HeaderByNumber(ctx, nil)
 	}
-	return fb.bc.GetHeaderByNumber(uint64(block.Int64())), nil
+	return fb.b.HeaderByNumber(ctx, big.NewInt(block.Int64()))
 }
 
 func (fb *filterBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	return fb.bc.GetHeaderByHash(hash), nil
+	return fb.b.HeaderByHash(ctx, hash)
 }
 
 func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
@@ -805,7 +829,7 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number, fb.bc.Config()), nil
+	return rawdb.ReadReceipts(fb.db, hash, *number, fb.b.config), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -813,7 +837,7 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number, fb.bc.Config())
+	receipts := rawdb.ReadReceipts(fb.db, hash, *number, fb.b.config)
 	if receipts == nil {
 		return nil, nil
 	}
@@ -829,15 +853,15 @@ func (fb *filterBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.
 }
 
 func (fb *filterBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
-	return fb.bc.SubscribeChainEvent(ch)
+	return fb.b.chainFeed.Subscribe(ch)
 }
 
 func (fb *filterBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
-	return fb.bc.SubscribeRemovedLogsEvent(ch)
+	return fb.b.rmLogsFeed.Subscribe(ch)
 }
 
 func (fb *filterBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return fb.bc.SubscribeLogsEvent(ch)
+	return fb.b.logsFeed.Subscribe(ch)
 }
 
 func (fb *filterBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {

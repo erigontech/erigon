@@ -1165,7 +1165,7 @@ func makeCreators(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -1751,7 +1751,7 @@ func makeSha3Preimages(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {

@@ -111,7 +111,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -142,7 +142,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// and that means that the state of the accounts written in the first block was correct.
 	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
-	st = state.New(state.NewDbState(db.KV(), blockchain1.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}

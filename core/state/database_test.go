@@ -137,7 +137,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -150,7 +150,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -170,7 +170,7 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
@@ -186,7 +186,7 @@ func TestCreate2Revive(t *testing.T) {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if st.Exist(create2address) {
 		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
 	}
@@ -205,7 +205,7 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
@@ -348,7 +348,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -361,7 +361,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -381,7 +381,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
@@ -396,7 +396,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if st.Exist(create2address) {
 		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
 	}
@@ -415,7 +415,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 4", create2address.String())
 	}
@@ -440,7 +440,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 5", create2address.String())
 	}
@@ -544,7 +544,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("generate long blocks")
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -557,7 +557,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -572,7 +572,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if st.Exist(contractAddress) {
 		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
 	}
@@ -582,7 +582,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 	}
@@ -594,7 +594,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer blockchain1.Stop()
-	st = state.New(state.NewDbState(db.KV(), blockchain1.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -688,7 +688,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -701,7 +701,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -722,7 +722,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 	}
@@ -734,7 +734,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer blockchain2.Stop()
-	st = state.New(state.NewDbState(db.KV(), blockchain2.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -985,7 +985,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -998,7 +998,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -1135,7 +1135,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -1149,7 +1149,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -1223,7 +1223,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -1250,7 +1250,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal("Incorrect incarnation", acc.Incarnation)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -1386,7 +1386,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st := state.New(state.NewDbStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -1401,7 +1401,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbState(db.KV(), blockchain.CurrentBlock().NumberU64()))
+	st = state.New(state.NewDbStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
