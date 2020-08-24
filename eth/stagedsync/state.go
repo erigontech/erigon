@@ -131,7 +131,6 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 
 		index, stage := s.CurrentStage()
 
-		fmt.Printf("44: %d %s\n", index, stage.Description)
 		if hook, ok := s.beforeStageRun[stage.ID]; ok {
 			if err := hook(); err != nil {
 				return err
