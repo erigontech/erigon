@@ -644,7 +644,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 				return nil
 			}
 			log.Debug("cycle unwind: commit transaction")
