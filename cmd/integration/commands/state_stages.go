@@ -120,7 +120,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		return errCommit
 	})
 
-	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
+	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
