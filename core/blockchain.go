@@ -1271,7 +1271,7 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 // wrong.
 //
 // After insertion is done, all accumulated events will be fired.
-func (bc *BlockChain) InsertChain1(ctx context.Context, chain types.Blocks) (int, error) {
+func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return 0, nil

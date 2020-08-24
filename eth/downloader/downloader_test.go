@@ -312,7 +312,7 @@ func (dl *downloadTester) GetVMConfig() *vm.Config {
 }
 
 // InsertChain injects a new batch of blocks into the simulated chain.
-func (dl *downloadTester) InsertChain1(_ context.Context, blocks types.Blocks) (i int, err error) {
+func (dl *downloadTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 	for i, block := range blocks {

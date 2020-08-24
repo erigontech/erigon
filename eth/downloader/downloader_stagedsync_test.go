@@ -144,7 +144,7 @@ func (st *stagedSyncTester) InsertBodyChain(_ context.Context, blocks types.Bloc
 }
 
 // InsertChain is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertChain1(_ context.Context, blocks types.Blocks) (i int, err error) {
+func (st *stagedSyncTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
 	panic("")
 }
 

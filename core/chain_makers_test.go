@@ -100,7 +100,7 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if i, err := blockchain.InsertChain1(context.Background(), chain); err != nil {
+	if i, err := blockchain.InsertChain(context.Background(), chain); err != nil {
 		fmt.Printf("insert error (block %d): %v\n", chain[i].NumberU64(), err)
 		return
 	}

@@ -215,7 +215,7 @@ type BlockChain interface {
 	FastSyncCommitHead(common.Hash) error
 
 	// InsertChain inserts a batch of blocks into the local chain.
-	InsertChain1(context.Context, types.Blocks) (int, error)
+	InsertChain(context.Context, types.Blocks) (int, error)
 
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
 	InsertBodyChain(context.Context, types.Blocks) (bool, error)
@@ -1679,8 +1679,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	var stopped bool
 	var err error
 	if execute {
-		index, err = d.blockchain.InsertChain1(context.Background(), blocks)
-		//index, err = stagedsync.InsertBlocksInStages(d.stateDB, d.chainConfig, d.blockchain.Engine(), blocks, d.blockchain.(*core.BlockChain))
+		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
 		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
 		if stopped {
