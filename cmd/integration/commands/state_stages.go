@@ -94,20 +94,12 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	bc, st, progress := newSync(ch, tx, changeSetHook)
 	defer bc.Stop()
 
-	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
-
-	senderStageProgress := progress(stages.Senders).BlockNumber
-
-	var stopAt = senderStageProgress
-	if block > 0 && block < senderStageProgress {
-		stopAt = block
-	}
-
 	st.BeforeStageRun(stages.Execution, func() error {
 		if tx.(ethdb.HasTx).Tx() != nil { // if tx started already, just use it
 			return nil
 		}
 
+		log.Debug("cycle: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
@@ -117,14 +109,25 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			return nil
 		}
 
+		log.Debug("cycle unwind: begin transaction")
 		var errTx error
 		tx, errTx = tx.Begin()
 		return errTx
 	})
 	st.AfterUnwind(func() error {
+		log.Debug("cycle unwind: commit transaction")
 		_, errCommit := tx.Commit()
 		return errCommit
 	})
+
+	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
+
+	senderStageProgress := progress(stages.Senders).BlockNumber
+
+	var stopAt = senderStageProgress
+	if block > 0 && block < senderStageProgress {
+		stopAt = block
+	}
 
 	for progress(stages.Execution).BlockNumber < stopAt {
 		select {
@@ -152,6 +155,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			return err
 		}
 
+		log.Debug("cycle: commit transaction")
 		if err := tx.CommitAndBegin(); err != nil {
 			return err
 		}
