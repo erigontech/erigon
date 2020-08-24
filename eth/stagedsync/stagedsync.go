@@ -40,7 +40,7 @@ func PrepareStagedSync(
 				return SpawnHeaderDownloadStage(s, u, d, headersFetchers)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return u.Done(tx)
+				return u.Done(db)
 			},
 		},
 		{
@@ -50,7 +50,7 @@ func PrepareStagedSync(
 				return SpawnBlockHashStage(s, db, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return u.Done(tx)
+				return u.Done(db)
 			},
 		},
 		{
@@ -60,7 +60,7 @@ func PrepareStagedSync(
 				return spawnBodyDownloadStage(s, u, d, pid)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindBodyDownloadStage(u, tx)
+				return unwindBodyDownloadStage(u, db)
 			},
 		},
 		{
