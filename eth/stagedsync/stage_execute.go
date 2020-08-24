@@ -154,7 +154,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
 	if !useExternalTx {
-		if _, err = tx.Commit(); err != nil {
+		if _, err := tx.Commit(); err != nil {
 			return err
 		}
 	}
