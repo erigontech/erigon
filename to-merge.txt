@@ -230,9 +230,3 @@ Date:   Wed Aug 26 09:37:00 2020 +0200
     * accounts/abi/bind/simulated: added comments, fixed test for AdjustTime
     
     * accounts/abi/bind/backends: updated comment
-
-commit fc20680b95da65f952012f3370e5d316f0ba237d
-Author: Felix Lange <fjl@twurst.com>
-Date:   Tue Aug 25 16:21:41 2020 +0200
-
-    params: begin v1.9.21 release cycle
