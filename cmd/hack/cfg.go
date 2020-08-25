@@ -2,15 +2,24 @@ package main
 
 import (
 	"encoding/hex"
+	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"log"
 	"math/big"
+	"os"
 )
 
 func testGenCfg() error {
+	args := os.Args
+	if len(args) == 4 {
+		fmt.Printf("%v\n", args[3])
+		absIntTest(args[3])
+		print("Finished running on program from command line.")
+		return nil
+	}
 	//cfg0Test0()
 	//cfg0Test1()
 	//dfTest1()
@@ -24,9 +33,9 @@ func testGenCfg() error {
 	absIntTestDiv00()
 	//absIntTestEcrecoverLoop02() //- PASSES
 	//absIntTestStorageVar03() // - PASSES
-	//absIntTestStaticLoop00() //- PASSES
-	//absIntTestStaticLoop01() //- PASSES
-	//absIntTestPrivateFunction01()
+	//absIntTestStaticLoop00() //- PASSESASSES
+	//	//a
+	//absIntTestStaticLoop01() //- PbsIntTestPrivateFunction01()
 	//absIntTestDepositContract() //FAILS - Imprecision
 	//absIntTestDepositContract2()
 	return nil
@@ -93,6 +102,17 @@ func absIntTest3() {
 							byte(vm.JUMPI),
 							byte(vm.STOP)}
 	_ = vm.AbsIntCfgHarness(contract)
+}
+
+func absIntTest(s string) {
+	decoded, err := hex.DecodeString(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract.Code = decoded
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTestSimple00() {
