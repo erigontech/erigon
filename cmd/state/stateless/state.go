@@ -318,7 +318,8 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 	var i int
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		var lastKey []byte
+		var lastAddress []byte
+		var lastLocation []byte
 		var lastTimestamp uint64
 		cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
 		sk, _, serr := cs.First()
@@ -330,14 +331,15 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 			if err != nil {
 				return err
 			}
-			key := k[:common.AddressLength+common.HashLength]
+			address := k[:common.AddressLength]
+			location := k[common.AddressLength : common.AddressLength+common.HashLength]
 			hi := dbutils.WrapHistoryIndex(v)
 			blockNums, created, err1 := hi.Decode()
 			if err1 != nil {
 				return err1
 			}
 			if created[0] {
-				if bytes.Equal(k[:common.AddressLength+common.HashLength], lastKey) {
+				if bytes.Equal(address, lastAddress) || bytes.Equal(location, lastLocation) {
 					r.CreationsByBlock[lastTimestamp]--
 				}
 			}
@@ -350,12 +352,20 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				}
 			}
 			if binary.BigEndian.Uint64(k[common.AddressLength+common.HashLength:]) == 0xffffffffffffffff {
-				for ; sk != nil && bytes.Compare(sk, key) < 0; sk, _, serr = cs.Next() {
+				var aCmp, lCmp int
+				for ; sk != nil; sk, _, serr = cs.Next() {
 					if serr != nil {
 						return serr
 					}
+					sAddress := sk[:common.AddressLength]
+					sLocation := sk[common.AddressLength+common.IncarnationLength:]
+					aCmp = bytes.Compare(sAddress, address)
+					lCmp = bytes.Compare(sLocation, location)
+					if aCmp > 0 || (aCmp == 0 && lCmp >= 0) {
+						break
+					}
 				}
-				if !bytes.Equal(sk, key) {
+				if aCmp != 0 || lCmp != 0 {
 					r.CreationsByBlock[blockNums[len(blockNums)-1]]--
 				}
 			}
@@ -363,7 +373,8 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 			if i%100000 == 0 {
 				fmt.Printf("Processed %d storage history records\n", i)
 			}
-			lastKey = key
+			lastAddress = address
+			lastLocation = location
 			lastTimestamp = blockNums[len(blockNums)-1]
 			if lastTimestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = lastTimestamp + 1
