@@ -43,7 +43,7 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 	}
 
 	// Stage 3
-	if _, err := bc.InsertBodyChain(context.TODO(), []*types.Block{block}); err != nil {
+	if _, err := bc.InsertBodyChain(context.TODO(), db, []*types.Block{block}); err != nil {
 		return err
 	}
 
