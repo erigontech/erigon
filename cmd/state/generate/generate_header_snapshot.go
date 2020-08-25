@@ -1,12 +1,16 @@
 package generate
 
 import (
+	"fmt"
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"math/big"
+	"os"
 	"time"
 )
 
@@ -22,13 +26,14 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 
 	t:=time.Now()
 	chunkFile:=30000
-	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3+100)
+	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3)
 	var hash common.Hash
 	var header []byte
-	for i:=uint64(0); i<=toBlock; i++ {
+	for i:=uint64(2); i<=toBlock; i++ {
 		hash=rawdb.ReadCanonicalHash(db, i)
 		header=rawdb.ReadHeaderRLP(db,hash, i)
 		tuples=append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
+		fmt.Println(i, hash.String())
 		if len(tuples) >= chunkFile {
 			log.Info("Commited","block", i)
 			_, err:=sndb.MultiPut(tuples...)
@@ -61,5 +66,33 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 
 
 	log.Info("Finished", "duration", time.Since(t))
+	sndb.Close()
+	err = os.Remove(snapshotPath+"/lock.mdb")
+	if err!=nil {
+		log.Warn("Remove lock", "err", err)
+		return err
+	}
+	mi := metainfo.MetaInfo{
+		CreatedBy: "turbogeth",
+		CreationDate: time.Now().Unix(),
+		Comment: "Snapshot of headers",
+	}
+
+	//mi.AnnounceList=builtinAnnounceList
+	info := metainfo.Info{PieceLength: 256 * 1024}
+	err = info.BuildFromFilePath(snapshotPath)
+	if err!=nil {
+		log.Warn("BuildFromFilePath", "err", err)
+		return err
+	}
+
+	mi.InfoBytes, err = bencode.Marshal(info)
+	if err!=nil {
+		log.Warn("bencode.Marshal", "err", err)
+		return err
+	}
+	magnet := mi.Magnet("headers", mi.HashInfoBytes()).String()
+	fmt.Println(magnet)
+
 	return nil
 }

@@ -20,7 +20,7 @@ func GenerateBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	chunkFile:=30000
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3+100)
 	var hash common.Hash
-	for i:=uint64(0); i<=toBlock; i++ {
+	for i:=uint64(2); i<=toBlock; i++ {
 		hash=rawdb.ReadCanonicalHash(db, i)
 		body:=rawdb.ReadBodyRLP(db, hash, i)
 		tuples=append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)

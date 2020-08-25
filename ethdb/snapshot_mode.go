@@ -45,6 +45,5 @@ func SnapshotModeFromString(flags string) (SnapshotMode, error) {
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
 	}
-
 	return mode, nil
 }

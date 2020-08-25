@@ -483,18 +483,27 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		return err
 	}
 
-	origin, err := d.findAncestor(p, height)
-	if err != nil {
+	var origin uint64
+
+	recalculateOrigin:=func() error {
+		origin, err = d.findAncestor(p, height)
+		if err != nil {
+			return err
+		}
+
+		syncStatsChainHeight := d.GetSyncStatsChainHeight()
+		d.syncStatsLock.Lock()
+		if syncStatsChainHeight <= origin || d.syncStatsChainOrigin > origin {
+			d.syncStatsChainOrigin = origin
+		}
+		d.syncStatsLock.Unlock()
+		d.SetSyncStatsChainHeight(height)
+		return nil
+	}
+	err = recalculateOrigin()
+	if err!=nil {
 		return err
 	}
-
-	syncStatsChainHeight := d.GetSyncStatsChainHeight()
-	d.syncStatsLock.Lock()
-	if syncStatsChainHeight <= origin || d.syncStatsChainOrigin > origin {
-		d.syncStatsChainOrigin = origin
-	}
-	d.syncStatsLock.Unlock()
-	d.SetSyncStatsChainHeight(height)
 
 	// Ensure our origin point is below any fast sync pivot point
 	pivot := uint64(0)
@@ -572,7 +581,22 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			d.storageMode,
 			d.datadir,
 			d.quitCh,
-			fetchers,
+			[]func() error{
+				func() error {
+					err = recalculateOrigin()
+					if err!=nil {
+						return err
+					}
+					return d.fetchHeaders(p, origin+1, pivot)
+				}, // Headers are always retrieved
+				func() error {
+					err = recalculateOrigin()
+					if err!=nil {
+						return err
+					}
+					return d.processHeaders(origin+1, pivot, blockNumber)
+				},
+			},
 			txPool,
 			poolStart,
 			nil,
@@ -1000,7 +1024,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 // can fill in the skeleton - not even the origin peer - it's assumed invalid and
 // the origin is dropped.
 func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) error {
-	p.log.Debug("Directing header downloads", "origin", from)
+	p.log.Info("Directing header downloads", "origin", from)
 	defer p.log.Debug("Header download terminated")
 
 	// Create a timeout timer, and the associated header fetcher
@@ -1459,6 +1483,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
 func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
+	log.Info("processHeaders", "origin", origin, "bn", blockNumber)
 	// Keep a count of uncertain headers to roll back
 	var (
 		rollback    []*types.Header
@@ -1598,7 +1623,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						if n > 0 {
 							rollback = append(rollback, chunk[:n]...)
 						}
-						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
+						log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 						return fmt.Errorf("%w: %v", errInvalidChain, err)
 					}
 

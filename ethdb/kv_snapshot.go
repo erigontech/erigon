@@ -106,7 +106,7 @@ func (opts snapshotOpts) Open() KV {
 	}
 }
 
-func (s SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
+func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 	if s.snapshotDB==nil {
 		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).ReadOnly().Open()
 		if err!=nil {
@@ -135,18 +135,26 @@ func (s SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 }
 
 
-func (s SnapshotKV) Update(ctx context.Context, f func(tx Tx) error) error {
+func (s *SnapshotKV) Update(ctx context.Context, f func(tx Tx) error) error {
 	return s.db.Update(ctx, f)
 }
 
-func (s SnapshotKV) Close() {
+func (s *SnapshotKV) Close() {
 	defer s.db.Close()
 	if s.snapshotDB!=nil {
 		defer s.snapshotDB.Close()
 	}
 }
 
-func (s SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
+func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
+	if s.snapshotDB==nil {
+		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).ReadOnly().Open()
+		if err!=nil {
+			log.Warn("Snapshot db has not opened", "err", err)
+			return s.db.Begin(ctx, parentTx, writable)
+		}
+		s.snapshotDB=snapshotDB
+	}
 	snTx,err:=s.snapshotDB.Begin(ctx, parentTx, false)
 	if err!=nil {
 		return nil, err
@@ -163,7 +171,7 @@ func (s SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, 
 	return t, nil
 }
 
-func (s SnapshotKV) IdealBatchSize() int {
+func (s *SnapshotKV) IdealBatchSize() int {
 	return s.db.IdealBatchSize()
 }
 
