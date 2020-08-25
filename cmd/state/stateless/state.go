@@ -150,10 +150,7 @@ type StateGrowth1Reporter struct {
 	AccountKey             []byte
 	// For each timestamp, how many accounts were created in the state
 	CreationsByBlock map[uint64]int
-
-	commit   func(ctx context.Context)
-	rollback func(ctx context.Context)
-	remoteDB ethdb.KV `codec:"-"`
+	remoteDB         ethdb.KV `codec:"-"`
 }
 
 func NewStateGrowth1Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth1Reporter {
@@ -175,9 +172,6 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 	}
 	if i%PrintMemStatsEvery == 0 {
 		debug.PrintMemStats(true)
-	}
-	if i%CommitEvery == 0 {
-		r.commit(ctx)
 	}
 	if i%MaxIterationsPerTx == 0 {
 		return true
@@ -230,7 +224,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				fmt.Printf("Processed %d account history records\n", i)
 			}
 			lastAccount = k[:common.AddressLength]
-			lastTimestamp := blockNums[len(blockNums)-1]
+			lastTimestamp = blockNums[len(blockNums)-1]
 
 			if lastTimestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = lastTimestamp + 1
@@ -276,8 +270,6 @@ type StateGrowth2Reporter struct {
 	CreationsByBlock map[uint64]int
 
 	remoteDB ethdb.KV `codec:"-"`
-	commit   func(ctx context.Context)
-	rollback func(ctx context.Context)
 }
 
 func NewStateGrowth2Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth2Reporter {
@@ -297,9 +289,6 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 	}
 	if i%PrintMemStatsEvery == 0 {
 		debug.PrintMemStats(true)
-	}
-	if i%CommitEvery == 0 {
-		r.commit(ctx)
 	}
 	if i%MaxIterationsPerTx == 0 {
 		return true
@@ -342,7 +331,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				fmt.Printf("Processed %d storage history records\n", i)
 			}
 			lastKey = k[:common.AddressLength+common.HashLength]
-			lastTimestamp := blockNums[len(blockNums)-1]
+			lastTimestamp = blockNums[len(blockNums)-1]
 			if lastTimestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = lastTimestamp + 1
 			}
