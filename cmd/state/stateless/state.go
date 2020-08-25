@@ -151,56 +151,21 @@ type StateGrowth1Reporter struct {
 	// For each timestamp, how many accounts were created in the state
 	CreationsByBlock map[uint64]int
 
-	// map[addrHash]uint64
-	lastTimestamps *typedbucket.Uint64 `codec:"-"`
-	commit         func(ctx context.Context)
-	rollback       func(ctx context.Context)
-	remoteDB       ethdb.KV `codec:"-"`
+	commit   func(ctx context.Context)
+	rollback func(ctx context.Context)
+	remoteDB ethdb.KV `codec:"-"`
 }
 
 func NewStateGrowth1Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth1Reporter {
-	var LastTimestampsBucket = []byte("sg1_accounts_last_timestamps")
-	var ProgressKey = []byte("state_growth_1")
-
-	var err error
-	var localTx *bolt.Tx
-	var lastTimestamps *bolt.Bucket
-
-	if localTx, err = localDB.Begin(true); err != nil {
-		panic(err)
-	}
-
-	if lastTimestamps, err = localTx.CreateBucketIfNotExists(LastTimestampsBucket, false); err != nil {
-		panic(err)
-	}
 
 	rep := &StateGrowth1Reporter{
 		remoteDB:         remoteDB,
 		HistoryKey:       []byte{},
 		AccountKey:       []byte{},
 		MaxTimestamp:     0,
-		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
 		CreationsByBlock: make(map[uint64]int),
 	}
-	rep.commit = func(ctx context.Context) {
-		commit(ProgressKey, localTx, rep)
-		if err = localTx.Commit(); err != nil {
-			panic(err)
-		}
-		localTx, err = localDB.Begin(true)
-		if err != nil {
-			panic(err)
-		}
 
-		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
-	}
-	rep.rollback = func(ctx context.Context) {
-		if err := localTx.Rollback(); err != nil {
-			panic(err)
-		}
-	}
-
-	restore(ProgressKey, localTx, rep)
 	return rep
 }
 
@@ -236,27 +201,43 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	}
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
+		var lastAccount []byte
+		var lastTimestamp uint64
 		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
-		return c.Walk(func(k []byte, v []byte) (bool, error) {
-			hi := dbutils.WrapHistoryIndex(v)
-			blockNums, exists, err := hi.Decode()
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
-				return false, err
+				return err
 			}
-			vIsEmpty := !exists[len(exists)-1]
-			timestamp := blockNums[len(blockNums)-1]
-
-			if timestamp+1 > r.MaxTimestamp {
-				r.MaxTimestamp = timestamp + 1
+			hi := dbutils.WrapHistoryIndex(v)
+			blockNums, created, err1 := hi.Decode()
+			if err1 != nil {
+				return err1
 			}
-
-			if vIsEmpty {
-				r.CreationsByBlock[timestamp]++
+			if created[0] {
+				if bytes.Equal(k[:common.AddressLength], lastAccount) {
+					r.CreationsByBlock[lastTimestamp]--
+				}
+			}
+			for i, timestamp := range blockNums {
+				if created[i] {
+					r.CreationsByBlock[timestamp]++
+					if i > 0 {
+						r.CreationsByBlock[blockNums[i-1]]--
+					}
+				}
 			}
 			i++
+			if i%100000 == 0 {
+				fmt.Printf("Processed %d account history records\n", i)
+			}
+			lastAccount = k[:common.AddressLength]
+			lastTimestamp := blockNums[len(blockNums)-1]
 
-			return true, nil
-		})
+			if lastTimestamp+1 > r.MaxTimestamp {
+				r.MaxTimestamp = lastTimestamp + 1
+			}
+		}
+		return nil
 	}); err != nil {
 		check(err)
 	}
@@ -293,12 +274,7 @@ type StateGrowth2Reporter struct {
 	HistoryKey             []byte
 	StorageKey             []byte
 
-	// map[common.Hash]map[common.Hash]uint64 - key is addrHash + hash
-	// For each address hash, when was it last accounted
-	lastTimestamps *typedbucket.Uint64 `codec:"-"`
-	// map[common.Hash]map[uint64]int - key is addrHash + hash
-	// For each address hash, when was it last accounted
-	creationsByBlock *typedbucket.Int `codec:"-"`
+	CreationsByBlock map[uint64]int
 
 	remoteDB ethdb.KV `codec:"-"`
 	commit   func(ctx context.Context)
@@ -306,54 +282,13 @@ type StateGrowth2Reporter struct {
 }
 
 func NewStateGrowth2Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth2Reporter {
-	var LastTimestampsBucket = []byte("sg2_accounts_last_timestamps")
-	var CreationsByBlockBucket = []byte("sg2_creations_by_block")
-	var ProgressKey = []byte("state_growth_2")
-
-	var err error
-	var localTx *bolt.Tx
-	var lastTimestamps *bolt.Bucket
-	var creationsByBlock *bolt.Bucket
-
-	if localTx, err = localDB.Begin(true); err != nil {
-		panic(err)
-	}
-
-	if lastTimestamps, err = localTx.CreateBucketIfNotExists(LastTimestampsBucket, false); err != nil {
-		panic(err)
-	}
-
-	if creationsByBlock, err = localTx.CreateBucketIfNotExists(CreationsByBlockBucket, false); err != nil {
-		panic(err)
-	}
-
 	rep := &StateGrowth2Reporter{
 		remoteDB:         remoteDB,
 		HistoryKey:       []byte{},
 		StorageKey:       []byte{},
 		MaxTimestamp:     0,
-		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
-		creationsByBlock: typedbucket.NewInt(creationsByBlock),
+		CreationsByBlock: make(map[uint64]int),
 	}
-	rep.commit = func(ctx context.Context) {
-		commit(ProgressKey, localTx, rep)
-		if err = localTx.Commit(); err != nil {
-			panic(err)
-		}
-		if localTx, err = localDB.Begin(true); err != nil {
-			panic(err)
-		}
-
-		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
-		rep.creationsByBlock = typedbucket.NewInt(localTx.Bucket(CreationsByBlockBucket))
-	}
-	rep.rollback = func(ctx context.Context) {
-		if err := localTx.Rollback(); err != nil {
-			panic(err)
-		}
-	}
-
-	restore(ProgressKey, localTx, rep)
 	return rep
 }
 
@@ -378,7 +313,6 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	startTime := time.Now()
 
 	var i int
-	totalCreationsByBlock := make(map[uint64]int)
 
 	// Go through the history of account first
 	if r.StartedWhenBlockNumber == 0 {
@@ -390,27 +324,42 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	}
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
+		var lastKey []byte
+		var lastTimestamp uint64
 		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
-		return c.Walk(func(k []byte, v []byte) (bool, error) {
-			hi := dbutils.WrapHistoryIndex(v)
-			blockNums, exists, err := hi.Decode()
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
-				return false, err
+				return err
 			}
-			vIsEmpty := !exists[len(exists)-1]
-			timestamp := blockNums[len(blockNums)-1]
-
-			if timestamp+1 > r.MaxTimestamp {
-				r.MaxTimestamp = timestamp + 1
+			hi := dbutils.WrapHistoryIndex(v)
+			blockNums, created, err1 := hi.Decode()
+			if err1 != nil {
+				return err1
 			}
-
-			if vIsEmpty {
-				totalCreationsByBlock[timestamp]++
+			if created[0] {
+				if bytes.Equal(k[:common.AddressLength+common.HashLength], lastKey) {
+					r.CreationsByBlock[lastTimestamp]--
+				}
+			}
+			for i, timestamp := range blockNums {
+				if created[i] {
+					r.CreationsByBlock[timestamp]++
+					if i > 0 {
+						r.CreationsByBlock[blockNums[i-1]]--
+					}
+				}
 			}
 			i++
-
-			return true, nil
-		})
+			if i%100000 == 0 {
+				fmt.Printf("Processed %d storage history records\n", i)
+			}
+			lastKey = k[:common.AddressLength+common.HashLength]
+			lastTimestamp := blockNums[len(blockNums)-1]
+			if lastTimestamp+1 > r.MaxTimestamp {
+				r.MaxTimestamp = lastTimestamp + 1
+			}
+		}
+		return nil
 	}); err != nil {
 		check(err)
 	}
@@ -420,9 +369,9 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	fmt.Printf("Creating dataset...\n")
 
 	// Sort accounts by timestamp
-	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
+	tsi := NewTimeSorterInt(len(r.CreationsByBlock))
 	idx := 0
-	for timestamp, count := range totalCreationsByBlock {
+	for timestamp, count := range r.CreationsByBlock {
 		tsi.timestamps[idx] = timestamp
 		tsi.values[idx] = count
 		idx++
