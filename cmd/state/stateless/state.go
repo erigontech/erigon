@@ -186,7 +186,6 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
-	defer r.rollback(ctx)
 	startTime := time.Now()
 
 	var i int
@@ -309,20 +308,9 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
-	defer r.rollback(ctx)
 	startTime := time.Now()
 
 	var i int
-
-	// Go through the history of account first
-	if r.StartedWhenBlockNumber == 0 {
-		var err error
-		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
-		if err != nil {
-			panic(err)
-		}
-	}
-
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		var lastKey []byte
 		var lastTimestamp uint64
