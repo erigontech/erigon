@@ -9,10 +9,55 @@ import (
 
 var (
 	_ KV = &SnapshotKV{}
+	_ BucketMigrator = &snapshotTX{}
 	_ Tx = &snapshotTX{}
 	_ Cursor = &snapshotCursor{}
 )
 
+func (s *snapshotTX) DropBucket(bucket string) error {
+	db,ok:=s.dbTX.(BucketMigrator)
+	if !ok {
+		return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
+	}
+	return db.DropBucket(bucket)
+}
+
+func (s *snapshotTX) CreateBucket(bucket string) error {
+	db,ok:=s.dbTX.(BucketMigrator)
+	if !ok {
+		return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
+	}
+	return db.CreateBucket(bucket)
+}
+
+func (s *snapshotTX) ExistsBucket(bucket string) bool {
+	db,ok:=s.dbTX.(BucketMigrator)
+	if !ok {
+		return false
+	}
+	return db.ExistsBucket(bucket)
+}
+
+func (s *snapshotTX) ClearBucket(bucket string) error {
+	db,ok:=s.dbTX.(BucketMigrator)
+	if !ok {
+		return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
+	}
+	return db.ClearBucket(bucket)
+}
+
+func (s *snapshotTX) ExistingBuckets() ([]string, error) {
+	db,ok:=s.dbTX.(BucketMigrator)
+	if !ok {
+		return []string{},fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
+	}
+	return db.ExistingBuckets()
+}
+
+type SnapshotUsageOpts struct{
+	Path string
+	ForBuckets [][]byte
+}
 
 func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{}
@@ -23,12 +68,13 @@ type SnapshotKV struct {
 	db KV
 	snapshotDB KV
 	snapshotPath string
+	forBuckets [][]byte
 }
 
 type snapshotOpts struct {
 	path     string
 	db     KV
-
+	forBuckets [][]byte
 }
 
 func (opts snapshotOpts) Path(path string) snapshotOpts {
@@ -38,6 +84,11 @@ func (opts snapshotOpts) Path(path string) snapshotOpts {
 
 func (opts snapshotOpts) DB(db KV) snapshotOpts {
 	opts.db = db
+	return opts
+}
+
+func (opts snapshotOpts) For(bucket []byte) snapshotOpts {
+	opts.forBuckets = append(opts.forBuckets, bucket)
 	return opts
 }
 
@@ -51,6 +102,7 @@ func (opts snapshotOpts) Open() KV {
 		snapshotDB: snapshotDB,
 		db: opts.db,
 		snapshotPath: opts.path,
+		forBuckets: opts.forBuckets,
 	}
 }
 
@@ -63,6 +115,7 @@ func (s SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 		}
 		s.snapshotDB=snapshotDB
 	}
+
 	snTx, err:=s.snapshotDB.Begin(ctx, nil,false)
 	if err!=nil {
 		return err
@@ -94,10 +147,20 @@ func (s SnapshotKV) Close() {
 }
 
 func (s SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
-	if !writable {
-
+	snTx,err:=s.snapshotDB.Begin(ctx, parentTx, false)
+	if err!=nil {
+		return nil, err
 	}
-	return s.db.Begin(ctx, parentTx, writable)
+	dbTx,err:= s.db.Begin(ctx, parentTx, writable)
+	if err!=nil {
+		return nil, err
+	}
+
+	t:=&snapshotTX{
+		dbTX: dbTx,
+		snTX: snTx,
+	}
+	return t, nil
 }
 
 func (s SnapshotKV) IdealBatchSize() int {
@@ -120,6 +183,7 @@ func (s *snapshotTX) Rollback() {
 	defer s.snTX.Rollback()
 	defer s.dbTX.Rollback()
 }
+
 func (s *snapshotTX) Cursor(bucket string) Cursor {
 	return &snapshotCursor{
 				snCursor: s.snTX.Cursor(bucket),

@@ -13,18 +13,24 @@ import (
 )
 
 func SpawnHeadersSnapshotDownload(s *StageState, db ethdb.Database, dataDir string, quitCh <-chan struct{}) error {
-	return GenerateHeaderIndexes(db)
+	return GenerateHeaderIndexes(db, quitCh, s)
 }
 
-func GenerateHeaderIndexes(db ethdb.Database) error {
+func GenerateHeaderIndexes(db ethdb.Database, quitCh <-chan struct{}, s *StageState) error {
 	toCommit:=uint64(20000)
 	currentKey:=[]byte{}
 	tuple:=make(ethdb.MultiPutTuples, 0, toCommit*(3+3))
 	td := big.NewInt(0)
+	var number uint64
 	var i uint64
 	for {
+		if err := common.Stopped(quitCh); err != nil {
+			return err
+		}
+
 		stop:=true
 		err:=db.Walk(dbutils.HeaderPrefix,currentKey, 0, func(k []byte, v []byte) (bool, error) {
+		//	log.Info("Key","k", common.Bytes2Hex(k))
 			if bytes.Equal(k, currentKey) {
 				return true, nil
 			}
@@ -37,6 +43,7 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 			if err!=nil {
 				return false, err
 			}
+			number=header.Number.Uint64()
 			//write blocknum to header hash index
 			//todo check that moved to separated stage
 			//tuple = append(tuple, []byte(dbutils.HeaderNumberPrefix), header.Hash().Bytes(), dbutils.EncodeBlockNumber(header.Number.Uint64()))
@@ -62,6 +69,7 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 			return err
 		}
 		sort.Sort(tuple)
+		log.Info("Commit ", "i", i, "number", number)
 		_, err = db.MultiPut(tuple...)
 		if err!=nil {
 			return err
@@ -71,5 +79,6 @@ func GenerateHeaderIndexes(db ethdb.Database) error {
 			break
 		}
 	}
-	return nil
+
+	return s.DoneAndUpdate(db, number)
 }

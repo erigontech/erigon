@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -30,8 +29,6 @@ func PrepareStagedSync(
 	changeSetHook ChangeSetHook,
 	snapshotMode ethdb.SnapshotMode,
 ) (*State, error) {
-	panic(snapshotMode.ToString())
-	defer log.Info("Staged sync finished")
 	stages := []*Stage{
 		{
 			ID:          stages.DownloadHeadersSnapshot,
@@ -215,7 +212,19 @@ func PrepareStagedSync(
 	state.unwindOrder = []*Stage{
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		stages[0], stages[1], stages[2], stages[3], stages[10], stages[4], stages[6], stages[5], stages[7], stages[8], stages[9], stages[10], stages[11],
+		stages[0],
+		stages[1],
+		stages[2],
+		stages[3],
+		stages[10],
+		stages[4],
+		stages[6],
+		stages[5],
+		stages[7],
+		stages[8],
+		stages[9],
+		stages[10],
+		stages[11],
 	}
 	if err := state.LoadUnwindInfo(stateDB); err != nil {
 		return nil, err

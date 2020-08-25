@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"math/big"
 	"time"
 )
 
@@ -13,7 +14,7 @@ import (
 //""/Users/boris/snapshot/"
 //10400000
 
-func GenerateBittorrentHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
+func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	kv:=ethdb.NewLMDB().Path(dbPath).MustOpen()
 	snkv:=ethdb.NewLMDB().Path(snapshotPath).MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
@@ -47,6 +48,17 @@ func GenerateBittorrentHeaderSnapshot(dbPath, snapshotPath string, toBlock uint6
 		}
 	}
 	rawdb.WriteHeadBlockHash(sndb, hash)
+	err:=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	if err!=nil {
+		log.Crit("SnapshotHeadersHeadNumber error", "err", err)
+		return err
+	}
+	err=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
+	if err!=nil {
+		log.Crit("SnapshotHeadersHeadHash error", "err", err)
+		return err
+	}
+
 
 	log.Info("Finished", "duration", time.Since(t))
 	return nil

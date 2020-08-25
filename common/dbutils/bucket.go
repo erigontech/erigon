@@ -169,6 +169,11 @@ var (
 	StorageModeTxIndex = []byte("smTxIndex")
 
 	HeadHeaderKey = "LastHeader"
+
+	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
+	SnapshotHeadersHeadHash = "SnapshotLastHeaderHash"
+	SnapshotBodyHeadNumber = "SnapshotLastBodyNumber"
+	SnapshotBodyHeadHash = "SnapshotLastBodyHash"
 )
 
 // Metrics

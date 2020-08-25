@@ -8,6 +8,7 @@ import (
 func init() {
 	withChaindata(generateHeadersSnapshotCmd)
 	withSnapshotFile(generateHeadersSnapshotCmd)
+	withBlock(generateHeadersSnapshotCmd)
 	rootCmd.AddCommand(generateHeadersSnapshotCmd)
 }
 
@@ -15,7 +16,7 @@ var generateHeadersSnapshotCmd = &cobra.Command{
 	Use:   "headerSnapshot",
 	Short: "Generate  snapshot",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return generate.GenerateBittorrentHeaderSnapshot(chaindata, snapshotFile, block)
+		return generate.GenerateHeaderSnapshot(chaindata, snapshotFile, block)
 	},
 }
 

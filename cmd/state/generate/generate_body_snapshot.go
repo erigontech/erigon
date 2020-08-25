@@ -1,14 +1,16 @@
 package generate
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"math/big"
 	"time"
 )
 
-func GenerateBittorrentBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
+func GenerateBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	kv:=ethdb.NewLMDB().Path(dbPath).MustOpen()
 	snkv:=ethdb.NewLMDB().Path(snapshotPath).MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
@@ -17,8 +19,9 @@ func GenerateBittorrentBodySnapshot(dbPath, snapshotPath string, toBlock uint64)
 	t:=time.Now()
 	chunkFile:=30000
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3+100)
+	var hash common.Hash
 	for i:=uint64(0); i<=toBlock; i++ {
-		hash:=rawdb.ReadCanonicalHash(db, i)
+		hash=rawdb.ReadCanonicalHash(db, i)
 		body:=rawdb.ReadBodyRLP(db, hash, i)
 		tuples=append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)
 		if len(tuples) >= chunkFile {
@@ -39,6 +42,18 @@ func GenerateBittorrentBodySnapshot(dbPath, snapshotPath string, toBlock uint64)
 			return err
 		}
 	}
+
+	err:=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotBodyHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	if err!=nil {
+		log.Crit("SnapshotBodyHeadNumber error", "err", err)
+		return err
+	}
+	err=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotBodyHeadHash), hash.Bytes())
+	if err!=nil {
+		log.Crit("SnapshotBodyHeadHash error", "err", err)
+		return err
+	}
+
 
 	log.Info("Finished", "duration", time.Since(t))
 	return nil

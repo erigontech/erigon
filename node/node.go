@@ -19,6 +19,7 @@ package node
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -556,14 +557,28 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	var db *ethdb.ObjectDatabase
 	var err error
 
+	var snapshotOpts []ethdb.SnapshotUsageOpts
+	if n.config.SnapshotMode.Headers {
+		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpts{
+			Path: "/media/b00ris/nvme/snapshots/headers",
+			ForBuckets: [][]byte{[]byte(dbutils.HeaderPrefix)},
+		})
+	}
+	if n.config.SnapshotMode.Bodies {
+		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpts{
+			Path: "/media/b00ris/nvme/snapshots/bodies",
+			ForBuckets: [][]byte{[]byte(dbutils.BlockBodyPrefix)},
+		})
+	}
+
 	if n.config.DataDir == "" {
 		db = ethdb.NewMemDatabase()
 	} else if n.config.Bolt {
 		log.Info("Opening Database (Bolt)")
-		db, err = ethdb.Open(n.config.ResolvePath(name + "_bolt"))
+		db, err = ethdb.Open(n.config.ResolvePath(name + "_bolt"),snapshotOpts...)
 	} else {
 		log.Info("Opening Database (LMDB)")
-		db, err = ethdb.Open(n.config.ResolvePath(name))
+		db, err = ethdb.Open(n.config.ResolvePath(name),snapshotOpts...)
 	}
 
 	if err != nil {

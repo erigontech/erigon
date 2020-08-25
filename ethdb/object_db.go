@@ -61,9 +61,10 @@ func MustOpen(path string) *ObjectDatabase {
 	return db
 }
 
+
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func Open(path string) (*ObjectDatabase, error) {
+func Open(path string, snapshotsOpts ...SnapshotUsageOpts) (*ObjectDatabase, error) {
 	var kv KV
 	var err error
 	testDB := debug.TestDB()
@@ -75,9 +76,16 @@ func Open(path string) (*ObjectDatabase, error) {
 	default:
 		kv, err = NewLMDB().Path(path).Open()
 	}
-	if snDB:=debug.SnapshotDB(); snDB!="" {
-		kv = NewSnapshotKV().DB(kv).Path(snDB).Open()
+
+	for _,snPath:=range snapshotsOpts {
+		fmt.Println("Wrapped by", snPath.Path)
+		opts:=NewSnapshotKV().DB(kv).Path(snPath.Path)
+		for _,bucket:=range snPath.ForBuckets  {
+			opts = opts.For(bucket)
+		}
+		kv = opts.Open()
 	}
+
 	if err != nil {
 		return nil, err
 	}
