@@ -629,10 +629,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			if id <= stages.Bodies || id == stages.TxPool {
 				return nil
 			}
-			if id < stages.Bodies || id >= stages.TxPool {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 				return nil
 			}
 			log.Info("cycle unwind: begin transaction")
