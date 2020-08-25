@@ -5,13 +5,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"math/big"
 	"os"
 	"runtime/pprof"
 	"runtime/trace"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -153,12 +154,11 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	wg := new(sync.WaitGroup)
 	wg.Add(cfg.NumOfGoroutines)
 	for i := 0; i < cfg.NumOfGoroutines; i++ {
-		go func() {
+		go func(threadNo int) {
 			defer wg.Done()
-
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(secp256k1.NewContext(), config, jobs, out, quitCh)
-		}()
+			recoverSenders(secp256k1.ContextForThread(threadNo), config, jobs, out, quitCh)
+		}(i)
 	}
 	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.NumOfGoroutines)
 	go func() {
@@ -167,6 +167,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	}()
 
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for j := range out {
 		if j.err != nil {
 			return j.err
@@ -175,6 +177,11 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return err
 		}
 		k := make([]byte, 4)
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Senders recovery", "block", j.index)
+		}
 		binary.BigEndian.PutUint32(k, uint32(j.index))
 		if err := collector.Collect(k, j.senders); err != nil {
 			return err
@@ -184,7 +191,19 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		index := int(binary.BigEndian.Uint32(k))
 		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
 	}
-	if err := collector.Load(db, dbutils.Senders, loadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+	if err := collector.Load(db,
+		dbutils.Senders,
+		loadFunc,
+		etl.TransformArgs{
+			Quit: quitCh,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			},
+		},
+	); err != nil {
 		return err
 	}
 	return s.DoneAndUpdate(db, to)

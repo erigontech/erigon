@@ -53,6 +53,10 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				blockNum, _ := dbutils.DecodeTimestamp(k)
+				return []interface{}{"block", blockNum}
+			},
 		},
 	)
 	if err != nil {

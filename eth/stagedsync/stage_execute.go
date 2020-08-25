@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	logInterval = 30 // seconds
+	logInterval = 30 * time.Second
 )
 
 type HasChangeSetWriter interface {
@@ -58,17 +58,21 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	batch := stateDB.NewBatch()
-	//batch, err := stateDB.Begin()
-	//if err != nil {
-	//	return err
-	//}
+	tx, err := stateDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	batch := tx.NewBatch()
 	defer batch.Rollback()
 
 	engine := chainContext.Engine()
 
 	stageProgress := s.BlockNumber
-	logTime, logBlock := time.Now(), stageProgress
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	logBlock := stageProgress
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -77,12 +81,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		stageProgress = blockNum
 
-		blockHash := rawdb.ReadCanonicalHash(batch, blockNum)
-		block := rawdb.ReadBlock(batch, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(tx, blockNum)
+		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(batch, blockHash, blockNum)
+		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
@@ -105,7 +109,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			if _, err = batch.Commit(); err != nil {
+			if err = batch.CommitAndBegin(); err != nil {
+				return err
+			}
+			if err = tx.CommitAndBegin(); err != nil {
 				return err
 			}
 		}
@@ -123,7 +130,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		logTime, logBlock = logProgress(logTime, logBlock, blockNum, batch)
+		select {
+		default:
+		case <-logEvery.C:
+			logBlock = logProgress(logBlock, blockNum, batch)
+		}
 	}
 
 	if err := s.Update(batch, stageProgress); err != nil {
@@ -132,17 +143,16 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	if _, err = tx.Commit(); err != nil {
+		return err
+	}
 	log.Info("Completed on", "block", stageProgress)
 	s.Done()
 	return nil
 }
 
-func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPendingMutations) (time.Time, uint64) {
-	if now%64 != 0 || time.Since(lastLogTime).Seconds() < logInterval {
-		return lastLogTime, prev // return old values because no logging happened
-	}
-
-	speed := float64(now-prev) / float64(logInterval)
+func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
+	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Executed blocks:",
@@ -153,7 +163,7 @@ func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPend
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
 
-	return time.Now(), now
+	return now
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -210,6 +220,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
 	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
 		if err = deleteChangeSets(batch, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
@@ -217,6 +230,19 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		if writeReceipts {
 			blockHash := rawdb.ReadCanonicalHash(batch, i)
 			rawdb.DeleteReceipts(batch, blockHash, i)
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Executed blocks:",
+				"currentBlock", i,
+				"batch", common.StorageSize(batch.BatchSize()),
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
 		}
 	}
 

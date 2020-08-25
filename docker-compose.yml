@@ -38,7 +38,7 @@ services:
 
   rpcdaemon:
     image: turbo-geth:latest
-    command: rpcdaemon --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug"
+    command: rpcdaemon --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
     ports:
       - 8545:8545
 

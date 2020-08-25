@@ -1,11 +1,11 @@
 package stagedsync
 
 import (
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -68,7 +68,7 @@ func PrepareStagedSync(
 			ExecFunc: func(s *StageState, u Unwinder) error {
 				const batchSize = 10000
 				const blockSize = 4096
-				n := runtime.NumCPU()
+				n := secp256k1.NumOfContexts() // we can only be as parallels as our crypto library supports
 
 				cfg := Stage3Config{
 					BatchSize:       batchSize,

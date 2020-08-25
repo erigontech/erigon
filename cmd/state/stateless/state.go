@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -36,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/wcharczuk/go-chart"
@@ -227,9 +225,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
 
 	var i int
-	var processingDone bool
 
-beginTx:
 	// Go through the history of account first
 	if r.StartedWhenBlockNumber == 0 {
 		var err error
@@ -240,96 +236,29 @@ beginTx:
 	}
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize).NoValues()
-
-		for k, vSize, err := c.Seek(r.HistoryKey); k != nil; k, vSize, err = c.Next() {
+		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
+		return c.Walk(func(k []byte, v []byte) (bool, error) {
+			hi := dbutils.WrapHistoryIndex(v)
+			blockNums, exists, err := hi.Decode()
 			if err != nil {
-				return err
+				return false, err
 			}
-			vIsEmpty := vSize == 0
-			i++
-			r.HistoryKey = k
-			if r.interrupt(ctx, i, startTime) {
-				return nil
-			}
-
-			var addrHash common.Hash
-
-			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
-			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
-
-			if timestamp > r.StartedWhenBlockNumber { // skip what happened after analysis started
-				continue
-			}
+			vIsEmpty := !exists[len(exists)-1]
+			timestamp := blockNums[len(blockNums)-1]
 
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
+
 			if vIsEmpty {
 				r.CreationsByBlock[timestamp]++
-				if lt, ok := r.lastTimestamps.Get(addrHash.Bytes()); ok {
-					r.CreationsByBlock[lt]--
-				}
-			}
-
-			if err := r.lastTimestamps.Put(addrHash.Bytes(), timestamp); err != nil {
-				return err
-			}
-		}
-		processingDone = true
-		return nil
-	}); err != nil {
-		check(err)
-	}
-
-	if !processingDone {
-		goto beginTx
-	}
-
-	processingDone = false
-	i = 0
-
-beginTx2:
-	// Go through the current state
-	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket).Prefetch(CursorBatchSize).NoValues()
-		for k, _, err := c.Seek(r.AccountKey); k != nil; k, _, err = c.Next() {
-			if len(k) != 32 {
-				continue
-			}
-			if err != nil {
-				return err
 			}
 			i++
-			r.AccountKey = k
-			if r.interrupt(ctx, i, startTime) {
-				return nil
-			}
 
-			var addrHash common.Hash
-
-			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
-			if err := r.lastTimestamps.Put(addrHash.Bytes(), r.MaxTimestamp); err != nil {
-				return err
-			}
-		}
-		processingDone = true
-		return nil
+			return true, nil
+		})
 	}); err != nil {
 		check(err)
-	}
-
-	if !processingDone {
-		goto beginTx2
-	}
-
-	if err := r.lastTimestamps.ForEach(func(_ []byte, lt uint64) error {
-		if lt < r.MaxTimestamp {
-			r.CreationsByBlock[lt]--
-		}
-		return nil
-	}); err != nil {
-		panic(err)
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
@@ -447,11 +376,11 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	defer r.rollback(ctx)
 	startTime := time.Now()
+
 	var i int
+	totalCreationsByBlock := make(map[uint64]int)
 
-	var processingDone bool
-
-beginTx:
+	// Go through the history of account first
 	if r.StartedWhenBlockNumber == 0 {
 		var err error
 		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
@@ -460,123 +389,35 @@ beginTx:
 		}
 	}
 
-	// Go through the history of account first
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize).NoValues()
-		for k, vSize, err := c.Seek(r.HistoryKey); k != nil; k, vSize, err = c.Next() {
+		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
+		return c.Walk(func(k []byte, v []byte) (bool, error) {
+			hi := dbutils.WrapHistoryIndex(v)
+			blockNums, exists, err := hi.Decode()
 			if err != nil {
-				return err
+				return false, err
 			}
-			vIsEmpty := vSize == 0
-			r.HistoryKey = k
-			i++
-			if r.interrupt(ctx, i, startTime) {
-				return nil
-			}
-
-			var addrHash, hash common.Hash
-			copy(addrHash[:], k[:32]) // First 20 bytes is the address
-			copy(hash[:], k[40:72])
-			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
-
-			if timestamp > r.StartedWhenBlockNumber { // only count what happened before analysis started
-				continue
-			}
-
-			addr2HashKey := append(addrHash.Bytes(), hash.Bytes()...)
+			vIsEmpty := !exists[len(exists)-1]
+			timestamp := blockNums[len(blockNums)-1]
 
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
+
 			if vIsEmpty {
-				addr2TsKey := append(addrHash.Bytes(), dbutils.EncodeTimestamp(timestamp)...)
-				if err := r.creationsByBlock.Increment(addr2TsKey); err != nil {
-					return err
-				}
-
-				if err := r.lastTimestamps.DecrementIfExist(addr2HashKey); err != nil {
-					return err
-				}
-			}
-			if err := r.lastTimestamps.Put(addr2HashKey, timestamp); err != nil {
-				return err
-			}
-		}
-		processingDone = true
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
-	if !processingDone {
-		goto beginTx
-	}
-
-	processingDone = false
-	i = 0
-
-beginTx2:
-	// Go through the current state
-	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket).Prefetch(CursorBatchSize).NoValues()
-		for k, _, err := c.Seek(r.StorageKey); k != nil; k, _, err = c.Next() {
-			if len(k) == 32 {
-				continue
-			}
-			if err != nil {
-				return err
+				totalCreationsByBlock[timestamp]++
 			}
 			i++
-			r.StorageKey = k
-			if r.interrupt(ctx, i, startTime) {
-				return nil
-			}
 
-			var addrHash, hash common.Hash
-			copy(addrHash[:], k[:32])
-			copy(hash[:], k[40:72])
-			localKey := append(addrHash.Bytes(), hash.Bytes()...)
-			if err := r.lastTimestamps.Put(localKey, r.MaxTimestamp); err != nil {
-				return err
-			}
-		}
-		processingDone = true
-		return nil
+			return true, nil
+		})
 	}); err != nil {
-		panic(err)
-	}
-
-	if !processingDone {
-		goto beginTx2
-	}
-
-	if err := r.lastTimestamps.ForEach(func(k []byte, lt uint64) error {
-		address := common.BytesToHash(k[:32])
-		if lt < r.MaxTimestamp {
-			addr2BlockKey := append(address.Bytes(), dbutils.EncodeTimestamp(lt)...)
-			if h, ok := r.creationsByBlock.Get(addr2BlockKey); ok {
-				h--
-				if err := r.creationsByBlock.Put(addr2BlockKey, h); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}); err != nil {
-		panic(err)
+		check(err)
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Storage history records: %d\n", i)
 	fmt.Printf("Creating dataset...\n")
-	totalCreationsByBlock := make(map[uint64]int)
-	if err := r.creationsByBlock.ForEach(func(k []byte, count int) error {
-		timestamp, _ := dbutils.DecodeTimestamp(k[32:])
-		totalCreationsByBlock[timestamp] += count
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
@@ -675,7 +516,6 @@ func (r *GasLimitReporter) interrupt(ctx context.Context, i int, startTime time.
 }
 func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	defer r.rollback(ctx)
-	startTime := time.Now()
 
 	f, ferr := os.Create("gas_limits.csv")
 	check(ferr)
@@ -684,91 +524,27 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	defer w.Flush()
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
-	i := 0
-	var processingDone bool
-
-beginTx:
-	if r.StartedWhenBlockNumber == 0 {
-		var err error
-		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
-		if err != nil {
-			panic(err)
-		}
-	}
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		fmt.Println("Preloading block numbers...")
 
 		c := tx.Cursor(dbutils.HeaderPrefix).Prefetch(CursorBatchSize)
-		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
+		if err := c.Walk(func(k, v []byte) (bool, error) {
+			if len(k) != 40 {
+				return true, nil
 			}
-			i++
-			r.HeaderPrefixKey1 = k
-			if r.interrupt(ctx, i, startTime) {
-				return nil
-			}
-
-			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
-			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
-				break
-			}
-
-			// skip bucket keys not useful for analysis
-			if !dbutils.IsHeaderHashKey(k) {
-				continue
-			}
-
-			mainHash := make([]byte, len(v))
-			copy(mainHash[:], v[:])
-			if err := r.mainHashes.Put(mainHash, 0); err != nil {
-				return err
-			}
-		}
-
-		fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
-		i = 0
-		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return fmt.Errorf("loop break: %w", err)
-			}
-			i++
-			r.HeaderPrefixKey2 = k
-			if r.interrupt(ctx, i, startTime) {
-				return nil
-			}
-
-			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
-			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
-				continue
-			}
-
-			if !dbutils.IsHeaderKey(k) {
-				continue
-			}
-
-			if _, ok := r.mainHashes.Get(k[common.BlockNumberLength:]); !ok {
-				continue
-			}
-
 			header := new(types.Header)
-			if decodeErr := rlp.Decode(bytes.NewReader(v), header); decodeErr != nil {
-				log.Error("Invalid block header RLP", "blockNum", blockNum, "err", decodeErr)
-				return nil
+			if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
+				return false, err
 			}
-
-			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
+			fmt.Fprintf(w, "%d, %d\n", header.Number.Uint64(), header.GasLimit)
 			blockNum++
+			return true, nil
+		}); err != nil {
+			return err
 		}
-		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)
-	}
-
-	if !processingDone {
-		goto beginTx
 	}
 
 	fmt.Printf("Finish processing %d blocks\n", blockNum)
@@ -1389,7 +1165,7 @@ func makeCreators(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -1975,7 +1751,7 @@ func makeSha3Preimages(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {

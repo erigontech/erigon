@@ -667,6 +667,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	assert.Error(t, errInterrupted, err)
 
 	state = NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err = state.LoadUnwindInfo(db)
 	assert.NoError(t, err)
 	err = state.Run(db)
@@ -763,5 +764,5 @@ func TestStateSyncInterruptLongStage(t *testing.T) {
 }
 
 func unwindOf(s stages.SyncStage) stages.SyncStage {
-	return 0xF - s
+	return 0xF0 + s
 }

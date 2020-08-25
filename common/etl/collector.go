@@ -114,7 +114,9 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 	}
 	var canUseAppend bool
 
-	putTimer := time.Now()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	i := 0
 	loadNextFunc := func(originalK, k, v []byte) error {
 		if i == 0 {
@@ -122,17 +124,20 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
-		if i%1_000_000 == 0 && time.Since(putTimer) > 30*time.Second {
-			putTimer = time.Now()
+
+		select {
+		default:
+		case <-logEvery.C:
+			logArs := []interface{}{"into", bucket}
+			if args.LogDetailsLoad != nil {
+				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
+			} else {
+				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+			}
+
 			runtime.ReadMemStats(&m)
-			log.Info(
-				"Loading into bucket",
-				"bucket", bucket,
-				"size", common.StorageSize(batch.BatchSize()),
-				"keys", fmt.Sprintf("%.1fM", float64(i)/1_000_000),
-				"use append", canUseAppend,
-				"current key", makeCurrentKeyStr(originalK),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			log.Info("ETL [2/2] Loading", logArs...)
 		}
 
 		if canUseAppend && len(v) == 0 {
@@ -190,7 +195,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		"Committed batch",
 		"bucket", bucket,
 		"commit", commitTook,
-		"size", common.StorageSize(batch.BatchSize()),
+		"records", i,
 		"current key", makeCurrentKeyStr(nil),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 

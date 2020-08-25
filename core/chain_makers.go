@@ -216,7 +216,8 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	chainreader := &fakeChainReader{config: config}
 	dbCopy := db.MemCopy()
 	defer dbCopy.Close()
-	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader, stateWriter *state.DbStateWriter) (*types.Block, types.Receipts, error) {
+	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
+		stateWriter *state.DbStateWriter, plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
@@ -243,7 +244,10 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			// Write state changes to db
 			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock:  %w", err)
+				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter:  %w", err)
+			}
+			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
+				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter:  %w", err)
 			}
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
@@ -311,10 +315,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	}
 
 	for i := 0; i < n; i++ {
-		stateReader := state.NewDbStateReader(dbCopy)
+		stateReader := state.NewPlainStateReader(dbCopy)
 		stateWriter := state.NewDbStateWriter(dbCopy, parent.Number().Uint64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(dbCopy, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
-		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter, plainStateWriter)
 		if err != nil {
 			return nil, nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
