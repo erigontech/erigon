@@ -56,6 +56,8 @@ const (
 	WrongChildBlockHeightPenalty
 	WrongChildDifficultyPenalty
 	InvalidSealPenalty
+	TooFarFuturePenalty
+	TooFarPastPenalty
 )
 
 type PeerPenalty struct {
@@ -85,6 +87,8 @@ type HeaderDownload struct {
 	tips                   map[common.Hash]*Tip
 	tipLimiter             *llrb.LLRB
 	tipLimit               int
+	newAnchorFutureLimit   uint64 // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64 // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -126,16 +130,18 @@ func (rq *RequestQueue) Pop() interface{} {
 	return x
 }
 
-func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDifficultyFunc, verifySealFunc VerifySealFunc) *HeaderDownload {
+func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDifficultyFunc, verifySealFunc VerifySealFunc, newAnchorFutureLimit, newAnchorPastLimit uint64) *HeaderDownload {
 	return &HeaderDownload{
-		filesDir:           filesDir,
-		badHeaders:         make(map[common.Hash]struct{}),
-		anchors:            make(map[common.Hash][]*Anchor),
-		tips:               make(map[common.Hash]*Tip),
-		tipLimiter:         llrb.New(),
-		tipLimit:           tipLimit,
-		calcDifficultyFunc: calcDifficultyFunc,
-		verifySealFunc:     verifySealFunc,
+		filesDir:             filesDir,
+		badHeaders:           make(map[common.Hash]struct{}),
+		anchors:              make(map[common.Hash][]*Anchor),
+		tips:                 make(map[common.Hash]*Tip),
+		tipLimiter:           llrb.New(),
+		tipLimit:             tipLimit,
+		calcDifficultyFunc:   calcDifficultyFunc,
+		verifySealFunc:       verifySealFunc,
+		newAnchorFutureLimit: newAnchorFutureLimit,
+		newAnchorPastLimit:   newAnchorPastLimit,
 	}
 }
 

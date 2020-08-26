@@ -13,7 +13,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
-	}, nil)
+	}, nil, 60, 60)
 
 	// Empty message
 	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{}); err == nil {
@@ -176,7 +176,7 @@ func TestHandleNewBlockMsg(t *testing.T) {
 	hd := NewHeaderDownload("", 10, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
-	}, nil)
+	}, nil, 60, 60)
 	var h types.Header
 	h.Number = big.NewInt(5)
 	if chainSegments, penalty, err := hd.HandleNewBlockMsg(&h); err == nil {
@@ -287,7 +287,7 @@ func TestExtendUp(t *testing.T) {
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, func(header *types.Header) error {
 		return nil
-	},
+	}, 60, 60,
 	)
 
 	// single header in the chain segment
@@ -421,7 +421,7 @@ func TestExtendDown(t *testing.T) {
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, func(header *types.Header) error {
 		return nil
-	},
+	}, 60, 60,
 	)
 
 	// single header in the chain segment

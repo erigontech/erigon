@@ -200,7 +200,7 @@ points from the bad parents to the existing children.
 anchor-parent relationship)
 
 ### Create anchor
-**Input**: chain segment + peer handle. **Output**: updated structures (new working chain segment) or "anchor too far in the future" or "anchor too far in the past", or penalty for the peer (e.g. invalid PoW)
+**Input**: chain segment + peer handle. **Output**: updated structures (new working chain segment) or one of the penalties: "anchor too far in the future" or "anchor too far in the past"
 
 ### Recover from files
 **Input**: the files. **Output**: working chain segments

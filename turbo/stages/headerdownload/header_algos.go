@@ -2,6 +2,8 @@ package headerdownload
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
 	"math/big"
 	"sort"
 
@@ -302,6 +304,28 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 		}
 	}
 	delete(hd.anchors, anchorHeader.Hash())
+	return nil
+}
+
+func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) Penalty {
+	anchor := segment.headers[end-1]
+	if anchor.Time > currentTime+hd.newAnchorFutureLimit {
+		return TooFarFuturePenalty
+	}
+	if anchor.Time+hd.newAnchorPastLimit < currentTime {
+		return TooFarPastPenalty
+	}
+	return NoPenalty
+}
+
+func (hd *HeaderDownload) RecoverFromFiles() error {
+	files, err := ioutil.ReadDir(hd.filesDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, f := range files {
+		fmt.Println(f.Name())
+	}
 	return nil
 }
 
