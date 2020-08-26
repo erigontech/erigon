@@ -491,3 +491,51 @@ To convert the hashes of keys back into the original keys (also known as preimag
 in the database. Keys in this bucket are the hashes, and the values are the preimages. The name of this bucket is
 contained in the constant `dbutils.PreimagePrefix`. Preimage bucket is being updated in the function `savePreimage`
 of the type `TrieDbState` in `core/state/database.go`.
+
+Merkle trie root calculation
+----------------------
+"Merkle trie root calculation" completely decoupled from "Blocks execution". 
+Theoretically: "Root calculation" starts from state, build from state keys - trie, 
+on each level of trie calculates intermediate hash of underlying data. 
+Practically: "Preorder trie traversal" (Preorder - visit Root, visit Left, visit Right). But, let's make couple observations to make traversal over huge state effitient.
+Observation 1: `CurrentStateBucket` already stores state keys in sorted way. 
+Iteration over this bucket will retrieve keys in same order as "Preorder trie traversal". 
+Observation 2: each Eth block - changes not big part of state - it means most of Merkle trie intermediate hashes will not change. 
+It means we effectively can cache them. `IntermediateTrieHashBucket` stores "Intermediate hashes of all Merkle trie levels".
+It also sorted and Iteration over `IntermediateTrieHashBucket` will retrieve keys in same order as "Preorder trie traversal".
+Implementation: by opening 1 Cursor on state and 1 more Cursor on intermediate hashes bucket - can implement
+"Preorder trie traversal" - and implementation will do only "sequential reads" and "jumps forward" - been hardware-friendly.
+1 stack keeps all accumulated hashes, when sub-trie traverse ends - all hashes pulled from stack -> hashed -> new hash puts on stack - it's hash of visited sub-trie.     
+
+Imagine that account with key 0000....00 (64 zeroes, 32 bytes of zeroes) changed. 
+Here is an example sequence which can be seen by running 2 Cursors:
+```
+00   // key which came from cache, can't use it - because account with this prefix changed 
+0000 // key which came from cache, can't use it - because account with this prefix changed
+...
+{30 zero bytes}00    // key which came from cache, can't use it - because account with this prefix changed
+{30 zero bytes}0000  // Account which came from state, use it - calculate hash, jump to "next sub-trie"
+{30 zero bytes}01    // key which came from cache, it is "next sub-trie", use it, jump to "next sub-trie" 
+{30 zero bytes}02    // key which came from cache, it is "next sub-trie", use it, jump to "next sub-trie"
+...
+{30 zero bytes}ff    // key which came from cache, it is "next sub-trie", use it, jump to "next sub-trie"
+{29 zero bytes}01    // key which came from cache, it is "next sub-trie" (1 byte shorter key), use it, jump to "next sub-trie"
+{29 zero bytes}02    // key which came from cache, it is "next sub-trie" (1 byte shorter key), use it, jump to "next sub-trie"
+...
+ff                   // key which came from cache, it is "next sub-trie" (1 byte shorter key), use it, jump to "next sub-trie"
+nil                  // db returned nil - means no more keys there, done   
+```
+On practice Trie is no full - it means after account key "{30 zero bytes}0000" may come "{5 zero bytes}01" and amount of iterations will not be big.  
+
+Implementation is in ![trie/flatdb_sub_trie_loader.go](../..trie/flatdb_sub_trie_loader.go)
+
+Account key (hashed) - 32 bytes. 
+Storage key (hashed) - 64 bytes (acc_hash+storage_hash). 
+Eth white-paper builds Trie not on bytes, but split each byte of key to 2 parts - high/low-nibbles:
+```
+// HI_NIBBLE(b) = (b >> 4) & 0x0F
+// LO_NIBBLE(b) = b & 0x0F
+// For example 1 byte "0xf4" transformed to 2 bytes (nibbles) "0x0f" and "0x04", and Merkle Trie built on nibbles 
+```
+
+More details read in ![trie/gen_struct_step.go](../..trie/gen_struct_step.go)

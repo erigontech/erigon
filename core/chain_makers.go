@@ -291,14 +291,14 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					unfurl.AddKey(storageChange.Key)
 				}
 			}
-			loader := trie.NewFlatDbSubTrieLoader()
-			if err := loader.Reset(dbCopy, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+			loader := trie.NewTrieRootLoader()
+			if err := loader.Reset(dbCopy, unfurl, trie.NewRetainList(0), hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
-			if subTries, err := loader.LoadSubTries(); err == nil {
-				b.header.Root = subTries.Hashes[0]
+			if hash, err := loader.CalcTrieRoot(); err == nil {
+				b.header.Root = hash
 			} else {
-				return nil, nil, fmt.Errorf("call to LoadSubTries: %w", err)
+				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			if intermediateHashes {
 				if err := collector.Load(dbCopy, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {

@@ -33,6 +33,7 @@ type StreamReceiver interface {
 	) error
 
 	Result() SubTries
+	Root() common.Hash
 }
 
 type FlatDbSubTrieLoader struct {
@@ -49,7 +50,6 @@ type FlatDbSubTrieLoader struct {
 	nextAccountKey     [32]byte
 	k, v               []byte
 	ihK, ihV           []byte
-	minKeyAsNibbles    []byte
 
 	itemPresent bool
 	itemType    StreamItem
@@ -88,7 +88,6 @@ type DefaultReceiver struct {
 	a            accounts.Account
 	leafData     GenStructStepLeafData
 	accData      GenStructStepAccountData
-	witnessSize  uint64
 }
 
 func NewDefaultReceiver() *DefaultReceiver {
@@ -109,7 +108,6 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	fstl.receiver = fstl.defaultReceiver
 	fstl.rangeIdx = 0
 
-	fstl.minKeyAsNibbles = fstl.minKeyAsNibbles[:0]
 	fstl.trace = trace
 	fstl.rl = rl
 	fstl.dbPrefixes = dbPrefixes
@@ -314,7 +312,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 			if fstl.trace {
 				fmt.Printf("k after accountWalker and Seek: %x\n", fstl.k)
 			}
-			if isBefore, _ := keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]); isBefore {
+			if keyIsBefore(fstl.ihK, fstl.accAddrHashWithInc[:]) {
 				if fstl.ihK, fstl.ihV, _, err = ih.Seek(fstl.accAddrHashWithInc[:]); err != nil {
 					return err
 				}
@@ -714,6 +712,10 @@ func (dr *DefaultReceiver) advanceKeysStorage(k []byte, terminator bool) {
 	}
 }
 
+func (dr *DefaultReceiver) Root() common.Hash {
+	panic("don't use me")
+}
+
 func (dr *DefaultReceiver) cutoffKeysStorage(cutoff int) {
 	dr.currStorage.Reset()
 	dr.currStorage.Write(dr.succStorage.Bytes())
@@ -969,19 +971,19 @@ func keyIsBeforeOrEqual(k1, k2 []byte) (bool, []byte) {
 }
 
 // keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
-func keyIsBefore(k1, k2 []byte) (bool, []byte) {
+func keyIsBefore(k1, k2 []byte) bool {
 	if k1 == nil {
-		return false, k2
+		return false
 	}
 
 	if k2 == nil {
-		return true, k1
+		return true
 	}
 
 	switch bytes.Compare(k1, k2) {
 	case -1:
-		return true, k1
+		return true
 	default:
-		return false, k2
+		return false
 	}
 }
