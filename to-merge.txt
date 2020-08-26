@@ -216,17 +216,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Wed Aug 26 13:05:06 2020 +0300
 
     core/state, eth, trie: stabilize memory use, fix memory leak
-
-commit 92b12ee6c6ebf32507a2834b2913bd557a416209
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Aug 26 09:37:00 2020 +0200
-
-    accounts/abi/bind/backends: Disallow AdjustTime for non-empty blocks (#21334)
-    
-    * accounts/abi/bind/backends: Disallow timeshift for non-empty blocks
-    
-    * accounts/abi/bind/backends: added tests for adjust time
-    
-    * accounts/abi/bind/simulated: added comments, fixed test for AdjustTime
-    
-    * accounts/abi/bind/backends: updated comment
