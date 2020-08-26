@@ -220,10 +220,6 @@ func (c *boltCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (c *boltCursor) NoValues() NoValuesCursor {
-	return &noValuesBoltCursor{boltCursor: c}
-}
-
 func (tx *boltTx) BucketSize(name string) (uint64, error) {
 	st := tx.bolt.Bucket([]byte(name)).Stats()
 	return uint64((st.BranchPageN + st.BranchOverflowN + st.LeafPageN) * os.Getpagesize()), nil
@@ -277,6 +273,10 @@ func (b boltBucket) Delete(key []byte) error {
 
 func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
+}
+
+func (tx *boltTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &noValuesBoltCursor{boltCursor: tx.Cursor(bucket).(*boltCursor)}
 }
 
 func (b boltBucket) Cursor() Cursor {

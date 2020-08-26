@@ -22,6 +22,7 @@ type KV interface {
 
 type Tx interface {
 	Cursor(bucket string) Cursor
+	NoValuesCursor(bucket string) NoValuesCursor
 	Get(bucket string, key []byte) (val []byte, err error)
 
 	Commit(ctx context.Context) error
@@ -41,7 +42,6 @@ type BucketMigrator interface {
 type Cursor interface {
 	Prefix(v []byte) Cursor
 	Prefetch(v uint) Cursor
-	NoValues() NoValuesCursor
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
@@ -51,7 +51,7 @@ type Cursor interface {
 
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
-	Append(key []byte, value []byte) error // Danger: if provided data will not sorted (or bucket have old records which mess with new in sorting manner) - db will corrupt. Method also doesn't tolerate duplicates.
+	Append(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
 }
 
 type NoValuesCursor interface {

@@ -476,11 +476,6 @@ func (c *LmdbCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (c *LmdbCursor) NoValues() NoValuesCursor {
-	//c.cursorOpts.PrefetchValues = false
-	return &lmdbNoValuesCursor{LmdbCursor: c}
-}
-
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 	dbi := tx.db.buckets[bucket]
 	cfg := dbutils.BucketsCfg[bucket]
@@ -538,6 +533,10 @@ func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
 	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket], dbi: tx.db.buckets[bucket]}
+}
+
+func (tx *lmdbTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &lmdbNoValuesCursor{LmdbCursor: tx.Cursor(bucket).(*LmdbCursor)}
 }
 
 func (c *LmdbCursor) initCursor() error {
@@ -829,6 +828,19 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 	}
 
 	return c.put(key, value)
+}
+
+func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	return c.putCurrent(key, value)
 }
 
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {

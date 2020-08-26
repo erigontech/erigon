@@ -189,11 +189,6 @@ func (c *remoteCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (c *remoteCursor) NoValues() NoValuesCursor {
-	//c.remote = c.remote.NoValues()
-	return &remoteNoValuesCursor{remoteCursor: c}
-}
-
 func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 	sizeReply, err := tx.db.remoteDB.BucketSize(tx.ctx, &remote.BucketSizeRequest{BucketName: name})
 	if err != nil {
@@ -231,6 +226,10 @@ func (tx *remoteTx) Cursor(bucket string) Cursor {
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket}
 	tx.cursors = append(tx.cursors, c)
 	return c
+}
+
+func (tx *remoteTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
 func (c *remoteCursor) Put(key []byte, value []byte) error {
