@@ -18,7 +18,7 @@ import (
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
 	db       Database
-	Tx       Tx
+	tx       Tx
 	ParentTx Tx
 	cursors  map[string]*LmdbCursor
 	len      uint64
@@ -28,9 +28,20 @@ func (m *TxDb) Close() {
 	panic("don't call me")
 }
 
+// NewTxDbWithoutTransaction creates TxDb object without opening transaction,
+// such TxDb not usable before .Begin() call on it
+// It allows inject TxDb object into class hierarchy, but open write transaction later
+func NewTxDbWithoutTransaction(db Database) *TxDb {
+	return &TxDb{db: db}
+}
+
 func (m *TxDb) Begin() (DbWithPendingMutations, error) {
-	batch := &TxDb{db: m.db}
-	if err := batch.begin(m.Tx); err != nil {
+	batch := m
+	if m.tx != nil {
+		batch = &TxDb{db: m.db}
+	}
+
+	if err := batch.begin(m.tx); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -63,7 +74,7 @@ func (m *TxDb) begin(parent Tx) error {
 	if err != nil {
 		return err
 	}
-	m.Tx = tx
+	m.tx = tx
 	m.ParentTx = parent
 	m.cursors = make(map[string]*LmdbCursor, 16)
 	for i := range dbutils.Buckets {
@@ -76,10 +87,7 @@ func (m *TxDb) begin(parent Tx) error {
 }
 
 func (m *TxDb) KV() KV {
-	if casted, ok := m.db.(HasKV); ok {
-		return casted.KV()
-	}
-	return nil
+	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 
 // Can only be called from the worker thread
@@ -129,7 +137,7 @@ func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
 }
 
 func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
-	return 0, MultiPut(m.Tx, tuples...)
+	return 0, MultiPut(m.tx, tuples...)
 }
 
 func MultiPut(tx Tx, tuples ...[]byte) error {
@@ -198,7 +206,7 @@ func (m *TxDb) BatchSize() int {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (m *TxDb) IdealBatchSize() int {
-	return m.db.IdealBatchSize()
+	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
@@ -223,6 +231,22 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 		k, v, err = c.Next()
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		ok, err := walker(k, v)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
 		}
 	}
 	return nil
@@ -297,13 +321,13 @@ func (m *TxDb) CommitAndBegin() error {
 }
 
 func (m *TxDb) Commit() (uint64, error) {
-	if m.Tx == nil {
+	if m.tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}
-	if err := m.Tx.Commit(context.Background()); err != nil {
+	if err := m.tx.Commit(context.Background()); err != nil {
 		return 0, err
 	}
-	m.Tx = nil
+	m.tx = nil
 	m.ParentTx = nil
 	m.cursors = nil
 	m.len = 0
@@ -311,14 +335,18 @@ func (m *TxDb) Commit() (uint64, error) {
 }
 
 func (m *TxDb) Rollback() {
-	if m.Tx == nil {
+	if m.tx == nil {
 		return
 	}
-	m.Tx.Rollback()
+	m.tx.Rollback()
 	m.cursors = nil
-	m.Tx = nil
+	m.tx = nil
 	m.ParentTx = nil
 	m.len = 0
+}
+
+func (m *TxDb) Tx() Tx {
+	return m.tx
 }
 
 func (m *TxDb) Keys() ([][]byte, error) {

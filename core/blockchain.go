@@ -145,9 +145,9 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db            *ethdb.ObjectDatabase // Low level persistent database to store final content in
-	triegc        *prque.Prque          // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration         // Accumulates canonical block processing for trie dumping
+	db            ethdb.Database // Low level persistent database to store final content in
+	triegc        *prque.Prque   // Priority queue mapping block numbers to tries to gc
+	gcproc        time.Duration  // Accumulates canonical block processing for trie dumping
 	txLookupLimit uint64
 
 	hc            *HeaderChain
@@ -199,7 +199,7 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -988,6 +988,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		batch := bc.db.NewBatch()
+		defer batch.Rollback()
 		for i, block := range blockChain {
 			// Short circuit insertion if shutting down or processing failed
 			if bc.insertStopped() {
@@ -1010,11 +1011,10 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
-				if _, err := batch.Commit(); err != nil {
+				size += batch.BatchSize()
+				if err := batch.CommitAndBegin(); err != nil {
 					return 0, err
 				}
-				size += batch.BatchSize()
-				batch = bc.db.NewBatch()
 			}
 			stats.processed++
 		}
@@ -2176,7 +2176,7 @@ func InsertBodies(
 	ctx context.Context,
 	procInterrupt *int32,
 	chain types.Blocks,
-	db *ethdb.ObjectDatabase,
+	db ethdb.Database,
 	config *params.ChainConfig,
 	noHistory bool,
 	isNoHistory func(currentBlock *big.Int) bool,

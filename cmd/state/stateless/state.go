@@ -498,7 +498,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 
 		c := tx.Cursor(dbutils.HeaderPrefix).Prefetch(CursorBatchSize)
-		if err := c.Walk(func(k, v []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 			if len(k) != 40 {
 				return true, nil
 			}

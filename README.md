@@ -110,7 +110,7 @@ it can run from a snapshot of a database for read-only calls.
 
 ```
 > make rpcdaemon
-> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug
+> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net
 ```
 **For remote DB**
 
