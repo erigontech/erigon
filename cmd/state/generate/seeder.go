@@ -2,6 +2,7 @@ package generate
 
 import (
 	"fmt"
+	trlog "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -16,7 +17,8 @@ func Seed(pathes []string) error {
 	cfg:=torrent.NewDefaultClientConfig()
 	cfg.DataDir = "/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd/"
 	cfg.Seed=true
-	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
+
+	cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
 	cl,err:=torrent.NewClient(cfg)
 	if err!=nil {
 		return err
@@ -27,7 +29,7 @@ func Seed(pathes []string) error {
 		mi := &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
 			CreatedBy: "turbogeth",
-			AnnounceList: builtinAnnounceList,
+			AnnounceList: trackers,
 		}
 
 		info := metainfo.Info{PieceLength: 256 * 1024}
@@ -46,7 +48,9 @@ func Seed(pathes []string) error {
 		torrents[i].VerifyData()
 		go func() {
 			for {
-				fmt.Println(torrents[i].Name(),torrents[i].InfoHash(), torrents[i].PeerConns(), torrents[i].Seeding())
+				fmt.Printf("Peer ID: %+q\n", cl.PeerID())
+				fmt.Println("trnt:", torrents[i].Name(),torrents[i].InfoHash(), torrents[i].PeerConns(), torrents[i].Seeding())
+				fmt.Println("magnet", mi.Magnet("headers",mi.HashInfoBytes()).String())
 				time.Sleep(time.Second*10)
 			}
 		}()
@@ -58,19 +62,15 @@ func Seed(pathes []string) error {
 	return nil
 }
 
-var (
-	builtinAnnounceList = [][]string{
-		{"udp://tracker.openbittorrent.com:80"},
-		{"udp://tracker.publicbt.com:80"},
-		{"udp://tracker.istole.it:6969"},
-	}
-)
 
-//var trackers = [][]string{
-//	{"udp://tracker.openbittorrent.com:80"},
-//	"udp://tracker.openbittorrent.com:80",
-//	"udp://tracker.publicbt.com:80",
-//	"udp://coppersurfer.tk:6969/announce",
-//	"udp://open.demonii.com:1337",
-//	"http://bttracker.crunchbanglinux.org:6969/announce",
-//}
+
+var trackers = [][]string{
+	{
+		"udp://tracker.openbittorrent.com:80",
+		"udp://tracker.publicbt.com:80",
+		"udp://coppersurfer.tk:6969/announce",
+		"udp://open.demonii.com:1337",
+		"udp://tracker.istole.it:6969",
+		"http://bttracker.crunchbanglinux.org:6969/announce",
+	},
+}

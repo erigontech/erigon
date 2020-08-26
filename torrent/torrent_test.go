@@ -22,26 +22,36 @@ var (
 	}
 )
 
+var trc = [][]string{
+	{
+		"udp://tracker.openbittorrent.com:80",
+		"udp://tracker.publicbt.com:80",
+		"udp://coppersurfer.tk:6969/announce",
+		"udp://open.demonii.com:1337",
+		"udp://tracker.istole.it:6969",
+		"http://bttracker.crunchbanglinux.org:6969/announce",
+	},
+}
 func TestNameLeech(t *testing.T) {
-	hash:=metainfo.NewHashFromHex("2bb12d22599a9a6ef918e75421c4cbb1e32fb342")
+	hash:=metainfo.NewHashFromHex("3b250d36911b78c2e82d7cde8f1b7affdf7ed8f2")
 	cfg:=torrent.NewDefaultClientConfig()
 	cfg.DataDir=os.TempDir()
 	cfg.ListenPort=0
-	cfg.Logger=cfg.Logger.FilterLevel(log.Info)
+	//cfg.Logger=cfg.Logger.FilterLevel(log.Info)
 
 	leecher,err:=torrent.NewClient(cfg)
 	if err!=nil {
 		t.Fatal(err)
 	}
 	tr, new, err:=leecher.AddTorrentSpec(&torrent.TorrentSpec{
-		Trackers: builtinAnnounceList,
+		Trackers: trc,
 		InfoHash: hash,
 		DisplayName: "test",
 	})
 	if err!=nil {
 		t.Fatal(err)
 	}
-
+	tr.AllowDataDownload()
 	//tr, new:=leecher.AddTorrentInfoHash(hash)
 	fmt.Println(new)
 	fmt.Println("get info")
@@ -49,11 +59,12 @@ func TestNameLeech(t *testing.T) {
 	fmt.Println("got info")
 	go func() {
 		for {
-			fmt.Println(tr.PeerConns(), tr.Seeding(), tr.BytesCompleted(), tr.Info().TotalLength())
+			fmt.Println(leecher.PeerID(), tr.PeerConns(), tr.Seeding(), tr.BytesCompleted(), tr.Info().TotalLength())
 			time.Sleep(time.Second*10)
 		}
 	}()
 	tr.DownloadAll()
+
 	leecher.WaitAll()
 	//c:=make(chan os.Signal)
 	//signal.Notify(c, os.Interrupt)
