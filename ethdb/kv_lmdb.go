@@ -1069,22 +1069,6 @@ type lmdbNoValuesCursor struct {
 	*LmdbCursor
 }
 
-func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
 func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {
 	return c.Seek(c.prefix)
 }

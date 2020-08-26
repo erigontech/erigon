@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -378,4 +379,81 @@ func (db *ObjectDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+// Type which expecting sequence of triplets: dbi, key, value, ....
+// It sorts entries by dbi name, then inside dbi clusters sort by keys
+type MultiPutTuples [][]byte
+
+func (t MultiPutTuples) Len() int { return len(t) / 3 }
+
+func (t MultiPutTuples) Less(i, j int) bool {
+	i3, j3 := i*3, j*3
+	cmp := bytes.Compare(t[i3], t[j3])
+	if cmp == -1 {
+		return true
+	}
+	if cmp == 0 {
+		return bytes.Compare(t[i3+1], t[j3+1]) == -1
+	}
+	return false
+}
+
+func (t MultiPutTuples) Swap(i, j int) {
+	i3, j3 := i*3, j*3
+	t[i3], t[j3] = t[j3], t[i3]
+	t[i3+1], t[j3+1] = t[j3+1], t[i3+1]
+	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
+}
+
+func Get(db KV, bucket string, key []byte) ([]byte, error) {
+	// Retrieve the key and increment the miss counter if not found
+	var dat []byte
+	err := db.View(context.Background(), func(tx Tx) error {
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, err
+}
+
+func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byte, err error) {
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(accNoRoot); err != nil {
+		return nil, err
+	}
+	acc.Root = common.BytesToHash(root)
+	accWithRoot = make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(accWithRoot)
+	return accWithRoot, nil
+}
+
+func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
+	fixedbytes = (fixedbits + 7) / 8
+	shiftbits := fixedbits & 7
+	mask = byte(0xff)
+	if shiftbits != 0 {
+		mask = 0xff << (8 - shiftbits)
+	}
+	return fixedbytes, mask
+}
+
+func InspectDatabase(db Database) error {
+	// FIXME: implement in Turbo-Geth
+	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
+	return errNotSupported
+}
+
+func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
+	// FIXME: implement freezer in Turbo-Geth
+	return db, nil
 }
