@@ -34,7 +34,8 @@ func testGenCfg() error {
 	//absIntTestEcrecoverLoop02() //- PASSES
 	//absIntTestStorageVar03() // - PASSES
 	//absIntTestStaticLoop00() //- PASSESASSES
-	//	//a
+	//absIntTestPrivateFunction01()
+	absIntTestPrivateFunction02()
 	//absIntTestStaticLoop01() //- PbsIntTestPrivateFunction01()
 	//absIntTestDepositContract() //FAILS - Imprecision
 	//absIntTestDepositContract2()
@@ -317,6 +318,33 @@ func absIntTestPrivateFunction01() {
 		}
 	*/
 	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c8063fe0d94c114602d575b600080fd5b605660048036036020811015604157600080fd5b8101908080359060200190929190505050606c565b6040518082815260200191505060405180910390f35b60006075826087565b6001820191506082826087565b919050565b600a8110609357600080fd5b5056fea26469706673582212201621427408bf92a9a07dd10d32e63a8421461a0778eeaba88b9fd84e3769b5ca64736f6c63430006060033"
+	decoded, err := hex.DecodeString(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract.Code = decoded
+	vm.AbsIntCfgHarness(contract)
+}
+
+
+func absIntTestPrivateFunction02() {
+	/*
+		pragma solidity 0.6.12;
+		contract DepositContract {
+			function get_deposit_root(bytes32 node) external view returns (uint64) {
+				return to_little_endian_64();
+			}
+			function get_deposit_count() external view returns (uint64) {
+				return to_little_endian_64();
+			}
+			function to_little_endian_64() internal pure returns (uint64) {
+				return 15;
+			}
+		}
+	*/
+	const s = "6080604052348015600f57600080fd5b506004361060325760003560e01c8063621fd130146037578063da36c6a314605d575b600080fd5b603d60a6565b604051808267ffffffffffffffff16815260200191505060405180910390f35b608660048036036020811015607157600080fd5b810190808035906020019092919050505060b3565b604051808267ffffffffffffffff16815260200191505060405180910390f35b600060ae60c2565b905090565b600060bb60c2565b9050919050565b6000600f90509056fea264697066735822122002e819f5f340845231359a0b3bc4134fb1daff9c5397e4c6d3101e54d0cdee0b64736f6c634300060c0033"
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
 		log.Fatal(err)
