@@ -825,7 +825,7 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	if err != nil {
 		return err
 	}
-	err = c.Walk(func(k, v []byte) (bool, error) {
+	err = ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 		blockNum, _ := dbutils.DecodeTimestamp(k)
 		if blockNum > to {
 			return false, nil

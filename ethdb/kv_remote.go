@@ -151,10 +151,6 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (db *RemoteKV) IdealBatchSize() int {
-	panic("not supported")
-}
-
 func (db *RemoteKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
 }
@@ -186,10 +182,6 @@ func (tx *remoteTx) Rollback() {
 func (c *remoteCursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
-}
-
-func (c *remoteCursor) MatchBits(n uint) Cursor {
-	panic("not implemented yet")
 }
 
 func (c *remoteCursor) Prefetch(v uint) Cursor {
@@ -308,38 +300,6 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 
 func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
-}
-
-func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }
 
 func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {

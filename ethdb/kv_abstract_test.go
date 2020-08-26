@@ -139,7 +139,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.Equal(1, counter)
 
 		counter = 0
-		if err := c.Walk(func(_, _ []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		}); err != nil {
@@ -162,7 +162,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.Equal(13, counter)
 
 		counter = 0
-		if err := c.Walk(func(_, _ []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		}); err != nil {

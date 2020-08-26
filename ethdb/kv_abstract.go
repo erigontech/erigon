@@ -18,7 +18,6 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
-	IdealBatchSize() int
 }
 
 type Tx interface {
@@ -41,7 +40,6 @@ type BucketMigrator interface {
 
 type Cursor interface {
 	Prefix(v []byte) Cursor
-	MatchBits(uint) Cursor
 	Prefetch(v uint) Cursor
 	NoValues() NoValuesCursor
 
@@ -50,7 +48,6 @@ type Cursor interface {
 	SeekExact(key []byte) ([]byte, error)
 	Next() ([]byte, []byte, error)
 	Last() ([]byte, []byte, error)
-	Walk(walker func(k, v []byte) (bool, error)) error
 
 	Put(key []byte, value []byte) error
 	Delete(key []byte) error
@@ -61,7 +58,6 @@ type NoValuesCursor interface {
 	First() ([]byte, uint32, error)
 	Seek(seek []byte) ([]byte, uint32, error)
 	Next() ([]byte, uint32, error)
-	Walk(walker func(k []byte, vSize uint32) (bool, error)) error
 }
 
 type HasStats interface {

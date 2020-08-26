@@ -988,6 +988,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		batch := bc.db.NewBatch()
+		defer batch.Rollback()
 		for i, block := range blockChain {
 			// Short circuit insertion if shutting down or processing failed
 			if bc.insertStopped() {
@@ -1010,11 +1011,10 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
-				if _, err := batch.Commit(); err != nil {
+				size += batch.BatchSize()
+				if err := batch.CommitAndBegin(); err != nil {
 					return 0, err
 				}
-				size += batch.BatchSize()
-				batch = bc.db.NewBatch()
 			}
 			stats.processed++
 		}

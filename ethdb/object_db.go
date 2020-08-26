@@ -127,10 +127,6 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 
 // Get returns the value for a given key if it's present.
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
-	if metrics.EnabledExpensive {
-		defer dbGetTimer.UpdateSince(time.Now())
-	}
-
 	var dat []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
 		v, err := tx.Get(bucket, key)
@@ -300,7 +296,7 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 		for _, name := range dbutils.Buckets {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
-			return tx.Cursor(name).Walk(func(k, _ []byte) (bool, error) {
+			return ForEach(tx.Cursor(name), func(k, _ []byte) (bool, error) {
 				var kCopy = make([]byte, len(k))
 				copy(kCopy, k)
 				keys = append(append(keys, nameCopy), kCopy)
@@ -334,7 +330,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 			name := name
 			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
 				newBucketToWrite := writeTx.Cursor(name)
-				return readTx.Cursor(name).Walk(func(k, v []byte) (bool, error) {
+				return ForEach(readTx.Cursor(name), func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 						return false, err
 					}
@@ -370,7 +366,7 @@ func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *ObjectDatabase) IdealBatchSize() int {
-	return db.kv.IdealBatchSize()
+	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
