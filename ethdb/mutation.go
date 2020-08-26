@@ -144,10 +144,6 @@ func (m *mutation) CommitAndBegin() error {
 	return err
 }
 
-type SupportMultiPut2 interface {
-	MultiPut2(bucket string, tuples ...[]byte) error
-}
-
 func (m *mutation) Commit() (uint64, error) {
 	if metrics.Enabled {
 		if m.puts.Size() >= m.IdealBatchSize() {
@@ -161,24 +157,6 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	//if casted, ok := m.db.(SupportMultiPut2); ok {
-	//	for bucketStr, bt := range m.puts.mp {
-	//		tuples := make(MultiPutTuples2, 0, len(bt)*2)
-	//		for key, value := range bt {
-	//			tuples = append(tuples, []byte(key), value)
-	//		}
-	//		delete(m.puts.mp, bucketStr)
-	//		sort.Sort(tuples)
-	//		if err := casted.MultiPut2(bucketStr, tuples...); err != nil {
-	//			return 0, fmt.Errorf("db.MultiPut2 failed: %w", err)
-	//		}
-	//	}
-	//
-	//	m.puts = newPuts()
-	//	m.tuples = nil
-	//	return 0, nil
-	//}
-
 	if m.tuples == nil {
 		m.tuples = make(MultiPutTuples, 0, m.puts.Len()*3)
 	}
