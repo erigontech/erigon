@@ -358,7 +358,10 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 						return serr
 					}
 					sAddress := sk[:common.AddressLength]
-					sLocation := sk[common.AddressLength+common.IncarnationLength:]
+					var sLocation []byte
+					if len(sk) >= common.AddressLength+common.IncarnationLength {
+						sLocation = sk[common.AddressLength+common.IncarnationLength:]
+					}
 					aCmp = bytes.Compare(sAddress, address)
 					lCmp = bytes.Compare(sLocation, location)
 					if aCmp > 0 || (aCmp == 0 && lCmp >= 0) {
