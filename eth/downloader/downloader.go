@@ -576,7 +576,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if canRunCycleInOneTransaction {
 			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
 			defer func() {
-				log.Info("cycle: rollback transaction")
 				tx.Rollback()
 			}()
 			writeDB = tx
@@ -611,7 +610,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			log.Info("cycle: begin transaction")
 			var errTx error
 			tx, errTx = tx.Begin()
 			return errTx
@@ -621,7 +619,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			log.Info("cycle: commit transaction")
+			log.Info("Commit blocks")
 			_, errTx := tx.Commit()
 			return errTx
 		})
@@ -635,7 +633,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 				return nil
 			}
-			log.Info("cycle unwind: begin transaction")
 			var errTx error
 			tx, errTx = tx.Begin()
 			return errTx
@@ -647,7 +644,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 				return nil
 			}
-			log.Info("cycle unwind: commit transaction")
+			log.Info("Commit blocks")
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
