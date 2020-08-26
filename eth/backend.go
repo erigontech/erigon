@@ -20,6 +20,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"math/big"
 	"os"
 	"reflect"
@@ -90,6 +91,8 @@ type Ethereum struct {
 
 	p2pServer     *p2p.Server
 	txPoolStarted bool
+
+	torrentClient *torrent.Client
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
@@ -275,6 +278,14 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			return nil, err
 		}
 		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, id)
+	}
+	fmt.Println("-------------------------------------------------------------")
+	fmt.Println(config.SyncMode, config.SnapshotMode.ToString(), config.NetworkID)
+	fmt.Println("-------------------------------------------------------------")
+	if config.SyncMode==downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID==params.MainnetChainConfig.ChainID.Uint64() {
+		panic(stack.Config().ResolvePath("snapshots"))
+
+		eth.torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
 	}
 
 	// Register the backend on the node

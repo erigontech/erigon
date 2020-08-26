@@ -19,7 +19,7 @@ package node
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -183,7 +183,7 @@ type Config struct {
 	// Whether to use BoltDB or LMDB.
 	LMDB bool
 	Bolt bool
-	SnapshotMode ethdb.SnapshotMode
+	SnapshotMode torrent.SnapshotMode
 
 
 	// Address to listen to when launchig listener for remote database access

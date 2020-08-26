@@ -20,6 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -420,7 +421,11 @@ var (
 * s - download state snapshot
 * r - download receipts snapshot
 `,
-		Value: ethdb.DefaultSnapshotMode.ToString(),
+		Value: torrent.DefaultSnapshotMode.ToString(),
+	}
+	NoSeedSnapshotsFlag = cli.BoolFlag{
+		Name: "no-seed-snapshots",
+		Usage: `Disallows snapshot seeding`,
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
@@ -1307,7 +1312,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	}
 	cfg.Bolt = strings.EqualFold(databaseFlag, "bolt") //case insensitive
 
-	snMode, err := ethdb.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}

@@ -112,6 +112,7 @@ var (
 		utils.DownloadOnlyFlag,
 		utils.StorageModeFlag,
 		utils.SnapshotModeFlag,
+		utils.NoSeedSnapshotsFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
 		utils.LMDBMapSizeFlag,

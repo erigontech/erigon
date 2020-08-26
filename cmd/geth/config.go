@@ -129,6 +129,7 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	if ctx.GlobalIsSet(utils.EthStatsURLFlag.Name) {
 		cfg.Ethstats.URL = ctx.GlobalString(utils.EthStatsURLFlag.Name)
 	}
+	cfg.Eth.SnapshotSeeding = !ctx.GlobalBool(utils.NoSeedSnapshotsFlag.Name)
 
 	return stack, cfg
 }

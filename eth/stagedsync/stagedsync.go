@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"runtime"
 	"time"
 
@@ -27,7 +28,7 @@ func PrepareStagedSync(
 	txPool *core.TxPool,
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
-	snapshotMode ethdb.SnapshotMode,
+	snapshotMode torrent.SnapshotMode,
 ) (*State, error) {
 	stages := []*Stage{
 		{

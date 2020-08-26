@@ -1,4 +1,4 @@
-package core
+package torrent
 
 import (
 	"fmt"
@@ -22,8 +22,42 @@ var (
 	}
 )
 
-func TestNameSeed(t *testing.T) {
+func TestNameLeech(t *testing.T) {
+	hash:=metainfo.NewHashFromHex("2bb12d22599a9a6ef918e75421c4cbb1e32fb342")
+	cfg:=torrent.NewDefaultClientConfig()
+	cfg.DataDir=os.TempDir()
+	cfg.ListenPort=0
+	cfg.Logger=cfg.Logger.FilterLevel(log.Info)
 
+	leecher,err:=torrent.NewClient(cfg)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	tr, new, err:=leecher.AddTorrentSpec(&torrent.TorrentSpec{
+		Trackers: builtinAnnounceList,
+		InfoHash: hash,
+		DisplayName: "test",
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	//tr, new:=leecher.AddTorrentInfoHash(hash)
+	fmt.Println(new)
+	fmt.Println("get info")
+	<-tr.GotInfo()
+	fmt.Println("got info")
+	go func() {
+		for {
+			fmt.Println(tr.PeerConns(), tr.Seeding(), tr.BytesCompleted(), tr.Info().TotalLength())
+			time.Sleep(time.Second*10)
+		}
+	}()
+	tr.DownloadAll()
+	leecher.WaitAll()
+	//c:=make(chan os.Signal)
+	//signal.Notify(c, os.Interrupt)
+	//<-c
 }
 
 func TestName(t *testing.T) {
@@ -250,10 +284,10 @@ func TestName2(t *testing.T) {
 }
 
 func TestName4(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 
-	dd1:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd1"
-	dd2:="/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd2"
+	dd1:="/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd1"
+	dd2:="/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/dd2"
 	os.RemoveAll(dd1)
 	os.RemoveAll(dd2)
 

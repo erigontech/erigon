@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"math/big"
 	"os"
 	"os/user"
@@ -121,7 +122,8 @@ type Config struct {
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
 	StorageMode ethdb.StorageMode
-	SnapshotMode ethdb.SnapshotMode
+	SnapshotMode torrent.SnapshotMode
+	SnapshotSeeding bool
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them

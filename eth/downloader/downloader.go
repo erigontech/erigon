@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -160,7 +161,7 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	storageMode ethdb.StorageMode
-	snapshotMode ethdb.SnapshotMode
+	snapshotMode torrent.SnapshotMode
 
 	datadir     string
 
@@ -244,7 +245,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, snm ethdb.SnapshotMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, snm torrent.SnapshotMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}

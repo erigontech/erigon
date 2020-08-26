@@ -1,4 +1,4 @@
-package ethdb
+package torrent
 
 import "fmt"
 
