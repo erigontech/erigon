@@ -1068,7 +1068,8 @@ func dumpStorage() {
 	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Cursor(dbutils.StorageHistoryBucket).Walk(func(k, v []byte) (bool, error) {
+		c := tx.Cursor(dbutils.StorageHistoryBucket)
+		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 			fmt.Printf("%x %x\n", k, v)
 			return true, nil
 		})

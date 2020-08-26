@@ -207,10 +207,6 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
-func (db *LmdbKV) IdealBatchSize() int {
-	return int(512 * datasize.MB)
-}
-
 func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
@@ -475,18 +471,9 @@ func (c *LmdbCursor) Prefix(v []byte) Cursor {
 	return c
 }
 
-func (c *LmdbCursor) MatchBits(n uint) Cursor {
-	panic("not implemented yet")
-}
-
 func (c *LmdbCursor) Prefetch(v uint) Cursor {
 	//c.cursorOpts.PrefetchSize = int(v)
 	return c
-}
-
-func (c *LmdbCursor) NoValues() NoValuesCursor {
-	//c.cursorOpts.PrefetchValues = false
-	return &lmdbNoValuesCursor{LmdbCursor: c}
 }
 
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
@@ -546,6 +533,10 @@ func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
 	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket], dbi: tx.db.buckets[bucket]}
+}
+
+func (tx *lmdbTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &lmdbNoValuesCursor{LmdbCursor: tx.Cursor(bucket).(*LmdbCursor)}
 }
 
 func (c *LmdbCursor) initCursor() error {
@@ -840,6 +831,19 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 	return c.put(key, value)
 }
 
+func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	return c.putCurrent(key, value)
+}
+
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
@@ -1053,20 +1057,17 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	return c.append(key, value)
 }
 
-func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
+func (c *LmdbCursor) AppendDup(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
 			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
 		}
 	}
-	return nil
+	return c.appendDup(key, value)
 }
 
 func (c *LmdbCursor) Close() error {
@@ -1079,22 +1080,6 @@ func (c *LmdbCursor) Close() error {
 
 type lmdbNoValuesCursor struct {
 	*LmdbCursor
-}
-
-func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }
 
 func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {

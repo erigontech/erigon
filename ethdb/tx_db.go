@@ -206,7 +206,7 @@ func (m *TxDb) BatchSize() int {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (m *TxDb) IdealBatchSize() int {
-	return m.db.IdealBatchSize()
+	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
@@ -231,6 +231,22 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 		k, v, err = c.Next()
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		ok, err := walker(k, v)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
 		}
 	}
 	return nil

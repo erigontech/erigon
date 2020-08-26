@@ -148,10 +148,6 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 	return res, nil
 }
 
-func (db *BoltKV) IdealBatchSize() int {
-	return 50 * 1024 * 1024 // 50 Mb
-}
-
 func (db *BoltKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	if db.bolt == nil {
 		return nil, fmt.Errorf("db closed")
@@ -219,17 +215,9 @@ func (c *boltCursor) Prefix(v []byte) Cursor {
 	return c
 }
 
-func (c *boltCursor) MatchBits(n uint) Cursor {
-	panic("not implemented yet")
-}
-
 func (c *boltCursor) Prefetch(v uint) Cursor {
 	// nothing to do
 	return c
-}
-
-func (c *boltCursor) NoValues() NoValuesCursor {
-	return &noValuesBoltCursor{boltCursor: c}
 }
 
 func (tx *boltTx) BucketSize(name string) (uint64, error) {
@@ -285,6 +273,10 @@ func (b boltBucket) Delete(key []byte) error {
 
 func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
+}
+
+func (tx *boltTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &noValuesBoltCursor{boltCursor: tx.Cursor(bucket).(*boltCursor)}
 }
 
 func (b boltBucket) Cursor() Cursor {
@@ -365,38 +357,6 @@ func (c *boltCursor) Put(key []byte, value []byte) error {
 
 func (c *boltCursor) Append(key []byte, value []byte) error {
 	return c.Put(key, value)
-}
-
-func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }
 
 func (c *noValuesBoltCursor) First() (k []byte, vSize uint32, err error) {
