@@ -1608,6 +1608,38 @@ func supply(chaindata string) error {
 	return nil
 }
 
+func extractCode(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	destDb := ethdb.MustOpen("codes")
+	defer destDb.Close()
+	return destDb.KV().Update(context.Background(), func(tx1 ethdb.Tx) error {
+		c1 := tx1.Cursor(dbutils.PlainContractCodeBucket)
+		return db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+			c := tx.Cursor(dbutils.PlainContractCodeBucket)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if err = c1.Append(k, v); err != nil {
+					return err
+				}
+			}
+			c1 = tx1.Cursor(dbutils.CodeBucket)
+			c = tx.Cursor(dbutils.CodeBucket)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if err = c1.Append(k, v); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
 func main() {
 	flag.Parse()
 
@@ -1734,6 +1766,11 @@ func main() {
 	}
 	if *action == "supply" {
 		if err := supply(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractCode" {
+		if err := extractCode(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
