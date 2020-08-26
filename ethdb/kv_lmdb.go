@@ -328,7 +328,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	}
 
 	commitTook := time.Since(commitTimer)
-	if commitTook > 20*time.Second {
+	if commitTook > 10*time.Second {
 		log.Info("Batch", "commit", commitTook)
 	}
 
@@ -337,7 +337,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 		log.Warn("fsync after commit failed: \n", err)
 	}
 	fsyncTook := time.Since(fsyncTimer)
-	if fsyncTook > 20*time.Second {
+	if fsyncTook > 10*time.Second {
 		log.Info("Batch", "fsync", fsyncTook)
 	}
 	return nil
@@ -557,6 +557,7 @@ func (c *LmdbCursor) initCursor() error {
 	var err error
 	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName])
 	if err != nil {
+		panic("su-tx")
 		return err
 	}
 

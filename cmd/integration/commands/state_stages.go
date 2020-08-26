@@ -85,10 +85,58 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	bc, st, progress := newSync(ch, db, changeSetHook)
+	log.Debug("cycle1: begin transaction")
+	tx, errBegin := db.Begin()
+	if errBegin != nil {
+		return errBegin
+	}
+	defer tx.Rollback()
+
+	bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 
-	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
+	log.Debug("cycle1: commit transaction")
+	if _, err := tx.Commit(); err != nil {
+		return err
+	}
+
+	st.BeforeStageRun(stages.Execution, func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			return nil
+		}
+		log.Debug("cycle: begin transaction")
+		var errTx error
+		tx, errTx = tx.Begin()
+		return errTx
+	})
+	st.BeforeStageRun(stages.TxPool, func() error {
+		log.Debug("cycle: commit transaction")
+		var errTx error
+		_, errTx = tx.Commit()
+		return errTx
+	})
+	st.OnBeforeUnwind(func(id stages.SyncStage) error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			return nil
+		}
+		if id < stages.Bodies || id >= stages.TxPool {
+			return nil
+		}
+		log.Debug("cycle unwind: begin transaction")
+		var errTx error
+		tx, errTx = tx.Begin()
+		return errTx
+	})
+	st.BeforeStageUnwind(stages.TxPool, func() error {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+			return nil
+		}
+		log.Debug("cycle unwind: commit transaction")
+		_, errCommit := tx.Commit()
+		return errCommit
+	})
+
+	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
@@ -113,13 +161,13 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, db, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
 		})
 
-		if err := st.Run(db); err != nil {
+		if err := st.Run(db, tx); err != nil {
 			return err
 		}
 

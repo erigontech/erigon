@@ -151,6 +151,10 @@ type HasKV interface {
 	KV() KV
 }
 
+type HasTx interface {
+	Tx() Tx
+}
+
 type HasNetInterface interface {
 	DB() Database
 }
