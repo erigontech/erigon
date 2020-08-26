@@ -30,14 +30,14 @@ func testGenCfg() error {
 	//absIntTestSimple00() //- PASSES
 	//absIntTestRequires00() //- PASSES
 	//absIntTestCall01() // - PASSES
-	absIntTestDiv00()
+	//absIntTestDiv00()
 	//absIntTestEcrecoverLoop02() //- PASSES
 	//absIntTestStorageVar03() // - PASSES
-	//absIntTestStaticLoop00() //- PASSESASSES
-	//absIntTestPrivateFunction01()
-	absIntTestPrivateFunction02()
-	//absIntTestStaticLoop01() //- PbsIntTestPrivateFunction01()
-	//absIntTestDepositContract() //FAILS - Imprecision
+	//absIntTestStaticLoop00() //- PASSES
+	//absIntTestPrivateFunction01() //- PASS
+	//absIntTestPrivateFunction02() //- PASS
+	//absIntTestStaticLoop01() //  //- PASS
+	absIntTestDepositContract() //FAILS - Imprecision
 	//absIntTestDepositContract2()
 	return nil
 }

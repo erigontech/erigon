@@ -16,7 +16,7 @@ import (
 //////////////////////////////////////////////////
 type AbsValueKind int
 const (
-	absStackLen = 32
+	absStackLen = 64
 )
 
 var DEBUG = false
@@ -164,6 +164,7 @@ type edge struct {
 	pc0 int
 	stmt *stmt
 	pc1 int
+	isJump bool
 }
 
 func (e edge) String() string {
@@ -240,10 +241,13 @@ type AbsValue struct {
 	kind AbsValueKind
 	value uint256.Int 	//only when kind=ConcreteValue
 	pc int 				//only when kind=TopValue
+	fromDeepStack bool	//only when Kind=TopValue
 }
 
 func (c0 AbsValue) String(abbrev bool) string {
-	if c0.kind == BotValue || c0.kind == TopValue {
+	if c0.kind == BotValue {
+		return c0.kind.String()
+	} else if c0.kind == TopValue {
 		if !abbrev {
 			return fmt.Sprintf("%v%v", c0.kind.String(), c0.pc)
 		} else {
@@ -258,155 +262,147 @@ func (c0 AbsValue) String(abbrev bool) string {
 	}
 }
 
+func AbsValueTop(pc int, fromDeepStack bool) AbsValue {
+	return AbsValue{kind: TopValue, pc: pc, fromDeepStack: fromDeepStack}
+}
+
+func AbsValueBot() AbsValue {
+	return AbsValue{kind: BotValue}
+}
+
+func AbsValueConcrete(value uint256.Int) AbsValue {
+	return AbsValue{kind: ConcreteValue, value: value}
+}
+
+func (c0 AbsValue) Eq(c1 AbsValue) bool {
+	if c0.kind != c1.kind {
+		return false
+	}
+
+	if c0.kind == ConcreteValue {
+		if !c0.value.Eq(&c1.value) {
+			return false
+		}
+	}
+
+	return true
+}
+
 //////////////////////////////////////////////////
-
-type ValueSet struct {
-	values map[AbsValue]bool
-	isTop bool
+type astack struct {
+	values []AbsValue
 }
 
-func (set ValueSet) Copy() ValueSet {
-	if set.isTop {
-		return ValueSet{isTop: true}
-	} else {
-		newSet := ValueSet{values: make(map[AbsValue]bool), isTop: false}
-		for k, v := range set.values {
-			newSet.values[k] = v
-		}
-		return newSet
-	}
+func (s *astack) Copy() *astack {
+	newStack := &astack{}
+	newStack.values = append(newStack.values, s.values...)
+	return newStack
 }
 
-func (set ValueSet) String(abbrev bool) string {
-	if set.isTop {
-		return "⊤ˢ"
-	}
-
-	var strs []string
-	hasTop := false
-	for v, in := range set.values {
-		if in {
-			strs = append(strs, v.String(abbrev))
-			if v.kind == TopValue {
-				hasTop = true
-			}
-		}
-	}
-
-	res := strings.Join(strs, " ")
-	if len(strs) == 0 {
-		return "⊥"
-	}
-
-	if abbrev && hasTop {
-		return "⊤"
-	} else if len(strs) == 1 {
-		return fmt.Sprintf("%v", res)
-	} else {
-		return fmt.Sprintf("{%v}", res)
-	}
+func (s *astack) Push(value AbsValue) {
+	rest := s.values[0: absStackLen-1]
+	s.values = nil
+	s.values = append(s.values, value)
+	s.values = append(s.values, rest...)
 }
 
-func ValueSetBot() ValueSet {
-	return ValueSet{ values: make(map[AbsValue]bool), isTop: false }
-}
-
-func ValueSetTop() ValueSet {
-	return ValueSet{ isTop: true }
-}
-
-func ValueSetLub(c0 ValueSet, c1 ValueSet) ValueSet {
-	if c0.isTop || c1.isTop {
-		return ValueSetTop()
-	}
-
-	res := ValueSet{ values: make(map[AbsValue]bool) }
-
-	for k, v := range c0.values {
-		res.values[k] = v
-	}
-
-	for k, v := range c1.values {
-		res.values[k] = v
-	}
-
+func (s *astack) Pop(pc int) AbsValue {
+	res := s.values[0]
+	s.values = s.values[1: absStackLen]
+	s.values = append(s.values, AbsValueTop(pc, true))
 	return res
 }
 
-func ValueSetLeq(c0 ValueSet, c1 ValueSet) bool {
-	if c0.isTop && c1.isTop {
-		return true
-	} else if !c0.isTop && c1.isTop {
-		return true
-	} else if c0.isTop && !c1.isTop {
-		return false
-	} else if !c0.isTop && !c1.isTop {
-		for k, v := range c0.values {
-			if v && !c1.values[k] {
-				return false
-			}
+func (s *astack) String(abbrev bool) string {
+	var strs []string
+	for _, c := range s.values {
+		strs = append(strs, c.String(abbrev))
+	}
+	return strings.Join(strs, " ")
+}
+
+func (s *astack) Eq(s1 *astack) bool {
+	for i := 0; i < absStackLen; i++ {
+		if !s.values[i].Eq(s1.values[i]) {
+			return false
 		}
-	} else {
-		panic("unreachable")
 	}
 	return true
 }
 
-func ValueSetSingle(value uint256.Int, pc int) ValueSet {
-	valueSet := ValueSet{values: make(map[AbsValue]bool)}
-	valueSet.values[AbsValue{ConcreteValue, value, pc}] = true
-	return valueSet
-}
-
 //////////////////////////////////////////////////
 
-type state struct {
-	stack       []ValueSet
+type astate struct {
+	stackset    []*astack
 	anlyCounter int
 	worklistLen int
 }
 
-func emptyState() state {
-	return state{stack: nil, anlyCounter: -1, worklistLen: -1}
+func emptyState() *astate {
+	return &astate{stackset: nil, anlyCounter: -1, worklistLen: -1}
 }
 
-func (state *state) Copy() state {
+func (state *astate) Copy() *astate {
 	newState := emptyState()
-	for _, valueSet := range state.stack {
-		newState.stack = append(newState.stack, valueSet.Copy())
+	for _, stack := range state.stackset {
+		newState.stackset = append(newState.stackset, stack.Copy())
 	}
 	return newState
 }
 
-func (state *state) Push(value ValueSet) {
-	rest := state.stack[0: absStackLen-1]
-	state.stack = []ValueSet{value}
-	state.stack = append(state.stack, rest...)
-}
-
-func (state *state) Pop() ValueSet {
-	res := state.stack[0]
-	state.stack = append(state.stack[1:], ValueSetTop())
-	return res
-}
-
 // botState generates initial state which is a stack of "bottom" values
-func botState() state {
+func botState() *astate {
 	st := emptyState()
-	st.stack = make([]ValueSet, absStackLen)
 
-	for i := range st.stack {
-		st.stack[i] = ValueSetBot()
+	botStack := &astack{}
+	for i := 0; i < absStackLen; i++ {
+		botStack.values = append(botStack.values, AbsValueBot())
 	}
+	st.stackset = append(st.stackset, botStack)
+
 	return st
 }
 
-func (state state) String(abbrev bool) string {
-	var strs []string
-	for _, c := range state.stack {
-		strs = append(strs, c.String(abbrev))
+func ExistsIn(values []AbsValue, value AbsValue) bool {
+	for _, v := range values {
+		if value.Eq(v) {
+			return true
+		}
 	}
-	return strings.Join(strs, " ")
+	return false
+}
+
+func (state *astate) String(abbrev bool) string {
+	var elms []string
+	for i := 0; i < absStackLen; i++ {
+		var elm []string
+		var values []AbsValue
+		for _, stack := range state.stackset {
+			value := stack.values[i]
+			if !ExistsIn(values, value) {
+				elm = append(elm, value.String(abbrev))
+				values = append(values, value)
+			}
+		}
+
+		var e string
+		if len(values) > 1 {
+			e = fmt.Sprintf("{%v}", strings.Join(elm, ","))
+		} else {
+			e = fmt.Sprintf("%v", strings.Join(elm, ","))
+		}
+		elms = append(elms, e)
+	}
+	return strings.Join(elms, " ")
+}
+
+func (state *astate) Add(stack *astack) {
+	for _, existing := range state.stackset {
+		if existing.Eq(stack) {
+			return
+		}
+	}
+	state.stackset = append(state.stackset, stack)
 }
 
 //////////////////////////////////////////////////
@@ -421,7 +417,7 @@ type ResolveResult struct {
 // It either concludes that the execution of the instruction may result in a jump to an unpredictable
 // destination (in this case, attrubute resolved will be false), or returns one (for a non-JUMPI) or two (for JUMPI)
 // edges that contain program counters of destinations where the executions can possibly come next
-func resolve(program *program, pc0 int, st0 state) ResolveResult {
+func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 	stmt := program.stmts[pc0]
 
 	if !stmt.operation.valid || stmt.ends {
@@ -433,34 +429,32 @@ func resolve(program *program, pc0 int, st0 state) ResolveResult {
 	var edges []edge
 	isBadJump := false
 
-	if stmt.opcode == JUMP || stmt.opcode == JUMPI {
-		jumpDestSet := st0.stack[0]
-		if jumpDestSet.isTop {
-			isBadJump = true
-		} else {
-			for jumpDest, _ := range jumpDestSet.values {
-				if jumpDest.kind == ConcreteValue {
-					if jumpDest.value.IsUint64() {
-						pc1 := int(jumpDest.value.Uint64())
+	//jump edges
+	for _, stack := range st0.stackset {
+		if stmt.opcode == JUMP || stmt.opcode == JUMPI {
+			jumpDest := stack.values[0]
+			if jumpDest.kind == TopValue {
+				isBadJump = true
+			} else if jumpDest.kind == ConcreteValue {
+				if jumpDest.value.IsUint64() {
+					pc1 := int(jumpDest.value.Uint64())
 
-						if program.stmts[pc1].opcode != JUMPDEST {
-							isBadJump = true
-						} else {
-							edges = append(edges, edge{pc0, stmt, pc1})
-						}
-					} else {
+					if program.stmts[pc1].opcode != JUMPDEST {
 						isBadJump = true
+					} else {
+						edges = append(edges, edge{pc0, stmt, pc1, true})
 					}
-				} else if jumpDest.kind == TopValue {
+				} else {
 					isBadJump = true
 				}
 			}
 		}
 	}
 
+	//fall-thru edge
 	if stmt.opcode != JUMP {
 		if pc0 < codeLen-stmt.numBytes {
-			edges = append(edges, edge{pc0, stmt, pc0 + stmt.numBytes})
+			edges = append(edges, edge{pc0, stmt, pc0 + stmt.numBytes, false})
 		}
 	}
 
@@ -476,39 +470,53 @@ func resolve(program *program, pc0 int, st0 state) ResolveResult {
 	}
 }
 
-func post(st0 state, stmt *stmt) (state, error) {
-	st1 := st0.Copy()
+func post(st0 *astate, edge edge) (*astate, error) {
+	st1 := emptyState()
+	stmt := edge.stmt
 
 	isStackTooShort := false
 
-	if stmt.opcode.IsPush() {
-		valueSet := ValueSet{values: make(map[AbsValue]bool)}
-		valueSet.values[AbsValue{kind: ConcreteValue, value: stmt.value, pc: stmt.pc}] = true
-		st1.Push(valueSet)
-	} else if stmt.operation.isDup {
-		valueSet := st1.stack[stmt.operation.opNum-1]
-		isStackTooShort = valueSet.isTop
-		st1.Push(valueSet)
-	} else if stmt.operation.isSwap {
-		opNum := stmt.operation.opNum
-		a := st1.stack[0]
-		b := st1.stack[opNum]
-
-		isStackTooShort =  a.isTop || b.isTop
-
-		st1.stack[0] = b
-		st1.stack[opNum] = a
-	} else {
-		for i := 0; i < stmt.operation.numPop; i++ {
-			s := st1.Pop()
-			isStackTooShort = isStackTooShort || s.isTop
+	for _, stack0 := range st0.stackset {
+		elm0 := stack0.values[0]
+		if edge.isJump {
+			if elm0.kind == ConcreteValue && elm0.value.IsUint64() && int(elm0.value.Uint64()) != edge.pc1 {
+				print("filtering out stack")
+				continue
+			}
 		}
-		for i := 0; i < stmt.operation.numPush; i++ {
-			valueSet := ValueSet{values: make(map[AbsValue]bool)}
-			valueSet.values[AbsValue{kind: TopValue, pc: stmt.pc}] = true
-			st1.Push(valueSet)
+
+		stack1 := stack0.Copy()
+
+		if stmt.opcode.IsPush() {
+			stack1.Push(AbsValueConcrete(stmt.value))
+		} else if stmt.operation.isDup {
+			value := stack1.values[stmt.operation.opNum-1]
+			stack1.Push(value)
+
+			isStackTooShort = isStackTooShort || value.fromDeepStack
+		} else if stmt.operation.isSwap {
+			opNum := stmt.operation.opNum
+			a := stack1.values[0]
+			b := stack1.values[opNum]
+			stack1.values[0] = b
+			stack1.values[opNum] = a
+
+			isStackTooShort = isStackTooShort || a.fromDeepStack || b.fromDeepStack
+		} else {
+			for i := 0; i < stmt.operation.numPop; i++ {
+				s := stack1.Pop(edge.pc0)
+				isStackTooShort = isStackTooShort || s.fromDeepStack
+			}
+
+			for i := 0; i < stmt.operation.numPush; i++ {
+				stack1.Push(AbsValueTop(edge.pc0, false))
+			}
 		}
+
+		st1.Add(stack1)
 	}
+
+
 
 	if isStackTooShort {
 		return st1, errors.New("abstract stack too short: reached unmodelled depth")
@@ -517,27 +525,30 @@ func post(st0 state, stmt *stmt) (state, error) {
 	}
 }
 
-func leq(st0 state, st1 state) bool {
-	if len(st0.stack) != len(st1.stack) || absStackLen != len(st0.stack) {
-		panic("mismatched stack len")
-	}
-
-	for i := 0; i < absStackLen; i++ {
-		if !ValueSetLeq(st0.stack[i], st1.stack[i]) {
+func Leq(st0 *astate, st1 *astate) bool {
+	for _, stack0 := range st0.stackset {
+		var found bool
+		for _, stack1 := range st1.stackset {
+			if stack0.Eq(stack1) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return false
 		}
 	}
 	return true
 }
 
-func lub(st0 state, st1 state) state {
+func Lub(st0 *astate, st1 *astate) *astate {
 	newState := emptyState()
-
-	for i := 0; i < absStackLen; i++ {
-		lub := ValueSetLub(st0.stack[i], st1.stack[i])
-		newState.stack = append(newState.stack, lub)
+	for _, stack := range st0.stackset {
+		newState.Add(stack)
 	}
-
+	for _, stack := range st1.stackset {
+		newState.Add(stack)
+	}
 	return newState
 }
 
@@ -547,7 +558,7 @@ type block struct {
 	stmts   []*stmt
 }
 
-func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]state, badJumps map[int]bool) {
+func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]*astate, badJumps map[int]bool) {
 //	es := make([]edge, len(edges))
 //	copy(es, edges)
 //	sortEdges(es)
@@ -661,9 +672,9 @@ func AbsIntCfgHarness(contract *Contract) error {
 
 	startPC := 0
 	codeLen := len(program.contract.Code)
-	D := make(map[int]state)
+	D := make(map[int]*astate)
 	for pc := 0; pc < codeLen; pc++ {
-		D[pc] = botState()
+		D[pc] = emptyState()
 	}
 	D[startPC] = botState()
 
@@ -707,7 +718,7 @@ func AbsIntCfgHarness(contract *Contract) error {
 		}
 		preDpc0 := D[e.pc0]
 		preDpc1 := D[e.pc1]
-		post1, err := post(preDpc0, e.stmt)
+		post1, err := post(preDpc0, e)
 		if err != nil {
 			if STOP_ON_ERROR  {
 				printAnlyState(program, prevEdgeMap, D, nil)
@@ -723,8 +734,8 @@ func AbsIntCfgHarness(contract *Contract) error {
 			fmt.Printf("Dprev\t\t%v\n", preDpc1)
 		}
 
-		if !leq(post1, preDpc1) {
-			postDpc1 := lub(post1, preDpc1)
+		if !Leq(post1, preDpc1) {
+			postDpc1 := Lub(post1, preDpc1)
 			if false {
 
 				fmt.Printf("\nedge %v %v\n", e.pc0, e.pc1)
