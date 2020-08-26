@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 	"runtime"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -170,6 +171,7 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 	}
 	index, stage := s.CurrentStage()
 
+	start := time.Now()
 	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
 	log.Info(message)
 
@@ -178,7 +180,9 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("%s DONE!", message))
+	if time.Since(start) > 30*time.Second {
+		log.Info(fmt.Sprintf("%s DONE!", message))
+	}
 	return nil
 }
 
@@ -186,6 +190,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		db = tx
 	}
+	start := time.Now()
 	log.Info("Unwinding...", "stage", string(stages.DBKeys[unwind.Stage]))
 	stage, err := s.StageByID(unwind.Stage)
 	if err != nil {
@@ -212,7 +217,9 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 		return err
 	}
 
-	log.Info("Unwinding... DONE!")
+	if time.Since(start) > 30*time.Second {
+		log.Info("Unwinding... DONE!")
+	}
 	return nil
 }
 
