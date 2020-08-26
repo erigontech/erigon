@@ -58,11 +58,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	tx, err := stateDB.Begin()
-	if err != nil {
-		return err
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = stateDB.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = stateDB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 
 	batch := tx.NewBatch()
 	defer batch.Rollback()
@@ -112,8 +120,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if err = batch.CommitAndBegin(); err != nil {
 				return err
 			}
-			if err = tx.CommitAndBegin(); err != nil {
-				return err
+			if !useExternalTx {
+				if err = tx.CommitAndBegin(); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -143,8 +153,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
-	if _, err = tx.Commit(); err != nil {
-		return err
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	log.Info("Completed on", "block", stageProgress)
 	s.Done()

@@ -237,7 +237,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
-		return c.Walk(func(k []byte, v []byte) (bool, error) {
+		return ethdb.ForEach(c, func(k []byte, v []byte) (bool, error) {
 			hi := dbutils.WrapHistoryIndex(v)
 			blockNums, exists, err := hi.Decode()
 			if err != nil {
@@ -391,7 +391,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
-		return c.Walk(func(k []byte, v []byte) (bool, error) {
+		return ethdb.ForEach(c, func(k []byte, v []byte) (bool, error) {
 			hi := dbutils.WrapHistoryIndex(v)
 			blockNums, exists, err := hi.Decode()
 			if err != nil {
@@ -528,7 +528,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 
 		c := tx.Cursor(dbutils.HeaderPrefix).Prefetch(CursorBatchSize)
-		if err := c.Walk(func(k, v []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 			if len(k) != 40 {
 				return true, nil
 			}

@@ -3,6 +3,7 @@ package ethdb
 import (
 	"context"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -116,7 +117,7 @@ func (m *mutation) BatchSize() int {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (m *mutation) IdealBatchSize() int {
-	return m.db.IdealBatchSize()
+	return int(512 * datasize.MB)
 }
 
 // WARNING: Merged mem/DB walk is not implemented
@@ -145,9 +146,9 @@ func (m *mutation) CommitAndBegin() error {
 
 func (m *mutation) Commit() (uint64, error) {
 	if metrics.Enabled {
-		if m.puts.Size() >= m.db.IdealBatchSize() {
+		if m.puts.Size() >= m.IdealBatchSize() {
 			defer dbCommitBigBatchTimer.UpdateSince(time.Now())
-		} else if m.puts.Len() < m.db.IdealBatchSize()/4 {
+		} else if m.puts.Len() < m.IdealBatchSize()/4 {
 			defer dbCommitSmallBatchTimer.UpdateSince(time.Now())
 		}
 	}
