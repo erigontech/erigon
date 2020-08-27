@@ -1171,6 +1171,7 @@ type Receiver struct {
 	currentIdx      int
 }
 
+func (r *Receiver) Root() common.Hash { panic("don't call me") }
 func (r *Receiver) Receive(
 	itemType trie.StreamItem,
 	accountKey []byte,
