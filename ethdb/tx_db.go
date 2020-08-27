@@ -140,10 +140,6 @@ func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
 	return 0, MultiPut(m.tx, tuples...)
 }
 
-func (m *TxDb) MultiPut2(bucket string, tuples ...[]byte) (uint64, error) {
-	return 0, MultiPut2(m.cursors[bucket], tuples...)
-}
-
 func MultiPut(tx Tx, tuples ...[]byte) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -200,51 +196,6 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 		}
 
 		bucketStart = bucketEnd
-	}
-	return nil
-}
-
-func MultiPut2(c Cursor, tuples ...[]byte) error {
-	putTimer := time.Now()
-
-	// move cursor to a first element in batch
-	// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
-	// can apply optimisations for this case
-	firstKey, _, err := c.Seek(tuples[0])
-	if err != nil {
-		return err
-	}
-	isEndOfBucket := firstKey == nil
-
-	total := len(tuples) / 2
-	for i := 0; i < len(tuples); i += 2 {
-		k := tuples[2*i]
-		v := tuples[2*i+1]
-		if isEndOfBucket {
-			if v == nil {
-				// nothing to delete after end of bucket
-			} else {
-				if err := c.Append(k, v); err != nil {
-					return err
-				}
-			}
-		} else {
-			if v == nil {
-				if err := c.Delete(k); err != nil {
-					return err
-				}
-			} else {
-				if err := c.Put(k, v); err != nil {
-					return err
-				}
-			}
-		}
-
-		if i%100_000 == 0 && time.Since(putTimer) > 30*time.Second {
-			progress := fmt.Sprintf("%.1fM/%.1fM", float64(i)/1_000_000, float64(total)/1_000_000)
-			log.Info("Write to db", "progress", progress)
-			putTimer = time.Now()
-		}
 	}
 	return nil
 }
