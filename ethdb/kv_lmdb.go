@@ -292,6 +292,8 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
+
+	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
 	tx, err := db.Begin(ctx, nil, false)
 	if err != nil {
 		return err
