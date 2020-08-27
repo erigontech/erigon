@@ -607,6 +607,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// begin tx at stage right after head/body download Or at first unwind stage
 		// it's temporary solution
 		d.stagedSync.BeforeStageRun(stages.Senders, func() error {
+			fmt.Printf("Try begin: canRunCycleInOneTransaction=%t\n", canRunCycleInOneTransaction)
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -617,6 +618,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return errTx
 		})
 		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
+			fmt.Printf("Try unwind begin: canRunCycleInOneTransaction=%t, id=%d\n", canRunCycleInOneTransaction, id)
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
