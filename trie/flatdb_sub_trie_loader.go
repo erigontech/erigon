@@ -282,9 +282,9 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 		if len(fstl.k) > common.HashLength {
 			fstl.itemType = StorageStreamItem
 			fstl.accountKey = nil
-			fstl.storageKey = append(fstl.storageKey[:0], fstl.k...)
+			fstl.storageKey = fstl.k // no reason to copy, because this "pointer and data" will valid until end of transaction
 			fstl.hashValue = nil
-			fstl.storageValue = append(fstl.storageValue[:0], fstl.v...)
+			fstl.storageValue = fstl.v
 			if fstl.k, fstl.v, err = c.Next(); err != nil {
 				return err
 			}
@@ -293,7 +293,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 			}
 		} else if len(fstl.k) > 0 {
 			fstl.itemType = AccountStreamItem
-			fstl.accountKey = append(fstl.accountKey[:0], fstl.k...)
+			fstl.accountKey = fstl.k
 			fstl.storageKey = nil
 			fstl.storageValue = nil
 			fstl.hashValue = nil
@@ -346,15 +346,15 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	if len(fstl.ihK) > common.HashLength {
 		fstl.itemType = SHashStreamItem
 		fstl.accountKey = nil
-		fstl.storageKey = append(fstl.storageKey[:0], fstl.ihK...)
-		fstl.hashValue = append(fstl.hashValue[:0], fstl.ihV...)
+		fstl.storageKey = fstl.ihK
+		fstl.hashValue = fstl.ihV
 		fstl.storageValue = nil
 	} else {
 		fstl.itemType = AHashStreamItem
-		fstl.accountKey = append(fstl.accountKey[:0], fstl.ihK...)
+		fstl.accountKey = fstl.ihK
 		fstl.storageKey = nil
 		fstl.storageValue = nil
-		fstl.hashValue = append(fstl.hashValue[:0], fstl.ihV...)
+		fstl.hashValue = fstl.ihV
 	}
 
 	// skip subtree

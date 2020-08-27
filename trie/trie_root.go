@@ -73,16 +73,16 @@ Then delete this account (SELFDESTRUCT).
 //
 // Each intermediate hash key firstly pass to RetainDecider, only if it returns "false" - such IH can be used.
 type FlatDBTrieLoader struct {
-	stateBucket, intermediateHashesBucket string
-	trace                                 bool
-	rd                                    RetainDecider
-	accAddrHashWithInc                    [40]byte // Concatenation of addrHash of the currently build account with its incarnation encoding
-	nextAccountKey                        [32]byte
-	k, v                                  []byte
-	ihK, ihV                              []byte
-
-	itemPresent bool
-	itemType    StreamItem
+	trace                    bool
+	itemPresent              bool
+	itemType                 StreamItem
+	stateBucket              string
+	intermediateHashesBucket string
+	rd                       RetainDecider
+	accAddrHashWithInc       [40]byte // Concatenation of addrHash of the currently build account with its incarnation encoding
+	nextAccountKey           [32]byte
+	k, v                     []byte
+	ihK, ihV                 []byte
 
 	// Storage item buffer
 	storageKey   []byte
@@ -102,6 +102,8 @@ type FlatDBTrieLoader struct {
 // it uses indivitual `RetainDecider`
 type RootHashAggregator struct {
 	trace        bool
+	wasIH        bool
+	wasIHStorage bool
 	hc           HashCollector
 	root         common.Hash
 	currStorage  bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
@@ -112,8 +114,6 @@ type RootHashAggregator struct {
 	value        bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groups       []uint16
 	hb           *HashBuilder
-	wasIH        bool
-	wasIHStorage bool
 	hashData     GenStructStepHashData
 	a            accounts.Account
 	leafData     GenStructStepLeafData
@@ -135,22 +135,17 @@ func NewFlatDBTrieLoader(stateBucket, intermediateHashesBucket string) *FlatDBTr
 }
 
 // Reset prepares the loader for reuse
-func (l *FlatDBTrieLoader) Reset(rl RetainDecider, hc HashCollector, trace bool) error {
+func (l *FlatDBTrieLoader) Reset(rd RetainDecider, hc HashCollector, trace bool) error {
 	l.defaultReceiver.Reset(hc, trace)
 	l.hc = hc
 	l.receiver = l.defaultReceiver
-
 	l.trace = trace
-	l.rd = rl
+	l.rd = rd
 	l.itemPresent = false
 	if l.trace {
 		fmt.Printf("----------\n")
-		fmt.Printf("RebuildTrie\n")
+		fmt.Printf("CalcTrieRoot\n")
 	}
-	if l.trace {
-		fmt.Printf("l.rd: %s\n", l.rd)
-	}
-
 	return nil
 }
 
@@ -168,7 +163,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 			return err
 		}
 		if isIHSequence {
-			l.k = common.CopyBytes(l.ihK)
+			l.k = l.ihK
 			return nil
 		}
 		if l.k, l.v, err = c.Seek([]byte{}); err != nil {
@@ -222,9 +217,9 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		if len(l.k) > common.HashLength {
 			l.itemType = StorageStreamItem
 			l.accountKey = nil
-			l.storageKey = append(l.storageKey[:0], l.k...)
+			l.storageKey = l.k // no reason to copy, because this "pointer and data" will valid until end of transaction
 			l.hashValue = nil
-			l.storageValue = append(l.storageValue[:0], l.v...)
+			l.storageValue = l.v
 			if l.k, l.v, err = c.Next(); err != nil {
 				return err
 			}
@@ -233,11 +228,11 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 			}
 		} else if len(l.k) > 0 {
 			l.itemType = AccountStreamItem
-			l.accountKey = append(l.accountKey[:0], l.k...)
+			l.accountKey = l.k
 			l.storageKey = nil
 			l.storageValue = nil
 			l.hashValue = nil
-			if err := l.accountValue.DecodeForStorage(l.v); err != nil {
+			if err = l.accountValue.DecodeForStorage(l.v); err != nil {
 				return fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
 			copy(l.accAddrHashWithInc[:], l.k)
@@ -288,15 +283,15 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 	if len(l.ihK) > common.HashLength {
 		l.itemType = SHashStreamItem
 		l.accountKey = nil
-		l.storageKey = append(l.storageKey[:0], l.ihK...)
-		l.hashValue = append(l.hashValue[:0], l.ihV...)
+		l.storageKey = l.ihK
+		l.hashValue = l.ihV
 		l.storageValue = nil
 	} else {
 		l.itemType = AHashStreamItem
-		l.accountKey = append(l.accountKey[:0], l.ihK...)
+		l.accountKey = l.ihK
 		l.storageKey = nil
 		l.storageValue = nil
-		l.hashValue = append(l.hashValue[:0], l.ihV...)
+		l.hashValue = l.ihV
 	}
 
 	// skip subtree
@@ -313,7 +308,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		return err
 	}
 	if isIHSequence {
-		l.k = common.CopyBytes(l.ihK)
+		l.k = l.ihK
 		return nil
 	}
 	if l.k, l.v, err = c.Seek(next); err != nil {
@@ -345,7 +340,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database) (common.Hash, error) 
 		kv ethdb.KV
 	)
 
-	// If method executed withing transaction - use it, or open new read transaction
+	// If method executed within transaction - use it, or open new read transaction
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		tx = hasTx.Tx()
 	} else {
