@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/torrent"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -557,17 +558,42 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	var db *ethdb.ObjectDatabase
 	var err error
 
-	var snapshotOpts []ethdb.SnapshotUsageOpts
+	var snapshotOpts []ethdb.SnapshotUsageOpt
 	if n.config.SnapshotMode.Headers {
-		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpts{
-			Path: "/media/b00ris/nvme/snapshots/headers",
-			ForBuckets: [][]byte{[]byte(dbutils.HeaderPrefix)},
+		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
+			Path: n.config.ResolvePath(name+torrent.HeadersSnapshotName),
+			ForBuckets: map[string]struct{}{
+				dbutils.HeaderPrefix: {},
+				dbutils.DatabaseInfoBucket: {},
+			},
 		})
 	}
 	if n.config.SnapshotMode.Bodies {
-		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpts{
-			Path: "/media/b00ris/nvme/snapshots/bodies",
-			ForBuckets: [][]byte{[]byte(dbutils.BlockBodyPrefix)},
+		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
+			Path: n.config.ResolvePath(name+torrent.BodiesSnapshotName),
+			ForBuckets: map[string]struct{}{
+				dbutils.BlockBodyPrefix: {},
+				dbutils.DatabaseInfoBucket: {},
+			},
+		})
+	}
+	if n.config.SnapshotMode.State {
+		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
+			Path: n.config.ResolvePath(name+torrent.StateSnapshotName),
+			ForBuckets: map[string]struct{}{
+				dbutils.CurrentStateBucket: {},
+				dbutils.PlainStateBucket: {},
+				dbutils.DatabaseInfoBucket: {},
+			},
+		})
+	}
+	if n.config.SnapshotMode.Receipts {
+		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
+			Path: n.config.ResolvePath(name+torrent.ReceiptsSnapshotName),
+			ForBuckets: map[string]struct{}{
+				dbutils.BlockReceiptsPrefix: {},
+				dbutils.DatabaseInfoBucket: {},
+			},
 		})
 	}
 

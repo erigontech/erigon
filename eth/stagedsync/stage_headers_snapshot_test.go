@@ -3,9 +3,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"math/big"
@@ -14,7 +16,7 @@ import (
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
-	snPath:=os.TempDir()+"sn"
+	snPath:=os.TempDir()+"/sn"
 	snVK:=ethdb.NewLMDB().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers:=generateHeaders(10)
@@ -24,7 +26,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 			if err!=nil {
 				panic(err)
 			}
-			fmt.Println("Put", header.Number, len(headerBytes))
+			fmt.Println("Put", header.Number, common.Bytes2Hex(dbutils.HeaderKey(header.Number.Uint64(), header.Hash())), len(headerBytes))
 			err = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if err!=nil {
 				panic(err)
@@ -38,8 +40,8 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	snVK.Close()
 
 	db:=ethdb.NewLMDB().InMem().MustOpen()
-	snKV:=ethdb.NewSnapshotKV().Path(snPath).DB(db).Open()
-	err=GenerateHeaderIndexes(ethdb.NewObjectDatabase(snKV))
+	snKV:=ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix).Path(snPath).DB(db).Open()
+	err=GenerateHeaderIndexes(ethdb.NewObjectDatabase(snKV), make(chan struct{}),&StageState{&State{}, stages.DownloadHeadersSnapshot, 10,nil })
 	if err!=nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,6 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	for i, header:=range headers {
 		td=td.Add(td, header.Difficulty)
 		canonical:=rawdb.ReadCanonicalHash(snDB,header.Number.Uint64())
-		fmt.Println(canonical)
 		if canonical!=header.Hash() {
 			t.Error(i, "canonical not correct", canonical)
 		}

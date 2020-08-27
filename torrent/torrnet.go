@@ -39,7 +39,7 @@ type Client struct {
 }
 
 func (c *Client) DownloadHeadersSnapshot() error  {
-	pc,err:=storage.NewBoltPieceCompletion(c.datadir+HeadersSnapshotName+"_pc")
+	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/"+HeadersSnapshotName+"_pc")
 	if err!=nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (c *Client) DownloadHeadersSnapshot() error  {
 		InfoHash:    metainfo.NewHashFromHex(HeadersSnapshotHash),
 		DisplayName: HeadersSnapshotName,
 		ChunkSize:   16*1024,
-		Storage: storage.NewFileWithCompletion(c.datadir+HeadersSnapshotName,pc),
+		Storage: storage.NewFileWithCompletion(c.datadir+"/"+HeadersSnapshotName,pc),
 	})
 	peerID:=c.cli.PeerID()
 	fmt.Println(common.Bytes2Hex(peerID[:]),new)
@@ -91,7 +91,10 @@ func (c *Client) DownloadHeadersSnapshot() error  {
 //only for mainnet
 const (
 	HeadersSnapshotName = "headers"
-	HeadersSnapshotHash = "4cb9a86271138936d7430cfad0358bab00d15ec2"
+	BodiesSnapshotName = "bodies"
+	StateSnapshotName = "state"
+	ReceiptsSnapshotName = "receipts"
+	HeadersSnapshotHash = "ab00bf8bc8d159151b35a9c62c6a5c6512187829"
 	//HeadersSnapshotHash = "f291a6986efbc5894840a0fd97e30c5dd38ba4c5"
 	BlocksSnapshotHash = "9e329198eba80cec81052533745f0484a281d300"
 )

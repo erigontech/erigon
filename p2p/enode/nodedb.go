@@ -75,7 +75,7 @@ type DB struct {
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(path string) (*DB, error) {
+func OpenDB(path string, snapshotsOpts ...ethdb.SnapshotUsageOpts) (*DB, error) {
 	if path == "" {
 		return newMemoryDB()
 	}
