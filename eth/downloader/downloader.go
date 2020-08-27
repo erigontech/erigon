@@ -644,7 +644,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
-		if !canRunCycleInOneTransaction {
+		if canRunCycleInOneTransaction {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+
 			log.Info("Commit blocks")
 			_, errTx := tx.Commit()
 			return errTx
