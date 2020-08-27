@@ -73,7 +73,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	}
 
 	batch := tx.NewBatch()
-	defer tx.Rollback()
+	defer batch.Rollback()
 
 	engine := chainContext.Engine()
 
