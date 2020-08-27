@@ -112,7 +112,7 @@ type RootHashAggregator struct {
 	curr         bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ         bytes.Buffer
 	value        bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups       []uint16
+	groups       []uint16     // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
 	hb           *HashBuilder
 	hashData     GenStructStepHashData
 	a            accounts.Account
