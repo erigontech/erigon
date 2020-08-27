@@ -59,8 +59,8 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewTrieRootLoader()
-	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
+	loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	if err := loader.Reset(db, trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -215,9 +215,9 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewTrieRootLoader()
+	loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, trie.NewRetainList(0), hashCollector, false); err != nil {
+	if err := loader.Reset(db, unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -295,9 +295,9 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewTrieRootLoader()
+	loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, trie.NewRetainList(0), hashCollector, false); err != nil {
+	if err := loader.Reset(db, unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()

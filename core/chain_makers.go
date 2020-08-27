@@ -291,8 +291,8 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					unfurl.AddKey(storageChange.Key)
 				}
 			}
-			loader := trie.NewTrieRootLoader()
-			if err := loader.Reset(dbCopy, unfurl, trie.NewRetainList(0), hashCollector, false); err != nil {
+			loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+			if err := loader.Reset(dbCopy, unfurl, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if hash, err := loader.CalcTrieRoot(); err == nil {

@@ -81,10 +81,11 @@ referred to as "State root". It is part of block header, and is contained in the
 `Header` [core/types/block.go](../../core/types/block.go)
 
 Prior to Byzantium release, the state root was also part of every transaction receipt, and was contained in the field `PostState`
-of the type `Receipt` [core/types/receipt.go](../../core/types/receipt.go). Side note: that is why the member function
-`ComputeTrieRoots` in the type `TrieDbState` [core/state/database.go](../../core/state/database.go) returns a slice of hashes,
-rather than just a single hash. For pre-Byzantium blocks, this function computes state roots for each transaction receipt, and
-another one for the block header. For post-Byzantium blocks, it always returns a singleton slice.
+of the type `Receipt` [core/types/receipt.go](../../core/types/receipt.go).
+
+To keep the Merkle Patricia trie of Ethereum state balanced, all the keys (either addresses of Ethereum accounts and contracts,
+or storage positions within contract storage) are converted into their respective hashes using `Keccak256` hash function. 
+`PlainStateBucket` stores state with keys before hashing, `CurrentStateBucket` store same data but keys are hashed.  
 
 ### Hexary radix "Patricia" tree
 Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computing the state root. For the purposes of
@@ -108,8 +109,7 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 The entire collection of keys form one implicit prefix group, with the empty prefix.
 
 Merkle Patricia tree hashing rules first remove redundant parts of each key within groups, making key-value
-pairs so-called "leaf nodes". They correspond to `shortNode` type in the file [trie/node.go](../../trie/node.go).
-To produce the hash of a leaf node, one applies the hash function to the two-piece RLP (Recursive Length Prefix).
+pairs so-called "leaf nodes". To produce the hash of a leaf node, one applies the hash function to the two-piece RLP (Recursive Length Prefix).
 The first piece is the representation of the non-redundant part of the key. And the second piece is the
 representation of the leaf value corresponding to the key, as shown in the member function `hashChildren` of the
 type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
@@ -124,8 +124,7 @@ shown in the member function `hashChildren` of the type `hasher` [trie/hasher.go
 
 Sometimes, nested prefix groups have longer prefixes than 1-digit extension of their encompassing prefix group, as it is the case
 in the group of items `12, 13` or in the group of items `29, 30, 31`. Such cases give rise to so-called "extension nodes".
-They correspond to `shortNode` type in [trie/node.go](../../trie/node.go), the same type as leaf nodes. However, the value
-in an extension node is always the representation of a prefix group, rather than a leaf. To produce the hash of an extension node,
+ However, the value in an extension node is always the representation of a prefix group, rather than a leaf. To produce the hash of an extension node,
 one applies the hash function to the two-piece RLP. The first piece is the representation of the non-redundant part of the key.
 The second part is the hash of the branch node representing the prefix group. This shown in the member function `hashChildren` of the
 type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
@@ -455,57 +454,25 @@ pushing `nil` instead. The hash of would-be account leaf node is pushed onto the
 corresponding hash onto the hash stack. This opcode is introduced because there is no way of achieving its semantics
 by means of other opcodes.
 
-Transaction processing
-----------------------
-The main function of Ethereum software is to continuously process blocks and generate some information as the result of this processing.
-The diagram below shows schematically the main types of information being processed and generated.
-![processing](processing_blocks.png)
-For an ordinary (non-mining) node,
-block headers and block bodies are coming from the outside, via the peer-to-peer network. While processing those, the node maintains
-the view of the current state of the Ethereum (bright yellow box), as well as generates the timestamped history of the changes in the state
-(this is optional). History of the state is shown as a series of dull yellow boxes. Some transactions also produce log messages, and those
-are included into transaction receipts. Receipts are also optionally persisted and are shown as green stacks of sheets. Turbo-geth's
-default mode of operation does not persist the receipts, but recalculates them on demand. It looks up the state at the point just before
-the transaction in question (for which we would like a receipt), re-executes transaction, and re-generates the receipt. This can only
-work if the history of the state is available for the period of time including the transaction.
-To turn on the recording of the receipts instead of relying on the re-generation (access to the recorded receipts is normally faster,
-but the recorded receipt take a lot of disk space), one needs to invoke `EnableReceipts(true)` on the object of the type
-`core.Blockchain`.
-To turn off the recording of the history of the state, one needs pass the corresponding field `NoHistory` as `true` in the `cacheConfig`
-parameter when creating a new instance of `core.Blockchain` by invoking `NewBlockchain`.
-![processing](processing.png)
 
-Database
---------
-### Preimages
-To keep the Merkle Patricia trie of Ethereum state balanced, all the keys (either addresses of Ethereum accounts and contracts,
-or storage positions within contract storage) are converted into their respective hashes using `Keccak256` hash function.
-Since that function is preimage resistant, it is impossible to obtain the original key from its hash.
-During some operations that involve iteration over the Ethereum state, only hashes of the keys are available, but users
-are expecting the keys themselves. Examples:
+### Merkle trie root calculation
 
- * `GetModifiedAccounts` computing the list of account addresses that had any changes within the given range of blocks
- * `StorageRangeAt` computing the list of non-empty storage positions in the given contract at the given block number
-
-To convert the hashes of keys back into the original keys (also known as preimages), a specially dedicated bucket is kept
-in the database. Keys in this bucket are the hashes, and the values are the preimages. The name of this bucket is
-contained in the constant `dbutils.PreimagePrefix`. Preimage bucket is being updated in the function `savePreimage`
-of the type `TrieDbState` in `core/state/database.go`.
-
-Merkle trie root calculation
-----------------------
-"Merkle trie root calculation" completely decoupled from "Blocks execution". 
-Theoretically: "Root calculation" starts from state, build from state keys - trie, 
+**Theoretically:** "Merkle trie root calculation" starts from state, build from state keys - trie, 
 on each level of trie calculates intermediate hash of underlying data. 
-Practically: "Preorder trie traversal" (Preorder - visit Root, visit Left, visit Right). But, let's make couple observations to make traversal over huge state effitient.
-Observation 1: `CurrentStateBucket` already stores state keys in sorted way. 
+
+**Practically:** It can be implemented as "Preorder trie traversal" (Preorder - visit Root, visit Left, visit Right). 
+But, let's make couple observations to make traversal over huge state efficient.
+
+**Observation 1:** `CurrentStateBucket` already stores state keys in sorted way. 
 Iteration over this bucket will retrieve keys in same order as "Preorder trie traversal". 
-Observation 2: each Eth block - changes not big part of state - it means most of Merkle trie intermediate hashes will not change. 
+
+**Observation 2:** each Eth block - changes not big part of state - it means most of Merkle trie intermediate hashes will not change. 
 It means we effectively can cache them. `IntermediateTrieHashBucket` stores "Intermediate hashes of all Merkle trie levels".
 It also sorted and Iteration over `IntermediateTrieHashBucket` will retrieve keys in same order as "Preorder trie traversal".
-Implementation: by opening 1 Cursor on state and 1 more Cursor on intermediate hashes bucket - can implement
-"Preorder trie traversal" - and implementation will do only "sequential reads" and "jumps forward" - been hardware-friendly.
-1 stack keeps all accumulated hashes, when sub-trie traverse ends - all hashes pulled from stack -> hashed -> new hash puts on stack - it's hash of visited sub-trie.     
+
+**Implementation:** by opening 1 Cursor on state and 1 more Cursor on intermediate hashes bucket - we will receive data in
+ order of "Preorder trie traversal". Cursors will only do "sequential reads" and "jumps forward" - been hardware-friendly.
+1 stack keeps all accumulated hashes, when sub-trie traverse ends - all hashes pulled from stack -> hashed -> new hash puts on stack - it's hash of visited sub-trie (it emulates recursive nature of "Preorder trie traversal" algo).     
 
 Imagine that account with key 0000....00 (64 zeroes, 32 bytes of zeroes) changed. 
 Here is an example sequence which can be seen by running 2 Cursors:
@@ -525,17 +492,34 @@ Here is an example sequence which can be seen by running 2 Cursors:
 ff                   // key which came from cache, it is "next sub-trie" (1 byte shorter key), use it, jump to "next sub-trie"
 nil                  // db returned nil - means no more keys there, done   
 ```
-On practice Trie is no full - it means after account key "{30 zero bytes}0000" may come "{5 zero bytes}01" and amount of iterations will not be big.  
+On practice Trie is no full - it means after account key `{30 zero bytes}0000` may come `{5 zero bytes}01` and amount of iterations will not be big.  
 
-Implementation is in ![trie/flatdb_sub_trie_loader.go](../..trie/flatdb_sub_trie_loader.go)
+### Attack - by delete account with huge state
 
-Account key (hashed) - 32 bytes. 
-Storage key (hashed) - 64 bytes (acc_hash+storage_hash). 
-Eth white-paper builds Trie not on bytes, but split each byte of key to 2 parts - high/low-nibbles:
-```
-// HI_NIBBLE(b) = (b >> 4) & 0x0F
-// LO_NIBBLE(b) = b & 0x0F
-// For example 1 byte "0xf4" transformed to 2 bytes (nibbles) "0x0f" and "0x04", and Merkle Trie built on nibbles 
-```
+It's possible to create Account with very big storage (increase storage size during many blocks). 
+Then delete this account (SELFDESTRUCT). 
+ Naive storage deletion may take several minutes - depends on Disk speed - means every Eth client 
+ will not process any incoming block that time. To protect against this attack: 
+ PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" - 
+ just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
+ `{account_key}{incarnation}{storage_hash}`. And [trie/trie_root.go](../../trie/trie_root.go) has logic - every time 
+ when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or IntermediateTrieHashes with another incarnation.
 
-More details read in ![trie/gen_struct_step.go](../..trie/gen_struct_step.go)
+Transaction processing
+----------------------
+
+The main function of Ethereum software is to continuously process blocks and generate some information as the result of this processing.
+The diagram below shows schematically the main types of information being processed and generated.
+![processing](processing_blocks.png)
+
+For an ordinary (non-mining) node,
+block headers and block bodies are coming from the outside, via the peer-to-peer network. While processing those, the node maintains
+the view of the current state of the Ethereum (bright yellow box), as well as generates the timestamped history of the changes in the state
+(this is optional). History of the state is shown as a series of dull yellow boxes. Some transactions also produce log messages, and those
+are included into transaction receipts. Receipts are also optionally persisted and are shown as green stacks of sheets. Turbo-geth's
+default mode of operation does not persist the receipts, but recalculates them on demand. It looks up the state at the point just before
+the transaction in question (for which we would like a receipt), re-executes transaction, and re-generates the receipt. This can only
+work if the history of the state is available for the period of time including the transaction.
+
+[See more about blocks and transactions processing here](../../eth/stagedsync/README.md)
+
