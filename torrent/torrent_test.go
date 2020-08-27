@@ -9,6 +9,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ var trc = [][]string{
 	},
 }
 func TestNameLeech(t *testing.T) {
-	hash:=metainfo.NewHashFromHex("3b250d36911b78c2e82d7cde8f1b7affdf7ed8f2")
+	hash:=metainfo.NewHashFromHex("f291a6986efbc5894840a0fd97e30c5dd38ba4c5")
 	cfg:=torrent.NewDefaultClientConfig()
 	cfg.DataDir=os.TempDir()
 	cfg.ListenPort=0
@@ -43,6 +44,7 @@ func TestNameLeech(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
+
 	tr, new, err:=leecher.AddTorrentSpec(&torrent.TorrentSpec{
 		Trackers: trc,
 		InfoHash: hash,
@@ -66,9 +68,9 @@ func TestNameLeech(t *testing.T) {
 	tr.DownloadAll()
 
 	leecher.WaitAll()
-	//c:=make(chan os.Signal)
-	//signal.Notify(c, os.Interrupt)
-	//<-c
+	c:=make(chan os.Signal)
+	signal.Notify(c, os.Interrupt)
+	<-c
 }
 
 func TestName(t *testing.T) {

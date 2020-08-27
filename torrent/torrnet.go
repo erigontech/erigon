@@ -37,3 +37,9 @@ func (c *Client) DownloadHeadersSnapshot() error  {
 	//c.cli.AddTorrentInfoHash()
 	return nil
 }
+
+//only for mainnet
+const (
+	HeadersSnapshotHash = ""
+	BlocksSnapshotHash = ""
+)
