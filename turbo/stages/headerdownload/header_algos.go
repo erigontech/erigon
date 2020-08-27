@@ -1,15 +1,21 @@
 package headerdownload
 
 import (
+	"bufio"
+	"container/heap"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/big"
+	"os"
 	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -318,13 +324,115 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	return NoPenalty
 }
 
+// Heap element for merging together header files
+type HeapElem struct {
+	file        *os.File
+	reader      io.Reader
+	blockHeight uint64
+	header      *types.Header
+}
+
+type Heap []HeapElem
+
+func (h Heap) Len() int {
+	return len(h)
+}
+
+func (h Heap) Less(i, j int) bool {
+	return h[i].blockHeight < h[j].blockHeight
+}
+
+func (h Heap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *Heap) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*h = append(*h, x.(HeapElem))
+}
+
+func (h *Heap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
 func (hd *HeaderDownload) RecoverFromFiles() error {
-	files, err := ioutil.ReadDir(hd.filesDir)
+	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, f := range files {
-		fmt.Println(f.Name())
+	h := &Heap{}
+	heap.Init(h)
+	for _, fileInfo := range fileInfos {
+		f, err := os.Open(fileInfo.Name())
+		if err != nil {
+			return fmt.Errorf("open file %s: %v", fileInfo.Name(), err)
+		}
+		r := bufio.NewReader(f)
+		var header types.Header
+		if err = rlp.Decode(r, &header); err != nil {
+			if !errors.Is(err, io.EOF) {
+				fmt.Printf("decoding rlp header from file: %v\n", err)
+			}
+			continue
+		}
+		he := HeapElem{file: f, reader: r, blockHeight: header.Number.Uint64(), header: &header}
+		heap.Push(h, he)
+	}
+	var prevHeight uint64
+	var parentAnchors = make(map[common.Hash]*Anchor)
+	var parentDiffs = make(map[common.Hash]*uint256.Int)
+	var childAnchors = make(map[common.Hash]*Anchor)
+	var childDiffs = make(map[common.Hash]*uint256.Int)
+	for h.Len() > 0 {
+		he := (heap.Pop(h)).(HeapElem)
+		if he.blockHeight > prevHeight {
+			// Clear out parent map and move childMap to its place
+			childAnchors = make(map[common.Hash]*Anchor)
+			childDiffs = make(map[common.Hash]*uint256.Int)
+			if he.blockHeight == prevHeight+1 {
+				parentAnchors = childAnchors
+				parentDiffs = childDiffs
+			} else {
+				// Skipping the level, so no connection between grand-parents and grand-children
+				parentAnchors = make(map[common.Hash]*Anchor)
+				parentDiffs = make(map[common.Hash]*uint256.Int)
+			}
+			prevHeight = he.blockHeight
+		}
+		// Since this header has already been processed, we do not expect overflow
+		headerDiff, overflow := uint256.FromBig(he.header.Difficulty)
+		if overflow {
+			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
+		}
+		if parentAnchor, found := parentAnchors[he.header.ParentHash]; found {
+			parentDiff := parentDiffs[he.header.ParentHash]
+			cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
+			if err := hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff); err != nil {
+				return fmt.Errorf("add header as tip: %v", err)
+			}
+		} else {
+			// Add header as anchor
+			//TODO
+			hd.addHeaderAsAnchor(he.header, 0, uint256.Int{})
+		}
+		var header types.Header
+		if err = rlp.Decode(he.reader, &h); err == nil {
+			he.blockHeight = header.Number.Uint64()
+			he.header = &header
+			heap.Push(h, he)
+		} else {
+			if !errors.Is(err, io.EOF) {
+				fmt.Printf("decoding rlp header from file: %v\n", err)
+			}
+			if err = he.file.Close(); err != nil {
+				fmt.Printf("closing file: %v\n", err)
+			}
+		}
 	}
 	return nil
 }
