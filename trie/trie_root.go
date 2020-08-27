@@ -413,29 +413,29 @@ func (l *FlatDBTrieLoader) logProgress() {
 	log.Info("Calculating Merkle root", "current key", k)
 }
 
-func (dr *RootHashAggregator) RetainNothing(prefix []byte) bool {
+func (r *RootHashAggregator) RetainNothing(prefix []byte) bool {
 	return false
 }
 
-func (dr *RootHashAggregator) Reset(hc HashCollector, trace bool) {
-	dr.hc = hc
-	dr.curr.Reset()
-	dr.succ.Reset()
-	dr.value.Reset()
-	dr.groups = dr.groups[:0]
-	dr.a.Reset()
-	dr.hb.Reset()
-	dr.wasIH = false
-	dr.currStorage.Reset()
-	dr.succStorage.Reset()
-	dr.valueStorage.Reset()
-	dr.wasIHStorage = false
-	dr.root = common.Hash{}
-	dr.trace = trace
-	dr.hb.trace = trace
+func (r *RootHashAggregator) Reset(hc HashCollector, trace bool) {
+	r.hc = hc
+	r.curr.Reset()
+	r.succ.Reset()
+	r.value.Reset()
+	r.groups = r.groups[:0]
+	r.a.Reset()
+	r.hb.Reset()
+	r.wasIH = false
+	r.currStorage.Reset()
+	r.succStorage.Reset()
+	r.valueStorage.Reset()
+	r.wasIHStorage = false
+	r.root = common.Hash{}
+	r.trace = trace
+	r.hb.trace = trace
 }
 
-func (dr *RootHashAggregator) Receive(itemType StreamItem,
+func (r *RootHashAggregator) Receive(itemType StreamItem,
 	accountKey []byte,
 	storageKey []byte,
 	accountValue *accounts.Account,
@@ -445,262 +445,262 @@ func (dr *RootHashAggregator) Receive(itemType StreamItem,
 ) error {
 	switch itemType {
 	case StorageStreamItem:
-		dr.advanceKeysStorage(storageKey, true /* terminator */)
-		if dr.currStorage.Len() > 0 {
-			if err := dr.genStructStorage(); err != nil {
+		r.advanceKeysStorage(storageKey, true /* terminator */)
+		if r.currStorage.Len() > 0 {
+			if err := r.genStructStorage(); err != nil {
 				return err
 			}
 		}
-		dr.saveValueStorage(false, storageValue, hash)
+		r.saveValueStorage(false, storageValue, hash)
 	case SHashStreamItem:
-		dr.advanceKeysStorage(storageKey, false /* terminator */)
-		if dr.currStorage.Len() > 0 {
-			if err := dr.genStructStorage(); err != nil {
+		r.advanceKeysStorage(storageKey, false /* terminator */)
+		if r.currStorage.Len() > 0 {
+			if err := r.genStructStorage(); err != nil {
 				return err
 			}
 		}
-		dr.saveValueStorage(true, storageValue, hash)
+		r.saveValueStorage(true, storageValue, hash)
 	case AccountStreamItem:
-		dr.advanceKeysAccount(accountKey, true /* terminator */)
-		if dr.curr.Len() > 0 && !dr.wasIH {
-			dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
-			if dr.currStorage.Len() > 0 {
-				if err := dr.genStructStorage(); err != nil {
+		r.advanceKeysAccount(accountKey, true /* terminator */)
+		if r.curr.Len() > 0 && !r.wasIH {
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			if r.currStorage.Len() > 0 {
+				if err := r.genStructStorage(); err != nil {
 					return err
 				}
 			}
-			if dr.currStorage.Len() > 0 {
-				if len(dr.groups) >= 2*common.HashLength {
-					dr.groups = dr.groups[:2*common.HashLength-1]
+			if r.currStorage.Len() > 0 {
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
 				}
-				for len(dr.groups) > 0 && dr.groups[len(dr.groups)-1] == 0 {
-					dr.groups = dr.groups[:len(dr.groups)-1]
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
 				}
-				dr.currStorage.Reset()
-				dr.succStorage.Reset()
-				dr.wasIHStorage = false
+				r.currStorage.Reset()
+				r.succStorage.Reset()
+				r.wasIHStorage = false
 				// There are some storage items
-				dr.accData.FieldSet |= AccountFieldStorageOnly
+				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
-		if dr.curr.Len() > 0 {
-			if err := dr.genStructAccount(); err != nil {
+		if r.curr.Len() > 0 {
+			if err := r.genStructAccount(); err != nil {
 				return err
 			}
 		}
-		if err := dr.saveValueAccount(false, accountValue, hash); err != nil {
+		if err := r.saveValueAccount(false, accountValue, hash); err != nil {
 			return err
 		}
 	case AHashStreamItem:
-		dr.advanceKeysAccount(accountKey, false /* terminator */)
-		if dr.curr.Len() > 0 && !dr.wasIH {
-			dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
-			if dr.currStorage.Len() > 0 {
-				if err := dr.genStructStorage(); err != nil {
+		r.advanceKeysAccount(accountKey, false /* terminator */)
+		if r.curr.Len() > 0 && !r.wasIH {
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			if r.currStorage.Len() > 0 {
+				if err := r.genStructStorage(); err != nil {
 					return err
 				}
 			}
-			if dr.currStorage.Len() > 0 {
-				if len(dr.groups) >= 2*common.HashLength {
-					dr.groups = dr.groups[:2*common.HashLength-1]
+			if r.currStorage.Len() > 0 {
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
 				}
-				for len(dr.groups) > 0 && dr.groups[len(dr.groups)-1] == 0 {
-					dr.groups = dr.groups[:len(dr.groups)-1]
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
 				}
-				dr.currStorage.Reset()
-				dr.succStorage.Reset()
-				dr.wasIHStorage = false
+				r.currStorage.Reset()
+				r.succStorage.Reset()
+				r.wasIHStorage = false
 				// There are some storage items
-				dr.accData.FieldSet |= AccountFieldStorageOnly
+				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
-		if dr.curr.Len() > 0 {
-			if err := dr.genStructAccount(); err != nil {
+		if r.curr.Len() > 0 {
+			if err := r.genStructAccount(); err != nil {
 				return err
 			}
 		}
-		if err := dr.saveValueAccount(true, accountValue, hash); err != nil {
+		if err := r.saveValueAccount(true, accountValue, hash); err != nil {
 			return err
 		}
 	case CutoffStreamItem:
-		if dr.trace {
+		if r.trace {
 			fmt.Printf("storage cuttoff %d\n", cutoff)
 		}
 
-		dr.cutoffKeysAccount(cutoff)
-		if dr.curr.Len() > 0 && !dr.wasIH {
-			dr.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
-			if dr.currStorage.Len() > 0 {
-				if err := dr.genStructStorage(); err != nil {
+		r.cutoffKeysAccount(cutoff)
+		if r.curr.Len() > 0 && !r.wasIH {
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			if r.currStorage.Len() > 0 {
+				if err := r.genStructStorage(); err != nil {
 					return err
 				}
 			}
-			if dr.currStorage.Len() > 0 {
-				if len(dr.groups) >= 2*common.HashLength {
-					dr.groups = dr.groups[:2*common.HashLength-1]
+			if r.currStorage.Len() > 0 {
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
 				}
-				for len(dr.groups) > 0 && dr.groups[len(dr.groups)-1] == 0 {
-					dr.groups = dr.groups[:len(dr.groups)-1]
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
 				}
-				dr.currStorage.Reset()
-				dr.succStorage.Reset()
-				dr.wasIHStorage = false
+				r.currStorage.Reset()
+				r.succStorage.Reset()
+				r.wasIHStorage = false
 				// There are some storage items
-				dr.accData.FieldSet |= AccountFieldStorageOnly
+				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
-		if dr.curr.Len() > 0 {
-			if err := dr.genStructAccount(); err != nil {
+		if r.curr.Len() > 0 {
+			if err := r.genStructAccount(); err != nil {
 				return err
 			}
 		}
-		if dr.curr.Len() > 0 {
-			if len(dr.groups) > cutoff {
-				dr.groups = dr.groups[:cutoff]
+		if r.curr.Len() > 0 {
+			if len(r.groups) > cutoff {
+				r.groups = r.groups[:cutoff]
 			}
-			for len(dr.groups) > 0 && dr.groups[len(dr.groups)-1] == 0 {
-				dr.groups = dr.groups[:len(dr.groups)-1]
+			for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+				r.groups = r.groups[:len(r.groups)-1]
 			}
 		}
-		if dr.hb.hasRoot() {
-			dr.root = dr.hb.rootHash()
+		if r.hb.hasRoot() {
+			r.root = r.hb.rootHash()
 		} else {
-			dr.root = EmptyRoot
+			r.root = EmptyRoot
 		}
-		dr.groups = dr.groups[:0]
-		dr.hb.Reset()
-		dr.wasIH = false
-		dr.wasIHStorage = false
-		dr.curr.Reset()
-		dr.succ.Reset()
-		dr.currStorage.Reset()
-		dr.succStorage.Reset()
+		r.groups = r.groups[:0]
+		r.hb.Reset()
+		r.wasIH = false
+		r.wasIHStorage = false
+		r.curr.Reset()
+		r.succ.Reset()
+		r.currStorage.Reset()
+		r.succStorage.Reset()
 	}
 	return nil
 }
 
-func (dr *RootHashAggregator) Result() SubTries {
+func (r *RootHashAggregator) Result() SubTries {
 	panic("don't call me")
 }
 
-func (dr *RootHashAggregator) Root() common.Hash {
-	return dr.root
+func (r *RootHashAggregator) Root() common.Hash {
+	return r.root
 }
 
-func (dr *RootHashAggregator) advanceKeysStorage(k []byte, terminator bool) {
-	dr.currStorage.Reset()
-	dr.currStorage.Write(dr.succStorage.Bytes())
-	dr.succStorage.Reset()
+func (r *RootHashAggregator) advanceKeysStorage(k []byte, terminator bool) {
+	r.currStorage.Reset()
+	r.currStorage.Write(r.succStorage.Bytes())
+	r.succStorage.Reset()
 	// Transform k to nibbles, but skip the incarnation part in the middle
-	keyToNibbles(k, &dr.succStorage)
+	keyToNibbles(k, &r.succStorage)
 
 	if terminator {
-		dr.succStorage.WriteByte(16)
+		r.succStorage.WriteByte(16)
 	}
 }
 
-func (dr *RootHashAggregator) cutoffKeysStorage(cutoff int) {
-	dr.currStorage.Reset()
-	dr.currStorage.Write(dr.succStorage.Bytes())
-	dr.succStorage.Reset()
-	if dr.currStorage.Len() > 0 {
-		dr.succStorage.Write(dr.currStorage.Bytes()[:cutoff-1])
-		dr.succStorage.WriteByte(dr.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+func (r *RootHashAggregator) cutoffKeysStorage(cutoff int) {
+	r.currStorage.Reset()
+	r.currStorage.Write(r.succStorage.Bytes())
+	r.succStorage.Reset()
+	if r.currStorage.Len() > 0 {
+		r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
+		r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
 	}
 }
 
-func (dr *RootHashAggregator) genStructStorage() error {
+func (r *RootHashAggregator) genStructStorage() error {
 	var err error
 	var data GenStructStepData
-	if dr.wasIHStorage {
-		dr.hashData.Hash = common.BytesToHash(dr.valueStorage.Bytes())
-		data = &dr.hashData
+	if r.wasIHStorage {
+		r.hashData.Hash = common.BytesToHash(r.valueStorage.Bytes())
+		data = &r.hashData
 	} else {
-		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
-		data = &dr.leafData
+		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage.Bytes())
+		data = &r.leafData
 	}
-	dr.groups, err = GenStructStep(dr.RetainNothing, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, dr.hc, data, dr.groups, dr.trace)
+	r.groups, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, r.hc, data, r.groups, r.trace)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (dr *RootHashAggregator) saveValueStorage(isIH bool, v, h []byte) {
+func (r *RootHashAggregator) saveValueStorage(isIH bool, v, h []byte) {
 	// Remember the current value
-	dr.wasIHStorage = isIH
-	dr.valueStorage.Reset()
+	r.wasIHStorage = isIH
+	r.valueStorage.Reset()
 	if isIH {
-		dr.valueStorage.Write(h)
+		r.valueStorage.Write(h)
 	} else {
-		dr.valueStorage.Write(v)
+		r.valueStorage.Write(v)
 	}
 }
 
-func (dr *RootHashAggregator) advanceKeysAccount(k []byte, terminator bool) {
-	dr.curr.Reset()
-	dr.curr.Write(dr.succ.Bytes())
-	dr.succ.Reset()
+func (r *RootHashAggregator) advanceKeysAccount(k []byte, terminator bool) {
+	r.curr.Reset()
+	r.curr.Write(r.succ.Bytes())
+	r.succ.Reset()
 	for _, b := range k {
-		dr.succ.WriteByte(b / 16)
-		dr.succ.WriteByte(b % 16)
+		r.succ.WriteByte(b / 16)
+		r.succ.WriteByte(b % 16)
 	}
 	if terminator {
-		dr.succ.WriteByte(16)
+		r.succ.WriteByte(16)
 	}
 }
 
-func (dr *RootHashAggregator) cutoffKeysAccount(cutoff int) {
-	dr.curr.Reset()
-	dr.curr.Write(dr.succ.Bytes())
-	dr.succ.Reset()
-	if dr.curr.Len() > 0 && cutoff > 0 {
-		dr.succ.Write(dr.curr.Bytes()[:cutoff-1])
-		dr.succ.WriteByte(dr.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
+func (r *RootHashAggregator) cutoffKeysAccount(cutoff int) {
+	r.curr.Reset()
+	r.curr.Write(r.succ.Bytes())
+	r.succ.Reset()
+	if r.curr.Len() > 0 && cutoff > 0 {
+		r.succ.Write(r.curr.Bytes()[:cutoff-1])
+		r.succ.WriteByte(r.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
 	}
 }
 
-func (dr *RootHashAggregator) genStructAccount() error {
+func (r *RootHashAggregator) genStructAccount() error {
 	var data GenStructStepData
-	if dr.wasIH {
-		copy(dr.hashData.Hash[:], dr.value.Bytes())
-		data = &dr.hashData
+	if r.wasIH {
+		copy(r.hashData.Hash[:], r.value.Bytes())
+		data = &r.hashData
 	} else {
-		dr.accData.Balance.Set(&dr.a.Balance)
-		if dr.a.Balance.Sign() != 0 {
-			dr.accData.FieldSet |= AccountFieldBalanceOnly
+		r.accData.Balance.Set(&r.a.Balance)
+		if r.a.Balance.Sign() != 0 {
+			r.accData.FieldSet |= AccountFieldBalanceOnly
 		}
-		dr.accData.Nonce = dr.a.Nonce
-		if dr.a.Nonce != 0 {
-			dr.accData.FieldSet |= AccountFieldNonceOnly
+		r.accData.Nonce = r.a.Nonce
+		if r.a.Nonce != 0 {
+			r.accData.FieldSet |= AccountFieldNonceOnly
 		}
-		dr.accData.Incarnation = dr.a.Incarnation
-		data = &dr.accData
+		r.accData.Incarnation = r.a.Incarnation
+		data = &r.accData
 	}
-	dr.wasIHStorage = false
-	dr.currStorage.Reset()
-	dr.succStorage.Reset()
+	r.wasIHStorage = false
+	r.currStorage.Reset()
+	r.succStorage.Reset()
 	var err error
-	if dr.groups, err = GenStructStep(dr.RetainNothing, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, dr.hc, data, dr.groups, dr.trace); err != nil {
+	if r.groups, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, r.hc, data, r.groups, r.trace); err != nil {
 		return err
 	}
-	dr.accData.FieldSet = 0
+	r.accData.FieldSet = 0
 	return nil
 }
 
-func (dr *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h []byte) error {
-	dr.wasIH = isIH
+func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h []byte) error {
+	r.wasIH = isIH
 	if isIH {
-		dr.value.Reset()
-		dr.value.Write(h)
+		r.value.Reset()
+		r.value.Write(h)
 		return nil
 	}
-	dr.a.Copy(v)
+	r.a.Copy(v)
 	// Place code on the stack first, the storage will follow
-	if !dr.a.IsEmptyCodeHash() {
+	if !r.a.IsEmptyCodeHash() {
 		// the first item ends up deepest on the stack, the second item - on the top
-		dr.accData.FieldSet |= AccountFieldCodeOnly
-		if err := dr.hb.hash(dr.a.CodeHash[:]); err != nil {
+		r.accData.FieldSet |= AccountFieldCodeOnly
+		if err := r.hb.hash(r.a.CodeHash[:]); err != nil {
 			return err
 		}
 	}
