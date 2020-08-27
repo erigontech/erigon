@@ -99,20 +99,19 @@ type FlatDBTrieLoader struct {
 }
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
-// it uses indivitual `RetainDecider`
 type RootHashAggregator struct {
 	trace        bool
 	wasIH        bool
 	wasIHStorage bool
-	hc           HashCollector
 	root         common.Hash
+	hc           HashCollector
 	currStorage  bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succStorage  bytes.Buffer
-	valueStorage bytes.Buffer // Current value to be used as the value tape for the hash builder
+	valueStorage []byte       // Current value to be used as the value tape for the hash builder
 	curr         bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ         bytes.Buffer
-	value        bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups       []uint16     // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
+	value        []byte   // Current value to be used as the value tape for the hash builder
+	groups       []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
 	hb           *HashBuilder
 	hashData     GenStructStepHashData
 	a            accounts.Account
@@ -382,19 +381,17 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database) (common.Hash, error) 
 			if err := l.iteration(c, ih, false /* first */); err != nil {
 				return EmptyRoot, err
 			}
-
 		}
-		if l.itemPresent {
-			if err := l.receiver.Receive(l.itemType, l.accountKey, l.storageKey, &l.accountValue, l.storageValue, l.hashValue, 0); err != nil {
-				return EmptyRoot, err
-			}
-			l.itemPresent = false
 
-			select {
-			default:
-			case <-logEvery.C:
-				l.logProgress()
-			}
+		if err := l.receiver.Receive(l.itemType, l.accountKey, l.storageKey, &l.accountValue, l.storageValue, l.hashValue, 0); err != nil {
+			return EmptyRoot, err
+		}
+		l.itemPresent = false
+
+		select {
+		default:
+		case <-logEvery.C:
+			l.logProgress()
 		}
 	}
 
@@ -419,14 +416,14 @@ func (r *RootHashAggregator) Reset(hc HashCollector, trace bool) {
 	r.hc = hc
 	r.curr.Reset()
 	r.succ.Reset()
-	r.value.Reset()
+	r.value = nil
 	r.groups = r.groups[:0]
 	r.a.Reset()
 	r.hb.Reset()
 	r.wasIH = false
 	r.currStorage.Reset()
 	r.succStorage.Reset()
-	r.valueStorage.Reset()
+	r.valueStorage = nil
 	r.wasIHStorage = false
 	r.root = common.Hash{}
 	r.trace = trace
@@ -611,10 +608,10 @@ func (r *RootHashAggregator) genStructStorage() error {
 	var err error
 	var data GenStructStepData
 	if r.wasIHStorage {
-		r.hashData.Hash = common.BytesToHash(r.valueStorage.Bytes())
+		r.hashData.Hash = common.BytesToHash(r.valueStorage)
 		data = &r.hashData
 	} else {
-		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage.Bytes())
+		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
 		data = &r.leafData
 	}
 	r.groups, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, r.hc, data, r.groups, r.trace)
@@ -627,11 +624,11 @@ func (r *RootHashAggregator) genStructStorage() error {
 func (r *RootHashAggregator) saveValueStorage(isIH bool, v, h []byte) {
 	// Remember the current value
 	r.wasIHStorage = isIH
-	r.valueStorage.Reset()
+	r.valueStorage = nil
 	if isIH {
-		r.valueStorage.Write(h)
+		r.valueStorage = h
 	} else {
-		r.valueStorage.Write(v)
+		r.valueStorage = v
 	}
 }
 
@@ -661,7 +658,7 @@ func (r *RootHashAggregator) cutoffKeysAccount(cutoff int) {
 func (r *RootHashAggregator) genStructAccount() error {
 	var data GenStructStepData
 	if r.wasIH {
-		copy(r.hashData.Hash[:], r.value.Bytes())
+		copy(r.hashData.Hash[:], r.value)
 		data = &r.hashData
 	} else {
 		r.accData.Balance.Set(&r.a.Balance)
@@ -689,8 +686,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h []byte) error {
 	r.wasIH = isIH
 	if isIH {
-		r.value.Reset()
-		r.value.Write(h)
+		r.value = h
 		return nil
 	}
 	r.a.Copy(v)
