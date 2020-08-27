@@ -59,12 +59,12 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
-	if err := loader.Reset(db, trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
+	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
 	t := time.Now()
-	if hash, err := loader.CalcTrieRoot(); err == nil {
+	if hash, err := loader.CalcTrieRoot(db); err == nil {
 		generationIHTook := time.Since(t)
 		if hash != expectedRootHash {
 			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
@@ -215,13 +215,13 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, hashCollector, false); err != nil {
+	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
-	hash, err := loader.CalcTrieRoot()
+	hash, err := loader.CalcTrieRoot(db)
 	if err != nil {
 		return err
 	}
@@ -295,13 +295,13 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewPreOrderTraverse(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, hashCollector, false); err != nil {
+	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
-	hash, err := loader.CalcTrieRoot()
+	hash, err := loader.CalcTrieRoot(db)
 	if err != nil {
 		return err
 	}

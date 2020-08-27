@@ -77,8 +77,6 @@ type FlatDBTrieLoader struct {
 	trace                                 bool
 	rd                                    RetainDecider
 	accAddrHashWithInc                    [40]byte // Concatenation of addrHash of the currently build account with its incarnation encoding
-	tx                                    ethdb.Tx
-	kv                                    ethdb.KV
 	nextAccountKey                        [32]byte
 	k, v                                  []byte
 	ihK, ihV                              []byte
@@ -94,7 +92,6 @@ type FlatDBTrieLoader struct {
 	accountKey   []byte
 	accountValue accounts.Account
 	hashValue    []byte
-	streamCutoff int
 
 	receiver        StreamReceiver
 	defaultReceiver *RootHashAggregator
@@ -123,22 +120,22 @@ type RootHashAggregator struct {
 	accData      GenStructStepAccountData
 }
 
-func NewRootCalculator() *RootHashAggregator {
+func NewRootHashAggregator() *RootHashAggregator {
 	return &RootHashAggregator{
 		hb: NewHashBuilder(false),
 	}
 }
 
-func NewPreOrderTraverse(stateBucket, intermediateHashesBucket string) *FlatDBTrieLoader {
+func NewFlatDBTrieLoader(stateBucket, intermediateHashesBucket string) *FlatDBTrieLoader {
 	return &FlatDBTrieLoader{
-		defaultReceiver:          NewRootCalculator(),
+		defaultReceiver:          NewRootHashAggregator(),
 		stateBucket:              stateBucket,
 		intermediateHashesBucket: intermediateHashesBucket,
 	}
 }
 
 // Reset prepares the loader for reuse
-func (l *FlatDBTrieLoader) Reset(db ethdb.Database, rl RetainDecider, hc HashCollector, trace bool) error {
+func (l *FlatDBTrieLoader) Reset(rl RetainDecider, hc HashCollector, trace bool) error {
 	l.defaultReceiver.Reset(hc, trace)
 	l.hc = hc
 	l.receiver = l.defaultReceiver
@@ -152,15 +149,6 @@ func (l *FlatDBTrieLoader) Reset(db ethdb.Database, rl RetainDecider, hc HashCol
 	}
 	if l.trace {
 		fmt.Printf("l.rd: %s\n", l.rd)
-	}
-	if hasTx, ok := db.(ethdb.HasTx); ok {
-		l.tx = hasTx.Tx()
-	} else {
-		if hasKV, ok := db.(ethdb.HasKV); ok {
-			l.kv = hasKV.KV()
-		} else {
-			return fmt.Errorf("database doest not implement KV: %T", db)
-		}
 	}
 
 	return nil
@@ -204,7 +192,6 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 	if l.ihK == nil && l.k == nil {
 		l.itemPresent = true
 		l.itemType = CutoffStreamItem
-		l.streamCutoff = 0
 		l.accountKey = nil
 		l.storageKey = nil
 		l.storageValue = nil
@@ -349,16 +336,32 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 	return nil
 }
 
-func (l *FlatDBTrieLoader) CalcTrieRoot() (common.Hash, error) {
-	if l.tx == nil {
-		var err error
-		l.tx, err = l.kv.Begin(context.Background(), nil, false)
-		if err != nil {
-			return EmptyRoot, err
+// CalcTrieRoot - spawn 2 cursors (IntermediateHashes and HashedState)
+// Wrap IntermediateHashes cursor to IH class - this class will return only keys which passed RetainDecider check
+// If RetainDecider check not passed, then such key must be deleted - HashCollector receiving nil for such key.
+func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database) (common.Hash, error) {
+	var (
+		tx ethdb.Tx
+		kv ethdb.KV
+	)
+
+	// If method executed withing transaction - use it, or open new read transaction
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = hasTx.Tx()
+	} else {
+		if hasKV, ok := db.(ethdb.HasKV); ok {
+			kv = hasKV.KV()
+			var err error
+			tx, err = kv.Begin(context.Background(), nil, false)
+			if err != nil {
+				return EmptyRoot, err
+			}
+			defer tx.Rollback()
+		} else {
+			return EmptyRoot, fmt.Errorf("database doest not implement KV: %T", db)
 		}
-		defer l.tx.Rollback()
 	}
-	tx := l.tx
+
 	c := tx.Cursor(l.stateBucket)
 	var filter = func(k []byte) (bool, error) {
 		if l.rd.Retain(k) {
@@ -387,7 +390,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot() (common.Hash, error) {
 
 		}
 		if l.itemPresent {
-			if err := l.receiver.Receive(l.itemType, l.accountKey, l.storageKey, &l.accountValue, l.storageValue, l.hashValue, l.streamCutoff); err != nil {
+			if err := l.receiver.Receive(l.itemType, l.accountKey, l.storageKey, &l.accountValue, l.storageValue, l.hashValue, 0); err != nil {
 				return EmptyRoot, err
 			}
 			l.itemPresent = false
