@@ -614,20 +614,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.BeforeStageRun(stages.TxPool, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-
-			log.Info("Commit blocks")
-			_, errTx := tx.Commit()
-			return errTx
-		})
 		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if id <= stages.Bodies || id >= stages.TxPool {
+			if id <= stages.Bodies || id > stages.TxPool {
 				return nil
 			}
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -637,7 +628,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.BeforeStageUnwind(stages.TxPool, func() error {
+		d.stagedSync.BeforeStageUnwind(stages.Bodies, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -652,6 +643,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		err = d.stagedSync.Run(d.stateDB, writeDB)
 		if err != nil {
 			return err
+		}
+		if !canRunCycleInOneTransaction {
+			log.Info("Commit blocks")
+			_, errTx := tx.Commit()
+			return errTx
 		}
 
 		return nil
