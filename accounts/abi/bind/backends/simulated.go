@@ -166,7 +166,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	stateWriter := state.NewPlainStateWriter(b.database, b.pendingBlock.NumberU64())
+	stateWriter := state.NewPlainStateWriter(b.database, nil, b.pendingBlock.NumberU64())
 	ctx := b.config.WithEIPsFlags(context.Background(), b.pendingHeader.Number)
 	rawdb.WriteBlock(ctx, b.database, b.pendingBlock)
 	rawdb.WriteCanonicalHash(b.database, b.pendingBlock.Hash(), b.pendingBlock.NumberU64())
