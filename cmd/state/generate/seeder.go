@@ -2,14 +2,14 @@ package generate
 
 import (
 	"fmt"
-	trlog "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
+	trnt "github.com/ledgerwatch/turbo-geth/torrent"
 	"os"
 	"os/signal"
-
 	"time"
 )
 
@@ -18,23 +18,23 @@ func Seed(pathes []string) error {
 	if len(pathes) ==  0 {
 		cfg.DataDir = "/media/b00ris/nvme/snapshots/"
 		pathes=[]string{
-			cfg.DataDir+"headers/",
-			cfg.DataDir+"bodies/",
-			cfg.DataDir+"state/",
-			cfg.DataDir+"receipts/",
+			cfg.DataDir+"headers3/",
+			//cfg.DataDir+"bodies/",
+			//cfg.DataDir+"state/",
+			//cfg.DataDir+"receipts/",
 		}
 	}
 	cfg.Seed=true
+	cfg.NoDHT=true
+	cfg.DisableTrackers=false
 
-	cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
+	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
 	cl,err:=torrent.NewClient(cfg)
 	if err!=nil {
 		return err
 	}
 	defer cl.Close()
 
-	fmt.Println(len(cl.Torrents()))
-	return nil
 	torrents:=make([]*torrent.Torrent, len(pathes))
 	for i,v :=range pathes {
 		i:=i
@@ -42,10 +42,10 @@ func Seed(pathes []string) error {
 		mi := &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
 			CreatedBy: "turbogeth",
-			AnnounceList: trackers,
+			AnnounceList: trnt.Trackers,
 		}
 
-		info := metainfo.Info{PieceLength: 16 * 1024 * 1024}
+		info := metainfo.Info{PieceLength: 16  * 1024}
 		fmt.Println("BuildFromFilePath")
 		if _, err := os.Stat(v); os.IsNotExist(err) {
 			fmt.Println(err)
@@ -69,10 +69,12 @@ func Seed(pathes []string) error {
 		fmt.Println("VerifyData")
 		torrents[i].VerifyData()
 		go func() {
+			tt:=time.Now()
+			peerID:=cl.PeerID()
+			fmt.Println(mi.Magnet("headers",mi.HashInfoBytes()).String())
 			for {
-				//fmt.Printf("Peer ID: %+q\n", cl.PeerID())
-				fmt.Println("trnt:", torrents[i].Name(),torrents[i].InfoHash(), torrents[i].PeerConns(), torrents[i].Seeding())
-				fmt.Println("magnet", mi.Magnet("headers",mi.HashInfoBytes()).String())
+				fmt.Println(common.Bytes2Hex(peerID[:]),torrents[i].Name(),torrents[i].InfoHash(), torrents[i].PeerConns(),"Swarm", len(torrents[i].KnownSwarm()), torrents[i].Seeding(), time.Since(tt))
+				//fmt.Println("magnet", mi.Magnet("headers",mi.HashInfoBytes()).String())
 				time.Sleep(time.Second*10)
 			}
 		}()

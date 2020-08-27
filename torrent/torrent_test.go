@@ -23,16 +23,20 @@ var (
 	}
 )
 
-var trc = [][]string{
-	{
-		"udp://tracker.openbittorrent.com:80",
-		"udp://tracker.publicbt.com:80",
-		"udp://coppersurfer.tk:6969/announce",
-		"udp://open.demonii.com:1337",
-		"udp://tracker.istole.it:6969",
-		"http://bttracker.crunchbanglinux.org:6969/announce",
-	},
+
+
+func TestTorrent(t *testing.T) {
+	path:=os.TempDir()+"/trnt_test"
+	//os.RemoveAll(path)
+	cli:=New(path, SnapshotMode{
+		Headers: true,
+	}, true)
+	err:=cli.DownloadHeadersSnapshot()
+	if err!=nil {
+		t.Fatal(err)
+	}
 }
+
 func TestNameLeech(t *testing.T) {
 	hash:=metainfo.NewHashFromHex("f291a6986efbc5894840a0fd97e30c5dd38ba4c5")
 	cfg:=torrent.NewDefaultClientConfig()
@@ -46,7 +50,7 @@ func TestNameLeech(t *testing.T) {
 	}
 
 	tr, new, err:=leecher.AddTorrentSpec(&torrent.TorrentSpec{
-		Trackers: trc,
+		Trackers: Trackers,
 		InfoHash: hash,
 		DisplayName: "test",
 	})
