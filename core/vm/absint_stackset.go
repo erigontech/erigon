@@ -26,15 +26,15 @@ var StopOnError = true
 
 // stmt is the representation of an executable instruction - extension of an opcode
 type astmt struct {
-	pc             int
-	opcode         OpCode
-	operation      *operation
-	value          uint256.Int
-	numBytes       int
 	inferredAsData bool
 	ends           bool
 	isBlockEntry   bool
 	isBlockExit    bool
+	opcode         OpCode
+	operation      *operation
+	pc             int
+	numBytes       int
+	value          uint256.Int
 }
 
 func (stmt *astmt) String() string {
