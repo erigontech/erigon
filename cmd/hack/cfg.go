@@ -5,20 +5,19 @@ import (
 	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"log"
 	"math/big"
 	"os"
 )
 
-func testGenCfg() error {
+func testGenCfg() {
 	args := os.Args
 	if len(args) == 4 {
 		fmt.Printf("%v\n", args[3])
 		absIntTest(args[3])
 		print("Finished running on program from command line.")
-		return nil
+		return
 	}
 	cfg0Test0()
 	cfg0Test1()
@@ -41,7 +40,6 @@ func testGenCfg() error {
 	absIntTestStaticLoop01() //  //- PASS
 	absIntTestDepositContract() //FAILS - Imprecision
 	absIntTestDepositContract2()
-	return nil
 }
 
 func cfg0Test0() {
@@ -391,11 +389,6 @@ func (dummyAccount) ReturnGas(*big.Int)                                  {}
 func (dummyAccount) SetCode(common.Hash, []byte)                         {}
 func (dummyAccount) ForEachStorage(cb func(key, value common.Hash) bool) {}
 
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 /*
 func testGenCfg() error {

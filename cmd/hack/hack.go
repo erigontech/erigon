@@ -1631,7 +1631,7 @@ func main() {
 	//check(err)
 	//defer db.Close()
 	if *action == "cfg" {
-		_ = testGenCfg()
+		testGenCfg()
 	}
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
