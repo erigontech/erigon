@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -46,7 +47,7 @@ func NewTraceAPI(db ethdb.KV, dbReader ethdb.Getter, maxTraces uint64) *TraceAPI
 	}
 }
 
-func retrieveHistory(tx ethdb.Tx, addr *common.Address) ([]uint64, error) {
+func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
 	addrBytes := addr.Bytes()
 	ca := tx.Cursor(dbutils.AccountsHistoryBucket).Prefix(addrBytes)
 
@@ -56,10 +57,20 @@ func retrieveHistory(tx ethdb.Tx, addr *common.Address) ([]uint64, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		numbers, _, err := dbutils.WrapHistoryIndex(v).Decode()
 		if err != nil {
 			return nil, err
 		}
+
+		if numbers[0] > toBlock {
+			break
+		}
+
+		if numbers[len(numbers)-1] < fromBlock {
+			continue
+		}
+
 		blockNumbers = append(blockNumbers, numbers...)
 	}
 	// Remove dublicates
@@ -70,12 +81,11 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 	if filter == nil {
 		return true
 	}
-	for _, f := range filter {
-		if bytes.Equal(addr.Bytes(), f.Bytes()) {
-			return true
-		}
-	}
-	return false
+	i := sort.Search(len(filter), func(i int) bool {
+		return bytes.Equal(filter[i].Bytes(), addr.Bytes())
+	})
+
+	return i != len(filter)
 }
 
 // Filter Implements trace_filter
@@ -83,6 +93,33 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, con
 	var filteredTransactionsHash []common.Hash
 	resp := []interface{}{}
 	var maxTracesCount uint64
+
+	sort.Slice(req.FromAddress, func(i int, j int) bool {
+		return bytes.Compare(req.FromAddress[i].Bytes(), req.FromAddress[j].Bytes()) == -1
+	})
+
+	sort.Slice(req.ToAddress, func(i int, j int) bool {
+		return bytes.Compare(req.ToAddress[i].Bytes(), req.ToAddress[j].Bytes()) == -1
+	})
+
+	var fromBlock uint64
+	var toBlock uint64
+	if req.FromBlock == nil {
+		fromBlock = 0
+	} else {
+		fromBlock = uint64(*req.FromBlock)
+	}
+
+	if req.ToBlock == nil {
+		headNumber := rawdb.ReadHeaderNumber(api.dbReader, rawdb.ReadHeadHeaderHash(api.dbReader))
+		toBlock = *headNumber
+	} else {
+		toBlock = uint64(*req.ToBlock)
+	}
+
+	if fromBlock > toBlock {
+		return nil, fmt.Errorf("invalid parameters: toBlock must be greater than fromBlock")
+	}
 
 	if req.Count == nil {
 		maxTracesCount = api.maxTraces
@@ -95,116 +132,58 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, con
 			maxTracesCount = api.maxTraces
 		}
 	}
+
 	if err := api.db.View(ctx, func(tx ethdb.Tx) error {
 		if req.FromAddress != nil || req.ToAddress != nil { // use address history index to retrieve matching transactions
-			if req.FromAddress != nil { // use FromAddress
-				for _, addr := range req.FromAddress {
+			var historyFilter []*common.Address
+			isFromAddress := req.FromAddress != nil
+			if isFromAddress {
+				historyFilter = req.FromAddress
+			} else {
+				historyFilter = req.ToAddress
+			}
 
-					addrBytes := addr.Bytes()
-					blockNumbers, err := retrieveHistory(tx, addr)
-					if err != nil {
-						return err
-					}
-					for _, num := range blockNumbers {
+			for _, addr := range historyFilter {
 
-						if req.FromBlock != nil && uint64(*req.FromBlock) > num {
-							continue
+				addrBytes := addr.Bytes()
+				blockNumbers, err := retrieveHistory(tx, addr, fromBlock, toBlock)
+				if err != nil {
+					return err
+				}
+
+				for _, num := range blockNumbers {
+
+					block := rawdb.ReadBlockByNumber(api.dbReader, num)
+					senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
+					txs := block.Transactions()
+					for i, tx := range txs {
+						if uint64(len(filteredTransactionsHash)) == maxTracesCount {
+							if uint64(len(filteredTransactionsHash)) == api.maxTraces {
+								return fmt.Errorf("too many traces found")
+							}
+							return nil
 						}
 
-						if req.ToBlock != nil && uint64(*req.ToBlock) < num {
-							continue
+						var to *common.Address
+						if tx.To() == nil {
+							to = &common.Address{}
+						} else {
+							to = tx.To()
 						}
-
-						block := rawdb.ReadBlockByNumber(api.dbReader, num)
-						senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
-						txs := block.Transactions()
-						for i, tx := range txs {
-							if uint64(len(filteredTransactionsHash)) == maxTracesCount {
-								if uint64(len(filteredTransactionsHash)) == api.maxTraces {
-									return fmt.Errorf("too many traces found")
-								}
-								return nil
-							}
-
-							var to *common.Address
-							if tx.To() == nil {
-								to = &common.Address{}
-							} else {
-								to = tx.To()
-							}
+						if isFromAddress {
 							if !isAddressInFilter(to, req.ToAddress) {
 								continue
 							}
 							if bytes.Equal(senders[i].Bytes(), addrBytes) {
 								filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
 							}
-						}
-					}
-				}
-			} else { // use ToAddress
-				for _, addr := range req.ToAddress {
-
-					blockNumbers, err := retrieveHistory(tx, addr)
-					addrBytes := addr.Bytes()
-					if err != nil {
-						return err
-					}
-
-					for _, num := range blockNumbers {
-						if req.FromBlock != nil && uint64(*req.FromBlock) > num {
-							continue
-						}
-
-						if req.ToBlock != nil && uint64(*req.ToBlock) < num {
-							continue
-						}
-
-						block := rawdb.ReadBlockByNumber(api.dbReader, num)
-						txs := block.Transactions()
-						senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
-						for i, tx := range txs {
-							if uint64(len(filteredTransactionsHash)) == maxTracesCount {
-								if uint64(len(filteredTransactionsHash)) == api.maxTraces {
-									return fmt.Errorf("too many traces found")
-								}
-								return nil
-							}
-
-							if !isAddressInFilter(&senders[i], req.FromAddress) {
-								continue
-							}
-							var to *common.Address
-							if tx.To() == nil {
-								to = &common.Address{}
-							} else {
-								to = tx.To()
-							}
-
-							if bytes.Equal(to.Bytes(), addrBytes) {
-								filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
-							}
+						} else if bytes.Equal(to.Bytes(), addrBytes) {
+							filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
 						}
 					}
 				}
 			}
 		} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
-			var fromBlock uint64
-			var toBlock uint64
-			if req.FromBlock == nil {
-				fromBlock = 0
-			} else {
-				fromBlock = uint64(*req.FromBlock)
-			}
-
-			if req.ToBlock == nil {
-				headNumber := rawdb.ReadHeaderNumber(api.dbReader, rawdb.ReadHeadHeaderHash(api.dbReader))
-				toBlock = *headNumber
-			} else {
-				toBlock = uint64(*req.ToBlock)
-			}
-			if fromBlock > toBlock {
-				return fmt.Errorf("invalid parameters: toBlock must be greater than fromBlock")
-			}
 
 			for blockNum := fromBlock; blockNum < toBlock+1; blockNum++ {
 				block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
