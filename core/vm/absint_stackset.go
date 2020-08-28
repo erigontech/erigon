@@ -675,13 +675,13 @@ func AbsIntCfgHarness(contract *Contract) {
 		if !resolution.resolved {
 			fmt.Printf("Unable to resolve at pc=%x\n", startPC)
 			return
-		} else {
-			for _, e := range resolution.edges {
-				if prevEdgeMap[e.pc1] == nil {
-					prevEdgeMap[e.pc1] = make(map[int]bool)
-				}
-				prevEdgeMap[e.pc1][e.pc0] = true
+		}
+
+		for _, e := range resolution.edges {
+			if prevEdgeMap[e.pc1] == nil {
+				prevEdgeMap[e.pc1] = make(map[int]bool)
 			}
+			prevEdgeMap[e.pc1][e.pc0] = true
 		}
 		workList = resolution.edges
 	}
@@ -713,9 +713,9 @@ func AbsIntCfgHarness(contract *Contract) {
 				printAnlyState(program, prevEdgeMap, D, nil)
 				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
 				return
-			} else {
-				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
 			}
+
+			fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
 		}
 
 		if DEBUG {
