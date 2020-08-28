@@ -28,7 +28,7 @@ type TraceFilterRequest struct {
 
 // TraceAPI
 type TraceAPI interface {
-	Filter(ctx context.Context, req TraceFilterRequest, config *eth.TraceConfig) ([]interface{}, error)
+	Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
@@ -89,7 +89,7 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 }
 
 // Filter Implements trace_filter
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, config *eth.TraceConfig) ([]interface{}, error) {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error) {
 	var filteredTransactionsHash []common.Hash
 	resp := []interface{}{}
 	var maxTracesCount uint64
@@ -209,13 +209,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, con
 	chainContext := adapter.NewChainContext(api.dbReader)
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	traceType := "callTracer"
 	for _, hash := range filteredTransactionsHash {
 		_, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
 		msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, api.db, blockHash, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, config)
+		trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
 		if err != nil {
 			return nil, err
 		}
