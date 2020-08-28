@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/emicklei/dot"
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
-	"github.com/emicklei/dot"
 	"os"
 	"sort"
 	"strconv"
@@ -15,13 +15,13 @@ import (
 
 //////////////////////////////////////////////////
 type AbsValueKind int
+
 const (
 	absStackLen = 64
 )
 
 var DEBUG = false
 var StopOnError = true
-
 
 //////////////////////////
 
@@ -47,11 +47,11 @@ func (stmt *stmt) String() string {
 }
 
 type program struct {
-	contract* Contract
-	stmts []*stmt
-	blocks []*block
+	contract    *Contract
+	stmts       []*stmt
+	blocks      []*block
 	entry2block map[int]*block
-	exit2block map[int]*block
+	exit2block  map[int]*block
 }
 
 func toProgram(contract *Contract) *program {
@@ -97,7 +97,7 @@ func toProgram(contract *Contract) *program {
 		}
 
 		program.stmts = append(program.stmts, &stmt)
-		if pc != len(program.stmts) - 1 {
+		if pc != len(program.stmts)-1 {
 			panic("Invalid length")
 		}
 	}
@@ -108,12 +108,12 @@ func toProgram(contract *Contract) *program {
 				stmt.isBlockEntry = true
 			} else if stmt.opcode == JUMPDEST {
 				stmt.isBlockEntry = true
-			} else if stmt.opcode == JUMPI && pc < len(program.stmts) - 1 {
+			} else if stmt.opcode == JUMPI && pc < len(program.stmts)-1 {
 				entry := program.stmts[pc+1]
 				entry.isBlockEntry = true
 			}
 
-			if pc == len(program.stmts) - 1 {
+			if pc == len(program.stmts)-1 {
 				stmt.isBlockExit = true
 			} else if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 				stmt.isBlockExit = true
@@ -126,7 +126,7 @@ func toProgram(contract *Contract) *program {
 
 	for entrypc, entry := range program.stmts {
 		if entry.isBlockEntry {
-			block := &block{entrypc: entrypc, stmts: make([]*stmt, 0) }
+			block := &block{entrypc: entrypc, stmts: make([]*stmt, 0)}
 			program.blocks = append(program.blocks, block)
 			for i := entrypc; i < len(program.stmts); i++ {
 				block.stmts = append(block.stmts, program.stmts[i])
@@ -147,7 +147,6 @@ func toProgram(contract *Contract) *program {
 	return program
 }
 
-
 func printStmts(stmts []stmt) {
 	for i, stmt := range stmts {
 		fmt.Printf("%v %v\n", i, stmt)
@@ -157,9 +156,9 @@ func printStmts(stmts []stmt) {
 ////////////////////////
 
 type edge struct {
-	pc0 int
-	stmt *stmt
-	pc1 int
+	pc0    int
+	stmt   *stmt
+	pc1    int
 	isJump bool
 }
 
@@ -184,7 +183,6 @@ func printEdges(edges []edge) {
 		fmt.Printf("%v\n", edge)
 	}
 }
-
 
 func getEntryReachableEdges(entry int, edges []edge) []edge {
 	pc2edges := make(map[int][]edge)
@@ -220,24 +218,23 @@ func getEntryReachableEdges(entry int, edges []edge) []edge {
 
 ////////////////////////
 
-
 const (
 	BotValue AbsValueKind = iota
 	TopValue
 	ConcreteValue
 )
 
-
 func (d AbsValueKind) String() string {
 	return [...]string{"⊥", "⊤", "AbsValue"}[d]
 }
+
 //////////////////////////////////////////////////
 
 type AbsValue struct {
-	kind AbsValueKind
-	value uint256.Int 	//only when kind=ConcreteValue
-	pc int 				//only when kind=TopValue
-	fromDeepStack bool	//only when Kind=TopValue
+	kind          AbsValueKind
+	value         uint256.Int //only when kind=ConcreteValue
+	pc            int         //only when kind=TopValue
+	fromDeepStack bool        //only when Kind=TopValue
 }
 
 func (c0 AbsValue) String(abbrev bool) string {
@@ -292,7 +289,7 @@ func (s *astack) Copy() *astack {
 }
 
 func (s *astack) Push(value AbsValue) {
-	rest := s.values[0: absStackLen-1]
+	rest := s.values[0 : absStackLen-1]
 	s.values = nil
 	s.values = append(s.values, value)
 	s.values = append(s.values, rest...)
@@ -300,7 +297,7 @@ func (s *astack) Push(value AbsValue) {
 
 func (s *astack) Pop(pc int) AbsValue {
 	res := s.values[0]
-	s.values = s.values[1: absStackLen]
+	s.values = s.values[1:absStackLen]
 	s.values = append(s.values, AbsValueTop(pc, true))
 	return res
 }
@@ -400,9 +397,9 @@ func (state *astate) Add(stack *astack) {
 //////////////////////////////////////////////////
 
 type ResolveResult struct {
-	edges []edge
+	edges    []edge
 	resolved bool
-	badJump *stmt
+	badJump  *stmt
 }
 
 // resolve analyses given executable instruction at given program counter in the context of given state
@@ -548,9 +545,9 @@ type block struct {
 }
 
 func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]*astate, badJumps map[int]bool) {
-//	es := make([]edge, len(edges))
-//	copy(es, edges)
-//	sortEdges(es)
+	//	es := make([]edge, len(edges))
+	//	copy(es, edges)
+	//	sortEdges(es)
 
 	var badJumpList []string
 	for pc, stmt := range program.stmts {
@@ -564,7 +561,7 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 		}
 
 		var valueStr string
-		if stmt.opcode.IsPush(){
+		if stmt.opcode.IsPush() {
 			valueStr = fmt.Sprintf("%v %v", stmt.opcode, stmt.value.Hex())
 		} else {
 			valueStr = fmt.Sprintf("%v", stmt.opcode)
@@ -572,10 +569,10 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 
 		pc0s := make([]string, 0)
 		showPC0s := false
-		for pc0, _ := range prevEdgeMap[pc] {
+		for pc0 := range prevEdgeMap[pc] {
 			pc0s = append(pc0s, strconv.Itoa(pc0))
 			stmt0 := program.stmts[pc0]
-			if pc0 + stmt0.numBytes != pc {
+			if pc0+stmt0.numBytes != pc {
 				showPC0s = true
 			}
 		}
@@ -584,13 +581,13 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 		}
 
 		if badJumps[pc] {
-			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 	aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(false))
+			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(false))
 			fmt.Print(out)
 			badJumpList = append(badJumpList, out)
 		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 			aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(true))
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(true))
 		} else {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", 					aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), valueStr)
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), valueStr)
 		}
 	}
 
@@ -709,17 +706,17 @@ func AbsIntCfgHarness(contract *Contract) {
 		preDpc1 := D[e.pc1]
 		post1, err := post(preDpc0, e)
 		if err != nil {
-			if StopOnError  {
+			if StopOnError {
 				printAnlyState(program, prevEdgeMap, D, nil)
-				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
+				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err)
 				return
 			}
 
-			fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
+			fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err)
 		}
 
 		if DEBUG {
-			fmt.Printf("post\t\t%v\n", post1);
+			fmt.Printf("post\t\t%v\n", post1)
 			fmt.Printf("Dprev\t\t%v\n", preDpc1)
 		}
 
@@ -733,16 +730,16 @@ func AbsIntCfgHarness(contract *Contract) {
 				fmt.Printf("post\t\t\t%v\n", post1)
 
 				/*
-				for i := 0; i < absStackLen; i++ {
-					c0 := post1.stack[i]
-					c1 := preDpc1.stack[i]
-					if !ValueSetLeq(c0, c1) {
-						fmt.Printf("diff: \t\t\t%v %v %v %v %v\n", i, c0, c1, c0.kind, c1.kind)
-						if c0.kind == ConstValueKind && c1.kind == ConstValueKind {
-							fmt.Printf("\t\t\t\t\tEQ=%v\n", c0.value.Eq(&c1.value))
+					for i := 0; i < absStackLen; i++ {
+						c0 := post1.stack[i]
+						c1 := preDpc1.stack[i]
+						if !ValueSetLeq(c0, c1) {
+							fmt.Printf("diff: \t\t\t%v %v %v %v %v\n", i, c0, c1, c0.kind, c1.kind)
+							if c0.kind == ConstValueKind && c1.kind == ConstValueKind {
+								fmt.Printf("\t\t\t\t\tEQ=%v\n", c0.value.Eq(&c1.value))
+							}
 						}
-					}
-				}*/
+					}*/
 				//fmt.Printf("lub\t\t\t%v\n", postDpc1)
 				printAnlyState(program, prevEdgeMap, D, nil)
 			}
@@ -804,7 +801,7 @@ func AbsIntCfgHarness(contract *Contract) {
 
 	reachableEdges := getEntryReachableEdges(0, finalEdges)
 
-	fmt.Printf("\n# of unreachable edges: %v\n", len(finalEdges) - len(reachableEdges))
+	fmt.Printf("\n# of unreachable edges: %v\n", len(finalEdges)-len(reachableEdges))
 	fmt.Printf("\n# of total edges: %v\n", len(finalEdges))
 	//printEdges(edges)
 

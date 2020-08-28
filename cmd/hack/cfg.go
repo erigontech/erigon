@@ -92,16 +92,15 @@ func absIntTest2() {
 	vm.AbsIntCfgHarness(contract)
 }
 
-
 func absIntTest3() {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
-	contract.Code = []byte{ byte(vm.PUSH1), 0x1,
-							byte(vm.PUSH1), 0x55,
-							byte(vm.MLOAD),
-							byte(vm.LT),
-							byte(vm.PUSH1), 0x0, //jump destination
-							byte(vm.JUMPI),
-							byte(vm.STOP)}
+	contract.Code = []byte{byte(vm.PUSH1), 0x1,
+		byte(vm.PUSH1), 0x55,
+		byte(vm.MLOAD),
+		byte(vm.LT),
+		byte(vm.PUSH1), 0x0, //jump destination
+		byte(vm.JUMPI),
+		byte(vm.STOP)}
 	vm.AbsIntCfgHarness(contract)
 }
 
@@ -118,12 +117,12 @@ func absIntTest(s string) {
 
 func absIntTestSimple00() {
 	/*
-	pragma solidity ^0.6.0;
-	contract simple00 {
-	    function execute() public returns (uint) {
-	        return 5;
-	    }
-	}
+		pragma solidity ^0.6.0;
+		contract simple00 {
+		    function execute() public returns (uint) {
+		        return 5;
+		    }
+		}
 	*/
 	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c80636146195414602d575b600080fd5b60336049565b6040518082815260200191505060405180910390f35b6000600590509056fea2646970667358221220e2d6ab235a595eb0ea85f8cc9c54b34e1b4fb7b8f0446851d77e72e6d973b15364736f6c634300060c0033"
 	decoded, err := hex.DecodeString(s)
@@ -138,12 +137,12 @@ func absIntTestSimple00() {
 
 func absIntTestDiv00() {
 	/*
-	pragma solidity ^0.6.0;
-	contract div00 {
-	    function execute(uint i) pure public returns (uint) {
-	        return 3 / i;
-	    }
-	}
+		pragma solidity ^0.6.0;
+		contract div00 {
+		    function execute(uint i) pure public returns (uint) {
+		        return 3 / i;
+		    }
+		}
 	*/
 	const s = "6080604052348015600f57600080fd5b506004361060285760003560e01c8063fe0d94c114602d575b600080fd5b605660048036036020811015604157600080fd5b8101908080359060200190929190505050606c565b6040518082815260200191505060405180910390f35b600081600381607757fe5b04905091905056fea2646970667358221220b094fe68fc0d94f35a01aa902290c8244fecb2ad6d1e773d7be369553fd8d48264736f6c63430006060033"
 	decoded, err := hex.DecodeString(s)
@@ -155,7 +154,6 @@ func absIntTestDiv00() {
 	contract.Code = decoded
 	vm.AbsIntCfgHarness(contract)
 }
-
 
 func absIntTestRequires00() {
 	/*
@@ -180,18 +178,18 @@ func absIntTestRequires00() {
 
 func absIntTestCall01() {
 	/*
-	pragma solidity 0.5.0;
-	contract call01 {
-	    uint public nonce;
+		pragma solidity 0.5.0;
+		contract call01 {
+		    uint public nonce;
 
-	    function execute(bool condition, uint gasLimit, uint value, bytes memory data, address destination) public {
-	        require(condition);
-	        nonce = nonce + 1;
-	        bool success = false;
-	        assembly { success := call(gasLimit, destination, value, add(data, 0x20), mload(data), 0, 0) }
-	        require(success);
-	    }
-	}
+		    function execute(bool condition, uint gasLimit, uint value, bytes memory data, address destination) public {
+		        require(condition);
+		        nonce = nonce + 1;
+		        bool success = false;
+		        assembly { success := call(gasLimit, destination, value, add(data, 0x20), mload(data), 0, 0) }
+		        require(success);
+		    }
+		}
 	*/
 	const s = "60806040526004361061004c576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806361fa2d7114610051578063affed0e014610159575b600080fd5b34801561005d57600080fd5b50610157600480360360a081101561007457600080fd5b810190808035151590602001909291908035906020019092919080359060200190929190803590602001906401000000008111156100b157600080fd5b8201836020820111156100c357600080fd5b803590602001918460018302840111640100000000831117156100e557600080fd5b91908080601f016020809104026020016040519081016040528093929190818152602001838380828437600081840152601f19601f820116905080830192505050505050509192919290803573ffffffffffffffffffffffffffffffffffffffff169060200190929190505050610184565b005b34801561016557600080fd5b5061016e6101c4565b6040518082815260200191505060405180910390f35b84151561019057600080fd5b600160005401600081905550600080905060008084516020860187868af190508015156101bc57600080fd5b505050505050565b6000548156fea165627a7a723058206ad69eb8bdde0a17439a080093eb09b7f9cb9f2c8ecc602773db3599cde132f10029"
 	decoded, err := hex.DecodeString(s)
@@ -204,20 +202,19 @@ func absIntTestCall01() {
 	vm.AbsIntCfgHarness(contract)
 }
 
-
 func absIntTestEcrecoverLoop02() {
 	/*
-	pragma solidity 0.5.0;
-	contract ecrecoverloop02 {
-	    function execute(bytes32 hash, bytes memory data,
-	                     uint8[2] memory sigV, bytes32[2] memory sigR, bytes32[2] memory sigS) pure public {
-	        for (uint i = 0; i < 2; i++) {
-	            address recovered = ecrecover(hash, sigV[i], sigR[i], sigS[i]);
-	            require(recovered > address(0));
-	        }
-	    }
-	}
-	 */
+		pragma solidity 0.5.0;
+		contract ecrecoverloop02 {
+		    function execute(bytes32 hash, bytes memory data,
+		                     uint8[2] memory sigV, bytes32[2] memory sigR, bytes32[2] memory sigS) pure public {
+		        for (uint i = 0; i < 2; i++) {
+		            address recovered = ecrecover(hash, sigV[i], sigR[i], sigS[i]);
+		            require(recovered > address(0));
+		        }
+		    }
+		}
+	*/
 	const s = "608060405260043610610041576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff1680633543d4b214610046575b600080fd5b34801561005257600080fd5b506101da600480360361010081101561006a57600080fd5b81019080803590602001909291908035906020019064010000000081111561009157600080fd5b8201836020820111156100a357600080fd5b803590602001918460018302840111640100000000831117156100c557600080fd5b91908080601f016020809104026020016040519081016040528093929190818152602001838380828437600081840152601f19601f82011690508083019250505050505050919291929080604001906002806020026040519081016040528092919082600260200280828437600081840152601f19601f820116905080830192505050505050919291929080604001906002806020026040519081016040528092919082600260200280828437600081840152601f19601f820116905080830192505050505050919291929080604001906002806020026040519081016040528092919082600260200280828437600081840152601f19601f82011690508083019250505050505091929192905050506101dc565b005b60008090505b60028110156102d557600060018786846002811015156101fe57fe5b6020020151868560028110151561021157fe5b6020020151868660028110151561022457fe5b602002015160405160008152602001604052604051808581526020018460ff1660ff1681526020018381526020018281526020019450505050506020604051602081039080840390855afa158015610280573d6000803e3d6000fd5b505050602060405103519050600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff161115156102c757600080fd5b5080806001019150506101e2565b50505050505056fea165627a7a723058200e559ecf0b4ed3978069fd9e401adb4043ef711a33a5926f0e081d7bcdf08bb80029"
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
@@ -229,19 +226,18 @@ func absIntTestEcrecoverLoop02() {
 	vm.AbsIntCfgHarness(contract)
 }
 
-
 func absIntTestStorageVar03() {
 	/*
-	pragma solidity 0.5.0;
-	contract storagevar03 {
-	    uint private n;
+		pragma solidity 0.5.0;
+		contract storagevar03 {
+		    uint private n;
 
-	    function execute() public returns(uint) {
-	        n = 5;
-	        require(false);
-	    }
-	}
-	 */
+		    function execute() public returns(uint) {
+		        n = 5;
+		        require(false);
+		    }
+		}
+	*/
 	const s = "608060405260043610603f576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806361461954146044575b600080fd5b348015604f57600080fd5b506056606c565b6040518082815260200191505060405180910390f35b6000600560008190555060001515608257600080fd5b9056fea165627a7a723058206c2e2e763fa3e914d5806ac22d4cf3bd0ff53cd57740965d5e5d05934668a9110029"
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
@@ -253,21 +249,20 @@ func absIntTestStorageVar03() {
 	vm.AbsIntCfgHarness(contract)
 }
 
-
 func absIntTestStaticLoop00() {
 	/*
-	pragma solidity 0.5.0;
-	contract staticloop00 {
-	    function execute(uint a0) pure external returns(uint256) {
-	        uint sum = a0;
-	        require (a0 < 10);
-	        for (uint i = 0; i < 3; i++) {
-	            sum += i;
-	        }
-	        return sum;
-	    }
-	}
-	 */
+		pragma solidity 0.5.0;
+		contract staticloop00 {
+		    function execute(uint a0) pure external returns(uint256) {
+		        uint sum = a0;
+		        require (a0 < 10);
+		        for (uint i = 0; i < 3; i++) {
+		            sum += i;
+		        }
+		        return sum;
+		    }
+		}
+	*/
 	const s = "608060405260043610603f576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff168063fe0d94c1146044575b600080fd5b348015604f57600080fd5b50607960048036036020811015606457600080fd5b8101908080359060200190929190505050608f565b6040518082815260200191505060405180910390f35b600080829050600a8310151560a357600080fd5b60008090505b600381101560c2578082019150808060010191505060a9565b508091505091905056fea165627a7a72305820e9eae4d836605e8f28df860b8f590e6cd933ddcbf111d99767c764aa99f093900029"
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
@@ -328,7 +323,6 @@ func absIntTestPrivateFunction01() {
 	vm.AbsIntCfgHarness(contract)
 }
 
-
 func absIntTestPrivateFunction02() {
 	/*
 		pragma solidity 0.6.12;
@@ -378,6 +372,7 @@ func absIntTestDepositContract2() {
 	contract.Code = decoded
 	vm.AbsIntCfgHarness(contract)
 }
+
 /////////////////////////////////////////////////////
 
 type dummyAccount struct{}
@@ -399,8 +394,6 @@ type dummyStatedb struct {
 }
 
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-
-
 
 /*
 func testGenCfg() error {
