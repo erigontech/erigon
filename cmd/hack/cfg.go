@@ -102,7 +102,7 @@ func absIntTest3() {
 							byte(vm.PUSH1), 0x0, //jump destination
 							byte(vm.JUMPI),
 							byte(vm.STOP)}
-	_ = vm.AbsIntCfgHarness(contract)
+	vm.AbsIntCfgHarness(contract)
 }
 
 func absIntTest(s string) {

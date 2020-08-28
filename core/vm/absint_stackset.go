@@ -507,13 +507,11 @@ func post(st0 *astate, edge edge) (*astate, error) {
 		st1.Add(stack1)
 	}
 
-
-
 	if isStackTooShort {
 		return st1, errors.New("abstract stack too short: reached unmodelled depth")
-	} else {
-		return st1, nil
 	}
+
+	return st1, nil
 }
 
 func Leq(st0 *astate, st1 *astate) bool {
@@ -657,7 +655,7 @@ func check(program *program, prevEdgeMap map[int]map[int]bool) {
 	}
 }
 
-func AbsIntCfgHarness(contract *Contract) error {
+func AbsIntCfgHarness(contract *Contract) {
 
 	program := toProgram(contract)
 
@@ -676,7 +674,7 @@ func AbsIntCfgHarness(contract *Contract) error {
 		resolution := resolve(program, startPC, D[startPC])
 		if !resolution.resolved {
 			fmt.Printf("Unable to resolve at pc=%x\n", startPC)
-			return nil
+			return
 		} else {
 			for _, e := range resolution.edges {
 				if prevEdgeMap[e.pc1] == nil {
@@ -714,7 +712,7 @@ func AbsIntCfgHarness(contract *Contract) error {
 			if StopOnError  {
 				printAnlyState(program, prevEdgeMap, D, nil)
 				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
-				return nil
+				return
 			} else {
 				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
 			}
@@ -759,7 +757,7 @@ func AbsIntCfgHarness(contract *Contract) error {
 					badJumps := make(map[int]bool)
 					badJumps[resolution.badJump.pc] = true
 					printAnlyState(program, prevEdgeMap, D, badJumps)
-					return nil
+					return
 				}
 			} else {
 				for _, e := range resolution.edges {
@@ -817,5 +815,5 @@ func AbsIntCfgHarness(contract *Contract) error {
 		printAnlyState(program, prevEdgeMap, D, badJumps)
 	}
 
-	return nil
+	return
 }
