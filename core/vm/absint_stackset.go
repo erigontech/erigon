@@ -8,7 +8,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -147,11 +146,12 @@ func toProgram(contract *Contract) *program {
 	return program
 }
 
+/*
 func printStmts(stmts []*astmt) {
 	for i, stmt := range stmts {
 		fmt.Printf("%v %v\n", i, stmt)
 	}
-}
+}*/
 
 ////////////////////////
 
@@ -166,6 +166,7 @@ func (e edge) String() string {
 	return fmt.Sprintf("%v %v %v", e.pc0, e.pc1, e.stmt.opcode)
 }
 
+/*
 func reverseSortEdges(edges []edge) {
 	sort.SliceStable(edges, func(i, j int) bool {
 		return edges[i].pc0 > edges[j].pc0
@@ -176,7 +177,7 @@ func sortEdges(edges []edge) {
 	sort.SliceStable(edges, func(i, j int) bool {
 		return edges[i].pc0 < edges[j].pc0
 	})
-}
+}*/
 
 func printEdges(edges []edge) {
 	for _, edge := range edges {
@@ -303,7 +304,7 @@ func (s *astack) Pop(pc int) AbsValue {
 }
 
 func (s *astack) String(abbrev bool) string {
-	var strs []string
+	strs := make([]string, 0)
 	for _, c := range s.values {
 		strs = append(strs, c.String(abbrev))
 	}
@@ -568,16 +569,8 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 		}
 
 		pc0s := make([]string, 0)
-		showPC0s := false
 		for pc0 := range prevEdgeMap[pc] {
 			pc0s = append(pc0s, strconv.Itoa(pc0))
-			stmt0 := program.stmts[pc0]
-			if pc0+stmt0.numBytes != pc {
-				showPC0s = true
-			}
-		}
-		if !showPC0s && false {
-			pc0s = nil
 		}
 
 		if badJumps[pc] {
@@ -623,7 +616,7 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 	}
 
 	path := "cfg.dot"
-	os.Remove(path)
+	_ = os.Remove(path)
 
 	f, errcr := os.Create(path)
 	if errcr != nil {
@@ -636,7 +629,7 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 	if errwr != nil {
 		panic(errwr)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func check(program *program, prevEdgeMap map[int]map[int]bool) {

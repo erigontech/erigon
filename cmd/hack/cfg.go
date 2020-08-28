@@ -20,25 +20,27 @@ func testGenCfg() error {
 		print("Finished running on program from command line.")
 		return nil
 	}
-	//cfg0Test0()
-	//cfg0Test1()
-	//dfTest1()
-	//dfTest2()
-	//dfTest3()
-	//absIntTest1() //- PASSES (should not be able to resolve all to concrete jumps)
-	//absIntTest2() //PASSES
-	//absIntTestSimple00() //- PASSES
-	//absIntTestRequires00() //- PASSES
-	//absIntTestCall01() // - PASSES
-	//absIntTestDiv00()
-	//absIntTestEcrecoverLoop02() //- PASSES
-	//absIntTestStorageVar03() // - PASSES
-	//absIntTestStaticLoop00() //- PASSES
-	//absIntTestPrivateFunction01() //- PASS
-	//absIntTestPrivateFunction02() //- PASS
-	//absIntTestStaticLoop01() //  //- PASS
+	cfg0Test0()
+	cfg0Test1()
+	dfTest0()
+	dfTest1()
+	dfTest2()
+	dfTest3()
+	absIntTest1() //- PASSES (should not be able to resolve all to concrete jumps)
+	absIntTest2() //PASSES
+	absIntTest3()
+	absIntTestSimple00() //- PASSES
+	absIntTestRequires00() //- PASSES
+	absIntTestCall01() // - PASSES
+	absIntTestDiv00()
+	absIntTestEcrecoverLoop02() //- PASSES
+	absIntTestStorageVar03() // - PASSES
+	absIntTestStaticLoop00() //- PASSES
+	absIntTestPrivateFunction01() //- PASS
+	absIntTestPrivateFunction02() //- PASS
+	absIntTestStaticLoop01() //  //- PASS
 	absIntTestDepositContract() //FAILS - Imprecision
-	//absIntTestDepositContract2()
+	absIntTestDepositContract2()
 	return nil
 }
 
