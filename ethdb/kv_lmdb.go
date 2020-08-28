@@ -292,13 +292,15 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
-	t := &lmdbTx{db: db, ctx: ctx}
-	return db.env.View(func(tx *lmdb.Txn) error {
-		defer t.closeCursors()
-		tx.RawRead = true
-		t.tx = tx
-		return f(t)
-	})
+
+	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
+	tx, err := db.Begin(ctx, nil, false)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	return f(tx)
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
@@ -308,33 +310,18 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	var commitTimer time.Time
-	tx := &lmdbTx{db: db, ctx: ctx}
-	if err := db.env.Update(func(txn *lmdb.Txn) error {
-		defer tx.closeCursors()
-		txn.RawRead = true
-		tx.tx = txn
-		if exeErr := f(tx); exeErr != nil {
-			return exeErr
-		}
-		commitTimer = time.Now()
-		return nil
-	}); err != nil {
+	tx, err := db.Begin(ctx, nil, true)
+	if err != nil {
 		return err
 	}
-
-	commitTook := time.Since(commitTimer)
-	if commitTook > 20*time.Second {
-		log.Info("Commit", "took", commitTook)
+	defer tx.Rollback()
+	err = f(tx)
+	if err != nil {
+		return err
 	}
-
-	fsyncTimer := time.Now()
-	if err := tx.db.env.Sync(true); err != nil {
-		log.Warn("fsync after commit failed: \n", err)
-	}
-	fsyncTook := time.Since(fsyncTimer)
-	if fsyncTook > 20*time.Second {
-		log.Info("Fsync", "took", fsyncTook)
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -418,7 +405,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		return err
 	}
 	commitTook := time.Since(commitTimer)
-	if commitTook > 10*time.Second {
+	if commitTook > 20*time.Second {
 		log.Info("Batch", "commit", commitTook)
 	}
 
@@ -428,7 +415,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 			log.Warn("fsync after commit failed: \n", err)
 		}
 		fsyncTook := time.Since(fsyncTimer)
-		if fsyncTook > 1*time.Second {
+		if fsyncTook > 20*time.Second {
 			log.Info("Batch", "fsync", fsyncTook)
 		}
 	}
