@@ -68,7 +68,7 @@ var (
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
-type JumpTable [256]operation
+type JumpTable [256]*operation
 
 func newYoloV1InstructionSet() JumpTable {
 	instructionSet := newIstanbulInstructionSet()
@@ -94,7 +94,7 @@ func newIstanbulInstructionSet() JumpTable {
 // byzantium and contantinople instructions.
 func newConstantinopleInstructionSet() JumpTable {
 	instructionSet := newByzantiumInstructionSet()
-	instructionSet[SHL] = operation{
+	instructionSet[SHL] = &operation{
 		execute:     opSHL,
 		constantGas: GasFastestStep,
 		minStack:    minStack(2, 1),
@@ -103,7 +103,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush: 	1,
 		valid:       true,
 	}
-	instructionSet[SHR] = operation{
+	instructionSet[SHR] = &operation{
 		execute:     opSHR,
 		constantGas: GasFastestStep,
 		minStack:    minStack(2, 1),
@@ -112,7 +112,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush: 	1,
 		valid:       true,
 	}
-	instructionSet[SAR] = operation{
+	instructionSet[SAR] = &operation{
 		execute:     opSAR,
 		constantGas: GasFastestStep,
 		minStack:    minStack(2, 1),
@@ -121,7 +121,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush: 	1,
 		valid:       true,
 	}
-	instructionSet[EXTCODEHASH] = operation{
+	instructionSet[EXTCODEHASH] = &operation{
 		execute:     opExtCodeHash,
 		constantGas: params.ExtcodeHashGasConstantinople,
 		minStack:    minStack(1, 1),
@@ -130,7 +130,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush: 	1,
 		valid:       true,
 	}
-	instructionSet[CREATE2] = operation{
+	instructionSet[CREATE2] = &operation{
 		execute:     opCreate2,
 		constantGas: params.Create2Gas,
 		dynamicGas:  gasCreate2,
@@ -150,7 +150,7 @@ func newConstantinopleInstructionSet() JumpTable {
 // byzantium instructions.
 func newByzantiumInstructionSet() JumpTable {
 	instructionSet := newSpuriousDragonInstructionSet()
-	instructionSet[STATICCALL] = operation{
+	instructionSet[STATICCALL] = &operation{
 		execute:     opStaticCall,
 		constantGas: params.CallGasEIP150,
 		dynamicGas:  gasStaticCall,
@@ -162,7 +162,7 @@ func newByzantiumInstructionSet() JumpTable {
 		valid:       true,
 		returns:     true,
 	}
-	instructionSet[RETURNDATASIZE] = operation{
+	instructionSet[RETURNDATASIZE] = &operation{
 		execute:     opReturnDataSize,
 		constantGas: GasQuickStep,
 		minStack:    minStack(0, 1),
@@ -171,7 +171,7 @@ func newByzantiumInstructionSet() JumpTable {
 		numPush: 	1,
 		valid:       true,
 	}
-	instructionSet[RETURNDATACOPY] = operation{
+	instructionSet[RETURNDATACOPY] = &operation{
 		execute:     opReturnDataCopy,
 		constantGas: GasFastestStep,
 		dynamicGas:  gasReturnDataCopy,
@@ -182,7 +182,7 @@ func newByzantiumInstructionSet() JumpTable {
 		memorySize:  memoryReturnDataCopy,
 		valid:       true,
 	}
-	instructionSet[REVERT] = operation{
+	instructionSet[REVERT] = &operation{
 		execute:    opRevert,
 		dynamicGas: gasRevert,
 		minStack:   minStack(2, 0),
@@ -190,7 +190,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop: 	2,
 		numPush: 	0,
 		memorySize: memoryRevert,
-		valid:      true,
 		reverts:    true,
 		returns:    true,
 	}
@@ -222,7 +221,7 @@ func newTangerineWhistleInstructionSet() JumpTable {
 // instructions that can be executed during the homestead phase.
 func newHomesteadInstructionSet() JumpTable {
 	instructionSet := newFrontierInstructionSet()
-	instructionSet[DELEGATECALL] = operation{
+	instructionSet[DELEGATECALL] = &operation{
 		execute:     opDelegateCall,
 		dynamicGas:  gasDelegateCall,
 		constantGas: params.CallGasFrontier,
@@ -231,7 +230,6 @@ func newHomesteadInstructionSet() JumpTable {
 		numPop: 	6,
 		numPush: 	1,
 		memorySize:  memoryDelegateCall,
-		valid:       true,
 		returns:     true,
 	}
 	return instructionSet
@@ -249,7 +247,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	0,
 			numPush: 	0,
 			halts:       true,
-			valid:       true,
 		},
 		ADD: {
 			execute:     opAdd,
@@ -258,7 +255,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		MUL: {
 			execute:     opMul,
@@ -267,7 +263,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		SUB: {
 			execute:     opSub,
@@ -276,7 +271,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		DIV: {
 			execute:     opDiv,
@@ -285,7 +279,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		SDIV: {
 			execute:     opSdiv,
@@ -294,7 +287,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		MOD: {
 			execute:     opMod,
@@ -303,7 +295,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		SMOD: {
 			execute:     opSmod,
@@ -312,7 +303,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		ADDMOD: {
 			execute:     opAddmod,
@@ -321,7 +311,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(3, 1),
 			numPop: 	3,
 			numPush: 	1,
-			valid:       true,
 		},
 		MULMOD: {
 			execute:     opMulmod,
@@ -330,7 +319,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(3, 1),
 			numPop: 	3,
 			numPush: 	1,
-			valid:       true,
 		},
 		EXP: {
 			execute:    opExp,
@@ -348,7 +336,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		LT: {
 			execute:     opLt,
@@ -357,7 +344,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		GT: {
 			execute:     opGt,
@@ -366,7 +352,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		SLT: {
 			execute:     opSlt,
@@ -375,7 +360,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		SGT: {
 			execute:     opSgt,
@@ -384,7 +368,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		EQ: {
 			execute:     opEq,
@@ -393,7 +376,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		ISZERO: {
 			execute:     opIszero,
@@ -402,7 +384,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		AND: {
 			execute:     opAnd,
@@ -411,7 +392,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		XOR: {
 			execute:     opXor,
@@ -420,7 +400,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		OR: {
 			execute:     opOr,
@@ -429,7 +408,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		NOT: {
 			execute:     opNot,
@@ -438,7 +416,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		BYTE: {
 			execute:     opByte,
@@ -447,7 +424,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:       true,
 		},
 		SHA3: {
 			execute:     opSha3,
@@ -458,7 +434,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	2,
 			numPush: 	1,
 			memorySize:  memorySha3,
-			valid:       true,
 		},
 		ADDRESS: {
 			execute:     opAddress,
@@ -467,7 +442,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		BALANCE: {
 			execute:     opBalance,
@@ -476,7 +450,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		ORIGIN: {
 			execute:     opOrigin,
@@ -485,7 +458,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		CALLER: {
 			execute:     opCaller,
@@ -494,7 +466,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		CALLVALUE: {
 			execute:     opCallValue,
@@ -503,7 +474,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		CALLDATALOAD: {
 			execute:     opCallDataLoad,
@@ -512,7 +482,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		CALLDATASIZE: {
 			execute:     opCallDataSize,
@@ -521,7 +490,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		CALLDATACOPY: {
 			execute:     opCallDataCopy,
@@ -532,7 +500,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	3,
 			numPush: 	0,
 			memorySize:  memoryCallDataCopy,
-			valid:       true,
 		},
 		CODESIZE: {
 			execute:     opCodeSize,
@@ -541,7 +508,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		CODECOPY: {
 			execute:     opCodeCopy,
@@ -552,7 +518,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	3,
 			numPush: 	0,
 			memorySize:  memoryCodeCopy,
-			valid:       true,
 		},
 		GASPRICE: {
 			execute:     opGasprice,
@@ -561,7 +526,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		EXTCODESIZE: {
 			execute:     opExtCodeSize,
@@ -570,7 +534,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		EXTCODECOPY: {
 			execute:     opExtCodeCopy,
@@ -581,7 +544,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	4,
 			numPush: 	0,
 			memorySize:  memoryExtCodeCopy,
-			valid:       true,
 		},
 		BLOCKHASH: {
 			execute:     opBlockhash,
@@ -590,7 +552,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		COINBASE: {
 			execute:     opCoinbase,
@@ -599,7 +560,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		TIMESTAMP: {
 			execute:     opTimestamp,
@@ -608,7 +568,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		NUMBER: {
 			execute:     opNumber,
@@ -617,7 +576,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		DIFFICULTY: {
 			execute:     opDifficulty,
@@ -626,7 +584,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		GASLIMIT: {
 			execute:     opGasLimit,
@@ -635,7 +592,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		POP: {
 			execute:     opPop,
@@ -644,7 +600,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 0),
 			numPop: 	1,
 			numPush: 	0,
-			valid:       true,
 		},
 		MLOAD: {
 			execute:     opMload,
@@ -655,7 +610,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	1,
 			numPush: 	1,
 			memorySize:  memoryMLoad,
-			valid:       true,
 		},
 		MSTORE: {
 			execute:     opMstore,
@@ -666,7 +620,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	2,
 			numPush: 	0,
 			memorySize:  memoryMStore,
-			valid:       true,
 		},
 		MSTORE8: {
 			execute:     opMstore8,
@@ -687,7 +640,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 1),
 			numPop: 	1,
 			numPush: 	1,
-			valid:       true,
 		},
 		SSTORE: {
 			execute:    opSstore,
@@ -707,7 +659,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	1,
 			numPush: 	0,
 			jumps:       true,
-			valid:       true,
 		},
 		JUMPI: {
 			execute:     opJumpi,
@@ -717,7 +668,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	2,
 			numPush: 	0,
 			jumps:       true,
-			valid:       true,
 		},
 		PC: {
 			execute:     opPc,
@@ -726,7 +676,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		MSIZE: {
 			execute:     opMsize,
@@ -735,7 +684,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		GAS: {
 			execute:     opGas,
@@ -744,7 +692,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 1),
 			numPop: 	0,
 			numPush: 	1,
-			valid:       true,
 		},
 		JUMPDEST: {
 			execute:     opJumpdest,
@@ -753,7 +700,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 0),
 			numPop: 	0,
 			numPush: 	0,
-			valid:       true,
 		},
 		PUSH1: {
 			execute:     opPush1,
@@ -764,7 +710,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		1,
-			valid:       true,
 		},
 		PUSH2: {
 			execute:     makePush(2, 2),
@@ -775,7 +720,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		2,
-			valid:       true,
 		},
 		PUSH3: {
 			execute:     makePush(3, 3),
@@ -786,7 +730,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		3,
-			valid:       true,
 		},
 		PUSH4: {
 			execute:     makePush(4, 4),
@@ -797,7 +740,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		4,
-			valid:       true,
 		},
 		PUSH5: {
 			execute:     makePush(5, 5),
@@ -808,7 +750,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		5,
-			valid:       true,
 		},
 		PUSH6: {
 			execute:     makePush(6, 6),
@@ -819,7 +760,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		6,
-			valid:       true,
 		},
 		PUSH7: {
 			execute:     makePush(7, 7),
@@ -830,7 +770,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		7,
-			valid:       true,
 		},
 		PUSH8: {
 			execute:     makePush(8, 8),
@@ -841,7 +780,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		8,
-			valid:       true,
 		},
 		PUSH9: {
 			execute:     makePush(9, 9),
@@ -852,7 +790,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		9,
-			valid:       true,
 		},
 		PUSH10: {
 			execute:     makePush(10, 10),
@@ -863,7 +800,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		10,
-			valid:       true,
 		},
 		PUSH11: {
 			execute:     makePush(11, 11),
@@ -874,7 +810,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		11,
-			valid:       true,
 		},
 		PUSH12: {
 			execute:     makePush(12, 12),
@@ -885,7 +820,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		12,
-			valid:       true,
 		},
 		PUSH13: {
 			execute:     makePush(13, 13),
@@ -896,7 +830,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		13,
-			valid:       true,
 		},
 		PUSH14: {
 			execute:     makePush(14, 14),
@@ -907,7 +840,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		14,
-			valid:       true,
 		},
 		PUSH15: {
 			execute:     makePush(15, 15),
@@ -918,7 +850,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		15,
-			valid:       true,
 		},
 		PUSH16: {
 			execute:     makePush(16, 16),
@@ -929,7 +860,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		16,
-			valid:       true,
 		},
 		PUSH17: {
 			execute:     makePush(17, 17),
@@ -940,7 +870,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		17,
-			valid:       true,
 		},
 		PUSH18: {
 			execute:     makePush(18, 18),
@@ -951,7 +880,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		18,
-			valid:       true,
 		},
 		PUSH19: {
 			execute:     makePush(19, 19),
@@ -962,7 +890,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		19,
-			valid:       true,
 		},
 		PUSH20: {
 			execute:     makePush(20, 20),
@@ -973,7 +900,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		20,
-			valid:       true,
 		},
 		PUSH21: {
 			execute:     makePush(21, 21),
@@ -984,7 +910,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		21,
-			valid:       true,
 		},
 		PUSH22: {
 			execute:     makePush(22, 22),
@@ -995,7 +920,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		22,
-			valid:       true,
 		},
 		PUSH23: {
 			execute:     makePush(23, 23),
@@ -1006,7 +930,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		23,
-			valid:       true,
 		},
 		PUSH24: {
 			execute:     makePush(24, 24),
@@ -1017,7 +940,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		24,
-			valid:       true,
 		},
 		PUSH25: {
 			execute:     makePush(25, 25),
@@ -1028,7 +950,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		25,
-			valid:       true,
 		},
 		PUSH26: {
 			execute:     makePush(26, 26),
@@ -1039,7 +960,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		26,
-			valid:       true,
 		},
 		PUSH27: {
 			execute:     makePush(27, 27),
@@ -1050,7 +970,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		27,
-			valid:       true,
 		},
 		PUSH28: {
 			execute:     makePush(28, 28),
@@ -1061,7 +980,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		28,
-			valid:       true,
 		},
 		PUSH29: {
 			execute:     makePush(29, 29),
@@ -1072,7 +990,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		29,
-			valid:       true,
 		},
 		PUSH30: {
 			execute:     makePush(30, 30),
@@ -1083,7 +1000,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		30,
-			valid:       true,
 		},
 		PUSH31: {
 			execute:     makePush(31, 31),
@@ -1094,7 +1010,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		31,
-			valid:       true,
 		},
 		PUSH32: {
 			execute:     makePush(32, 32),
@@ -1105,7 +1020,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isPush: 	true,
 			opNum: 		32,
-			valid:       true,
 		},
 		DUP1: {
 			execute:     makeDup(1),
@@ -1116,7 +1030,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		1,
-			valid:       true,
 		},
 		DUP2: {
 			execute:     makeDup(2),
@@ -1127,7 +1040,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		2,
-			valid:       true,
 		},
 		DUP3: {
 			execute:     makeDup(3),
@@ -1138,7 +1050,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		3,
-			valid:       true,
 		},
 		DUP4: {
 			execute:     makeDup(4),
@@ -1149,7 +1060,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		4,
-			valid:       true,
 		},
 		DUP5: {
 			execute:     makeDup(5),
@@ -1160,7 +1070,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		5,
-			valid:       true,
 		},
 		DUP6: {
 			execute:     makeDup(6),
@@ -1171,7 +1080,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		6,
-			valid:       true,
 		},
 		DUP7: {
 			execute:     makeDup(7),
@@ -1182,7 +1090,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		7,
-			valid:       true,
 		},
 		DUP8: {
 			execute:     makeDup(8),
@@ -1193,7 +1100,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		8,
-			valid:       true,
 		},
 		DUP9: {
 			execute:     makeDup(9),
@@ -1204,7 +1110,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		9,
-			valid:       true,
 		},
 		DUP10: {
 			execute:     makeDup(10),
@@ -1215,7 +1120,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		10,
-			valid:       true,
 		},
 		DUP11: {
 			execute:     makeDup(11),
@@ -1226,7 +1130,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		11,
-			valid:       true,
 		},
 		DUP12: {
 			execute:     makeDup(12),
@@ -1237,7 +1140,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		12,
-			valid:       true,
 		},
 		DUP13: {
 			execute:     makeDup(13),
@@ -1248,7 +1150,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		13,
-			valid:       true,
 		},
 		DUP14: {
 			execute:     makeDup(14),
@@ -1259,7 +1160,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		14,
-			valid:       true,
 		},
 		DUP15: {
 			execute:     makeDup(15),
@@ -1270,7 +1170,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		15,
-			valid:       true,
 		},
 		DUP16: {
 			execute:     makeDup(16),
@@ -1281,7 +1180,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isDup: 		true,
 			opNum: 		16,
-			valid:       true,
 		},
 		SWAP1: {
 			execute:     makeSwap(1),
@@ -1292,7 +1190,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		1,
-			valid:       true,
 		},
 		SWAP2: {
 			execute:     makeSwap(2),
@@ -1303,7 +1200,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		2,
-			valid:       true,
 		},
 		SWAP3: {
 			execute:     makeSwap(3),
@@ -1314,7 +1210,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		3,
-			valid:       true,
 		},
 		SWAP4: {
 			execute:     makeSwap(4),
@@ -1325,7 +1220,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		4,
-			valid:       true,
 		},
 		SWAP5: {
 			execute:     makeSwap(5),
@@ -1336,7 +1230,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		5,
-			valid:       true,
 		},
 		SWAP6: {
 			execute:     makeSwap(6),
@@ -1347,7 +1240,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		6,
-			valid:       true,
 		},
 		SWAP7: {
 			execute:     makeSwap(7),
@@ -1358,7 +1250,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		7,
-			valid:       true,
 		},
 		SWAP8: {
 			execute:     makeSwap(8),
@@ -1369,7 +1260,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		8,
-			valid:       true,
 		},
 		SWAP9: {
 			execute:     makeSwap(9),
@@ -1380,7 +1270,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		9,
-			valid:       true,
 		},
 		SWAP10: {
 			execute:     makeSwap(10),
@@ -1391,7 +1280,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		10,
-			valid:       true,
 		},
 		SWAP11: {
 			execute:     makeSwap(11),
@@ -1402,7 +1290,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		11,
-			valid:       true,
 		},
 		SWAP12: {
 			execute:     makeSwap(12),
@@ -1413,7 +1300,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		12,
-			valid:       true,
 		},
 		SWAP13: {
 			execute:     makeSwap(13),
@@ -1424,7 +1310,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		13,
-			valid:       true,
 		},
 		SWAP14: {
 			execute:     makeSwap(14),
@@ -1435,7 +1320,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		14,
-			valid:       true,
 		},
 		SWAP15: {
 			execute:     makeSwap(15),
@@ -1446,7 +1330,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		15,
-			valid:       true,
 		},
 		SWAP16: {
 			execute:     makeSwap(16),
@@ -1457,7 +1340,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	1,
 			isSwap: 	true,
 			opNum: 		16,
-			valid:       true,
 		},
 		LOG0: {
 			execute:    makeLog(0),
@@ -1523,7 +1405,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	3,
 			numPush: 	1,
 			memorySize:  memoryCreate,
-			valid:       true,
 			writes:      true,
 			returns:     true,
 		},
@@ -1536,7 +1417,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	7,
 			numPush: 	1,
 			memorySize:  memoryCall,
-			valid:       true,
 			returns:     true,
 		},
 		CALLCODE: {
@@ -1548,7 +1428,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	7,
 			numPush: 	1,
 			memorySize:  memoryCall,
-			valid:       true,
 			returns:     true,
 		},
 		RETURN: {
