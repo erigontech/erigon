@@ -29,7 +29,7 @@ var STOP_ON_ERROR = true
 type stmt struct {
 	pc             int
 	opcode         OpCode
-	operation      operation
+	operation      *operation
 	value          uint256.Int
 	numBytes       int
 	inferredAsData bool
@@ -43,11 +43,7 @@ func (stmt *stmt) String() string {
 	if stmt.ends {
 		ends = "ends"
 	}
-	valid := ""
-	if stmt.operation.valid {
-		valid = "valid"
-	}
-	return fmt.Sprintf("%v %v %v", stmt.opcode, ends, valid)
+	return fmt.Sprintf("%v %v %v", stmt.opcode, ends)
 }
 
 type program struct {
@@ -73,7 +69,7 @@ func toProgram(contract *Contract) *program {
 		op := contract.GetOp(uint64(pc))
 		stmt.opcode = op
 		stmt.operation = jt[op]
-		stmt.ends = stmt.operation.halts || stmt.operation.reverts || !stmt.operation.valid
+		stmt.ends = stmt.operation == nil || stmt.operation.halts || stmt.operation.reverts
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {
@@ -420,7 +416,7 @@ type ResolveResult struct {
 func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 	stmt := program.stmts[pc0]
 
-	if !stmt.operation.valid || stmt.ends {
+	if stmt.ends {
 		return ResolveResult{resolved: true}
 	}
 

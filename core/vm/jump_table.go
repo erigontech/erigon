@@ -51,7 +51,6 @@ type operation struct {
 	halts   bool // indicates whether the operation should halt further execution
 	jumps   bool // indicates whether the program counter should not increment
 	writes  bool // determines whether this a state modifying operation
-	valid   bool // indication whether the retrieved operation is valid and known
 	reverts bool // determines whether the operation reverts state (implicitly halts)
 	returns bool // determines whether the operations sets the return data content
 }
@@ -101,7 +100,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		maxStack:    maxStack(2, 1),
 		numPop: 	2,
 		numPush: 	1,
-		valid:       true,
 	}
 	instructionSet[SHR] = &operation{
 		execute:     opSHR,
@@ -110,7 +108,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		maxStack:    maxStack(2, 1),
 		numPop: 	2,
 		numPush: 	1,
-		valid:       true,
 	}
 	instructionSet[SAR] = &operation{
 		execute:     opSAR,
@@ -119,7 +116,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		maxStack:    maxStack(2, 1),
 		numPop: 	2,
 		numPush: 	1,
-		valid:       true,
 	}
 	instructionSet[EXTCODEHASH] = &operation{
 		execute:     opExtCodeHash,
@@ -128,7 +124,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		maxStack:    maxStack(1, 1),
 		numPop: 	1,
 		numPush: 	1,
-		valid:       true,
 	}
 	instructionSet[CREATE2] = &operation{
 		execute:     opCreate2,
@@ -139,7 +134,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPop: 	4,
 		numPush: 	1,
 		memorySize:  memoryCreate2,
-		valid:       true,
 		writes:      true,
 		returns:     true,
 	}
@@ -159,7 +153,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop: 	6,
 		numPush: 	1,
 		memorySize:  memoryStaticCall,
-		valid:       true,
 		returns:     true,
 	}
 	instructionSet[RETURNDATASIZE] = &operation{
@@ -169,7 +162,6 @@ func newByzantiumInstructionSet() JumpTable {
 		maxStack:    maxStack(0, 1),
 		numPop: 	0,
 		numPush: 	1,
-		valid:       true,
 	}
 	instructionSet[RETURNDATACOPY] = &operation{
 		execute:     opReturnDataCopy,
@@ -180,7 +172,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop: 	3,
 		numPush: 	0,
 		memorySize:  memoryReturnDataCopy,
-		valid:       true,
 	}
 	instructionSet[REVERT] = &operation{
 		execute:    opRevert,
@@ -327,7 +318,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:   maxStack(2, 1),
 			numPop: 	2,
 			numPush: 	1,
-			valid:      true,
 		},
 		SIGNEXTEND: {
 			execute:     opSignExtend,
@@ -631,7 +621,6 @@ func newFrontierInstructionSet() JumpTable {
 
 			numPop: 	2,
 			numPush: 	0,
-			valid: true,
 		},
 		SLOAD: {
 			execute:     opSload,
@@ -648,7 +637,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:   maxStack(2, 0),
 			numPop: 	2,
 			numPush: 	0,
-			valid:      true,
 			writes:     true,
 		},
 		JUMP: {
@@ -1349,7 +1337,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	2,
 			numPush: 	0,
 			memorySize: memoryLog,
-			valid:      true,
 			writes:     true,
 		},
 		LOG1: {
@@ -1360,7 +1347,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	3,
 			numPush: 	0,
 			memorySize: memoryLog,
-			valid:      true,
 			writes:     true,
 		},
 		LOG2: {
@@ -1371,7 +1357,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	4,
 			numPush: 	0,
 			memorySize: memoryLog,
-			valid:      true,
 			writes:     true,
 		},
 		LOG3: {
@@ -1382,7 +1367,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	5,
 			numPush: 	0,
 			memorySize: memoryLog,
-			valid:      true,
 			writes:     true,
 		},
 		LOG4: {
@@ -1393,7 +1377,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	6,
 			numPush: 	0,
 			memorySize: memoryLog,
-			valid:      true,
 			writes:     true,
 		},
 		CREATE: {
@@ -1439,7 +1422,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush: 	0,
 			memorySize: memoryReturn,
 			halts:      true,
-			valid:      true,
 		},
 		SELFDESTRUCT: {
 			execute:    opSuicide,
@@ -1449,7 +1431,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop: 	1,
 			numPush: 	0,
 			halts:      true,
-			valid:      true,
 			writes:     true,
 		},
 	}
