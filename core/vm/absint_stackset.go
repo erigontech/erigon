@@ -26,7 +26,7 @@ var StopOnError = true
 //////////////////////////
 
 // stmt is the representation of an executable instruction - extension of an opcode
-type stmt struct {
+type astmt struct {
 	pc             int
 	opcode         OpCode
 	operation      *operation
@@ -38,17 +38,17 @@ type stmt struct {
 	isBlockExit    bool
 }
 
-func (stmt *stmt) String() string {
+func (stmt *astmt) String() string {
 	ends := ""
 	if stmt.ends {
 		ends = "ends"
 	}
-	return fmt.Sprintf("%v %v %v", stmt.opcode, ends)
+	return fmt.Sprintf("%v %v %v", stmt.opcode, ends, stmt.operation.isPush)
 }
 
 type program struct {
 	contract    *Contract
-	stmts       []*stmt
+	stmts       []*astmt
 	blocks      []*block
 	entry2block map[int]*block
 	exit2block  map[int]*block
@@ -62,7 +62,7 @@ func toProgram(contract *Contract) *program {
 	codeLen := len(contract.Code)
 	inferIsData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
-		stmt := stmt{}
+		stmt := astmt{}
 		stmt.pc = pc
 		stmt.inferredAsData = inferIsData[pc]
 
@@ -126,7 +126,7 @@ func toProgram(contract *Contract) *program {
 
 	for entrypc, entry := range program.stmts {
 		if entry.isBlockEntry {
-			block := &block{entrypc: entrypc, stmts: make([]*stmt, 0)}
+			block := &block{entrypc: entrypc, stmts: make([]*astmt, 0)}
 			program.blocks = append(program.blocks, block)
 			for i := entrypc; i < len(program.stmts); i++ {
 				block.stmts = append(block.stmts, program.stmts[i])
@@ -147,7 +147,7 @@ func toProgram(contract *Contract) *program {
 	return program
 }
 
-func printStmts(stmts []stmt) {
+func printStmts(stmts []*astmt) {
 	for i, stmt := range stmts {
 		fmt.Printf("%v %v\n", i, stmt)
 	}
@@ -157,7 +157,7 @@ func printStmts(stmts []stmt) {
 
 type edge struct {
 	pc0    int
-	stmt   *stmt
+	stmt   *astmt
 	pc1    int
 	isJump bool
 }
@@ -399,7 +399,7 @@ func (state *astate) Add(stack *astack) {
 type ResolveResult struct {
 	edges    []edge
 	resolved bool
-	badJump  *stmt
+	badJump  *astmt
 }
 
 // resolve analyses given executable instruction at given program counter in the context of given state
@@ -541,7 +541,7 @@ func Lub(st0 *astate, st1 *astate) *astate {
 type block struct {
 	entrypc int
 	exitpc  int
-	stmts   []*stmt
+	stmts   []*astmt
 }
 
 func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]*astate, badJumps map[int]bool) {
@@ -751,8 +751,6 @@ func AbsIntCfgHarness(contract *Contract) {
 				badJumps[resolution.badJump.pc] = true
 				fmt.Printf("FAILURE: Unable to resolve: anlyCounter=%v pc=%x\n", aurora.Red(anlyCounter), aurora.Red(e.pc1))
 				if StopOnError {
-					badJumps := make(map[int]bool)
-					badJumps[resolution.badJump.pc] = true
 					printAnlyState(program, prevEdgeMap, D, badJumps)
 					return
 				}
