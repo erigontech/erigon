@@ -565,7 +565,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return err
 		}
 
-		canRunCycleInOneTransaction := height-origin < 16 && height-hashStateStageProgress < 16
+		canRunCycleInOneTransaction := height-origin < 32 && height-hashStateStageProgress < 32
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
