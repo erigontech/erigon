@@ -20,7 +20,7 @@ const (
 )
 
 var DEBUG = false
-var STOP_ON_ERROR = true
+var StopOnError = true
 
 
 //////////////////////////
@@ -246,16 +246,12 @@ func (c0 AbsValue) String(abbrev bool) string {
 	} else if c0.kind == TopValue {
 		if !abbrev {
 			return fmt.Sprintf("%v%v", c0.kind.String(), c0.pc)
-		} else {
-			return c0.kind.String()
 		}
-	} else {
-		if c0.value.IsUint64() {
-			return strconv.FormatUint(c0.value.Uint64(), 10)
-		} else {
-			return "256bit"
-		}
+		return c0.kind.String()
+	} else if c0.value.IsUint64() {
+		return strconv.FormatUint(c0.value.Uint64(), 10)
 	}
+	return "256bit"
 }
 
 func AbsValueTop(pc int, fromDeepStack bool) AbsValue {
@@ -461,9 +457,9 @@ func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 
 	if isBadJump {
 		return ResolveResult{edges: edges, resolved: false, badJump: stmt}
-	} else {
-		return ResolveResult{edges: edges, resolved: true, badJump: nil}
 	}
+
+	return ResolveResult{edges: edges, resolved: true, badJump: nil}
 }
 
 func post(st0 *astate, edge edge) (*astate, error) {
@@ -476,7 +472,6 @@ func post(st0 *astate, edge edge) (*astate, error) {
 		elm0 := stack0.values[0]
 		if edge.isJump {
 			if elm0.kind == ConcreteValue && elm0.value.IsUint64() && int(elm0.value.Uint64()) != edge.pc1 {
-				print("filtering out stack")
 				continue
 			}
 		}
@@ -595,7 +590,7 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 			fmt.Print(out)
 			badJumpList = append(badJumpList, out)
 		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 			aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(false))
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", 			aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(true))
 		} else {
 			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", 					aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), valueStr)
 		}
@@ -613,8 +608,8 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 		block2node[block] = &n
 	}
 
-	for pc1, _ := range prevEdgeMap {
-		for pc0, _ := range prevEdgeMap[pc1] {
+	for pc1 := range prevEdgeMap {
+		for pc0 := range prevEdgeMap[pc1] {
 			block1 := program.entry2block[pc1]
 
 			if block1 == nil {
@@ -716,7 +711,7 @@ func AbsIntCfgHarness(contract *Contract) error {
 		preDpc1 := D[e.pc1]
 		post1, err := post(preDpc0, e)
 		if err != nil {
-			if STOP_ON_ERROR  {
+			if StopOnError  {
 				printAnlyState(program, prevEdgeMap, D, nil)
 				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err);
 				return nil
@@ -760,7 +755,7 @@ func AbsIntCfgHarness(contract *Contract) error {
 			if !resolution.resolved {
 				badJumps[resolution.badJump.pc] = true
 				fmt.Printf("FAILURE: Unable to resolve: anlyCounter=%v pc=%x\n", aurora.Red(anlyCounter), aurora.Red(e.pc1))
-				if STOP_ON_ERROR {
+				if StopOnError {
 					badJumps := make(map[int]bool)
 					badJumps[resolution.badJump.pc] = true
 					printAnlyState(program, prevEdgeMap, D, badJumps)
