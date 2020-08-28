@@ -225,7 +225,7 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the tips from the attached anchors to it
-func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powDepth int) error {
+func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powDepth int, currentTime uint64) error {
 	// Find attachement anchors again
 	anchorHeader := segment.headers[start]
 	if anchors, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
@@ -242,6 +242,8 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 			blockHeight: newAnchorHeader.Number.Uint64(),
 		}
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
+		heap.Push(hd.requestQueue, &RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
+
 		// Add all headers in the segments as tips to this anchor
 		// Iterate in reverse order to be able to compute cumulative difficulty along the way
 		var cumulativeDifficulty uint256.Int
@@ -326,6 +328,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth, uint256.Int{}); err != nil {
 		return NoPenalty, err
 	}
+	heap.Push(hd.requestQueue, &RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
@@ -435,8 +438,12 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 			}
 		} else {
 			// Add header as anchor
-			//TODO
-			hd.addHeaderAsAnchor(he.header, 0, uint256.Int{})
+			//TODO - persist powDepth and totalDifficulty
+			if parentAnchor, err = hd.addHeaderAsAnchor(he.header, hd.initPowDepth, uint256.Int{}); err != nil {
+				return fmt.Errorf("add header as anchor: %v", err)
+			}
+			childAnchors[he.header.Hash()] = parentAnchor
+			childDiffs[he.header.Hash()] = new(uint256.Int)
 		}
 		var header types.Header
 		if err = rlp.Decode(he.reader, &h); err == nil {
@@ -453,6 +460,24 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 		}
 	}
 	return nil
+}
+
+func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*HeaderRequest {
+	if hd.requestQueue.Len() == 0 {
+		return nil
+	}
+	var requests []*HeaderRequest
+	for peek := (*hd.requestQueue)[0]; hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime; peek = (*hd.requestQueue)[0] {
+		pop := heap.Pop(hd.requestQueue).(*RequestQueueItem)
+		if _, present := hd.anchors[pop.anchorParent]; present {
+			// Anchor still exists after the timeout
+			//TODO: Figure out correct request length
+			requests = append(requests, &HeaderRequest{hash: pop.anchorParent, length: 16})
+			pop.waitUntil = currentTime + timeout
+			heap.Push(hd.requestQueue, pop)
+		}
+	}
+	return requests
 }
 
 // childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct

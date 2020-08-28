@@ -3,6 +3,7 @@ package headerdownload
 import (
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -426,7 +427,7 @@ func TestExtendDown(t *testing.T) {
 
 	// single header in the chain segment
 	var h types.Header
-	if err := hd.ExtendDown(&ChainSegment{headers: []*types.Header{&h}}, 0, 1, 256); err == nil {
+	if err := hd.ExtendDown(&ChainSegment{headers: []*types.Header{&h}}, 0, 1, 256, uint64(time.Now().Unix())); err == nil {
 		t.Errorf("extendDown without working trees - expected error")
 	}
 }

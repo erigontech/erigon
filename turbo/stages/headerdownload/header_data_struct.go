@@ -2,11 +2,11 @@ package headerdownload
 
 import (
 	"bytes"
+	"container/heap"
 	"fmt"
 	"io"
 	"math/big"
 	"os"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -69,10 +69,16 @@ type PeerPenalty struct {
 
 type RequestQueueItem struct {
 	anchorParent common.Hash
-	requestTime  time.Time
+	waitUntil    uint64
 }
 
 type RequestQueue []RequestQueueItem
+
+// Request for chain segment starting with hash and going to its parent, etc, with length headers in total
+type HeaderRequest struct {
+	hash   common.Hash
+	length int
+}
 
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
@@ -110,7 +116,7 @@ func (rq RequestQueue) Len() int {
 }
 
 func (rq RequestQueue) Less(i, j int) bool {
-	return rq[i].requestTime.Before(rq[j].requestTime)
+	return rq[i].waitUntil < rq[j].waitUntil
 }
 
 func (rq RequestQueue) Swap(i, j int) {
@@ -137,7 +143,7 @@ func NewHeaderDownload(filesDir string,
 	verifySealFunc VerifySealFunc,
 	newAnchorFutureLimit, newAnchorPastLimit uint64,
 ) *HeaderDownload {
-	return &HeaderDownload{
+	hd := &HeaderDownload{
 		filesDir:             filesDir,
 		badHeaders:           make(map[common.Hash]struct{}),
 		anchors:              make(map[common.Hash][]*Anchor),
@@ -145,11 +151,14 @@ func NewHeaderDownload(filesDir string,
 		tipLimiter:           llrb.New(),
 		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
+		requestQueue:         &RequestQueue{},
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
 	}
+	heap.Init(hd.requestQueue)
+	return hd
 }
 
 func (p Penalty) String() string {
