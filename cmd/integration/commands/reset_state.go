@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
 	"path"
 	"sync"
@@ -22,9 +23,9 @@ import (
 
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
-	Short: "Reset StateStages (4,5,6,7,8,9) and buckets",
+	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		err := resetState(ctx)
 		if err != nil {
 			log.Error(err.Error())
@@ -40,11 +41,42 @@ var cmdResetState = &cobra.Command{
 	},
 }
 
+var cmdClearUnwindStack = &cobra.Command{
+	Use:   "clear_unwind_stack",
+	Short: "Clear unwind stack",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := clearUnwindStack(ctx)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdResetState)
 	withCompact(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
+
+	withChaindata(cmdClearUnwindStack)
+
+	rootCmd.AddCommand(cmdClearUnwindStack)
+}
+
+func clearUnwindStack(_ context.Context) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	for i := stages.SyncStage(0); i < stages.Finish; i++ {
+		if err := stages.SaveStageUnwind(db, i, 0, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resetState(_ context.Context) error {

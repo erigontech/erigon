@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -222,9 +223,6 @@ func CompositeKeyWithoutIncarnation(key []byte) []byte {
 		return kk
 	}
 	return key
-}
-func IsIndexBucket(b []byte) bool {
-	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
 }
 
 func CheckNewIndexChunk(b []byte, v uint64) bool {

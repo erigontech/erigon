@@ -1,8 +1,17 @@
 package main
 
-import "github.com/ledgerwatch/turbo-geth/cmd/integration/commands"
+import (
+	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/integration/commands"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"os"
+)
 
 func main() {
-	commands.Execute()
-}
+	rootCmd := commands.RootCommand()
 
+	if err := rootCmd.ExecuteContext(utils.RootContext()); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}

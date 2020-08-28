@@ -1,11 +1,11 @@
 package stagedsync
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,7 +43,7 @@ func TestStateStagesSuccess(t *testing.T) {
 	state := NewState(s)
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -87,7 +87,7 @@ func TestStateDisabledStages(t *testing.T) {
 	state := NewState(s)
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -134,7 +134,7 @@ func TestStateRepeatedStage(t *testing.T) {
 	state := NewState(s)
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -179,7 +179,7 @@ func TestStateErroredStage(t *testing.T) {
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.Equal(t, expectedErr, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -267,7 +267,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -369,7 +369,7 @@ func TestStateUnwind(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -452,7 +452,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -509,11 +509,11 @@ func TestStateSyncDoTwice(t *testing.T) {
 	}
 
 	state := NewState(s)
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.NoError(t, err)
 
 	state = NewState(s)
-	err = state.Run(db)
+	err = state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -571,13 +571,13 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	defer db.Close()
 
 	state := NewState(s)
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
 
 	state = NewState(s)
-	err = state.Run(db)
+	err = state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -663,13 +663,14 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.Error(t, errInterrupted, err)
 
 	state = NewState(s)
+	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err = state.LoadUnwindInfo(db)
 	assert.NoError(t, err)
-	err = state.Run(db)
+	err = state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -746,12 +747,12 @@ func TestStateSyncInterruptLongStage(t *testing.T) {
 
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err := state.Run(db)
+	err := state.Run(db, db)
 	assert.Equal(t, errInterrupted, err)
 
 	state = NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err = state.Run(db)
+	err = state.Run(db, db)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -763,5 +764,5 @@ func TestStateSyncInterruptLongStage(t *testing.T) {
 }
 
 func unwindOf(s stages.SyncStage) stages.SyncStage {
-	return 0xF - s
+	return 0xF0 + s
 }

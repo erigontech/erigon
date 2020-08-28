@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -58,15 +57,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-type LesServer interface {
-	Start(srvr *p2p.Server)
-	Stop()
-	APIs() []rpc.API
-	Protocols() []p2p.Protocol
-	SetBloomBitsIndexer(bbIndexer *core.ChainIndexer)
-	SetContractBackend(bind.ContractBackend)
-}
-
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *Config
@@ -75,7 +65,6 @@ type Ethereum struct {
 	txPool          *core.TxPool
 	blockchain      *core.BlockChain
 	protocolManager *ProtocolManager
-	lesServer       LesServer
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
@@ -99,26 +88,15 @@ type Ethereum struct {
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
 
-	lock          sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	p2pServer     *p2p.Server
 	txPoolStarted bool
-}
 
-func (s *Ethereum) AddLesServer(ls LesServer) {
-	s.lesServer = ls
-	ls.SetBloomBitsIndexer(s.bloomIndexer)
-}
-
-// SetClient sets a rpc client which connecting to our local node.
-func (s *Ethereum) SetContractBackend(backend bind.ContractBackend) {
-	// Pass the rpc client to les server if it is enabled.
-	if s.lesServer != nil {
-		s.lesServer.SetContractBackend(backend)
-	}
+	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
+func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	// Ensure configuration values are compatible and sane
 	if config.SyncMode == downloader.LightSync {
 		return nil, errors.New("can't run eth.Ethereum in light sync mode, use les.LightEthereum")
@@ -150,15 +128,13 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
-		if chainDb, err = ctx.OpenDatabaseWithFreezer("chaindata", config.DatabaseFreezer); err != nil {
+		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
+		if err != nil {
 			return nil, err
 		}
 	}
-	if ctx.Config.PrivateApiAddr != "" {
-		remotedbserver.StartGrpc(chainDb.KV(), ctx.Config.PrivateApiAddr)
-	}
 
-	err = migrations.NewMigrator().Apply(chainDb, ctx.Config.DataDir)
+	err = migrations.NewMigrator().Apply(chainDb, stack.Config().DataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -174,15 +150,16 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		config:            config,
 		chainDb:           chainDb,
 		chainKV:           chainDb.KV(),
-		eventMux:          ctx.EventMux,
-		accountManager:    ctx.AccountManager,
-		engine:            CreateConsensusEngine(ctx, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		eventMux:          stack.EventMux(),
+		accountManager:    stack.AccountManager(),
+		engine:            CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkID,
 		gasPrice:          config.Miner.GasPrice,
 		etherbase:         config.Miner.Etherbase,
 		bloomRequests:     make(chan chan *bloombits.Retrieval),
 		bloomIndexer:      NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		p2pServer:         stack.Server(),
 	}
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
@@ -242,10 +219,14 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	if config.TxPool.Journal != "" {
-		config.TxPool.Journal = ctx.ResolvePath(config.TxPool.Journal)
+		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
+
+	if stack.Config().PrivateApiAddr != "" {
+		remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr)
+	}
 
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
@@ -254,13 +235,20 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
-	eth.protocolManager.SetDataDir(ctx.Config.DataDir)
+	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	eth.protocolManager.SetDataDir(stack.Config().DataDir)
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {
 			return nil, err
 		}
 	}
+	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil}
+	gpoParams := config.GPO
+	if gpoParams.Default == nil {
+		gpoParams.Default = config.Miner.GasPrice
+	}
+	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
@@ -268,7 +256,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	}
 
 	if config.SyncMode != downloader.StagedSync {
-		eth.APIBackend = &EthAPIBackend{ctx.ExtRPCEnabled(), eth, nil}
+		eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil}
 		gpoParams := config.GPO
 		if gpoParams.Default == nil {
 			gpoParams.Default = config.Miner.GasPrice
@@ -276,11 +264,23 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	}
 
-	eth.dialCandidates, err = eth.setupDiscovery(&ctx.Config.P2P)
+	eth.dialCandidates, err = eth.setupDiscovery(&stack.Config().P2P)
 	if err != nil {
 		return nil, err
 	}
+	// Start the RPC service
+	if config.SyncMode != downloader.StagedSync {
+		id, err := eth.NetVersion()
+		if err != nil {
+			return nil, err
+		}
+		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, id)
+	}
 
+	// Register the backend on the node
+	stack.RegisterAPIs(eth.APIs())
+	stack.RegisterProtocols(eth.Protocols())
+	stack.RegisterLifecycle(eth)
 	return eth, nil
 }
 
@@ -326,7 +326,7 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(ctx *node.ServiceContext, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
+func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
 	// If proof-of-authority is requested, set it up
 	if chainConfig.Clique != nil {
 		return clique.New(chainConfig.Clique, db)
@@ -344,9 +344,7 @@ func CreateConsensusEngine(ctx *node.ServiceContext, chainConfig *params.ChainCo
 		return ethash.NewShared()
 	default:
 		engine := ethash.New(ethash.Config{
-			CacheDir:         ctx.ResolvePath(config.CacheDir),
 			CachesInMem:      config.CachesInMem,
-			CachesOnDisk:     config.CachesOnDisk,
 			CachesLockMmap:   config.CachesLockMmap,
 			DatasetDir:       config.DatasetDir,
 			DatasetsInMem:    config.DatasetsInMem,
@@ -366,59 +364,57 @@ func (s *Ethereum) APIs() []rpc.API {
 	}
 	apis := ethapi.GetAPIs(s.APIBackend)
 
-	// Append any APIs exposed explicitly by the les server
-	if s.lesServer != nil {
-		apis = append(apis, s.lesServer.APIs()...)
-	}
 	// Append any APIs exposed explicitly by the consensus engine
 	apis = append(apis, s.engine.APIs(s.BlockChain())...)
 
-	// Append any APIs exposed explicitly by the les server
-	if s.lesServer != nil {
-		apis = append(apis, s.lesServer.APIs()...)
-	}
-
 	// Append all the local APIs and return
 	return append(apis, []rpc.API{
+		//{
+		//	Namespace: "eth",
+		//	Version:   "1.0",
+		//	Service:   NewPublicEthereumAPI(s),
+		//	Public:    true,
+		//},
+		//{
+		//	Namespace: "eth",
+		//	Version:   "1.0",
+		//	Service:   NewPublicMinerAPI(s),
+		//	Public:    true,
+		//},
 		{
-			Namespace: "eth",
-			Version:   "1.0",
-			Service:   NewPublicEthereumAPI(s),
-			Public:    true,
-		}, {
-			Namespace: "eth",
-			Version:   "1.0",
-			Service:   NewPublicMinerAPI(s),
-			Public:    true,
-		}, {
 			Namespace: "eth",
 			Version:   "1.0",
 			Service:   downloader.NewPublicDownloaderAPI(s.protocolManager.downloader, s.eventMux),
 			Public:    true,
-		}, {
-			Namespace: "miner",
-			Version:   "1.0",
-			Service:   NewPrivateMinerAPI(s),
-			Public:    false,
-		}, {
+		},
+		//{
+		//	Namespace: "miner",
+		//	Version:   "1.0",
+		//	Service:   NewPrivateMinerAPI(s),
+		//	Public:    false,
+		//},
+		{
 			Namespace: "eth",
 			Version:   "1.0",
 			Service:   filters.NewPublicFilterAPI(s.APIBackend, false),
 			Public:    true,
-		}, {
-			Namespace: "admin",
-			Version:   "1.0",
-			Service:   NewPrivateAdminAPI(s),
-		}, {
-			Namespace: "debug",
-			Version:   "1.0",
-			Service:   NewPublicDebugAPI(s),
-			Public:    true,
-		}, {
-			Namespace: "debug",
-			Version:   "1.0",
-			Service:   NewPrivateDebugAPI(s),
-		}, {
+		},
+		//{
+		//	Namespace: "admin",
+		//	Version:   "1.0",
+		//	Service:   NewPrivateAdminAPI(s),
+		//},
+		//{
+		//	Namespace: "debug",
+		//	Version:   "1.0",
+		//	Service:   NewPublicDebugAPI(s),
+		//	Public:    true,
+		//}, {
+		//	Namespace: "debug",
+		//	Version:   "1.0",
+		//	Service:   NewPrivateDebugAPI(s),
+		//},
+		{
 			Namespace: "net",
 			Version:   "1.0",
 			Service:   s.netRPCService,
@@ -589,12 +585,13 @@ func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
 func (s *Ethereum) ChainKV() ethdb.KV                  { return s.chainKV }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) EthVersion() int                    { return int(ProtocolVersions[0]) }
-func (s *Ethereum) NetVersion() uint64                 { return s.networkID }
+func (s *Ethereum) NetVersion() (uint64, error)        { return s.networkID, nil }
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.protocolManager.downloader }
 func (s *Ethereum) Synced() bool                       { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
 func (s *Ethereum) ArchiveMode() bool                  { return !s.config.Pruning }
+func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
 
-// Protocols implements node.Service, returning all the currently configured
+// Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
 	protos := make([]p2p.Protocol, len(ProtocolVersions))
@@ -609,45 +606,24 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		protos = append(protos, s.protocolManager.makeDebugProtocol())
 	}
 
-	if s.lesServer != nil {
-		protos = append(protos, s.lesServer.Protocols()...)
-	}
 	return protos
 }
 
-// Start implements node.Service, starting all internal goroutines needed by the
+// Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
-func (s *Ethereum) Start(srvr *p2p.Server) error {
-	s.startEthEntryUpdate(srvr.LocalNode())
+func (s *Ethereum) Start() error {
+	s.startEthEntryUpdate(s.p2pServer.LocalNode())
 
 	// Start the bloom bits servicing goroutines
 	if s.config.SyncMode != downloader.StagedSync {
 		s.startBloomHandlers(params.BloomBitsBlocks)
 	}
 
-	// Start the RPC service
-	if s.config.SyncMode != downloader.StagedSync {
-		s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
-	}
-
 	// Figure out a max peers count based on the server limits
-	maxPeers := srvr.MaxPeers
-	if s.config.LightServ > 0 {
-		if s.config.LightPeers >= srvr.MaxPeers {
-			return fmt.Errorf("invalid peer config: light peer count (%d) >= total peer count (%d)", s.config.LightPeers, srvr.MaxPeers)
-		}
-		maxPeers -= s.config.LightPeers
-	}
-
+	maxPeers := s.p2pServer.MaxPeers
 	withTxPool := s.config.SyncMode != downloader.StagedSync
 	// Start the networking layer and the light server if requested
-	if err := s.protocolManager.Start(maxPeers, withTxPool); err != nil {
-		return err
-	}
-	if s.lesServer != nil {
-		s.lesServer.Start(srvr)
-	}
-	return nil
+	return s.protocolManager.Start(maxPeers, withTxPool)
 }
 
 func (s *Ethereum) StartTxPool() error {
@@ -685,9 +661,6 @@ func (s *Ethereum) StopTxPool() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
-	if s.lesServer != nil {
-		s.lesServer.Stop()
-	}
 
 	// Then stop everything else.
 	s.bloomIndexer.Close()

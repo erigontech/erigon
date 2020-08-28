@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -32,12 +31,12 @@ type IndexGenerator struct {
 	quitCh           <-chan struct{}
 }
 
-func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket []byte, datadir string) error {
-	v, ok := changeset.Mapper[string(changeSetBucket)]
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
+	v, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", string(changeSetBucket))
+	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
@@ -54,18 +53,22 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				blockNum, _ := dbutils.DecodeTimestamp(k)
+				return []interface{}{"block", blockNum}
+			},
 		},
 	)
 	if err != nil {
 		return err
 	}
 
-	log.Debug("Index generation successfully finished", "csbucket", string(changeSetBucket), "it took", time.Since(t))
+	log.Debug("Index generation successfully finished", "csbucket", changeSetBucket, "it took", time.Since(t))
 	return nil
 }
 
-func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) error {
-	vv, ok := changeset.Mapper[string(changeSetBucket)]
+func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) error {
+	vv, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
@@ -92,7 +95,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 
 	historyEffects := make(map[string][]byte)
 	keySize := vv.KeySize
-	if bytes.Equal(dbutils.StorageChangeSetBucket, changeSetBucket) || bytes.Equal(dbutils.PlainStorageChangeSetBucket, changeSetBucket) {
+	if dbutils.StorageChangeSetBucket == changeSetBucket || dbutils.PlainStorageChangeSetBucket == changeSetBucket {
 		keySize -= 8
 	}
 
@@ -123,28 +126,35 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket []byte) e
 			return err
 		}
 	}
+	mutation := ig.db.NewBatch()
+	defer mutation.Rollback()
 
 	for key, value := range historyEffects {
 		if value == nil {
-			if err := ig.db.Delete(vv.IndexBucket, []byte(key)); err != nil {
+			if err := mutation.Delete(vv.IndexBucket, []byte(key)); err != nil {
 				return err
 			}
 		} else {
-			if err := ig.db.Put(vv.IndexBucket, []byte(key), value); err != nil {
+			if err := mutation.Put(vv.IndexBucket, []byte(key), value); err != nil {
+				return err
+			}
+		}
+		if mutation.BatchSize() >= mutation.IdealBatchSize() {
+			if err := mutation.CommitAndBegin(); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
+	_, err := mutation.Commit()
+	return err
 }
 
-func (ig *IndexGenerator) DropIndex(bucket []byte) error {
+func (ig *IndexGenerator) DropIndex(bucket string) error {
 	casted, ok := ig.db.(ethdb.NonTransactional)
 	if !ok {
 		return errors.New("imposible to drop")
-
 	}
-	log.Warn("Remove bucket", "bucket", string(bucket))
+	log.Warn("Remove bucket", "bucket", bucket)
 	return casted.ClearBuckets(bucket)
 }
 

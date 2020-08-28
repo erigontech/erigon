@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -14,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
+func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -41,7 +42,7 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poo
 	return s.DoneAndUpdate(db, to)
 }
 
-func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
@@ -85,8 +86,13 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 			return true, nil
 		}
 
+		bodyRlp, err := rawdb.DecompressBlockBody(v)
+		if err != nil {
+			return false, err
+		}
+
 		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
+		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("txPoolUpdate: invalid block body RLP: %w", err)
 		}
 		for _, tx := range body.Transactions {
@@ -100,7 +106,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 	return nil
 }
 
-func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, quitCh <-chan struct{}) error {
+func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *core.TxPool, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -111,12 +117,12 @@ func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool 
 		}
 	}
 	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind TxPool: reset: %w", err)
+		return fmt.Errorf("unwind Backend: reset: %w", err)
 	}
 	return nil
 }
 
-func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, from)
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
@@ -189,8 +195,13 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 			return true, nil
 		}
 
+		bodyRlp, err := rawdb.DecompressBlockBody(v)
+		if err != nil {
+			return false, err
+		}
+
 		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
+		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("unwind TxPoolUpdate: invalid block body RLP: %w", err)
 		}
 		body.SendersToTxs(senders[blockNumber-from-1])

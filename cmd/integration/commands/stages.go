@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"runtime"
 	"time"
 
@@ -16,12 +17,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cmdStage3 = &cobra.Command{
-	Use:   "stage3",
+var cmdStageSenders = &cobra.Command{
+	Use:   "stage_senders",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
-		if err := stage3(ctx); err != nil {
+		ctx := utils.RootContext()
+		if err := stageSenders(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -29,12 +30,12 @@ var cmdStage3 = &cobra.Command{
 	},
 }
 
-var cmdStage4 = &cobra.Command{
-	Use:   "stage4",
+var cmdStageExec = &cobra.Command{
+	Use:   "stage_exec",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
-		if err := stage4(ctx); err != nil {
+		ctx := utils.RootContext()
+		if err := stageExec(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -42,12 +43,12 @@ var cmdStage4 = &cobra.Command{
 	},
 }
 
-var cmdStage5 = &cobra.Command{
-	Use:   "stage5",
+var cmdStageIHash = &cobra.Command{
+	Use:   "stage_ih",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
-		if err := stage5(ctx); err != nil {
+		ctx := utils.RootContext()
+		if err := stageIHash(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -55,12 +56,12 @@ var cmdStage5 = &cobra.Command{
 	},
 }
 
-var cmdStage6 = &cobra.Command{
-	Use:   "stage6",
+var cmdStageHashState = &cobra.Command{
+	Use:   "stage_hash_state",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
-		if err := stage6(ctx); err != nil {
+		ctx := utils.RootContext()
+		if err := stageHashState(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -68,12 +69,12 @@ var cmdStage6 = &cobra.Command{
 	},
 }
 
-var cmdStage78 = &cobra.Command{
-	Use:   "stage78",
+var cmdStageHistory = &cobra.Command{
+	Use:   "stage_history",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
-		if err := stage78(ctx); err != nil {
+		ctx := utils.RootContext()
+		if err := stageHistory(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -81,12 +82,12 @@ var cmdStage78 = &cobra.Command{
 	},
 }
 
-var cmdStage9 = &cobra.Command{
-	Use:   "stage9",
+var cmdStageTxLookup = &cobra.Command{
+	Use:   "stage_tx_lookup",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
-		if err := stage9(ctx); err != nil {
+		ctx := utils.RootContext()
+		if err := stageTxLookup(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -97,7 +98,7 @@ var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootContext()
+		ctx := utils.RootContext()
 		if err := printAllStages(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
@@ -110,59 +111,59 @@ func init() {
 	withChaindata(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
-	withChaindata(cmdStage3)
-	withReset(cmdStage3)
-	withBlock(cmdStage3)
-	withUnwind(cmdStage3)
-	withDatadir(cmdStage3)
+	withChaindata(cmdStageSenders)
+	withReset(cmdStageSenders)
+	withBlock(cmdStageSenders)
+	withUnwind(cmdStageSenders)
+	withDatadir(cmdStageSenders)
 
-	rootCmd.AddCommand(cmdStage3)
+	rootCmd.AddCommand(cmdStageSenders)
 
-	withChaindata(cmdStage4)
-	withReset(cmdStage4)
-	withBlock(cmdStage4)
-	withUnwind(cmdStage4)
+	withChaindata(cmdStageExec)
+	withReset(cmdStageExec)
+	withBlock(cmdStageExec)
+	withUnwind(cmdStageExec)
 
-	rootCmd.AddCommand(cmdStage4)
+	rootCmd.AddCommand(cmdStageExec)
 
-	withChaindata(cmdStage5)
-	withReset(cmdStage5)
-	withBlock(cmdStage5)
-	withUnwind(cmdStage5)
-	withDatadir(cmdStage5)
+	withChaindata(cmdStageIHash)
+	withReset(cmdStageIHash)
+	withBlock(cmdStageIHash)
+	withUnwind(cmdStageIHash)
+	withDatadir(cmdStageIHash)
 
-	rootCmd.AddCommand(cmdStage5)
+	rootCmd.AddCommand(cmdStageIHash)
 
-	withChaindata(cmdStage6)
-	withReset(cmdStage6)
-	withBlock(cmdStage6)
-	withUnwind(cmdStage6)
-	withDatadir(cmdStage6)
+	withChaindata(cmdStageHashState)
+	withReset(cmdStageHashState)
+	withBlock(cmdStageHashState)
+	withUnwind(cmdStageHashState)
+	withDatadir(cmdStageHashState)
 
-	rootCmd.AddCommand(cmdStage6)
+	rootCmd.AddCommand(cmdStageHashState)
 
-	withChaindata(cmdStage78)
-	withReset(cmdStage78)
-	withBlock(cmdStage78)
-	withUnwind(cmdStage78)
-	withDatadir(cmdStage78)
+	withChaindata(cmdStageHistory)
+	withReset(cmdStageHistory)
+	withBlock(cmdStageHistory)
+	withUnwind(cmdStageHistory)
+	withDatadir(cmdStageHistory)
 
-	rootCmd.AddCommand(cmdStage78)
+	rootCmd.AddCommand(cmdStageHistory)
 
-	withChaindata(cmdStage9)
-	withReset(cmdStage9)
-	withBlock(cmdStage9)
-	withUnwind(cmdStage9)
-	withDatadir(cmdStage9)
+	withChaindata(cmdStageTxLookup)
+	withReset(cmdStageTxLookup)
+	withBlock(cmdStageTxLookup)
+	withUnwind(cmdStageTxLookup)
+	withDatadir(cmdStageTxLookup)
 
-	rootCmd.AddCommand(cmdStage9)
+	rootCmd.AddCommand(cmdStageTxLookup)
 }
 
-func stage3(ctx context.Context) error {
+func stageSenders(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -196,24 +197,19 @@ func stage3(ctx context.Context) error {
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, datadir, ch)
 }
 
-func stage4(ctx context.Context) error {
+func stageExec(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset { //nolint:staticcheck
 		// TODO
 	}
 
-	chainConfig, blockchain, err := newBlockChain(db)
-	if err != nil {
-		return err
-	}
-	defer bc.Stop()
 	stage4 := progress(stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
@@ -221,22 +217,23 @@ func stage4(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, chainConfig, blockchain, blockchain.GetVMConfig(), block, ch, false, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, bc.Config(), bc, bc.GetVMConfig(), block, ch, false, nil)
 }
 
-func stage5(ctx context.Context) error {
+func stageIHash(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
 		if err := stagedsync.ResetHashState(db); err != nil {
 			return err
 		}
+		return nil
 	}
 
 	stage4 := progress(stages.Execution)
@@ -252,14 +249,21 @@ func stage5(ctx context.Context) error {
 	return stagedsync.SpawnIntermediateHashesStage(stage5, db, datadir, ch)
 }
 
-func stage6(ctx context.Context) error {
+func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
+
+	if reset {
+		if err := stagedsync.ResetHashState(db); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	stage5 := progress(stages.IntermediateHashes)
 	stage6 := progress(stages.HashState)
@@ -269,18 +273,18 @@ func stage6(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage6, db, datadir, ch)
+		return stagedsync.UnwindHashStateStage(u, stage6, db, datadir, ch)
 	}
 	return stagedsync.SpawnHashStateStage(stage6, db, datadir, ch)
 }
 
-func stage78(ctx context.Context) error {
+func stageHistory(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -309,13 +313,13 @@ func stage78(ctx context.Context) error {
 	return nil
 }
 
-func stage9(ctx context.Context) error {
+func stageTxLookup(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, nil)
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -345,8 +349,8 @@ func printAllStages(_ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
-func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(db)
+func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
+	chainConfig, bc, err := newBlockChain(tx)
 	if err != nil {
 		panic(err)
 	}
@@ -355,12 +359,19 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 	if err != nil {
 		panic(err)
 	}
-	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
+	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
 
 	progress := func(stage stages.SyncStage) *stagedsync.StageState {
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			s, err := st.StageState(stage, tx)
+			if err != nil {
+				panic(err)
+			}
+			return s
+		}
 		s, err := st.StageState(stage, db)
 		if err != nil {
 			panic(err)
@@ -371,7 +382,7 @@ func newSync(quitCh <-chan struct{}, db *ethdb.ObjectDatabase, hook stagedsync.C
 	return bc, st, progress
 }
 
-func newBlockChain(db *ethdb.ObjectDatabase) (*params.ChainConfig, *core.BlockChain, error) {
+func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
 	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1

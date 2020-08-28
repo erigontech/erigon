@@ -30,6 +30,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+var toAddr = common.BytesToAddress
+
 type StateSuite struct {
 	db    ethdb.Database
 	kv    ethdb.KV // Same as db, but with a different interface
@@ -38,8 +40,6 @@ type StateSuite struct {
 }
 
 var _ = checker.Suite(&StateSuite{})
-
-var toAddr = common.BytesToAddress
 
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
@@ -95,7 +95,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
     }
 }`
 	if got != want {
-		c.Errorf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
+		c.Errorf("DumpToCollector mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
 }
 
@@ -353,19 +353,19 @@ func TestDump(t *testing.T) {
         "0x0000000000000000000000000000000000000001": {
             "balance": "22",
             "nonce": 0,
-            "root": "0000000000000000000000000000000000000000000000000000000000000000",
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
             "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
         },
         "0x0000000000000000000000000000000000000002": {
             "balance": "44",
             "nonce": 0,
-            "root": "0000000000000000000000000000000000000000000000000000000000000000",
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
             "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
         },
         "0x0000000000000000000000000000000000000102": {
             "balance": "0",
             "nonce": 0,
-            "root": "0000000000000000000000000000000000000000000000000000000000000000",
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
             "codeHash": "87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
             "code": "03030303030303"
         }

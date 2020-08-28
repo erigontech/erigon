@@ -491,7 +491,7 @@ type Bucket struct {
 	out          io.Writer
 	bucketHandle uint64
 
-	name        []byte
+	name        string
 	initialized bool
 	tx          *Tx
 }
@@ -531,7 +531,7 @@ func (c *Cursor) NoValues() *Cursor {
 }
 
 // Bucket returns the handle to the bucket in remote DB
-func (tx *Tx) Bucket(name []byte) *Bucket {
+func (tx *Tx) Bucket(name string) *Bucket {
 	return &Bucket{tx: tx, ctx: tx.ctx, in: tx.in, out: tx.out, name: name}
 }
 
@@ -738,7 +738,7 @@ func (c *Cursor) SeekKey(seek []byte) (key []byte, vSize uint32, err error) {
 		}
 	}
 
-	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .Seek() calls
 
 	select {
 	default:
@@ -790,7 +790,7 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 			return nil, nil, err
 		}
 	}
-	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .Seek() calls
 
 	select {
 	default:
@@ -830,54 +830,6 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 
 	if err := decoder.Decode(&value); err != nil {
 		return nil, nil, fmt.Errorf("could not decode value for CmdCursorSeek: %w", err)
-	}
-
-	return key, value, nil
-}
-
-func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
-	if !c.initialized {
-		if err := c.init(); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
-
-	select {
-	default:
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	}
-
-	decoder := codecpool.Decoder(c.in)
-	defer codecpool.Return(decoder)
-	encoder := codecpool.Encoder(c.out)
-	defer codecpool.Return(encoder)
-
-	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
-		return nil, nil, fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
-	}
-	if err := encoder.Encode(c.cursorHandle); err != nil {
-		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
-	}
-	if err := encoder.Encode(&seek); err != nil {
-		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
-	}
-
-	var responseCode ResponseCode
-	if err := decoder.Decode(&responseCode); err != nil {
-		return nil, nil, fmt.Errorf("could not decode ResponseCode for CmdCursorSeekTo: %w", err)
-	}
-
-	if responseCode != ResponseOk {
-		if err := decodeErr(decoder, responseCode); err != nil {
-			return nil, nil, fmt.Errorf("could not decode errorMessage for CmdCursorSeekTo: %w", err)
-		}
-	}
-
-	if err := decodeKeyValue(decoder, &key, &value); err != nil {
-		return nil, nil, fmt.Errorf("could not decode (key, value) for CmdCursorSeekTo: %w", err)
 	}
 
 	return key, value, nil

@@ -19,10 +19,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -40,7 +42,7 @@ func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
 	return codeMap, nil
 }
 
-func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
+/*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
 	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
 	filename := fmt.Sprintf("state_%d.dot", number)
 	f, err := os.Create(filename)
@@ -76,7 +78,7 @@ func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed b
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
 	return t, nil
-}
+}*/
 
 func keyTape(t *trie.Trie, number int) error {
 	filename := fmt.Sprintf("state_%d.dot", number)
@@ -110,20 +112,34 @@ func keyTape(t *trie.Trie, number int) error {
 }
 
 var bucketLabels = map[string]string{
-	string(dbutils.PreimagePrefix):         "Preimages",
-	string(dbutils.BlockReceiptsPrefix):    "Receips",
-	string(dbutils.AccountsHistoryBucket):  "History of Accounts",
-	string(dbutils.HeaderPrefix):           "Headers",
-	string(dbutils.ConfigPrefix):           "Config",
-	string(dbutils.BlockBodyPrefix):        "Block Bodies",
-	string(dbutils.HeaderNumberPrefix):     "Header Numbers",
-	string(dbutils.AccountChangeSetBucket): "Account Change Sets",
-	string(dbutils.StorageChangeSetBucket): "Storage Change Sets",
-	string(dbutils.CurrentStateBucket):     "Current State",
-	string(dbutils.TxLookupPrefix):         "Transaction Index",
-	string(dbutils.StorageHistoryBucket):   "History of Storage",
-	string(dbutils.CodeBucket):             "Code of Contracts",
+	dbutils.PreimagePrefix:              "Preimages",
+	dbutils.BlockReceiptsPrefix:         "Receipts",
+	dbutils.AccountsHistoryBucket:       "History of Accounts",
+	dbutils.HeaderPrefix:                "Headers",
+	dbutils.ConfigPrefix:                "Config",
+	dbutils.BlockBodyPrefix:             "Block Bodies",
+	dbutils.HeaderNumberPrefix:          "Header Numbers",
+	dbutils.AccountChangeSetBucket:      "Account Change Sets",
+	dbutils.StorageChangeSetBucket:      "Storage Change Sets",
+	dbutils.CurrentStateBucket:          "Current State",
+	dbutils.TxLookupPrefix:              "Transaction Index",
+	dbutils.StorageHistoryBucket:        "History of Storage",
+	dbutils.CodeBucket:                  "Code of Contracts",
+	dbutils.Senders:                     "Senders",
+	dbutils.SyncStageProgress:           "Sync Progress",
+	dbutils.PlainStateBucket:            "PlainState",
+	dbutils.IntermediateTrieHashBucket:  "Intermediate Hashes",
+	dbutils.SyncStageUnwind:             "Unwind",
+	dbutils.PlainAccountChangeSetBucket: "Account Changes",
+	dbutils.PlainStorageChangeSetBucket: "Storage Changes",
+	dbutils.IncarnationMapBucket:        "Incarnations",
 }
+
+/*dbutils.PlainContractCodeBucket,
+dbutils.CodeBucket,
+dbutils.AccountsHistoryBucket,
+dbutils.StorageHistoryBucket,
+dbutils.TxLookupPrefix,*/
 
 func hexPalette() error {
 	filename := "hex_palette.dot"
@@ -160,14 +176,12 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 	if err = second.View(context.Background(), func(readTx ethdb.Tx) error {
 		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
 			for _, bucketName := range dbutils.Buckets {
-				b := readTx.Bucket(bucketName)
-				firstB := firstTx.Bucket(bucketName)
-				if err2 := b.Cursor().Walk(func(k, v []byte) (bool, error) {
-					if firstB != nil {
-						if firstV, _ := firstB.Get(k); firstV != nil && bytes.Equal(v, firstV) {
-							// Skip the record that is the same as in the first Db
-							return true, nil
-						}
+				bucketName := bucketName
+				c := readTx.Cursor(bucketName)
+				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+					if firstV, _ := firstTx.Get(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
+						// Skip the record that is the same as in the first Db
+						return true, nil
 					}
 					// Produce pair of nodes
 					keyKeyBytes := &trie.Keybytes{
@@ -184,7 +198,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					key := keyKeyBytes.ToHex()
 					var f1 *os.File
 					var ok bool
-					if f1, ok = perBucketFiles[string(bucketName)]; !ok {
+					if f1, ok = perBucketFiles[bucketName]; !ok {
 						f1, err = os.Create(fmt.Sprintf("changes_%d_%s_%d.dot", number, bucketName, len(perBucketFiles)))
 						if err != nil {
 							return false, err
@@ -192,11 +206,11 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 						visual.StartGraph(f1, true)
 						var clusterLabel string
 						var ok bool
-						if clusterLabel, ok = bucketLabels[string(bucketName)]; !ok {
-							clusterLabel = string(bucketName)
+						if clusterLabel, ok = bucketLabels[bucketName]; !ok {
+							clusterLabel = bucketName
 						}
 						visual.StartCluster(f1, 0, clusterLabel)
-						perBucketFiles[string(common.CopyBytes(bucketName))] = f1
+						perBucketFiles[bucketName] = f1
 					}
 					visual.Horizontal(f1, key, len(key), fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
 					if len(val) > 0 {
@@ -222,9 +236,9 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					} else {
 						noValues[i] = struct{}{}
 					}
-					lst := m[string(bucketName)]
+					lst := m[bucketName]
 					lst = append(lst, i)
-					m[string(common.CopyBytes(bucketName))] = lst
+					m[bucketName] = lst
 					i++
 					return true, nil
 				}); err2 != nil {
@@ -296,15 +310,7 @@ func initialState1() error {
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = common.Address{1}
 		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-			},
+			Config: params.MainnetChainConfig,
 			Alloc: core.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -315,39 +321,18 @@ func initialState1() error {
 		signer = types.HomesteadSigner{}
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	snapshotDB := db.MemCopy()
-	genesis := gspec.MustCommit(db)
+	_, genesisHash, _, err := core.SetupGenesisBlock(db, gspec, true, false)
+	if err != nil {
+		return err
+	}
+	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	if err != nil {
+		return err
+	}
 	genesisDb := db.MemCopy()
 	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		return err
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
-
-	if err = hexPalette(); err != nil {
-		return err
-	}
-
-	tds, err := blockchain.GetTrieDbState()
-	if err != nil {
-		return err
-	}
-	t := tds.Trie()
-	if _, err = statePicture(t, 0, 0, false, false, false, false, nil); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, 1, 48, false, false, false, false, nil); err != nil {
-		return err
-	}
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 0); err != nil {
-		return err
-	}
-	snapshotDB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts := bind.NewKeyedTransactor(key)
@@ -355,7 +340,7 @@ func initialState1() error {
 	transactOpts2 := bind.NewKeyedTransactor(key2)
 
 	var tokenContract *contracts.Token
-
+	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 8, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
@@ -363,16 +348,15 @@ func initialState1() error {
 		)
 
 		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
-
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -455,171 +439,227 @@ func initialState1() error {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, true /* intemediateHashes */)
+	}, true)
 	if err != nil {
 		return err
 	}
+	db.Close()
+	// We reset the DB and use the generated blocks
+	core.UsePlainStateExecution = true
+	db = ethdb.NewMemDatabase()
+	kv = db.KV()
+	snapshotDB := db.MemCopy()
+
+	_, _, _, err = core.SetupGenesisBlock(db, gspec, true, false)
+	if err != nil {
+		return err
+	}
+	engine = ethash.NewFaker()
+
+	if err != nil {
+		return err
+	}
+
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
+	if err != nil {
+		return err
+	}
+	defer blockchain.Stop()
+	blockchain.EnableReceipts(true)
+
+	if err = hexPalette(); err != nil {
+		return err
+	}
+
+	/*if _, err = statePicture(t, 0, 0, false, false, false, false, nil); err != nil {
+		return err
+	}
+
+	if _, err = statePicture(t, 1, 48, false, false, false, false, nil); err != nil {
+		return err
+	}*/
+
+	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 0); err != nil {
+		return err
+	}
+
+	snapshotDB.Close()
 
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[0], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 1); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 2, 48, false, false, false, false, nil); err != nil {
+	/*if _, err = statePicture(t, 2, 48, false, false, false, false, nil); err != nil {
 		return err
-	}
+	}*/
 
 	// BLOCK 2
 	snapshotDB = db.MemCopy()
-
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[1], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 2); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 3, 48, false, false, false, false, nil); err != nil {
+	/*if _, err = statePicture(t, 3, 48, false, false, false, false, nil); err != nil {
 		return err
-	}
-
+	}*/
 	// BLOCK 3
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[2], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 3); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 4, 48, false, false, false, false, nil); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, 5, 48, true, false, false, false, nil); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, 6, 48, true, true, false, false, nil); err != nil {
-		return err
-	}
-
+	/*
+		if _, err = statePicture(t, 4, 48, false, false, false, false, nil); err != nil {
+			return err
+		}
+		if _, err = statePicture(t, 5, 48, true, false, false, false, nil); err != nil {
+			return err
+		}
+		if _, err = statePicture(t, 6, 48, true, true, false, false, nil); err != nil {
+			return err
+		}
+	*/
 	// BLOCK 4
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[3], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 4); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 7, 48, true, true, false, false, nil); err != nil {
+	/*if _, err = statePicture(t, 7, 48, true, true, false, false, nil); err != nil {
 		return err
-	}
+	}*/
 
 	// BLOCK 5
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[4], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 5); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 8, 54, true, true, false, false, nil); err != nil {
-		return err
-	}
+	/*
+		if _, err = statePicture(t, 8, 54, true, true, false, false, nil); err != nil {
+			return err
+		}
+	*/
 
 	// BLOCK 6
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[5], blockchain); err != nil {
 		return err
 	}
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 5); err != nil {
+
+	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 6); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 9, 54, true, true, false, false, nil); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, 10, 110, true, true, true, true, nil); err != nil {
-		return err
-	}
+
+	/*
+		if _, err = statePicture(t, 9, 54, true, true, false, false, nil); err != nil {
+			return err
+		}
+		if _, err = statePicture(t, 10, 110, true, true, true, true, nil); err != nil {
+			return err
+		}
+	*/
 
 	// BLOCK 7
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[6], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 7); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	quadTrie, err := statePicture(t, 11, 110, true, true, true, true, nil)
+	// _, err = statePicture(t, 11, 110, true, true, true, true, nil)
 	if err != nil {
 		return err
 	}
 
-	tds.SetResolveReads(true)
+	// tds.SetResolveReads(true)
 	// BLOCK 8
 	snapshotDB = db.MemCopy()
 
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[7]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[7], blockchain); err != nil {
 		return err
 	}
+
 	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 8); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	if _, err = statePicture(t, 12, 110, true, true, true, true, nil); err != nil {
-		return err
-	}
+	/*
+		if _, err = statePicture(t, 12, 110, true, true, true, true, nil); err != nil {
+			return err
+		}
 
-	rl := trie.NewRetainList(0)
-	touches, storageTouches := tds.ExtractTouches()
-	var touchQuads = make([][]byte, len(touches))
-	for _, touch := range touches {
-		touchQuad := trie.KeyToQuad(touch)
-		rl.AddHex(touchQuad)
-		touchQuads = append(touchQuads, touchQuad)
-	}
-	for _, touch := range storageTouches {
-		touchQuad := trie.KeyToQuad(touch)
-		rl.AddHex(touchQuad)
-		touchQuads = append(touchQuads, touchQuad)
-	}
+		rl := trie.NewRetainList(0)
+		touches, storageTouches := tds.ExtractTouches()
+		var touchQuads = make([][]byte, len(touches))
+		for _, touch := range touches {
+			touchQuad := trie.KeyToQuad(touch)
+			rl.AddHex(touchQuad)
+			touchQuads = append(touchQuads, touchQuad)
+		}
+		for _, touch := range storageTouches {
+			touchQuad := trie.KeyToQuad(touch)
+			rl.AddHex(touchQuad)
+			touchQuads = append(touchQuads, touchQuad)
+		}
 
-	var witness *trie.Witness
+		var witness *trie.Witness
 
-	if witness, err = quadTrie.ExtractWitness(false, rl); err != nil {
-		return err
-	}
+		if witness, err = quadTrie.ExtractWitness(false, rl); err != nil {
+			return err
+		}
 
-	var witnessTrie *trie.Trie
+		var witnessTrie *trie.Trie
 
-	if witnessTrie, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
-		return err
-	}
-	if _, err = statePicture(witnessTrie, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {
-		return err
-	}
+		if witnessTrie, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
+			return err
+		}
+		if _, err = statePicture(witnessTrie, 13, 110, true, true, false, true, touchQuads); err != nil {
+			return err
+		}
 
-	if err = keyTape(witnessTrie, 14); err != nil {
-		return err
-	}
+		if err = keyTape(witnessTrie, 14); err != nil {
+			return err
+		}
 
-	// Repeat the block witness illustration, but without any highlighted keys
-	if _, err = statePicture(witnessTrie, 15, 110, true, true, false /*already quad*/, true, nil); err != nil {
-		return err
-	}
+		// Repeat the block witness illustration, but without any highlighted keys
+		if _, err = statePicture(witnessTrie, 15, 110, true, true, false, true, nil); err != nil {
+			return err
+		}
+	*/
 
 	kv2 := ethdb.NewMemDatabase().KV()
 	defer kv2.Close()

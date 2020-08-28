@@ -28,12 +28,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/spf13/cobra"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -75,7 +79,7 @@ func StartNode(stack *node.Node) {
 		defer signal.Stop(sigc)
 		<-sigc
 		log.Info("Got interrupt, shutting down...")
-		go stack.Stop()
+		go stack.Close()
 		for i := 10; i > 0; i-- {
 			<-sigc
 			if i > 1 {
@@ -163,7 +167,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 			log.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
 		}
-		if _, err := chain.InsertChain(context.Background(), missing); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(chain.ChainDb(), chain.Config(), chain.Engine(), missing, chain); err != nil {
 			return fmt.Errorf("invalid block %d: %v", n, err)
 		}
 	}
@@ -312,4 +316,36 @@ func ExportPreimages(db ethdb.Database, fn string) error {
 
 	log.Info("Exported preimages", "file", fn)
 	return nil
+}
+
+func SetupCobra(cmd *cobra.Command) error {
+	return debug.SetupCobra(cmd)
+}
+
+func StopDebug() {
+	debug.Exit()
+}
+
+func SetupUrfave(ctx *cli.Context) error {
+	return debug.Setup(ctx)
+}
+
+func RootContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer cancel()
+
+		ch := make(chan os.Signal, 1)
+		defer close(ch)
+
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(ch)
+
+		select {
+		case <-ch:
+			log.Info("Got interrupt, shutting down...")
+		case <-ctx.Done():
+		}
+	}()
+	return ctx
 }

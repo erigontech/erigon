@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -61,6 +59,9 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 		Quit:            quitCh,
 		ExtractStartKey: startKey,
 		ExtractEndKey:   endKey,
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
 	})
 }
 
@@ -81,16 +82,14 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir st
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
-		data := v
-		if debug.IsBlockCompressionEnabled() && len(data) > 0 {
-			var err1 error
-			data, err1 = snappy.Decode(nil, v)
-			if err1 != nil {
-				return false, fmt.Errorf("unwindTxLookup, snappy err: %w", err1)
-			}
+
+		bodyRlp, err := rawdb.DecompressBlockBody(v)
+		if err != nil {
+			return false, err
 		}
+
 		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
+		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 			return false, fmt.Errorf("unwindTxLookup, rlp decode err: %w", err)
 		}
 		for _, tx := range body.Transactions {

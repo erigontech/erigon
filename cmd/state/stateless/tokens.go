@@ -70,7 +70,7 @@ func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Add
 	tt.startMode[depth] = true
 	return nil
 }
-func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (tt TokenTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (tt TokenTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
@@ -155,7 +155,7 @@ func makeTokens(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -239,7 +239,7 @@ func makeTokenBalances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewDbState(ethDb.KV(), currentBlockNr)
+		dbstate := state.NewPlainDBState(ethDb.KV(), currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
@@ -460,7 +460,7 @@ func makeTokenAllowances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewDbState(ethDb.KV(), currentBlockNr)
+		dbstate := state.NewPlainDBState(ethDb.KV(), currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,

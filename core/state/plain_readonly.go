@@ -21,8 +21,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/holiman/uint256"
 	"github.com/petar/GoLLRB/llrb"
@@ -34,6 +35,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
+
+type storageItem struct {
+	key, seckey common.Hash
+	value       uint256.Int
+}
+
+func (a *storageItem) Less(b llrb.Item) bool {
+	bi := b.(*storageItem)
+	return bytes.Compare(a.key[:], bi.key[:]) < 0
+}
 
 // Implements StateReader by wrapping database only, without trie
 type PlainDBState struct {
@@ -62,7 +73,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
-	accData, _ := GetAsOf(dbs.db, true /* plain */, false /* storage */, addr[:], dbs.blockNr+1)
+	accData, _ := GetAsOf(dbs.db, false /* storage */, addr[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
@@ -161,7 +172,7 @@ func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Ad
 }
 
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := GetAsOf(dbs.db, true /* plain */, false /* storage */, address[:], dbs.blockNr+1)
+	enc, err := GetAsOf(dbs.db, false /* storage */, address[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -173,7 +184,10 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		var codeHash []byte
 		if err := dbs.db.View(context.Background(), func(tx ethdb.Tx) error {
-			codeHash, _ = tx.Bucket(dbutils.PlainContractCodeBucket).Get(dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+			codeHash, err = tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+			if err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			return nil, err
@@ -187,7 +201,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	enc, err := GetAsOf(dbs.db, true /* plain */, true /* storage */, compositeKey, dbs.blockNr+1)
+	enc, err := GetAsOf(dbs.db, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}

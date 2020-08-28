@@ -87,7 +87,7 @@ func TestFileDataProviders(t *testing.T) {
 
 	collector := NewCollector("", NewSortableBuffer(1))
 
-	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil)
+	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -116,7 +116,7 @@ func TestRAMDataProviders(t *testing.T) {
 	generateTestData(t, db, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
-	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil)
+	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -178,7 +178,7 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 	assert.Nil(t, err)
 	compareBuckets(t, db, sourceBucket, destBucket, nil)
 
-	assert.Equal(t, 21, numberOfCalls)
+	assert.Equal(t, 1, numberOfCalls)
 	assert.True(t, finalized)
 }
 
@@ -311,7 +311,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 	compareBucketsDouble(t, db, sourceBucket, destBucket)
 }
 
-func generateTestData(t *testing.T, db ethdb.Putter, bucket []byte, count int) {
+func generateTestData(t *testing.T, db ethdb.Putter, bucket string, count int) {
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("%10d-key-%010d", i, i))
 		v := []byte(fmt.Sprintf("val-%099d", i))
@@ -385,7 +385,7 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) e
 	return next(k, append(k, 0xBB), append(realValue, 0xBB))
 }
 
-func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 []byte, startKey []byte) {
+func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []byte) {
 	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.Walk(b1, startKey, len(startKey), func(k, v []byte) (bool, error) {
@@ -402,7 +402,7 @@ func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 []byte, startKey []b
 	assert.Equal(t, b1Map, b2Map)
 }
 
-func compareBucketsDouble(t *testing.T, db ethdb.Database, b1, b2 []byte) {
+func compareBucketsDouble(t *testing.T, db ethdb.Database, b1, b2 string) {
 	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.Walk(b1, nil, 0, func(k, v []byte) (bool, error) {

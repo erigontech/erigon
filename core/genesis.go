@@ -320,11 +320,7 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 	tds.SetBlockNr(0)
 
 	var blockWriter state.WriterWithChangeSets
-	if UsePlainStateExecution {
-		blockWriter = tds.PlainStateWriter()
-	} else {
-		blockWriter = tds.DbStateWriter()
-	}
+	blockWriter = tds.PlainStateWriter()
 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
@@ -337,6 +333,12 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 	if history {
 		if err := blockWriter.WriteHistory(); err != nil {
 			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		}
+	}
+	if !UsePlainStateExecution {
+		blockWriter = tds.DbStateWriter()
+		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 		}
 	}
 
@@ -457,7 +459,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 	return &Genesis{
 		Config:     &config,
 		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
-		GasLimit:   6283185,
+		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
 		Alloc: map[common.Address]GenesisAccount{
 			common.BytesToAddress([]byte{1}): {Balance: big.NewInt(1)}, // ECRecover
@@ -468,6 +470,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 			common.BytesToAddress([]byte{6}): {Balance: big.NewInt(1)}, // ECAdd
 			common.BytesToAddress([]byte{7}): {Balance: big.NewInt(1)}, // ECScalarMul
 			common.BytesToAddress([]byte{8}): {Balance: big.NewInt(1)}, // ECPairing
+			common.BytesToAddress([]byte{9}): {Balance: big.NewInt(1)}, // BLAKE2b
 			faucet:                           {Balance: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(9))},
 		},
 	}

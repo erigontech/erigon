@@ -31,6 +31,7 @@ type SyncStage byte
 
 const (
 	Headers             SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BlockHashes                          // Headers Number are written, fills blockHash => number bucket
 	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders                              // "From" recovered from signatures, bodies re-written
 	Execution                            // Executing each block w/o buildinf a trie
@@ -39,12 +40,13 @@ const (
 	AccountHistoryIndex                  // Generating history index for accounts
 	StorageHistoryIndex                  // Generating history index for storage
 	TxLookup                             // Generating transactions lookup index
-	TxPool                               // Starts TxPool
+	TxPool                               // Starts Backend
 	Finish                               // Nominal stage after all other stages
 )
 
 var DBKeys = map[SyncStage][]byte{
 	Headers:             []byte("Headers"),
+	BlockHashes:         []byte("BlockHashes"),
 	Bodies:              []byte("Bodies"),
 	Senders:             []byte("Senders"),
 	Execution:           []byte("Execution"),

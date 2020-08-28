@@ -110,7 +110,7 @@ it can run from a snapshot of a database for read-only calls.
 
 ```
 > make rpcdaemon
-> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug
+> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net
 ```
 **For remote DB**
 
@@ -125,21 +125,25 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090
 ```
 
-Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
+Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go)):
 
 ```
-eth_call
-eth_getBlockByHash
-eth_getBlock
+eth_coinbase
 eth_blockNumber
+eth_getBlockByNumber
+eth_getBlockByHash
 eth_getBalance
+eth_getTransactionReceipt
 eth_getLogs
+eth_call
 eth_estimateGas
+eth_sendRawTransaction
 debug_storageRangeAt
 debug_traceTransaction
 debug_accountRange
 debug_getModifiedAccountsByNumber
 debug_getModifiedAccountsByHash
+net_version
 ```
 
 #### REST API Daemon

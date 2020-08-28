@@ -48,7 +48,8 @@ type Contract struct {
 	CallerAddress common.Address
 	caller        ContractRef
 	self          ContractRef
-	analysis      []uint64 // Locally cached result of JUMPDEST analysis
+	jumpdests     map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
+	analysis      []uint64                 // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
@@ -63,6 +64,13 @@ type Contract struct {
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
 	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: object}
+
+	if parent, ok := caller.(*Contract); ok {
+		// Reuse JUMPDEST analysis from parent context if available.
+		c.jumpdests = parent.jumpdests
+	} else {
+		c.jumpdests = make(map[common.Hash][]uint64)
+	}
 
 	// Gas should be a pointer so it can safely be reduced through the run
 	// This pointer will be off the state transition
@@ -107,9 +115,30 @@ func (c *Contract) validJumpSubdest(udest uint64) bool {
 	return c.isCode(udest)
 }
 
+func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
+	return analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
+}
+
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
+	// Do we have a contract hash already?
+	// If we do have a hash, that means it's a 'regular' contract. For regular
+	// contracts ( not temporary initcode), we store the analysis in a map
+	if c.CodeHash != (common.Hash{}) {
+		// Does parent context have the analysis?
+		analysis, exist := c.jumpdests[c.CodeHash]
+		if !exist {
+			// Do the analysis and save in parent context
+			// We do not need to store it in c.analysis
+			analysis = codeBitmap(c.Code)
+			c.jumpdests[c.CodeHash] = analysis
+		}
+		// Also stash it in current contract for faster access
+		c.analysis = analysis
+		return isCodeFromAnalysis(analysis, udest)
+	}
+
 	// We don't have the code hash, most likely a piece of initcode not already
 	// in state trie. In that case, we do an analysis, and save it locally, so
 	// we don't have to recalculate it for every JUMP instruction in the execution
@@ -117,7 +146,8 @@ func (c *Contract) isCode(udest uint64) bool {
 	if c.analysis == nil {
 		c.analysis = codeBitmap(c.Code)
 	}
-	return c.analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
+
+	return isCodeFromAnalysis(c.analysis, udest)
 }
 
 // AsDelegate sets the contract to be a delegate call and returns the current

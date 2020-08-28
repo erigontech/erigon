@@ -3,6 +3,8 @@ package migrations
 import (
 	"bytes"
 	"errors"
+	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -30,7 +32,7 @@ import (
 //		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 //			return err
 //		} else if !exists {
-//			return nil
+//			return OnLoadCommit(db, nil, true)
 //		}
 //
 //		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
@@ -53,12 +55,21 @@ import (
 var migrations = []Migration{
 	stagesToUseNamedKeys,
 	unwindStagesToUseNamedKeys,
+	stagedsyncToUseStageBlockhashes,
+	unwindStagedsyncToUseStageBlockhashes,
+	dupSortHashState,
+	dupSortPlainState,
 }
 
 type Migration struct {
 	Name string
 	Up   func(db ethdb.Database, dataDir string, OnLoadCommit etl.LoadCommitHandler) error
 }
+
+var (
+	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
+	ErrMigrationCommitNotCalled = fmt.Errorf("migraion commit function was not called")
+)
 
 func NewMigrator() *Migrator {
 	return &Migrator{
@@ -93,21 +104,36 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		return err
 	}
 
+	// migration names must be unique, protection against people's mistake
+	uniqueNameCheck := map[string]bool{}
+	for i := range m.Migrations {
+		_, ok := uniqueNameCheck[m.Migrations[i].Name]
+		if ok {
+			return fmt.Errorf("%w, duplicate: %s", ErrMigrationNonUniqueName, m.Migrations[i].Name)
+		}
+		uniqueNameCheck[m.Migrations[i].Name] = true
+	}
+
 	for i := range m.Migrations {
 		v := m.Migrations[i]
 		if _, ok := applied[v.Name]; ok {
 			continue
 		}
+
+		commitFuncCalled := false // commit function must be called if no error, protection against people's mistake
+
 		log.Info("Apply migration", "name", v.Name)
 		if err := v.Up(db, datadir, func(putter ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				return nil // don't save partial progress
 			}
+			commitFuncCalled = true
+
 			stagesProgress, err := MarshalMigrationPayload(db)
 			if err != nil {
 				return err
 			}
-			err = db.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
 			if err != nil {
 				return err
 			}
@@ -116,6 +142,9 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			return err
 		}
 
+		if !commitFuncCalled {
+			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
+		}
 		log.Info("Applied migration", "name", v.Name)
 	}
 	return nil

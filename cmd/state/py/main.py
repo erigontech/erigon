@@ -10,6 +10,8 @@ import chain
 import dbutils
 import common
 
+# apt install python3-snappy libgmp3-dev && pip3 install trinity lmdb pandas plotly
+
 cmd = sys.argv[1]
 chaindata = sys.argv[2]
 
@@ -19,9 +21,18 @@ analyticsEnv = lmdb.open("analytics", max_dbs=100, readonly=False, subdir=True, 
 
 env.reader_check()  # clear stale reads
 
+def allBuckets(env):
+    buckets = []
+    root = env.open_db(None, create=False)
+    with env.begin(write=False) as txn:
+        with txn.cursor(root) as curs:
+            for i, (k, v) in enumerate(curs.iternext()):
+                buckets.append(k.decode("utf-8"))
+    return buckets
+
 if cmd == "stats":
     data = {"name": [], "size": []}
-    for bucket in dbutils.buckets:
+    for bucket in allBuckets(env):
         b = env.open_db(bucket.encode(), create=False)
         with env.begin(write=False) as txn:
             stat = txn.stat(b)

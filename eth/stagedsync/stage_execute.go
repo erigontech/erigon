@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	logInterval = 30 // seconds
+	logInterval = 30 * time.Second
 )
 
 type HasChangeSetWriter interface {
@@ -58,12 +58,29 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	batch := stateDB.NewBatch()
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = stateDB.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = stateDB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	batch := tx.NewBatch()
+	defer batch.Rollback()
 
 	engine := chainContext.Engine()
 
 	stageProgress := s.BlockNumber
-	logTime, logBlock := time.Now(), stageProgress
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	logBlock := stageProgress
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -72,12 +89,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		stageProgress = blockNum
 
-		blockHash := rawdb.ReadCanonicalHash(stateDB, blockNum)
-		block := rawdb.ReadBlock(stateDB, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(tx, blockNum)
+		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(stateDB, blockHash, blockNum)
+		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
@@ -96,16 +113,18 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
 		}
 
-		if batch.BatchSize() >= stateDB.IdealBatchSize() {
+		if batch.BatchSize() >= batch.IdealBatchSize() {
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			start := time.Now()
-			sz := batch.BatchSize()
-			if _, err = batch.Commit(); err != nil {
+			if err = batch.CommitAndBegin(); err != nil {
 				return err
 			}
-			log.Info("Batch committed", "in", time.Since(start), "size", common.StorageSize(sz))
+			if !useExternalTx {
+				if err = tx.CommitAndBegin(); err != nil {
+					return err
+				}
+			}
 		}
 
 		if prof {
@@ -121,7 +140,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		logTime, logBlock = logProgress(logTime, logBlock, blockNum, batch)
+		select {
+		default:
+		case <-logEvery.C:
+			logBlock = logProgress(logBlock, blockNum, batch)
+		}
 	}
 
 	if err := s.Update(batch, stageProgress); err != nil {
@@ -130,28 +153,29 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	log.Info("Completed on", "block", stageProgress)
 	s.Done()
 	return nil
 }
 
-func logProgress(lastLogTime time.Time, prev, now uint64, batch ethdb.DbWithPendingMutations) (time.Time, uint64) {
-	if now%64 != 0 || time.Since(lastLogTime).Seconds() < logInterval {
-		return lastLogTime, prev // return old values because no logging happened
-	}
-
-	speed := float64(now-prev) / float64(logInterval)
+func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
+	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Executed blocks:",
 		"currentBlock", now,
 		"speed (blk/second)", speed,
-		"state batch", common.StorageSize(batch.BatchSize()),
+		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
 
-	return time.Now(), now
+	return now
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -162,6 +186,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
 	batch := stateDB.NewBatch()
+	defer batch.Rollback()
 
 	rewindFunc := ethdb.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
@@ -207,6 +232,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
 	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
 		if err = deleteChangeSets(batch, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
 			return err
@@ -214,6 +242,19 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		if writeReceipts {
 			blockHash := rawdb.ReadCanonicalHash(batch, i)
 			rawdb.DeleteReceipts(batch, blockHash, i)
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Executed blocks:",
+				"currentBlock", i,
+				"batch", common.StorageSize(batch.BatchSize()),
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
 		}
 	}
 
@@ -275,7 +316,7 @@ func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
 
 func cleanupContractCodeBucket(
 	db ethdb.Database,
-	bucket []byte,
+	bucket string,
 	acc accounts.Account,
 	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
 	getKeyForIncarnationFunc func(uint64) []byte,
@@ -319,7 +360,7 @@ func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
 	return rawdb.PlainDeleteAccount(db, address)
 }
 
-func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket []byte) error {
+func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
 	changeSetKey := dbutils.EncodeTimestamp(timestamp)
 	if err := batch.Delete(accountBucket, changeSetKey); err != nil {
 		return err

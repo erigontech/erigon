@@ -101,7 +101,6 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 	key := common.Hash(x.Bytes32())
 	var current uint256.Int
 	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
-
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active

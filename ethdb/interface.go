@@ -28,29 +28,29 @@ var ErrKeyNotFound = errors.New("db: key not found")
 // Putter wraps the database write operations.
 type Putter interface {
 	// Put inserts or updates a single entry.
-	Put(bucket, key, value []byte) error
+	Put(bucket string, key, value []byte) error
 }
 
 // Getter wraps the database read operations.
 type Getter interface {
 	// Get returns the value for a given key if it's present.
-	Get(bucket, key []byte) ([]byte, error)
+	Get(bucket string, key []byte) ([]byte, error)
 
 	// Get returns prober chunk of index or error if index is not created.
 	// Key must contain 8byte inverted block number in the end.
-	GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error)
+	GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error)
 
 	// Has indicates whether a key exists in the database.
-	Has(bucket, key []byte) (bool, error)
+	Has(bucket string, key []byte) (bool, error)
 
 	// Walk iterates over entries with keys greater or equal to startkey.
 	// Only the keys whose first fixedbits match those of startkey are iterated over.
 	// walker is called for each eligible entry.
 	// If walker returns false or an error, the walk stops.
-	Walk(bucket, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
+	Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
 
 	// MultiWalk is similar to multiple Walk calls folded into one.
-	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error
+	MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error
 }
 
 type GetterPutter interface {
@@ -61,7 +61,11 @@ type GetterPutter interface {
 // Deleter wraps the database delete operations.
 type Deleter interface {
 	// Delete removes a single entry.
-	Delete(bucket, key []byte) error
+	Delete(bucket string, key []byte) error
+}
+
+type Closer interface {
+	Close()
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.
@@ -69,13 +73,25 @@ type Database interface {
 	Getter
 	Putter
 	Deleter
+	Closer
 
 	// MultiPut inserts or updates multiple entries.
 	// Entries are passed as an array:
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
-	Close()
-	NewBatch() DbWithPendingMutations
+
+	// NewBatch - starts in-mem batch
+	//
+	// Common pattern:
+	//
+	// batch := db.NewBatch()
+	// defer batch.Rollback()
+	// ... some calculations on `batch`
+	// batch.Commit()
+	//
+	NewBatch() DbWithPendingMutations       //
+	Begin() (DbWithPendingMutations, error) // starts db transaction
+	Last(bucket string) ([]byte, []byte, error)
 
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
 	IdealBatchSize() int
@@ -86,15 +102,13 @@ type Database interface {
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)
 	TruncateAncients(items uint64) error
-
-	ID() uint64
 }
 
 // MinDatabase is a minimalistic version of the Database interface.
 type MinDatabase interface {
-	Get(bucket, key []byte) ([]byte, error)
-	Put(bucket, key, value []byte) error
-	Delete(bucket, key []byte) error
+	Get(bucket string, key []byte) ([]byte, error)
+	Put(bucket string, key, value []byte) error
+	Delete(bucket string, key []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,
@@ -102,7 +116,33 @@ type MinDatabase interface {
 // Later they can either be committed to the database or rolled back.
 type DbWithPendingMutations interface {
 	Database
+
+	// Commit - commits transaction (or flush data into underlying db object in case of `mutation`)
+	//
+	// Common pattern:
+	//
+	// tx := db.Begin()
+	// defer tx.Rollback()
+	// ... some calculations on `tx`
+	// tx.Commit()
+	//
 	Commit() (uint64, error)
+
+	// CommitAndBegin - commits and starts new transaction inside same db object.
+	// useful for periodical commits implementation.
+	//
+	// Common pattern:
+	//
+	// tx := db.Begin()
+	// defer tx.Rollback()
+	// for {
+	// 		... some calculations on `tx`
+	//       tx.CommitAndBegin()
+	//       // defer here - is not useful, because 'tx' object is reused and first `defer` will work perfectly
+	// }
+	// tx.Commit()
+	//
+	CommitAndBegin() error
 	Rollback()
 	BatchSize() int
 }
@@ -111,14 +151,18 @@ type HasKV interface {
 	KV() KV
 }
 
+type HasTx interface {
+	Tx() Tx
+}
+
 type HasNetInterface interface {
 	DB() Database
 }
 
 type NonTransactional interface {
-	BucketExists(bucket []byte) (bool, error) // makes them empty
-	ClearBuckets(buckets ...[]byte) error     // makes them empty
-	DropBuckets(buckets ...[]byte) error      // drops them, use of them after drop will panic
+	BucketExists(bucket string) (bool, error) // makes them empty
+	ClearBuckets(buckets ...string) error     // makes them empty
+	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
 }
 
 var errNotSupported = errors.New("not supported")

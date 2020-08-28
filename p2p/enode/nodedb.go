@@ -108,8 +108,8 @@ func newPersistentDB(path string) (*DB, error) {
 
 	var blob []byte
 	if err := kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		v, errGet := b.Get([]byte(dbVersionKey))
+		c := tx.Cursor(dbutils.InodesBucket)
+		v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
 		}
@@ -119,7 +119,7 @@ func newPersistentDB(path string) (*DB, error) {
 			copy(blob, v)
 			return nil
 		}
-		return b.Put([]byte(dbVersionKey), currentVer)
+		return c.Put([]byte(dbVersionKey), currentVer)
 	}); err != nil {
 		return nil, err
 	}
@@ -201,8 +201,7 @@ func localItemKey(id ID, field string) []byte {
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		blob, errGet := b.Get(key)
+		blob, errGet := tx.Get(dbutils.InodesBucket, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -224,7 +223,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
+		return tx.Cursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
@@ -232,8 +231,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		blob, errGet := b.Get(key)
+		blob, errGet := tx.Get(dbutils.InodesBucket, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -252,7 +250,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
 	return db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
+		return tx.Cursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
@@ -260,8 +258,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		v, errGet := b.Get(nodeKey(id))
+		v, errGet := tx.Get(dbutils.InodesBucket, nodeKey(id))
 		if errGet != nil {
 			return errGet
 		}
@@ -299,7 +296,7 @@ func (db *DB) UpdateNode(node *Node) error {
 		return err
 	}
 	if err := db.lvl.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Bucket(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
+		return tx.Cursor(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}
@@ -327,13 +324,12 @@ func (db *DB) DeleteNode(id ID) {
 
 func deleteRange(db ethdb.KV, prefix []byte) {
 	if err := db.Update(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.InodesBucket)
 		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if err := b.Delete(k); err != nil {
+			if err := c.Delete(k); err != nil {
 				return nil
 			}
 		}
@@ -380,12 +376,8 @@ func (db *DB) expireNodes() {
 	)
 	var toDelete [][]byte
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		if b == nil {
-			return nil
-		}
+		c := tx.Cursor(dbutils.InodesBucket)
 		p := []byte(dbNodePrefix)
-		c := b.Cursor()
 		var prevId ID
 		var empty bool = true
 		for k, v, err := c.Seek(p); bytes.HasPrefix(k, p); k, v, err = c.Next() {
@@ -490,8 +482,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	)
 
 	if err := db.lvl.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.InodesBucket)
-		c := b.Cursor()
+		c := tx.Cursor(dbutils.InodesBucket)
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// Seek to a random entry. The first byte is incremented by a
@@ -517,7 +508,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			blob, errGet := b.Get(pongKey)
+			blob, errGet := tx.Get(dbutils.InodesBucket, pongKey)
 			if errGet != nil {
 				return errGet
 			}

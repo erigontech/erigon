@@ -30,16 +30,11 @@ func DecodeTimestamp(suffix []byte) (uint64, []byte) {
 	return timestamp, suffix[bytecount:]
 }
 
-func ChangeSetByIndexBucket(plain, storage bool) []byte {
-	if plain {
-		if storage {
-			return PlainStorageChangeSetBucket
-		}
-		return PlainAccountChangeSetBucket
-	} else if storage {
-		return StorageChangeSetBucket
+func ChangeSetByIndexBucket(storage bool) string {
+	if storage {
+		return PlainStorageChangeSetBucket
 	}
-	return AccountChangeSetBucket
+	return PlainAccountChangeSetBucket
 }
 
 // NextSubtree does []byte++. Returns false if overflow.
@@ -55,23 +50,4 @@ func NextSubtree(in []byte) ([]byte, bool) {
 		r = r[:i] // make it shorter, because in tries after 11ff goes 12, but not 1200
 	}
 	return nil, false
-}
-
-func NextS(in []byte, out *[]byte) bool {
-	tmp := *out
-	if cap(tmp) < len(in) {
-		tmp = make([]byte, len(in))
-	}
-	tmp = tmp[:len(in)]
-	copy(tmp, in)
-	for i := len(tmp) - 1; i >= 0; i-- {
-		if tmp[i] != 255 {
-			tmp[i]++
-			*out = tmp
-			return true
-		}
-		tmp[i] = 0
-	}
-	*out = tmp
-	return false
 }
