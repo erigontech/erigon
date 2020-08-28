@@ -313,15 +313,33 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 	return nil
 }
 
-func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) Penalty {
-	anchor := segment.headers[end-1]
-	if anchor.Time > currentTime+hd.newAnchorFutureLimit {
-		return TooFarFuturePenalty
+func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) (Penalty, error) {
+	anchorHeader := segment.headers[end-1]
+	if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
+		return TooFarFuturePenalty, nil
 	}
-	if anchor.Time+hd.newAnchorPastLimit < currentTime {
-		return TooFarPastPenalty
+	if anchorHeader.Time+hd.newAnchorPastLimit < currentTime {
+		return TooFarPastPenalty, nil
 	}
-	return NoPenalty
+	var anchor *Anchor
+	var err error
+	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth, uint256.Int{}); err != nil {
+		return NoPenalty, err
+	}
+	cumulativeDifficulty := uint256.Int{}
+	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
+	for i := end - 1; i >= start; i-- {
+		header := segment.headers[i]
+		diff, overflow := uint256.FromBig(header.Difficulty)
+		if overflow {
+			return NoPenalty, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+		}
+		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
+		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty); err != nil {
+			return NoPenalty, fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
+		}
+	}
+	return NoPenalty, nil
 }
 
 // Heap element for merging together header files

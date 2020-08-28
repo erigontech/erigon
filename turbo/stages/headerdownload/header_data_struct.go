@@ -87,6 +87,7 @@ type HeaderDownload struct {
 	tips                   map[common.Hash]*Tip
 	tipLimiter             *llrb.LLRB
 	tipLimit               int
+	initPowDepth           int    // powDepth assigned to the newly inserted anchor
 	newAnchorFutureLimit   uint64 // How far in the future (relative to current time) the new anchors are allowed to be
 	newAnchorPastLimit     uint64 // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
@@ -130,7 +131,12 @@ func (rq *RequestQueue) Pop() interface{} {
 	return x
 }
 
-func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDifficultyFunc, verifySealFunc VerifySealFunc, newAnchorFutureLimit, newAnchorPastLimit uint64) *HeaderDownload {
+func NewHeaderDownload(filesDir string,
+	tipLimit, initPowDepth int,
+	calcDifficultyFunc CalcDifficultyFunc,
+	verifySealFunc VerifySealFunc,
+	newAnchorFutureLimit, newAnchorPastLimit uint64,
+) *HeaderDownload {
 	return &HeaderDownload{
 		filesDir:             filesDir,
 		badHeaders:           make(map[common.Hash]struct{}),
@@ -138,6 +144,7 @@ func NewHeaderDownload(filesDir string, tipLimit int, calcDifficultyFunc CalcDif
 		tips:                 make(map[common.Hash]*Tip),
 		tipLimiter:           llrb.New(),
 		tipLimit:             tipLimit,
+		initPowDepth:         initPowDepth,
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
@@ -159,6 +166,10 @@ func (p Penalty) String() string {
 		return "WrongChildDifficulty"
 	case InvalidSealPenalty:
 		return "InvalidSeal"
+	case TooFarFuturePenalty:
+		return "TooFarFuture"
+	case TooFarPastPenalty:
+		return "TooFarPast"
 	default:
 		return fmt.Sprintf("Unknown(%d)", p)
 	}
