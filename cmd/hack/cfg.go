@@ -28,17 +28,17 @@ func testGenCfg() {
 	absIntTest1() //- PASSES (should not be able to resolve all to concrete jumps)
 	absIntTest2() //PASSES
 	absIntTest3()
-	absIntTestSimple00() //- PASSES
+	absIntTestSimple00()   //- PASSES
 	absIntTestRequires00() //- PASSES
-	absIntTestCall01() // - PASSES
+	absIntTestCall01()     // - PASSES
 	absIntTestDiv00()
-	absIntTestEcrecoverLoop02() //- PASSES
-	absIntTestStorageVar03() // - PASSES
-	absIntTestStaticLoop00() //- PASSES
+	absIntTestEcrecoverLoop02()   //- PASSES
+	absIntTestStorageVar03()      // - PASSES
+	absIntTestStaticLoop00()      //- PASSES
 	absIntTestPrivateFunction01() //- PASS
 	absIntTestPrivateFunction02() //- PASS
-	absIntTestStaticLoop01() //  //- PASS
-	absIntTestDepositContract() //FAILS - Imprecision
+	absIntTestStaticLoop01()      //  //- PASS
+	absIntTestDepositContract()   //FAILS - Imprecision
 	absIntTestDepositContract2()
 }
 
@@ -388,7 +388,6 @@ func (dummyAccount) Address() common.Address                             { retur
 func (dummyAccount) ReturnGas(*big.Int)                                  {}
 func (dummyAccount) SetCode(common.Hash, []byte)                         {}
 func (dummyAccount) ForEachStorage(cb func(key, value common.Hash) bool) {}
-
 
 /*
 func testGenCfg() error {
