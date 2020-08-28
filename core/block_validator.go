@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -120,6 +121,17 @@ func (v *BlockValidator) ValidateGasAndRoot(block *types.Block, root common.Hash
 	var errorBuf strings.Builder
 	if block.GasUsed() != usedGas {
 		fmt.Fprintf(&errorBuf, "invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
+	}
+
+	// Validate the state root against the received state root and throw
+	// an error if they don't match.
+	if block.Header().Root != root {
+		filename := fmt.Sprintf("root_%d.txt", block.NumberU64())
+		log.Warn("Generating deep snapshot of the wrong tries...", "file", filename)
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "[pre-processed] invalid merkle root (remote: %x local: %x)", block.Header().Root, root)
 	}
 
 	if errorBuf.Len() > 0 {
