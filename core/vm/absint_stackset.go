@@ -19,8 +19,6 @@ const (
 	absStackLen = 64
 )
 
-var DEBUG = false
-var StopOnError = true
 
 //////////////////////////
 
@@ -290,7 +288,7 @@ func (s *astack) Copy() *astack {
 }
 
 func (s *astack) Push(value AbsValue) {
-	rest := s.values[0 : absStackLen-1]
+	rest := s.values[0 : len(s.values)-1]
 	s.values = nil
 	s.values = append(s.values, value)
 	s.values = append(s.values, rest...)
@@ -298,7 +296,7 @@ func (s *astack) Push(value AbsValue) {
 
 func (s *astack) Pop(pc int) AbsValue {
 	res := s.values[0]
-	s.values = s.values[1:absStackLen]
+	s.values = s.values[1:len(s.values)]
 	s.values = append(s.values, AbsValueTop(pc, true))
 	return res
 }
@@ -312,7 +310,7 @@ func (s *astack) String(abbrev bool) string {
 }
 
 func (s *astack) Eq(s1 *astack) bool {
-	for i := 0; i < absStackLen; i++ {
+	for i := 0; i < len(s.values); i++ {
 		if !s.values[i].Eq(s1.values[i]) {
 			return false
 		}
@@ -323,17 +321,18 @@ func (s *astack) Eq(s1 *astack) bool {
 //////////////////////////////////////////////////
 
 type astate struct {
+	astackLen 	int
 	stackset    []*astack
 	anlyCounter int
 	worklistLen int
 }
 
-func emptyState() *astate {
-	return &astate{stackset: nil, anlyCounter: -1, worklistLen: -1}
+func emptyState(astackLen int) *astate {
+	return &astate{astackLen: astackLen, stackset: nil, anlyCounter: -1, worklistLen: -1}
 }
 
 func (state *astate) Copy() *astate {
-	newState := emptyState()
+	newState := emptyState(state.astackLen)
 	for _, stack := range state.stackset {
 		newState.stackset = append(newState.stackset, stack.Copy())
 	}
@@ -341,11 +340,11 @@ func (state *astate) Copy() *astate {
 }
 
 // botState generates initial state which is a stack of "bottom" values
-func botState() *astate {
-	st := emptyState()
+func botState(astackLen int) *astate {
+	st := emptyState(astackLen)
 
 	botStack := &astack{}
-	for i := 0; i < absStackLen; i++ {
+	for i := 0; i < st.astackLen; i++ {
 		botStack.values = append(botStack.values, AbsValueBot())
 	}
 	st.stackset = append(st.stackset, botStack)
@@ -364,7 +363,7 @@ func ExistsIn(values []AbsValue, value AbsValue) bool {
 
 func (state *astate) String(abbrev bool) string {
 	var elms []string
-	for i := 0; i < absStackLen; i++ {
+	for i := 0; i < state.astackLen; i++ {
 		var elm []string
 		var values []AbsValue
 		for _, stack := range state.stackset {
@@ -448,11 +447,6 @@ func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 		}
 	}
 
-	if DEBUG {
-		fmt.Printf("\nResolve: %v %v\n", pc0, stmt)
-		printEdges(edges)
-	}
-
 	if isBadJump {
 		return ResolveResult{edges: edges, resolved: false, badJump: stmt}
 	}
@@ -460,8 +454,8 @@ func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 	return ResolveResult{edges: edges, resolved: true, badJump: nil}
 }
 
-func post(st0 *astate, edge edge) (*astate, error) {
-	st1 := emptyState()
+func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
+	st1 := emptyState(st0.astackLen)
 	stmt := edge.stmt
 
 	isStackTooShort := false
@@ -506,6 +500,7 @@ func post(st0 *astate, edge edge) (*astate, error) {
 	}
 
 	if isStackTooShort {
+		cfg.ShortStack = true
 		return st1, errors.New("abstract stack too short: reached unmodelled depth")
 	}
 
@@ -529,7 +524,7 @@ func Leq(st0 *astate, st1 *astate) bool {
 }
 
 func Lub(st0 *astate, st1 *astate) *astate {
-	newState := emptyState()
+	newState := emptyState(st0.astackLen)
 	for _, stack := range st0.stackset {
 		newState.Add(stack)
 	}
@@ -645,17 +640,44 @@ func check(program *program, prevEdgeMap map[int]map[int]bool) {
 	}
 }
 
-func AbsIntCfgHarness(contract *Contract) {
+type Cfg struct {
+	FinalEdges 			[]edge
+	ReachableEdges 		[]edge
+	AnlyCounter 		int
 
+	Valid      			bool
+	Panic      			bool
+	Unresolved 			bool
+	ShortStack 			bool
+	AnlyCounterLimit 	bool
+
+	BadJumps 			map[int]bool
+}
+
+func (cfg *Cfg) PrintStats() {
+	fmt.Printf("\n# of unreachable edges: %v\n", len(cfg.FinalEdges)-len(cfg.ReachableEdges))
+	fmt.Printf("\n# of total edges: %v\n", len(cfg.FinalEdges))
+}
+
+func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, err error) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+			err = errors.New("internal panic")
+			cfg.Panic = true
+		}
+	}()
+
+	cfg = &Cfg{BadJumps: make(map[int]bool)}
 	program := toProgram(contract)
 
 	startPC := 0
 	codeLen := len(program.contract.Code)
 	D := make(map[int]*astate)
 	for pc := 0; pc < codeLen; pc++ {
-		D[pc] = emptyState()
+		D[pc] = emptyState(astackLen)
 	}
-	D[startPC] = botState()
+	D[startPC] = botState(astackLen)
 
 	prevEdgeMap := make(map[int]map[int]bool)
 
@@ -663,8 +685,8 @@ func AbsIntCfgHarness(contract *Contract) {
 	{
 		resolution := resolve(program, startPC, D[startPC])
 		if !resolution.resolved {
-			fmt.Printf("Unable to resolve at pc=%x\n", startPC)
-			return
+			cfg.Unresolved = true
+			return cfg, errors.New("unresolvable jumps found")
 		}
 
 		for _, e := range resolution.edges {
@@ -678,75 +700,32 @@ func AbsIntCfgHarness(contract *Contract) {
 
 	check(program, prevEdgeMap)
 
-	anlyCounter := 0
-	badJumps := make(map[int]bool)
 	for len(workList) > 0 {
+		if anlyCounterLimit > 0 && cfg.AnlyCounter > anlyCounterLimit {
+			cfg.AnlyCounterLimit = true
+			return cfg, errors.New("reached analysis counter limit")
+		}
 		//sortEdges(workList)
 		var e edge
 		e, workList = workList[0], workList[1:]
 
-		//fmt.Printf("%v\n", e.pc0)
-		if e.pc0 == -1 {
-			fmt.Printf("---------------------------------------\n")
-			fmt.Printf("Verbose debugging for pc=%v\n", e.pc0)
-			DEBUG = true
-		}
-
-		if DEBUG {
-			fmt.Printf("pre pc=%v\t%v\n", e.pc0, D[e.pc0])
-		}
 		preDpc0 := D[e.pc0]
 		preDpc1 := D[e.pc1]
-		post1, err := post(preDpc0, e)
+		post1, err := post(cfg, preDpc0, e)
 		if err != nil {
-			if StopOnError {
-				printAnlyState(program, prevEdgeMap, D, nil)
-				fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err)
-				return
-			}
-
-			fmt.Printf("FAILURE: pc=%v %v\n", e.pc0, err)
-		}
-
-		if DEBUG {
-			fmt.Printf("post\t\t%v\n", post1)
-			fmt.Printf("Dprev\t\t%v\n", preDpc1)
+			return cfg, err
 		}
 
 		if !Leq(post1, preDpc1) {
 			postDpc1 := Lub(post1, preDpc1)
-			if false {
-
-				fmt.Printf("\nedge %v %v\n", e.pc0, e.pc1)
-				//fmt.Printf("pre D[pc0]\t\t%v\n", preDpc0);
-				fmt.Printf("pre D[pc1]\t\t%v\n", preDpc1)
-				fmt.Printf("post\t\t\t%v\n", post1)
-
-				/*
-					for i := 0; i < absStackLen; i++ {
-						c0 := post1.stack[i]
-						c1 := preDpc1.stack[i]
-						if !ValueSetLeq(c0, c1) {
-							fmt.Printf("diff: \t\t\t%v %v %v %v %v\n", i, c0, c1, c0.kind, c1.kind)
-							if c0.kind == ConstValueKind && c1.kind == ConstValueKind {
-								fmt.Printf("\t\t\t\t\tEQ=%v\n", c0.value.Eq(&c1.value))
-							}
-						}
-					}*/
-				//fmt.Printf("lub\t\t\t%v\n", postDpc1)
-				printAnlyState(program, prevEdgeMap, D, nil)
-			}
 			D[e.pc1] = postDpc1
 
 			resolution := resolve(program, e.pc1, D[e.pc1])
 
 			if !resolution.resolved {
-				badJumps[resolution.badJump.pc] = true
-				fmt.Printf("FAILURE: Unable to resolve: anlyCounter=%v pc=%x\n", aurora.Red(anlyCounter), aurora.Red(e.pc1))
-				if StopOnError {
-					printAnlyState(program, prevEdgeMap, D, badJumps)
-					return
-				}
+				cfg.BadJumps[resolution.badJump.pc] = true
+				cfg.Unresolved = true
+				return cfg, errors.New("unresolvable jumps found")
 			} else {
 				for _, e := range resolution.edges {
 					inWorkList := false
@@ -767,39 +746,33 @@ func AbsIntCfgHarness(contract *Contract) {
 				prevEdgeMap[e.pc1][e.pc0] = true
 			}
 		}
-		DEBUG = false
-
 		decp1Copy := D[e.pc1]
-		decp1Copy.anlyCounter = anlyCounter
+		decp1Copy.anlyCounter = cfg.AnlyCounter
 		decp1Copy.worklistLen = len(workList)
 		D[e.pc1] = decp1Copy
-		anlyCounter++
+		cfg.AnlyCounter++
 
 		check(program, prevEdgeMap)
 	}
 
-	print("\nFinal resolve....")
 	var finalEdges []edge
 	for pc := 0; pc < codeLen; pc++ {
 		resolution := resolve(program, pc, D[pc])
 		if !resolution.resolved {
-			badJumps[resolution.badJump.pc] = true
-			fmt.Println("Bad jump found during final resolve.")
+			cfg.BadJumps[resolution.badJump.pc] = true
 		}
 		finalEdges = append(finalEdges, resolution.edges...)
 	}
-	//need to run a DFS from the entry point to pick only reachable stmts
 
-	reachableEdges := getEntryReachableEdges(0, finalEdges)
+	cfg.ReachableEdges = getEntryReachableEdges(0, finalEdges)
+	cfg.FinalEdges = finalEdges
 
-	fmt.Printf("\n# of unreachable edges: %v\n", len(finalEdges)-len(reachableEdges))
-	fmt.Printf("\n# of total edges: %v\n", len(finalEdges))
-	//printEdges(edges)
-
-	printAnlyState(program, prevEdgeMap, D, nil)
-	println("done valueset")
-
-	if len(badJumps) > 0 {
-		printAnlyState(program, prevEdgeMap, D, badJumps)
+	if len(cfg.BadJumps) > 0 {
+		cfg.Unresolved = true
+		return cfg, errors.New("unresolvable jumps found")
 	}
+
+	cfg.Valid = true
+
+	return cfg, nil
 }
