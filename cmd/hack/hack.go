@@ -1609,6 +1609,72 @@ func supply(chaindata string) error {
 	return nil
 }
 
+func extractCode(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	destDb := ethdb.MustOpen("codes")
+	defer destDb.Close()
+	return destDb.KV().Update(context.Background(), func(tx1 ethdb.Tx) error {
+		c1 := tx1.Cursor(dbutils.PlainContractCodeBucket)
+		return db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+			c := tx.Cursor(dbutils.PlainContractCodeBucket)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if err = c1.Append(k, v); err != nil {
+					return err
+				}
+			}
+			c1 = tx1.Cursor(dbutils.CodeBucket)
+			c = tx.Cursor(dbutils.CodeBucket)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if err = c1.Append(k, v); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
+func iterateOverCode(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var contractKeyTotalLength int
+	var contractValTotalLength int
+	var codeHashTotalLength int
+	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.PlainContractCodeBucket)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			contractKeyTotalLength += len(k)
+			contractValTotalLength += len(v)
+		}
+		c = tx.Cursor(dbutils.CodeBucket)
+		// This is a mapping of CodeHash => Byte code
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			codeHashTotalLength += len(k)
+			codeTotalLength += len(v)
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1738,6 +1804,16 @@ func main() {
 	}
 	if *action == "supply" {
 		if err := supply(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractCode" {
+		if err := extractCode(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "iterateOverCode" {
+		if err := iterateOverCode(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
