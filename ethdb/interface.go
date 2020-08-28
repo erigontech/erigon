@@ -79,7 +79,17 @@ type Database interface {
 	// Entries are passed as an array:
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
-	NewBatch() DbWithPendingMutations       // starts in-mem batch
+
+	// NewBatch - starts in-mem batch
+	//
+	// Common pattern:
+	//
+	// batch := db.NewBatch()
+	// defer batch.Rollback()
+	// ... some calculations on `batch`
+	// batch.Commit()
+	//
+	NewBatch() DbWithPendingMutations       //
 	Begin() (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
@@ -106,13 +116,43 @@ type MinDatabase interface {
 // Later they can either be committed to the database or rolled back.
 type DbWithPendingMutations interface {
 	Database
+
+	// Commit - commits transaction (or flush data into underlying db object in case of `mutation`)
+	//
+	// Common pattern:
+	//
+	// tx := db.Begin()
+	// defer tx.Rollback()
+	// ... some calculations on `tx`
+	// tx.Commit()
+	//
 	Commit() (uint64, error)
+
+	// CommitAndBegin - commits and starts new transaction inside same db object.
+	// useful for periodical commits implementation.
+	//
+	// Common pattern:
+	//
+	// tx := db.Begin()
+	// defer tx.Rollback()
+	// for {
+	// 		... some calculations on `tx`
+	//       tx.CommitAndBegin()
+	//       // defer here - is not useful, because 'tx' object is reused and first `defer` will work perfectly
+	// }
+	// tx.Commit()
+	//
+	CommitAndBegin() error
 	Rollback()
 	BatchSize() int
 }
 
 type HasKV interface {
 	KV() KV
+}
+
+type HasTx interface {
+	Tx() Tx
 }
 
 type HasNetInterface interface {

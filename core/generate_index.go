@@ -127,6 +127,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 		}
 	}
 	mutation := ig.db.NewBatch()
+	defer mutation.Rollback()
 
 	for key, value := range historyEffects {
 		if value == nil {
@@ -139,11 +140,9 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 			}
 		}
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			_, err := mutation.Commit()
-			if err != nil {
+			if err := mutation.CommitAndBegin(); err != nil {
 				return err
 			}
-			mutation = ig.db.NewBatch()
 		}
 	}
 	_, err := mutation.Commit()

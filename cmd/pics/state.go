@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -18,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -27,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -164,126 +161,6 @@ func hexPalette() error {
 	return nil
 }
 
-func insertBlocksInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, block *types.Block, bc *core.BlockChain) error {
-
-	num := block.Number().Uint64()
-	// Stage 1
-	if _, _, err := stagedsync.InsertHeaderChain(db, []*types.Header{block.Header()}, config, engine, 1); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.Headers, num, nil); err != nil {
-		return err
-	}
-	// Stage 2
-	if err := stagedsync.SpawnBlockHashStage(&stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.BlockHashes, num, nil); err != nil {
-		return err
-	}
-
-	// Stage 3
-	if _, err := bc.InsertBodyChain(context.TODO(), []*types.Block{block}); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.Bodies, num, nil); err != nil {
-		return err
-	}
-	// Stage 4
-	const batchSize = 10000
-	const blockSize = 4096
-	n := runtime.NumCPU()
-
-	cfg := stagedsync.Stage3Config{
-		BatchSize:       batchSize,
-		BlockSize:       blockSize,
-		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-		StartTrace:      false,
-		Prof:            false,
-		NumOfGoroutines: n,
-		ReadChLen:       4,
-		Now:             time.Now(),
-	}
-	if err := stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, config, 0, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.Senders, num, nil); err != nil {
-		return err
-	}
-	// Stage 5
-	if err := stagedsync.SpawnExecuteBlocksStage(&stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, config, bc, bc.GetVMConfig(), 0, nil, true, nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.Execution, num, nil); err != nil {
-		return err
-	}
-
-	// Stage 6
-	if err := stagedsync.SpawnIntermediateHashesStage(&stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.IntermediateHashes, num, nil); err != nil {
-		return err
-	}
-
-	// Stage 7
-	if err := stagedsync.SpawnHashStateStage(&stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.HashState, num, nil); err != nil {
-		return err
-	}
-
-	// Stage 8
-	if err := stagedsync.SpawnAccountHistoryIndex(&stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, num, nil); err != nil {
-		return err
-	}
-
-	// Stage 9
-	if err := stagedsync.SpawnStorageHistoryIndex(&stagedsync.StageState{
-		BlockNumber: num - 1,
-	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, num, nil); err != nil {
-		return err
-	}
-
-	// Stage 10
-	if err := stagedsync.SpawnTxLookup(&stagedsync.StageState{}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.TxLookup, num, nil); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
@@ -301,7 +178,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 			for _, bucketName := range dbutils.Buckets {
 				bucketName := bucketName
 				c := readTx.Cursor(bucketName)
-				if err2 := c.Walk(func(k, v []byte) (bool, error) {
+				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 					if firstV, _ := firstTx.Get(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
 						return true, nil
@@ -612,7 +489,7 @@ func initialState1() error {
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[0], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[0], blockchain); err != nil {
 		return err
 	}
 
@@ -626,7 +503,7 @@ func initialState1() error {
 
 	// BLOCK 2
 	snapshotDB = db.MemCopy()
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[1], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[1], blockchain); err != nil {
 		return err
 	}
 
@@ -640,7 +517,7 @@ func initialState1() error {
 	// BLOCK 3
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[2], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[2], blockchain); err != nil {
 		return err
 	}
 
@@ -662,7 +539,7 @@ func initialState1() error {
 	// BLOCK 4
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[3], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[3], blockchain); err != nil {
 		return err
 	}
 
@@ -677,7 +554,7 @@ func initialState1() error {
 	// BLOCK 5
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[4], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[4], blockchain); err != nil {
 		return err
 	}
 
@@ -694,7 +571,7 @@ func initialState1() error {
 	// BLOCK 6
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[5], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[5], blockchain); err != nil {
 		return err
 	}
 
@@ -715,7 +592,7 @@ func initialState1() error {
 	// BLOCK 7
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[6], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[6], blockchain); err != nil {
 		return err
 	}
 
@@ -732,7 +609,7 @@ func initialState1() error {
 	// BLOCK 8
 	snapshotDB = db.MemCopy()
 
-	if err = insertBlocksInStages(db, gspec.Config, engine, blocks[7], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[7], blockchain); err != nil {
 		return err
 	}
 

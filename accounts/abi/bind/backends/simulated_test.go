@@ -69,7 +69,7 @@ func TestSimulatedBackend(t *testing.T) {
 
 	err = sim.SendTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatal("error sending transaction")
+		t.Fatalf("error sending transaction: %v", err)
 	}
 
 	txHash = tx.Hash()
@@ -134,7 +134,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
 
-	statedb := state.New(state.NewDbState(sim.KV(), sim.blockchain.CurrentBlock().NumberU64()))
+	statedb := state.New(state.NewPlainDBState(sim.KV(), sim.blockchain.CurrentBlock().NumberU64()))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)

@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
+func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -42,7 +42,7 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poo
 	return s.DoneAndUpdate(db, to)
 }
 
-func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
@@ -106,7 +106,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 	return nil
 }
 
-func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, quitCh <-chan struct{}) error {
+func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *core.TxPool, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -122,7 +122,7 @@ func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool 
 	return nil
 }
 
-func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, from)
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)

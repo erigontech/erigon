@@ -207,10 +207,6 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
-func (db *LmdbKV) IdealBatchSize() int {
-	return int(512 * datasize.MB)
-}
-
 func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
@@ -296,13 +292,15 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
-	t := &lmdbTx{db: db, ctx: ctx}
-	return db.env.View(func(tx *lmdb.Txn) error {
-		defer t.closeCursors()
-		tx.RawRead = true
-		t.tx = tx
-		return f(t)
-	})
+
+	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
+	tx, err := db.Begin(ctx, nil, false)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	return f(tx)
 }
 
 func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
@@ -312,33 +310,18 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	var commitTimer time.Time
-	tx := &lmdbTx{db: db, ctx: ctx}
-	if err := db.env.Update(func(txn *lmdb.Txn) error {
-		defer tx.closeCursors()
-		txn.RawRead = true
-		tx.tx = txn
-		if exeErr := f(tx); exeErr != nil {
-			return exeErr
-		}
-		commitTimer = time.Now()
-		return nil
-	}); err != nil {
+	tx, err := db.Begin(ctx, nil, true)
+	if err != nil {
 		return err
 	}
-
-	commitTook := time.Since(commitTimer)
-	if commitTook > 10*time.Second {
-		log.Info("Batch", "commit", commitTook)
+	defer tx.Rollback()
+	err = f(tx)
+	if err != nil {
+		return err
 	}
-
-	fsyncTimer := time.Now()
-	if err := tx.db.env.Sync(true); err != nil {
-		log.Warn("fsync after commit failed: \n", err)
-	}
-	fsyncTook := time.Since(fsyncTimer)
-	if fsyncTook > 1*time.Second {
-		log.Info("Batch", "fsync", fsyncTook)
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -422,7 +405,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		return err
 	}
 	commitTook := time.Since(commitTimer)
-	if commitTook > 10*time.Second {
+	if commitTook > 20*time.Second {
 		log.Info("Batch", "commit", commitTook)
 	}
 
@@ -432,7 +415,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 			log.Warn("fsync after commit failed: \n", err)
 		}
 		fsyncTook := time.Since(fsyncTimer)
-		if fsyncTook > 1*time.Second {
+		if fsyncTook > 20*time.Second {
 			log.Info("Batch", "fsync", fsyncTook)
 		}
 	}
@@ -475,18 +458,9 @@ func (c *LmdbCursor) Prefix(v []byte) Cursor {
 	return c
 }
 
-func (c *LmdbCursor) MatchBits(n uint) Cursor {
-	panic("not implemented yet")
-}
-
 func (c *LmdbCursor) Prefetch(v uint) Cursor {
 	//c.cursorOpts.PrefetchSize = int(v)
 	return c
-}
-
-func (c *LmdbCursor) NoValues() NoValuesCursor {
-	//c.cursorOpts.PrefetchValues = false
-	return &lmdbNoValuesCursor{LmdbCursor: c}
 }
 
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
@@ -548,6 +522,10 @@ func (tx *lmdbTx) Cursor(bucket string) Cursor {
 	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket], dbi: tx.db.buckets[bucket]}
 }
 
+func (tx *lmdbTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &lmdbNoValuesCursor{LmdbCursor: tx.Cursor(bucket).(*LmdbCursor)}
+}
+
 func (c *LmdbCursor) initCursor() error {
 	if c.cursor != nil {
 		return nil
@@ -557,6 +535,7 @@ func (c *LmdbCursor) initCursor() error {
 	var err error
 	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName])
 	if err != nil {
+		panic("su-tx")
 		return err
 	}
 
@@ -839,6 +818,19 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 	return c.put(key, value)
 }
 
+func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	return c.putCurrent(key, value)
+}
+
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
@@ -1052,20 +1044,17 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	return c.append(key, value)
 }
 
-func (c *LmdbCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
+func (c *LmdbCursor) AppendDup(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
 			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
 		}
 	}
-	return nil
+	return c.appendDup(key, value)
 }
 
 func (c *LmdbCursor) Close() error {
@@ -1078,22 +1067,6 @@ func (c *LmdbCursor) Close() error {
 
 type lmdbNoValuesCursor struct {
 	*LmdbCursor
-}
-
-func (c *lmdbNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }
 
 func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {

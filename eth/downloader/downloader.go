@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -559,12 +560,37 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
+		hashStateStageProgress, _, err := stages.GetStageProgress(d.stateDB, stages.HashState) // because later stages can be disabled
+		if err != nil {
+			return err
+		}
+
+		canRunCycleInOneTransaction := height-origin < 32 && height-hashStateStageProgress < 32
+
+		var writeDB ethdb.Database // on this variable will run sync cycle.
+
+		// create empty TxDb object, it's not usable before .Begin() call which will use this object
+		// It allows inject tx object to stages now, define rollback now,
+		// but call .Begin() after hearer/body download stages
+		var tx ethdb.DbWithPendingMutations
+		if canRunCycleInOneTransaction {
+			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
+			defer func() {
+				log.Info("Rollback")
+				tx.Rollback()
+			}()
+			writeDB = tx
+		} else {
+			writeDB = d.stateDB
+		}
+
 		d.stagedSync, err = stagedsync.PrepareStagedSync(
 			d,
 			d.chainConfig,
 			d.blockchain,
 			d.blockchain.GetVMConfig(),
 			d.stateDB,
+			writeDB,
 			p.id,
 			d.storageMode,
 			d.datadir,
@@ -577,7 +603,62 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
-		return d.stagedSync.Run(d.stateDB)
+
+		// begin tx at stage right after head/body download Or at first unwind stage
+		// it's temporary solution
+		d.stagedSync.BeforeStageRun(stages.Senders, func() error {
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+
+			var errTx error
+			log.Debug("Begin tx")
+			tx, errTx = tx.Begin()
+			return errTx
+		})
+		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
+			fmt.Printf("Try unwind begin: canRunCycleInOneTransaction=%t, id=%d\n", canRunCycleInOneTransaction, id)
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+			if id <= stages.Bodies || id > stages.TxPool {
+				return nil
+			}
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+				return nil
+			}
+			var errTx error
+			log.Debug("Begin tx")
+			tx, errTx = tx.Begin()
+			return errTx
+		})
+		d.stagedSync.BeforeStageUnwind(stages.Bodies, func() error {
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+			log.Info("Commit blocks")
+			_, errCommit := tx.Commit()
+			return errCommit
+		})
+
+		err = d.stagedSync.Run(d.stateDB, writeDB)
+		if err != nil {
+			return err
+		}
+		if canRunCycleInOneTransaction {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+
+			log.Info("Commit blocks")
+			_, errTx := tx.Commit()
+			return errTx
+		}
+
+		return nil
 	}
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync

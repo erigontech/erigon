@@ -139,7 +139,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.Equal(1, counter)
 
 		counter = 0
-		if err := c.Walk(func(_, _ []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		}); err != nil {
@@ -162,7 +162,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.Equal(13, counter)
 
 		counter = 0
-		if err := c.Walk(func(_, _ []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		}); err != nil {
@@ -241,7 +241,7 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 string) {
 		k, _, err = c.Seek([]byte{99})
 		assert.NoError(err)
 		assert.Nil(k)
-		c2 := c.NoValues()
+		c2 := tx.NoValuesCursor(bucket1)
 
 		k, _, err = c2.First()
 		assert.NoError(err)

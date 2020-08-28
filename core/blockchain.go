@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -146,9 +145,9 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db            *ethdb.ObjectDatabase // Low level persistent database to store final content in
-	triegc        *prque.Prque          // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration         // Accumulates canonical block processing for trie dumping
+	db            ethdb.Database // Low level persistent database to store final content in
+	triegc        *prque.Prque   // Priority queue mapping block numbers to tries to gc
+	gcproc        time.Duration  // Accumulates canonical block processing for trie dumping
 	txLookupLimit uint64
 
 	hc            *HeaderChain
@@ -200,7 +199,7 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db *ethdb.ObjectDatabase, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
+func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
 			Pruning:             false,
@@ -766,24 +765,6 @@ func (bc *BlockChain) insertStopped() bool {
 	return atomic.LoadInt32(&bc.procInterrupt) == 1
 }
 
-func (bc *BlockChain) procFutureBlocks() {
-	blocks := make([]*types.Block, 0, bc.futureBlocks.Len())
-	for _, hash := range bc.futureBlocks.Keys() {
-		if block, exist := bc.futureBlocks.Peek(hash); exist {
-			blocks = append(blocks, block.(*types.Block))
-		}
-	}
-	if len(blocks) > 0 {
-		sort.Slice(blocks, func(i, j int) bool {
-			return blocks[i].NumberU64() < blocks[j].NumberU64()
-		})
-		// Insert one by one as chain insertion needs contiguous ancestry between blocks
-		for i := range blocks {
-			_, _ = bc.InsertChain(context.Background(), blocks[i:i+1])
-		}
-	}
-}
-
 // WriteStatus status of write
 type WriteStatus byte
 
@@ -1007,6 +988,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		batch := bc.db.NewBatch()
+		defer batch.Rollback()
 		for i, block := range blockChain {
 			// Short circuit insertion if shutting down or processing failed
 			if bc.insertStopped() {
@@ -1029,11 +1011,10 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
-				if _, err := batch.Commit(); err != nil {
+				size += batch.BatchSize()
+				if err := batch.CommitAndBegin(); err != nil {
 					return 0, err
 				}
-				size += batch.BatchSize()
-				batch = bc.db.NewBatch()
 			}
 			stats.processed++
 		}
@@ -1148,6 +1129,10 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if stateDb != nil {
 		blockWriter := tds.DbStateWriter()
 		if err := stateDb.CommitBlock(ctx, blockWriter); err != nil {
+			return NonStatTy, err
+		}
+		plainBlockWriter := state.NewPlainStateWriter(bc.db, block.NumberU64())
+		if err := stateDb.CommitBlock(ctx, plainBlockWriter); err != nil {
 			return NonStatTy, err
 		}
 		// Always write changesets
@@ -1877,19 +1862,6 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	return nil
 }
 
-func (bc *BlockChain) update() {
-	futureTimer := time.NewTicker(5 * time.Second)
-	defer futureTimer.Stop()
-	for {
-		select {
-		case <-futureTimer.C:
-			bc.procFutureBlocks()
-		case <-bc.quit:
-			return
-		}
-	}
-}
-
 // BadBlocks returns a list of the last 'bad blocks' that the client has seen on the network
 func (bc *BlockChain) BadBlocks() []*types.Block {
 	blocks := make([]*types.Block, 0, bc.badBlocks.Len())
@@ -2204,7 +2176,7 @@ func InsertBodies(
 	ctx context.Context,
 	procInterrupt *int32,
 	chain types.Blocks,
-	db *ethdb.ObjectDatabase,
+	db ethdb.Database,
 	config *params.ChainConfig,
 	noHistory bool,
 	isNoHistory func(currentBlock *big.Int) bool,

@@ -1,13 +1,12 @@
 ## Target: 
 
-To build 1 key-value abstraction on top of Bolt, LMDB and RemoteDB (our own read-only TCP protocol for key-value databases).
+To build 1 key-value abstraction on top of LMDB and RemoteDB (our own read-only TCP protocol for key-value databases).
 
 ## Design principles:
-- No internal copies/allocations - all must be delegated to user. It means app must copy keys/values before put to database.  
-Make it part of contract - written clearly in docs, because it's unsafe (unsafe to put slice to DB and then change it). 
+- No internal copies/allocations. It means app must copy keys/values before put to database.  
 Known problems: mutation.Put does copy internally. 
 - Low-level API: as close to original LMDB as possible.
-- Expose concept of transaction - app-level code can .Rollback() or .Commit() at once. 
+- Expose concept of transaction - app-level code can .Rollback() or .Commit() 
 
 ## Result interface:
 
@@ -17,7 +16,7 @@ type KV interface {
 	Update(ctx context.Context, f func(tx Tx) error) (err error)
 	Close() error
 
-	Begin(ctx context.Context, writable bool) (Tx, error)
+	Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error)
 }
 
 type Tx interface {
@@ -36,21 +35,18 @@ type Bucket interface {
 
 type Cursor interface {
 	Prefix(v []byte) Cursor
-	MatchBits(uint) Cursor
 	Prefetch(v uint) Cursor
 	NoValues() NoValuesCursor
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
-	Walk(walker func(k, v []byte) (bool, error)) error
 }
 
 type NoValuesCursor interface {
 	First() ([]byte, uint32, error)
 	Seek(seek []byte) ([]byte, uint32, error)
 	Next() ([]byte, uint32, error)
-	Walk(walker func(k []byte, vSize uint32) (bool, error)) error
 }
 ```
 
