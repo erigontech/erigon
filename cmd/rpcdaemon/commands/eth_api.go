@@ -25,6 +25,7 @@ type EthAPI interface {
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	Syncing(ctx context.Context) (interface{}, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -52,4 +53,18 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	return hexutil.Uint64(execution), nil
+}
+
+func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+	progress, err := api.ethBackend.SyncProgress()
+	if err != nil {
+		return false, err
+	}
+
+	// Return not syncing if the synchronisation already completed
+	if progress["currentBlock"] >= progress["highestBlock"] {
+		return false, nil
+	}
+	// Otherwise gather the block sync stats
+	return progress, nil
 }

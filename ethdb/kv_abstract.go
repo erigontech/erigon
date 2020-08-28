@@ -3,8 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 )
 
 var (
@@ -68,6 +68,7 @@ type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+	SyncProgress() (map[string]hexutil.Uint64, error)
 }
 
 type DbProvider uint8

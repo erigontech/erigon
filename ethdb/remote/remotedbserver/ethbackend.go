@@ -55,3 +55,15 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 	}
 	return &remote.NetVersionReply{Id: id}, nil
 }
+
+func (s *EthBackendServer) SyncingProgress(_ context.Context, _ *remote.SyncingProgressRequest) (*remote.SyncingProgressReply, error) {
+	progress := s.eth.SyncProgress()
+	reply := &remote.SyncingProgressReply{
+		StartingBlock: progress.StartingBlock,
+		CurrentBlock:  progress.CurrentBlock,
+		HighestBlock:  progress.HighestBlock,
+		PulledStates:  progress.PulledStates,
+		KnownStates:   progress.KnownStates,
+	}
+	return reply, nil
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -347,4 +348,18 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 	}
 
 	return res.Id, nil
+}
+
+func (back *RemoteBackend) SyncProgress() (map[string]hexutil.Uint64, error) {
+	reply, err := back.remoteEthBackend.SyncingProgress(context.Background(), &remote.SyncingProgressRequest{})
+	if err != nil {
+		return map[string]hexutil.Uint64{}, err
+	}
+	return map[string]hexutil.Uint64{
+		"startingBlock": hexutil.Uint64(reply.StartingBlock),
+		"currentBlock":  hexutil.Uint64(reply.CurrentBlock),
+		"highestBlock":  hexutil.Uint64(reply.HighestBlock),
+		"pulledStates":  hexutil.Uint64(reply.PulledStates),
+		"knownStates":   hexutil.Uint64(reply.KnownStates),
+	}, nil
 }

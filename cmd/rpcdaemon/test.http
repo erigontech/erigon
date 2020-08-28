@@ -4,6 +4,13 @@
 POST localhost:8545
 Content-Type: application/json
 
+{ "jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id":1}
+
+###
+
+POST localhost:8545
+Content-Type: application/json
+
 { "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1e8480", "", 256, false, false, false], "id":1}
 
 ###
