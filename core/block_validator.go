@@ -54,6 +54,8 @@ func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain, engin
 	}
 	files, err := ioutil.ReadDir("./")
 	if err != nil {
+		cwd, cwderr := os.Getwd()
+		fmt.Printf("cwd: %s, %s\n", cwd, cwderr)
 		panic(err)
 	}
 	for _, f := range files {
