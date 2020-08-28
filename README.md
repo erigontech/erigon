@@ -138,6 +138,7 @@ eth_getLogs
 eth_call
 eth_estimateGas
 eth_sendRawTransaction
+eth_syncing
 debug_storageRangeAt
 debug_traceTransaction
 debug_accountRange
