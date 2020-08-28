@@ -157,10 +157,10 @@ func PrepareStagedSync(
 			ID:          stages.TxPool,
 			Description: "Update transaction pool",
 			ExecFunc: func(s *StageState, _ Unwinder) error {
-				return spawnTxPool(s, db, txPool, poolStart, quitCh)
+				return spawnTxPool(s, tx, txPool, poolStart, quitCh)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return unwindTxPool(u, s, db, txPool, quitCh)
+				return unwindTxPool(u, s, tx, txPool, quitCh)
 			},
 		},
 	}

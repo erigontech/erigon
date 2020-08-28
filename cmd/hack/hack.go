@@ -1171,6 +1171,7 @@ type Receiver struct {
 	currentIdx      int
 }
 
+func (r *Receiver) Root() common.Hash { panic("don't call me") }
 func (r *Receiver) Receive(
 	itemType trie.StreamItem,
 	accountKey []byte,
@@ -1695,6 +1696,9 @@ func main() {
 	//db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	//check(err)
 	//defer db.Close()
+	if *action == "cfg" {
+		testGenCfg()
+	}
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
 	}

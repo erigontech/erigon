@@ -565,7 +565,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return err
 		}
 
-		canRunCycleInOneTransaction := height-origin < 16 && height-hashStateStageProgress < 16
+		canRunCycleInOneTransaction := height-origin < 32 && height-hashStateStageProgress < 32
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -576,7 +576,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if canRunCycleInOneTransaction {
 			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
 			defer func() {
-				log.Info("cycle: rollback transaction")
+				log.Info("Rollback")
 				tx.Rollback()
 			}()
 			writeDB = tx
@@ -611,43 +611,35 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			log.Info("cycle: begin transaction")
 			var errTx error
+			log.Debug("Begin tx")
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.BeforeStageRun(stages.TxPool, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-
-			log.Info("cycle: commit transaction")
-			_, errTx := tx.Commit()
-			return errTx
-		})
 		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
+			fmt.Printf("Try unwind begin: canRunCycleInOneTransaction=%t, id=%d\n", canRunCycleInOneTransaction, id)
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if id <= stages.Bodies || id >= stages.TxPool {
+			if id <= stages.Bodies || id > stages.TxPool {
 				return nil
 			}
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 				return nil
 			}
-			log.Info("cycle unwind: begin transaction")
 			var errTx error
+			log.Debug("Begin tx")
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.BeforeStageUnwind(stages.TxPool, func() error {
+		d.stagedSync.BeforeStageUnwind(stages.Bodies, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 				return nil
 			}
-			log.Info("cycle unwind: commit transaction")
+			log.Info("Commit blocks")
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
@@ -655,6 +647,15 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		err = d.stagedSync.Run(d.stateDB, writeDB)
 		if err != nil {
 			return err
+		}
+		if canRunCycleInOneTransaction {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+
+			log.Info("Commit blocks")
+			_, errTx := tx.Commit()
+			return errTx
 		}
 
 		return nil
