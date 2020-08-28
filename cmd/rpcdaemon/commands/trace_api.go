@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -33,10 +32,9 @@ type TraceAPI interface {
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
-	db           ethdb.KV
-	dbReader     ethdb.Getter
-	chainContext core.ChainContext
-	maxTraces    uint64
+	db        ethdb.KV
+	dbReader  ethdb.Getter
+	maxTraces uint64
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
@@ -83,7 +81,7 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // Filter Implements trace_filter
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, config *eth.TraceConfig) ([]interface{}, error) {
 	var filteredTransactionsHash []common.Hash
-	var resp []interface{}
+	resp := []interface{}{}
 	var maxTracesCount uint64
 
 	if req.Count == nil {
