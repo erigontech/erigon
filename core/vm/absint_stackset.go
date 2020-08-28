@@ -802,6 +802,4 @@ func AbsIntCfgHarness(contract *Contract) {
 	if len(badJumps) > 0 {
 		printAnlyState(program, prevEdgeMap, D, badJumps)
 	}
-
-	return
 }
