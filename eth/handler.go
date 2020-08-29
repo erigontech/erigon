@@ -174,7 +174,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	if manager.downloader != nil {
 		manager.downloader.Cancel()
 	}
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
 
 	// Construct the fetcher (short sync)

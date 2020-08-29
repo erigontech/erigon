@@ -139,9 +139,9 @@ func makeFullNode(ctx *cli.Context) (*node.Node, *eth.Ethereum) {
 	backend := utils.RegisterEthService(stack, &cfg.Eth)
 
 	// Configure GraphQL if required
-	if ctx.GlobalIsSet(utils.GraphQLEnabledFlag.Name) {
-		utils.RegisterGraphQLService(stack, backend.APIBackend, cfg.Node)
-	}
+	//if ctx.GlobalIsSet(utils.GraphQLEnabledFlag.Name) {
+	//	utils.RegisterGraphQLService(stack, backend.APIBackend, cfg.Node)
+	//}
 
 	// TurboGeth - moved all API's to RPCDaemon service
 	// Add the Ethereum Stats daemon if requested.
