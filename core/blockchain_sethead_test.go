@@ -20,18 +20,17 @@
 package core
 
 import (
+	"context"
 	"fmt"
-	"io/ioutil"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -1749,17 +1748,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	//fmt.Println(tt.dump(false))
 
-	// Create a temporary persistent database
-	datadir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatalf("Failed to create temporary datadir: %v", err)
-	}
-	os.RemoveAll(datadir)
-
-	db, err := rawdb.NewLevelDBDatabaseWithFreezer(datadir, 0, 0, datadir, "")
-	if err != nil {
-		t.Fatalf("Failed to create persistent database: %v", err)
-	}
+	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
 	// Initialize a fresh chain
@@ -1774,40 +1763,29 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
 	if tt.sidechainBlocks > 0 {
-		sideblocks, _ = GenerateChain(params.TestChainConfig, genesis, engine, rawdb.NewMemoryDatabase(), tt.sidechainBlocks, func(i int, b *BlockGen) {
+		sideblocks, _, err = GenerateChain(params.TestChainConfig, genesis, engine, ethdb.NewMemDatabase(), tt.sidechainBlocks, func(i int, b *BlockGen) {
 			b.SetCoinbase(common.Address{0x01})
-		})
-		if _, err := chain.InsertChain(sideblocks); err != nil {
+		}, false)
+		if err != nil {
+			t.Fatalf("error creating chain err=%v", err)
+		}
+		if _, err = chain.InsertChain(context.TODO(), sideblocks); err != nil {
 			t.Fatalf("Failed to import side chain: %v", err)
 		}
 	}
-	canonblocks, _ := GenerateChain(params.TestChainConfig, genesis, engine, rawdb.NewMemoryDatabase(), tt.canonicalBlocks, func(i int, b *BlockGen) {
+	canonblocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, ethdb.NewMemDatabase(), tt.canonicalBlocks, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{0x02})
 		b.SetDifficulty(big.NewInt(1000000))
-	})
-	if _, err := chain.InsertChain(canonblocks[:tt.commitBlock]); err != nil {
+	}, false)
+	if _, err := chain.InsertChain(context.TODO(), canonblocks[:tt.commitBlock]); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
 	if tt.commitBlock > 0 {
-		chain.stateCache.TrieDB().Commit(canonblocks[tt.commitBlock-1].Root(), true, nil)
+		//chain.stateCache.TrieDB().Commit(canonblocks[tt.commitBlock-1].Root(), true, nil)
 	}
-	if _, err := chain.InsertChain(canonblocks[tt.commitBlock:]); err != nil {
+	if _, err := chain.InsertChain(context.TODO(), canonblocks[tt.commitBlock:]); err != nil {
 		t.Fatalf("Failed to import canonical chain tail: %v", err)
 	}
-	// Manually dereference anything not committed to not have to work with 128+ tries
-	for _, block := range sideblocks {
-		chain.stateCache.TrieDB().Dereference(block.Root())
-	}
-	for _, block := range canonblocks {
-		chain.stateCache.TrieDB().Dereference(block.Root())
-	}
-	// Force run a freeze cycle
-	type freezer interface {
-		Freeze(threshold uint64)
-		Ancients() (uint64, error)
-	}
-	db.(freezer).Freeze(tt.freezeThreshold)
-
 	// Set the head of the chain back to the requested number
 	chain.SetHead(tt.setheadBlock)
 
@@ -1825,11 +1803,6 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	}
 	if head := chain.CurrentBlock(); head.NumberU64() != tt.expHeadBlock {
 		t.Errorf("Head block mismatch: have %d, want %d", head.NumberU64(), tt.expHeadBlock)
-	}
-	if frozen, err := db.(freezer).Ancients(); err != nil {
-		t.Errorf("Failed to retrieve ancient count: %v\n", err)
-	} else if int(frozen) != tt.expFrozen {
-		t.Errorf("Frozen block count mismatch: have %d, want %d", frozen, tt.expFrozen)
 	}
 }
 

@@ -846,7 +846,6 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 	archiveDb := ethdb.NewMemDatabase()
 	defer archiveDb.Close()
 
-	archiveCaching := *defaultCacheConfig
 	gspec.MustCommit(archiveDb)
 
 	cacheConfig := &CacheConfig{
