@@ -218,10 +218,6 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33 h1:8e99Kuxoi+RnWCO8zD+ftp+rIuh9AYkZDRPmO8Xgp5k=
 github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
-github.com/ledgerwatch/lmdb-go v1.13.0 h1:iyLPkF2i+zym+lbGMqJrrD0yMy8uCWzrO90fOBxaEtc=
-github.com/ledgerwatch/lmdb-go v1.13.0/go.mod h1:NKRpCxksoTQPyxsUcBiVOe0135uqnJsnf6cElxmOL0o=
-github.com/ledgerwatch/lmdb-go v1.13.1-0.20200828125756-548cf1dd6933 h1:7YR6rLj5BBYPvV9rZGvV1orCwQYM8X2crTxJcsS/AYs=
-github.com/ledgerwatch/lmdb-go v1.13.1-0.20200828125756-548cf1dd6933/go.mod h1:NKRpCxksoTQPyxsUcBiVOe0135uqnJsnf6cElxmOL0o=
 github.com/ledgerwatch/lmdb-go v1.13.1-0.20200829020305-221d50cfedab h1:0GaFl88nDLj9Z8L8iE+2l0UHTEJufpyVHGYuHgRNC8k=
 github.com/ledgerwatch/lmdb-go v1.13.1-0.20200829020305-221d50cfedab/go.mod h1:NKRpCxksoTQPyxsUcBiVOe0135uqnJsnf6cElxmOL0o=
 github.com/leodido/go-urn v1.2.0 h1:hpXL4XnriNwQ/ABnpepYM/1vCLWNDfUNts8dX3xTG6Y=
