@@ -125,22 +125,30 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090
 ```
 
-Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/eth_api.go), [debug](./cmd/rpcdaemon/debug_api.go)):
+Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go)):
 
 ```
-eth_call
-eth_getBlockByHash
-eth_getBlock
+eth_coinbase
 eth_blockNumber
+eth_getBlockByNumber
+eth_getBlockByHash
 eth_getBalance
+eth_getTransactionReceipt
 eth_getLogs
+eth_call
 eth_estimateGas
+eth_sendRawTransaction
+eth_syncing
 debug_storageRangeAt
 debug_traceTransaction
 debug_accountRange
 debug_getModifiedAccountsByNumber
 debug_getModifiedAccountsByHash
+net_version
+net_peerCount*
 ```
+
+\* net_peerCount currently always returns a count of 25 as work continues on Sentry.
 
 #### REST API Daemon
 

@@ -3,7 +3,6 @@ package ethdb
 import (
 	"context"
 	"errors"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 

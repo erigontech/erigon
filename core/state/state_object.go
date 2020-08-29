@@ -251,7 +251,7 @@ func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) 
 // AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
 func (so *stateObject) AddBalance(amount *uint256.Int) {
-	// EIP158: We must check emptiness for the objects such that the account
+	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
 		if so.empty() {

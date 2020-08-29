@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -19,4 +20,8 @@ func NewNetAPIImpl(eth ethdb.Backend) *NetAPIImpl {
 	return &NetAPIImpl{
 		ethBackend: eth,
 	}
+}
+
+func (api *NetAPIImpl) PeerCount(_ context.Context) (hexutil.Uint, error) {
+	return hexutil.Uint(25), nil
 }

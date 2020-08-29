@@ -40,7 +40,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.downloader = New(uint64(StagedSync), tester.db, nil /* syncBloom */, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	clear := func() {
 		tester.db.Close()
 	}
@@ -55,6 +55,10 @@ func (st *stagedSyncTester) newPeer(id string, version int, chain *testChain) er
 	peer := &stagedSyncTesterPeer{st: st, id: id, chain: chain}
 	st.peers[id] = peer
 	return st.downloader.RegisterPeer(id, version, peer)
+}
+
+func (st *stagedSyncTester) SetHead(_ uint64) error {
+	panic("should not be called")
 }
 
 // dropPeer simulates a hard peer removal from the connection pool.

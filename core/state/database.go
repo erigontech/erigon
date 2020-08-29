@@ -1291,7 +1291,7 @@ func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) PlainStateWriter() *PlainStateWriter {
-	return NewPlainStateWriter(tds.db, tds.blockNr)
+	return NewPlainStateWriter(tds.db, nil, tds.blockNr)
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
