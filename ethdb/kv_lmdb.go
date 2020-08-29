@@ -107,11 +107,11 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	db := &LmdbKV{
-		opts:       opts,
-		env:        env,
-		log:        logger,
-		wg:         &sync.WaitGroup{},
-		bucketsCfg: opts.bucketsCfg(dbutils.BucketsCfg),
+		opts:    opts,
+		env:     env,
+		log:     logger,
+		wg:      &sync.WaitGroup{},
+		buckets: opts.bucketsCfg(dbutils.BucketsCfg),
 	}
 
 	// Open or create buckets
@@ -145,13 +145,13 @@ func (opts lmdbOpts) Open() (KV, error) {
 			dbi, createErr := tx.OpenDBI(name, 0)
 			if createErr != nil {
 				if lmdb.IsNotFound(createErr) {
-					db.bucketsCfg[name].DBI = NonExistingDBI
+					db.buckets[name].DBI = NonExistingDBI
 					continue // if deprecated bucket couldn't be open - then it's deleted and it's fine
 				} else {
 					return createErr
 				}
 			}
-			db.bucketsCfg[name].DBI = dbi
+			db.buckets[name].DBI = dbi
 		}
 		return nil
 	}); err != nil {
@@ -181,7 +181,7 @@ type LmdbKV struct {
 	opts                lmdbOpts
 	env                 *lmdb.Env
 	log                 log.Logger
-	bucketsCfg          map[string]*dbutils.BucketConfigItem
+	buckets             map[string]*dbutils.BucketConfigItem
 	stopStaleReadsCheck context.CancelFunc
 	wg                  *sync.WaitGroup
 }
@@ -283,7 +283,7 @@ func (db *LmdbKV) Env() *lmdb.Env {
 
 func (db *LmdbKV) AllDBI() map[string]lmdb.DBI {
 	res := map[string]lmdb.DBI{}
-	for name, cfg := range db.bucketsCfg {
+	for name, cfg := range db.buckets {
 		res[name] = cfg.DBI
 	}
 	return res
@@ -352,22 +352,22 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 	if !tx.db.opts.readOnly {
 		flags |= lmdb.Create
 	}
-	if tx.db.bucketsCfg[name].IsDupSort {
+	if tx.db.buckets[name].IsDupSort {
 		flags |= lmdb.DupSort
 	}
-	if tx.db.bucketsCfg[name].IsDupFixed {
+	if tx.db.buckets[name].IsDupFixed {
 		flags |= lmdb.DupFixed
 	}
 	dbi, err := tx.tx.OpenDBI(name, flags)
 	if err != nil {
 		return err
 	}
-	tx.db.bucketsCfg[name].DBI = dbi
+	tx.db.buckets[name].DBI = dbi
 	return nil
 }
 
 func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
-	dbi := tx.db.bucketsCfg[name].DBI
+	dbi := tx.db.buckets[name].DBI
 	// if bucket was not open on db start, then it's may be deprecated
 	// try to open it now without `Create` flag, and if fail then nothing to drop
 	if dbi == NonExistingDBI {
@@ -383,7 +383,7 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	if err := tx.tx.Drop(dbi, true); err != nil {
 		return err
 	}
-	tx.db.bucketsCfg[name].DBI = NonExistingDBI
+	tx.db.buckets[name].DBI = NonExistingDBI
 	return nil
 }
 
@@ -405,7 +405,7 @@ func (tx *lmdbTx) DropBucket(name string) error {
 }
 
 func (tx *lmdbTx) ExistsBucket(name string) bool {
-	return tx.db.bucketsCfg[name].DBI != NonExistingDBI
+	return tx.db.buckets[name].DBI != NonExistingDBI
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -488,7 +488,7 @@ func (c *LmdbCursor) Prefetch(v uint) Cursor {
 }
 
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
-	cfg := tx.db.bucketsCfg[bucket]
+	cfg := tx.db.buckets[bucket]
 	if cfg.IsDupSort {
 		return tx.getDupSort(bucket, cfg.DBI, cfg, key)
 	}
@@ -534,7 +534,7 @@ func (tx *lmdbTx) getDupSort(bucket string, dbi lmdb.DBI, cfg *dbutils.BucketCon
 }
 
 func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.Stat(tx.db.bucketsCfg[name].DBI)
+	st, err := tx.tx.Stat(tx.db.buckets[name].DBI)
 	if err != nil {
 		return 0, err
 	}
@@ -542,7 +542,7 @@ func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
 }
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
-	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: tx.db.bucketsCfg[bucket], dbi: tx.db.bucketsCfg[bucket].DBI}
+	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: tx.db.buckets[bucket], dbi: tx.db.buckets[bucket].DBI}
 }
 
 func (tx *lmdbTx) NoValuesCursor(bucket string) NoValuesCursor {
@@ -556,7 +556,7 @@ func (c *LmdbCursor) initCursor() error {
 	tx := c.tx
 
 	var err error
-	c.cursor, err = tx.tx.OpenCursor(c.tx.db.bucketsCfg[c.bucketName].DBI)
+	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName].DBI)
 	if err != nil {
 		panic("su-tx")
 		return err
