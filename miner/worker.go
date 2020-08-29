@@ -753,7 +753,6 @@ func (w *worker) updateSnapshot() {
 		w.current.txs,
 		uncles,
 		w.current.receipts,
-		new(trie.Trie),
 	)
 
 	w.snapshotState = w.current.state

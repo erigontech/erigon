@@ -1671,8 +1671,8 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 					if err != nil {
 						// If some headers were inserted, add them too to the rollback list
-						if n > 0 {
-							rollback = append(rollback, chunk[:n]...)
+						if n > 0 && rollback == 0 {
+							rollback = chunk[0].Number.Uint64()
 						}
 						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 						return fmt.Errorf("%w: %v", errInvalidChain, err)
@@ -1781,29 +1781,6 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
 		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
-	}
-	return nil
-}
-
-// processFastSyncContent takes fetch results from the queue and writes them to the
-// database. It also controls the synchronisation of state nodes of the pivot block.
-func (d *Downloader) processFastSyncContent(latest *types.Header) error {
-	// Start syncing state of the reported head block. This should get us most of
-	// the state of the pivot block.
-	sync := d.syncState(latest.Root)
-	defer sync.Cancel()
-	closeOnErr := func(s *stateSync) {
-		if err := s.Wait(); err != nil && err != errCancelStateFetch && err != errCanceled {
-			d.queue.Close() // wake up Results
-		}
-	}
-	go closeOnErr(sync)
-
-	// Figure out the ideal pivot block. Note, that this goalpost may move if the
-	// sync takes long enough for the chain head to move significantly.
-	pivot := uint64(0)
-	if height := latest.Number.Uint64(); height > uint64(fsMinFullBlocks) {
-		pivot = height - uint64(fsMinFullBlocks)
 	}
 	if d.getMode() == StagedSync && index > 0 && d.bodiesState != nil {
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
