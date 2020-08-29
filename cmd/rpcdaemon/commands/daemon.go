@@ -17,14 +17,14 @@ import (
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
 	var blockNum uint64
-	if number == rpc.LatestBlockNumber {
+	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
 		var err error
 		blockNum, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
 		if err != nil {
 			return nil, fmt.Errorf("getting latest block number: %v", err)
 		}
-	} else if number == rpc.PendingBlockNumber || number == rpc.EarliestBlockNumber {
-		return nil, fmt.Errorf("pending and earliest blocks are not supported")
+	} else if number == rpc.EarliestBlockNumber {
+		blockNum = 0
 	} else {
 		blockNum = uint64(number.Int64())
 	}
