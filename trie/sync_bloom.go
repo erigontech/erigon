@@ -16,6 +16,7 @@
 
 package trie
 
+/*
 import (
 	"encoding/binary"
 	"fmt"
@@ -113,18 +114,16 @@ func (b *SyncBloom) init(database ethdb.Database) {
 			}
 			return true, nil
 			// FIXME: restore or remove in Turbo-Geth
-			/*
-				// If enough time elapsed since the last iterator swap, restart
-				if time.Since(swap) > 8*time.Second {
-					key := common.CopyBytes(it.Key())
-
-					it.Release()
-					it = database.NewIteratorWithStart(key)
-
-					log.Info("Initializing fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))
-					swap = time.Now()
-				}
-			*/
+			// If enough time elapsed since the last iterator swap, restart
+			//if time.Since(swap) > 8*time.Second {
+			//	key := common.CopyBytes(it.Key())
+			//
+			//	it.Release()
+			//	it = database.NewIteratorWithStart(key)
+			//
+			//	log.Info("Initializing fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))
+			//	swap = time.Now()
+			//}
 		})
 	}
 
@@ -209,3 +208,5 @@ func (b *SyncBloom) errorRate() float64 {
 
 	return math.Pow(1.0-math.Exp((-k)*(n+0.5)/(m-1)), k)
 }
+
+*/

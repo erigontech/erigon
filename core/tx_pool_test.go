@@ -182,7 +182,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 		key, _  = crypto.GenerateKey()
 		address = crypto.PubkeyToAddress(key.PublicKey)
 	)
-	stateWriter := state.NewPlainStateWriter(db, 1)
+	stateWriter := state.NewPlainStateWriter(db, nil, 1)
 	ibs := state.New(state.NewPlainStateReader(db))
 
 	// setup pool with 2 transaction in it
@@ -320,7 +320,7 @@ func TestTransactionChainFork(t *testing.T) {
 	defer clear()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	resetState := func() {
-		stateWriter := state.NewPlainStateWriter(pool.chaindb, 1)
+		stateWriter := state.NewPlainStateWriter(pool.chaindb, nil, 1)
 		ibs := state.New(state.NewPlainStateReader(pool.chaindb))
 		ibs.AddBalance(addr, uint256.NewInt().SetUint64(100000000000000))
 		ctx := context.Background()
@@ -349,7 +349,7 @@ func TestTransactionDoubleNonce(t *testing.T) {
 	defer clear()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	resetState := func() {
-		stateWriter := state.NewPlainStateWriter(pool.chaindb, 1)
+		stateWriter := state.NewPlainStateWriter(pool.chaindb, nil, 1)
 		ibs := state.New(state.NewPlainStateReader(pool.chaindb))
 		ibs.AddBalance(addr, uint256.NewInt().SetUint64(100000000000000))
 		ctx := context.Background()
@@ -1726,7 +1726,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	local, _ := crypto.GenerateKey()
 	remote, _ := crypto.GenerateKey()
 
-	stateWriter := state.NewPlainStateWriter(db, 1)
+	stateWriter := state.NewPlainStateWriter(db, nil, 1)
 	ibs := state.New(state.NewPlainStateReader(db))
 	ibs.AddBalance(crypto.PubkeyToAddress(local.PublicKey), uint256.NewInt().SetUint64(1000000000))
 	ibs.AddBalance(crypto.PubkeyToAddress(remote.PublicKey), uint256.NewInt().SetUint64(1000000000))
@@ -1762,7 +1762,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	txCacher.Close()
 	pool.Stop()
 
-	stateWriter = state.NewPlainStateWriter(db, 1)
+	stateWriter = state.NewPlainStateWriter(db, nil, 1)
 	ibs = state.New(state.NewPlainStateReader(db))
 	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
 	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
@@ -1792,7 +1792,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 		t.Fatalf("pool internal state corrupted: %v", err)
 	}
 	// Bump the nonce temporarily and ensure the newly invalidated transaction is removed
-	stateWriter = state.NewPlainStateWriter(db, 1)
+	stateWriter = state.NewPlainStateWriter(db, nil, 1)
 	ibs = state.New(state.NewPlainStateReader(db))
 	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 2)
 	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
@@ -1805,7 +1805,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	txCacher.Close()
 	pool.Stop()
 
-	stateWriter = state.NewPlainStateWriter(db, 1)
+	stateWriter = state.NewPlainStateWriter(db, nil, 1)
 	ibs = state.New(state.NewPlainStateReader(db))
 	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
 	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {

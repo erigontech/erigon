@@ -85,7 +85,6 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	log.Debug("cycle1: begin transaction")
 	tx, errBegin := db.Begin()
 	if errBegin != nil {
 		return errBegin
@@ -95,46 +94,9 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 
-	log.Debug("cycle1: commit transaction")
-	if _, err := tx.Commit(); err != nil {
+	if err := tx.CommitAndBegin(); err != nil {
 		return err
 	}
-
-	st.BeforeStageRun(stages.Execution, func() error {
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-			return nil
-		}
-		log.Debug("cycle: begin transaction")
-		var errTx error
-		tx, errTx = tx.Begin()
-		return errTx
-	})
-	st.BeforeStageRun(stages.TxPool, func() error {
-		log.Debug("cycle: commit transaction")
-		var errTx error
-		_, errTx = tx.Commit()
-		return errTx
-	})
-	st.OnBeforeUnwind(func(id stages.SyncStage) error {
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-			return nil
-		}
-		if id < stages.Bodies || id >= stages.TxPool {
-			return nil
-		}
-		log.Debug("cycle unwind: begin transaction")
-		var errTx error
-		tx, errTx = tx.Begin()
-		return errTx
-	})
-	st.BeforeStageUnwind(stages.TxPool, func() error {
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
-			return nil
-		}
-		log.Debug("cycle unwind: commit transaction")
-		_, errCommit := tx.Commit()
-		return errCommit
-	})
 
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
@@ -150,6 +112,10 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		case <-ctx.Done():
 			return nil
 		default:
+		}
+
+		if err := tx.CommitAndBegin(); err != nil {
+			return err
 		}
 
 		// All stages forward to `execStage + unwindEvery` block
@@ -172,7 +138,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 
 		for blockN := range expectedAccountChanges {
-			if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
+			if err := checkChangeSet(tx, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 				return err
 			}
 			delete(expectedAccountChanges, blockN)
@@ -187,7 +153,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		execStage := progress(stages.Execution)
 		to := execStage.BlockNumber - unwind
 
-		if err := st.UnwindTo(to, db); err != nil {
+		if err := st.UnwindTo(to, tx); err != nil {
 			return err
 		}
 	}
@@ -195,8 +161,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	return nil
 }
 
-func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
-	dbAccountChanges, err := db.GetChangeSetByBlock(false /* storage */, blockNum)
+func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
+	dbAccountChanges, err := ethdb.GetChangeSetByBlock(db, false /* storage */, blockNum)
 	if err != nil {
 		return err
 	}
@@ -219,7 +185,7 @@ func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountCh
 		return fmt.Errorf("check change set failed")
 	}
 
-	dbStorageChanges, err := db.GetChangeSetByBlock(true /* storage */, blockNum)
+	dbStorageChanges, err := ethdb.GetChangeSetByBlock(db, true /* storage */, blockNum)
 	if err != nil {
 		return err
 	}

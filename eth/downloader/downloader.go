@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var (
@@ -115,8 +114,8 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB    *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
-	stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
+	stateDB *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
+	//stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
 
 	// Statistics
 	syncStatsChainOrigin uint64       // Origin block number where syncing started at
@@ -243,7 +242,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -409,9 +408,9 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 	// If we are already full syncing, but have a fast-sync bloom filter laying
 	// around, make sure it doesn't use memory any more. This is a special case
 	// when the user attempts to fast sync a new empty network.
-	if mode == FullSync && d.stateBloom != nil {
-		d.stateBloom.Close()
-	}
+	//if mode == FullSync && d.stateBloom != nil {
+	//	d.stateBloom.Close()
+	//}
 	// Reset the queue, peer set and wake channels to clean any internal leftover state
 	d.queue.Reset(blockCacheItems)
 	d.peers.Reset()
@@ -576,7 +575,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return err
 		}
 
-		canRunCycleInOneTransaction := height-origin < 16 && height-hashStateStageProgress < 16
+		canRunCycleInOneTransaction := height-origin < 32 && height-hashStateStageProgress < 32
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -586,9 +585,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
 			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
-			defer func() {
-				tx.Rollback()
-			}()
+			defer tx.Rollback()
 			writeDB = tx
 		} else {
 			writeDB = d.stateDB
@@ -622,33 +619,26 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 
 			var errTx error
+			log.Debug("Begin tx")
 			tx, errTx = tx.Begin()
-			return errTx
-		})
-		d.stagedSync.BeforeStageRun(stages.TxPool, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-
-			log.Info("Commit blocks")
-			_, errTx := tx.Commit()
 			return errTx
 		})
 		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if id <= stages.Bodies || id >= stages.TxPool {
+			if id <= stages.Bodies || id > stages.TxPool {
 				return nil
 			}
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 				return nil
 			}
 			var errTx error
+			log.Debug("Begin tx")
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.BeforeStageUnwind(stages.TxPool, func() error {
+		d.stagedSync.BeforeStageUnwind(stages.Bodies, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -663,6 +653,15 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		err = d.stagedSync.Run(d.stateDB, writeDB)
 		if err != nil {
 			return err
+		}
+		if canRunCycleInOneTransaction {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+
+			log.Info("Commit blocks")
+			_, errTx := tx.Commit()
+			return errTx
 		}
 
 		return nil
@@ -734,9 +733,9 @@ func (d *Downloader) Terminate() {
 	d.quitLock.Lock()
 	common.SafeClose(d.quitCh)
 
-	if d.stateBloom != nil {
-		d.stateBloom.Close()
-	}
+	//if d.stateBloom != nil {
+	//	d.stateBloom.Close()
+	//}
 
 	d.quitLock.Unlock()
 
@@ -1832,9 +1831,9 @@ func (d *Downloader) commitPivotBlock(result *fetchResult) error {
 	// a rollback after committing the pivot and restarting fast sync, we don't end
 	// up using a nil bloom. Empty bloom is fine, it just returns that it does not
 	// have the info we need, so reach down to the database instead.
-	if d.stateBloom != nil {
-		d.stateBloom.Close()
-	}
+	//if d.stateBloom != nil {
+	//	d.stateBloom.Close()
+	//}
 	return nil
 }
 

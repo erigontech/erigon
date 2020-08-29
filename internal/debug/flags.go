@@ -26,15 +26,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fjl/memsize/memsizeui"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/exp"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
-
-var Memsize memsizeui.Handler
 
 var (
 	verbosityFlag = cli.IntFlag{
@@ -307,7 +304,6 @@ func StartPProf(address string, withMetrics bool) {
 	if withMetrics {
 		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
 	}
-	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
 	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
