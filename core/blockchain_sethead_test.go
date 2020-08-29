@@ -1798,7 +1798,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		t.Fatalf("Failed to import canonical chain tail: %v", err)
 	}
 	// Set the head of the chain back to the requested number
-	chain.SetHead(tt.setheadBlock)
+	chain.SetHead(tt.setheadBlock) //nolint:errcheck
 
 	// Iterate over all the remaining blocks and ensure there are no gaps
 	verifyNoGaps(t, chain, true, canonblocks)

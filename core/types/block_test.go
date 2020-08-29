@@ -110,8 +110,8 @@ func (h *testHasher) Reset() {
 }
 
 func (h *testHasher) Update(key, val []byte) {
-	h.hasher.Write(key)
-	h.hasher.Write(val)
+	h.hasher.Write(key) //nolint: errcheck
+	h.hasher.Write(val) //nolint: errcheck
 }
 
 func (h *testHasher) Hash() common.Hash {

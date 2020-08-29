@@ -862,7 +862,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 	defer archive.Stop()
 
 	assert(t, "archive", archive, height, height, height)
-	archive.SetHead(remove - 1)
+	archive.SetHead(remove - 1) //nolint:errcheck
 	assert(t, "archive", archive, height/2, height/2, height/2)
 
 	// Import the chain as a non-archive node and ensure all pointers are updated
@@ -883,7 +883,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 		t.Fatalf("failed to insert receipt %d: %v", n, err)
 	}
 	assert(t, "fast", fast, height, height, 0)
-	fast.SetHead(remove - 1)
+	fast.SetHead(remove - 1) //nolint:errcheck
 	assert(t, "fast", fast, height/2, height/2, 0)
 
 	// Import the chain as a ancient-first node and ensure all pointers are updated
@@ -900,7 +900,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 		t.Fatalf("failed to insert receipt %d: %v", n, err)
 	}
 	assert(t, "ancient", ancient, height, height, 0)
-	ancient.SetHead(remove - 1)
+	ancient.SetHead(remove - 1) //nolint:errcheck
 	assert(t, "ancient", ancient, 0, 0, 0)
 
 	if frozen, err := ancientDb.Ancients(); err != nil || frozen != 1 {
@@ -917,7 +917,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 	defer light.Stop()
 
 	assert(t, "light", light, height, 0, 0)
-	light.SetHead(remove - 1)
+	light.SetHead(remove - 1) //nolint:errcheck
 	assert(t, "light", light, height/2, 0, 0)
 }
 
@@ -2421,7 +2421,7 @@ func testInsertKnownChainData(t *testing.T, typ string) {
 	// Import a long canonical chain with some known data as prefix.
 	rollback := blocks[len(blocks)/2].NumberU64()
 
-	chain.SetHead(rollback - 1)
+	chain.SetHead(rollback - 1) //nolint:errcheck
 	if err := inserter(append(blocks, blocks2...), append(receipts, receipts2...)); err != nil {
 		t.Fatalf("failed to insert chain data: %v", err)
 	}
@@ -2441,7 +2441,7 @@ func testInsertKnownChainData(t *testing.T, typ string) {
 	asserter(t, blocks3[len(blocks3)-1])
 
 	// Rollback the heavier chain and re-insert the longer chain again
-	chain.SetHead(rollback - 1)
+	chain.SetHead(rollback - 1) //nolint:errcheck
 	if err := inserter(append(blocks, blocks2...), append(receipts, receipts2...)); err != nil {
 		t.Fatalf("failed to insert chain data: %v", err)
 	}
