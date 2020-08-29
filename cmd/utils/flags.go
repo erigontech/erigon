@@ -1065,7 +1065,7 @@ func setEtherbase(ctx *cli.Context, ks *keystore.KeyStore, cfg *eth.Config) {
 	var etherbase string
 	if ctx.GlobalIsSet(LegacyMinerEtherbaseFlag.Name) {
 		etherbase = ctx.GlobalString(LegacyMinerEtherbaseFlag.Name)
-		log.Warn("The flag --etherbase is deprecated and will be removed in the future, please use --miner.etherbase")
+		log.Warn("The flag --miner.etherbase is deprecated and will be removed in the future, please use --miner.etherbase")
 
 	}
 	if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
