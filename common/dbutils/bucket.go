@@ -236,8 +236,7 @@ const (
 var BucketsCfg = map[string]*BucketConfigItem{}
 
 type BucketConfigItem struct {
-	IsDupSort        bool
-	IsDupFixed       bool
+	Flags            uint
 	DBI              lmdb.DBI
 	DupToLen         int
 	DupFromLen       int
@@ -246,32 +245,31 @@ type BucketConfigItem struct {
 }
 
 type dupSortConfigEntry struct {
-	Bucket           string
-	IsDupSort        bool
-	IsDupFixed       bool
-	DupFixedSize     int
-	FromLen          int
-	ToLen            int
-	CustomComparator CustomComparator
+	Flags               uint
+	Bucket              string
+	DupFixedSize        int
+	FromLen             int
+	ToLen               int
+	CustomDupComparator CustomComparator
 }
 
 var dupSortConfig = []dupSortConfigEntry{
 	{
-		Bucket:    CurrentStateBucket,
-		IsDupSort: true,
-		ToLen:     40,
-		FromLen:   72,
+		Bucket:  CurrentStateBucket,
+		Flags:   lmdb.DupSort,
+		ToLen:   40,
+		FromLen: 72,
 	},
 	{
-		Bucket:    PlainStateBucket,
-		IsDupSort: true,
-		ToLen:     28,
-		FromLen:   60,
+		Bucket:  PlainStateBucket,
+		Flags:   lmdb.DupSort,
+		ToLen:   28,
+		FromLen: 60,
 	},
 	{
-		Bucket:           IntermediateTrieHashBucket2,
-		IsDupSort:        true,
-		CustomComparator: DupCmpSuffix32,
+		Bucket:              IntermediateTrieHashBucket2,
+		Flags:               lmdb.DupSort,
+		CustomDupComparator: DupCmpSuffix32,
 	},
 }
 
@@ -299,7 +297,7 @@ func createBucketConfig(name string) *BucketConfigItem {
 
 		cfg.DupFromLen = dupCfg.FromLen
 		cfg.DupToLen = dupCfg.ToLen
-		cfg.IsDupSort = dupCfg.IsDupSort
+		cfg.Flags = dupCfg.Flags
 	}
 
 	return cfg

@@ -27,11 +27,12 @@ var (
 
 type BucketConfigsFunc func(defaultBuckets map[string]*dbutils.BucketConfigItem) map[string]*dbutils.BucketConfigItem
 type lmdbOpts struct {
-	path       string
-	inMem      bool
-	readOnly   bool
-	buckets    []string
-	bucketsCfg BucketConfigsFunc
+	inMem             bool
+	readOnly          bool
+	path              string
+	buckets           []string
+	deprecatedBuckets []string
+	bucketsCfg        BucketConfigsFunc
 }
 
 func (opts lmdbOpts) Path(path string) lmdbOpts {
@@ -51,6 +52,11 @@ func (opts lmdbOpts) ReadOnly() lmdbOpts {
 
 func (opts lmdbOpts) WithBuckets(b []string) lmdbOpts {
 	opts.buckets = b
+	return opts
+}
+
+func (opts lmdbOpts) WithDeprecatedBuckets(b []string) lmdbOpts {
+	opts.deprecatedBuckets = b
 	return opts
 }
 
@@ -187,7 +193,7 @@ type LmdbKV struct {
 }
 
 func NewLMDB() lmdbOpts {
-	return lmdbOpts{bucketsCfg: DefaultBucketConfigs, buckets: dbutils.Buckets}
+	return lmdbOpts{bucketsCfg: DefaultBucketConfigs, buckets: dbutils.Buckets, deprecatedBuckets: dbutils.DeprecatedBuckets}
 }
 
 // Close closes db
@@ -348,15 +354,9 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *lmdbTx) CreateBucket(name string) error {
-	var flags uint = 0
+	var flags = tx.db.buckets[name].Flags
 	if !tx.db.opts.readOnly {
 		flags |= lmdb.Create
-	}
-	if tx.db.buckets[name].IsDupSort {
-		flags |= lmdb.DupSort
-	}
-	if tx.db.buckets[name].IsDupFixed {
-		flags |= lmdb.DupFixed
 	}
 	dbi, err := tx.tx.OpenDBI(name, flags)
 	if err != nil {
@@ -489,7 +489,7 @@ func (c *LmdbCursor) Prefetch(v uint) Cursor {
 
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 	cfg := tx.db.buckets[bucket]
-	if cfg.IsDupSort {
+	if cfg.Flags&lmdb.DupSort != 0 {
 		return tx.getDupSort(bucket, cfg.DBI, cfg, key)
 	}
 
@@ -600,7 +600,7 @@ func (c *LmdbCursor) Last() ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 
-	if c.bucketCfg.IsDupSort {
+	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		if k == nil {
 			return k, v, nil
 		}
@@ -624,7 +624,7 @@ func (c *LmdbCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 	}
 
-	if c.bucketCfg.IsDupSort {
+	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		return c.seekDupSort(seek)
 	}
 
@@ -714,7 +714,7 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 	default:
 	}
 
-	if c.bucketCfg.IsDupSort {
+	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		return c.nextDupSort()
 	}
 
@@ -777,7 +777,7 @@ func (c *LmdbCursor) Delete(key []byte) error {
 		}
 	}
 
-	if c.bucketCfg.IsDupSort {
+	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		return c.deleteDupSort(key)
 	}
 
@@ -834,7 +834,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 		}
 	}
 
-	if c.bucketCfg.IsDupSort {
+	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		return c.putDupSort(key, value)
 	}
 
@@ -906,7 +906,7 @@ func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
 		}
 	}
 
-	if c.bucketCfg.IsDupSort {
+	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		return c.getDupSort(key)
 	}
 
@@ -1051,7 +1051,7 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	}
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
-	if b.IsDupSort {
+	if b.Flags&lmdb.DupSort != 0 {
 		if len(key) != from && len(key) >= to {
 			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
 		}
