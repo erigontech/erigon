@@ -145,7 +145,10 @@ debug_accountRange
 debug_getModifiedAccountsByNumber
 debug_getModifiedAccountsByHash
 net_version
+net_peerCount*
 ```
+
+\* net_peerCount currently always returns a count of 25 as work continues on Sentry.
 
 #### REST API Daemon
 
