@@ -11,7 +11,6 @@ service ETHBACKEND {
   rpc Add(TxRequest) returns (AddReply);
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
-  rpc SyncingProgress(SyncingProgressRequest) returns (SyncingProgressReply);
 }
 
 message TxRequest {
@@ -34,13 +33,4 @@ message NetVersionRequest {
 
 message NetVersionReply {
   uint64 id = 1;
-}
-
-message SyncingProgressRequest {}
-message SyncingProgressReply {
-  uint64 StartingBlock = 1; // Block number where sync began
-  uint64 CurrentBlock = 2; // Current block number where sync is at
-  uint64 HighestBlock = 3; // Highest alleged block number in the chain
-  uint64 PulledStates = 4; // Number of state trie entries already downloaded
-  uint64 KnownStates = 5; // Total number of state trie entries known about
 }

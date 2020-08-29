@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	ethereum "github.com/ledgerwatch/turbo-geth"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -333,10 +332,6 @@ func (b *EthAPIBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.S
 
 func (b *EthAPIBackend) Downloader() *downloader.Downloader {
 	return b.eth.Downloader()
-}
-
-func (b *EthAPIBackend) SyncProgress() ethereum.SyncProgress {
-	return b.eth.Downloader().Progress()
 }
 
 func (b *EthAPIBackend) ProtocolVersion() int {

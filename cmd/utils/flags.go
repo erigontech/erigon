@@ -43,20 +43,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/graphql"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/metrics/exp"
-	"github.com/ledgerwatch/turbo-geth/metrics/influxdb"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -923,52 +917,52 @@ func splitAndTrim(input string) (ret []string) {
 
 // setGraphQL creates the GraphQL listener interface string from the set
 // command line flags, returning empty if the GraphQL endpoint is disabled.
-func setGraphQL(ctx *cli.Context, cfg *node.Config) {
-	if ctx.GlobalIsSet(GraphQLCORSDomainFlag.Name) {
-		cfg.GraphQLCors = splitAndTrim(ctx.GlobalString(GraphQLCORSDomainFlag.Name))
-	}
-	if ctx.GlobalIsSet(GraphQLVirtualHostsFlag.Name) {
-		cfg.GraphQLVirtualHosts = splitAndTrim(ctx.GlobalString(GraphQLVirtualHostsFlag.Name))
-	}
-}
+//func setGraphQL(ctx *cli.Context, cfg *node.Config) {
+//	if ctx.GlobalIsSet(GraphQLCORSDomainFlag.Name) {
+//		cfg.GraphQLCors = splitAndTrim(ctx.GlobalString(GraphQLCORSDomainFlag.Name))
+//	}
+//	if ctx.GlobalIsSet(GraphQLVirtualHostsFlag.Name) {
+//		cfg.GraphQLVirtualHosts = splitAndTrim(ctx.GlobalString(GraphQLVirtualHostsFlag.Name))
+//	}
+//}
 
 // setWS creates the WebSocket RPC listener interface string from the set
 // command line flags, returning empty if the HTTP endpoint is disabled.
-func setWS(ctx *cli.Context, cfg *node.Config) {
-	if ctx.GlobalBool(WSEnabledFlag.Name) && cfg.WSHost == "" {
-		cfg.WSHost = localhost
-		if ctx.GlobalIsSet(LegacyWSListenAddrFlag.Name) {
-			cfg.WSHost = ctx.GlobalString(LegacyWSListenAddrFlag.Name)
-			log.Warn("The flag --wsaddr is deprecated and will be removed in the future, please use --ws.addr")
-		}
-		if ctx.GlobalIsSet(WSListenAddrFlag.Name) {
-			cfg.WSHost = ctx.GlobalString(WSListenAddrFlag.Name)
-		}
-	}
-	if ctx.GlobalIsSet(LegacyWSPortFlag.Name) {
-		cfg.WSPort = ctx.GlobalInt(LegacyWSPortFlag.Name)
-		log.Warn("The flag --wsport is deprecated and will be removed in the future, please use --ws.port")
-	}
-	if ctx.GlobalIsSet(WSPortFlag.Name) {
-		cfg.WSPort = ctx.GlobalInt(WSPortFlag.Name)
-	}
-
-	if ctx.GlobalIsSet(LegacyWSAllowedOriginsFlag.Name) {
-		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(LegacyWSAllowedOriginsFlag.Name))
-		log.Warn("The flag --wsorigins is deprecated and will be removed in the future, please use --ws.origins")
-	}
-	if ctx.GlobalIsSet(WSAllowedOriginsFlag.Name) {
-		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(WSAllowedOriginsFlag.Name))
-	}
-
-	if ctx.GlobalIsSet(LegacyWSApiFlag.Name) {
-		cfg.WSModules = splitAndTrim(ctx.GlobalString(LegacyWSApiFlag.Name))
-		log.Warn("The flag --wsapi is deprecated and will be removed in the future, please use --ws.api")
-	}
-	if ctx.GlobalIsSet(WSApiFlag.Name) {
-		cfg.WSModules = splitAndTrim(ctx.GlobalString(WSApiFlag.Name))
-	}
-}
+//func setWS(ctx *cli.Context, cfg *node.Config) {
+//	if ctx.GlobalBool(WSEnabledFlag.Name) && cfg.WSHost == "" {
+//		cfg.WSHost = localhost
+//		if ctx.GlobalIsSet(LegacyWSListenAddrFlag.Name) {
+//			cfg.WSHost = ctx.GlobalString(LegacyWSListenAddrFlag.Name)
+//			log.Warn("The flag --wsaddr is deprecated and will be removed in the future, please use --ws.addr")
+//		}
+//		if ctx.GlobalIsSet(WSListenAddrFlag.Name) {
+//			cfg.WSHost = ctx.GlobalString(WSListenAddrFlag.Name)
+//		}
+//	}
+//	if ctx.GlobalIsSet(LegacyWSPortFlag.Name) {
+//		cfg.WSPort = ctx.GlobalInt(LegacyWSPortFlag.Name)
+//		log.Warn("The flag --wsport is deprecated and will be removed in the future, please use --ws.port")
+//	}
+//	if ctx.GlobalIsSet(WSPortFlag.Name) {
+//		cfg.WSPort = ctx.GlobalInt(WSPortFlag.Name)
+//	}
+//
+//	if ctx.GlobalIsSet(LegacyWSAllowedOriginsFlag.Name) {
+//		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(LegacyWSAllowedOriginsFlag.Name))
+//		log.Warn("The flag --wsorigins is deprecated and will be removed in the future, please use --ws.origins")
+//	}
+//	if ctx.GlobalIsSet(WSAllowedOriginsFlag.Name) {
+//		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(WSAllowedOriginsFlag.Name))
+//	}
+//
+//	if ctx.GlobalIsSet(LegacyWSApiFlag.Name) {
+//		cfg.WSModules = splitAndTrim(ctx.GlobalString(LegacyWSApiFlag.Name))
+//		log.Warn("The flag --wsapi is deprecated and will be removed in the future, please use --ws.api")
+//	}
+//	if ctx.GlobalIsSet(WSApiFlag.Name) {
+//		cfg.WSModules = splitAndTrim(ctx.GlobalString(WSApiFlag.Name))
+//	}
+//}
 
 // setPrivateApi populates configuration fields related to the remote
 // read-only interface to the databae
@@ -978,15 +972,15 @@ func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 
 // setIPC creates an IPC path configuration from the set command line flags,
 // returning an empty string if IPC was explicitly disabled, or the set path.
-func setIPC(ctx *cli.Context, cfg *node.Config) {
-	CheckExclusive(ctx, IPCDisabledFlag, IPCPathFlag)
-	switch {
-	case ctx.GlobalBool(IPCDisabledFlag.Name):
-		cfg.IPCPath = ""
-	case ctx.GlobalIsSet(IPCPathFlag.Name):
-		cfg.IPCPath = ctx.GlobalString(IPCPathFlag.Name)
-	}
-}
+//func setIPC(ctx *cli.Context, cfg *node.Config) {
+//	CheckExclusive(ctx, IPCDisabledFlag, IPCPathFlag)
+//	switch {
+//	case ctx.GlobalBool(IPCDisabledFlag.Name):
+//		cfg.IPCPath = ""
+//	case ctx.GlobalIsSet(IPCPathFlag.Name):
+//		cfg.IPCPath = ctx.GlobalString(IPCPathFlag.Name)
+//	}
+//}
 
 // setLes configures the les server and ultra light client settings from the command line flags.
 func setLes(ctx *cli.Context, cfg *eth.Config) {
@@ -1187,27 +1181,27 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 // SetNodeConfig applies node-related command line flags to the config.
 func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
-	setIPC(ctx, cfg)
-	setGraphQL(ctx, cfg)
-	setWS(ctx, cfg)
+	//setIPC(ctx, cfg)
+	//setGraphQL(ctx, cfg)
+	//setWS(ctx, cfg)
 	setPrivateApi(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
 
-	if ctx.GlobalBool(LegacyRPCEnabledFlag.Name) ||
-		ctx.GlobalBool(HTTPEnabledFlag.Name) ||
-		ctx.GlobalIsSet(LegacyRPCPortFlag.Name) ||
-		ctx.GlobalIsSet(HTTPPortFlag.Name) ||
-		ctx.GlobalIsSet(LegacyRPCCORSDomainFlag.Name) ||
-		ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) ||
-		ctx.GlobalIsSet(LegacyRPCApiFlag.Name) ||
-		ctx.GlobalIsSet(HTTPApiFlag.Name) ||
-		ctx.GlobalIsSet(LegacyRPCVirtualHostsFlag.Name) ||
-		ctx.GlobalIsSet(HTTPVirtualHostsFlag.Name) &&
-			cfg.HTTPHost == "" {
-		Fatalf("Turbo-Geth does not support native rpc. Use instead rpcdaemon.")
-	}
+	//if ctx.GlobalBool(LegacyRPCEnabledFlag.Name) ||
+	//	ctx.GlobalBool(HTTPEnabledFlag.Name) ||
+	//	ctx.GlobalIsSet(LegacyRPCPortFlag.Name) ||
+	//	ctx.GlobalIsSet(HTTPPortFlag.Name) ||
+	//	ctx.GlobalIsSet(LegacyRPCCORSDomainFlag.Name) ||
+	//	ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) ||
+	//	ctx.GlobalIsSet(LegacyRPCApiFlag.Name) ||
+	//	ctx.GlobalIsSet(HTTPApiFlag.Name) ||
+	//	ctx.GlobalIsSet(LegacyRPCVirtualHostsFlag.Name) ||
+	//	ctx.GlobalIsSet(HTTPVirtualHostsFlag.Name) &&
+	//		cfg.HTTPHost == "" {
+	//	Fatalf("Turbo-Geth does not support native rpc. Use instead rpcdaemon.")
+	//}
 
 	if ctx.GlobalIsSet(ExternalSignerFlag.Name) {
 		cfg.ExternalSigner = ctx.GlobalString(ExternalSignerFlag.Name)
@@ -1660,9 +1654,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 
 	// TODO(fjl): move trie cache generations into config
-	if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-		state.MaxTrieCacheSize = uint64(gen)
-	}
+	//if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
+	//	state.MaxTrieCacheSize = uint64(gen)
+	//}
 }
 
 // setDNSDiscoveryDefaults configures DNS discovery with the given URL if
@@ -1699,38 +1693,38 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
 //}
 
 // RegisterGraphQLService is a utility function to construct a new service and register it against a node.
-func RegisterGraphQLService(stack *node.Node, backend ethapi.Backend, cfg node.Config) {
-	if err := graphql.New(stack, backend, cfg.GraphQLCors, cfg.GraphQLVirtualHosts); err != nil {
-		Fatalf("Failed to register the GraphQL service: %v", err)
-	}
-}
+//func RegisterGraphQLService(stack *node.Node, backend ethapi.Backend, cfg node.Config) {
+//	if err := graphql.New(stack, backend, cfg.GraphQLCors, cfg.GraphQLVirtualHosts); err != nil {
+//		Fatalf("Failed to register the GraphQL service: %v", err)
+//	}
+//}
 
 func SetupMetrics(ctx *cli.Context) {
-	if metrics.Enabled {
-		log.Info("Enabling metrics collection")
-
-		var (
-			enableExport = ctx.GlobalBool(MetricsEnableInfluxDBFlag.Name)
-			endpoint     = ctx.GlobalString(MetricsInfluxDBEndpointFlag.Name)
-			database     = ctx.GlobalString(MetricsInfluxDBDatabaseFlag.Name)
-			username     = ctx.GlobalString(MetricsInfluxDBUsernameFlag.Name)
-			password     = ctx.GlobalString(MetricsInfluxDBPasswordFlag.Name)
-		)
-
-		if enableExport {
-			tagsMap := SplitTagsFlag(ctx.GlobalString(MetricsInfluxDBTagsFlag.Name))
-
-			log.Info("Enabling metrics export to InfluxDB")
-
-			go influxdb.InfluxDBWithTags(metrics.DefaultRegistry, 10*time.Second, endpoint, database, username, password, "geth.", tagsMap)
-		}
-
-		if ctx.GlobalIsSet(MetricsHTTPFlag.Name) {
-			address := fmt.Sprintf("%s:%d", ctx.GlobalString(MetricsHTTPFlag.Name), ctx.GlobalInt(MetricsPortFlag.Name))
-			log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
-			exp.Setup(address)
-		}
-	}
+	//if metrics.Enabled {
+	//	log.Info("Enabling metrics collection")
+	//
+	//	var (
+	//		enableExport = ctx.GlobalBool(MetricsEnableInfluxDBFlag.Name)
+	//		endpoint     = ctx.GlobalString(MetricsInfluxDBEndpointFlag.Name)
+	//		database     = ctx.GlobalString(MetricsInfluxDBDatabaseFlag.Name)
+	//		username     = ctx.GlobalString(MetricsInfluxDBUsernameFlag.Name)
+	//		password     = ctx.GlobalString(MetricsInfluxDBPasswordFlag.Name)
+	//	)
+	//
+	//	if enableExport {
+	//		tagsMap := SplitTagsFlag(ctx.GlobalString(MetricsInfluxDBTagsFlag.Name))
+	//
+	//		log.Info("Enabling metrics export to InfluxDB")
+	//
+	//		go influxdb.InfluxDBWithTags(metrics.DefaultRegistry, 10*time.Second, endpoint, database, username, password, "geth.", tagsMap)
+	//	}
+	//
+	//	if ctx.GlobalIsSet(MetricsHTTPFlag.Name) {
+	//		address := fmt.Sprintf("%s:%d", ctx.GlobalString(MetricsHTTPFlag.Name), ctx.GlobalInt(MetricsPortFlag.Name))
+	//		log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
+	//		exp.Setup(address)
+	//	}
+	//}
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {

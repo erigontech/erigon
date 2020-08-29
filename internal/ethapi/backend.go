@@ -19,7 +19,6 @@ package ethapi
 
 import (
 	"context"
-	ethereum "github.com/ledgerwatch/turbo-geth"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -42,7 +41,6 @@ import (
 type Backend interface {
 	// General Ethereum API
 	Downloader() *downloader.Downloader
-	SyncProgress() ethereum.SyncProgress
 	ProtocolVersion() int
 	SuggestPrice(ctx context.Context) (*big.Int, error)
 	ChainDb() ethdb.Database
