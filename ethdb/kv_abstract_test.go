@@ -37,7 +37,7 @@ func TestManagedTx(t *testing.T) {
 				DupFromLen: 6,
 			},
 			bucket2: {
-				Flags: lmdb.DupSort,
+				Flags: 0,
 			},
 		}
 	})
