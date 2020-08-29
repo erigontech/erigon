@@ -1,10 +1,10 @@
 package dbutils
 
 import (
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"sort"
 	"strings"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
