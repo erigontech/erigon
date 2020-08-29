@@ -115,7 +115,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 	// Open or create buckets
 	if opts.readOnly {
 		if err := db.View(context.Background(), func(tx Tx) error {
-			for name := range db.buckets {
+			for name, cfg := range db.buckets {
+				if cfg.IsDeprecated {
+					continue
+				}
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
@@ -126,7 +129,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}
 	} else {
 		if err := db.Update(context.Background(), func(tx Tx) error {
-			for name := range db.buckets {
+			for name, cfg := range db.buckets {
+				if cfg.IsDeprecated {
+					continue
+				}
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
@@ -139,7 +145,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 
 	// Open deprecated buckets if they exist, don't create
 	if err := env.View(func(tx *lmdb.Txn) error {
-		for _, name := range dbutils.DeprecatedBuckets {
+		for name, cfg := range db.buckets {
+			if !cfg.IsDeprecated {
+				continue
+			}
 			dbi, createErr := tx.OpenDBI(name, 0)
 			if createErr != nil {
 				if lmdb.IsNotFound(createErr) {
@@ -385,11 +394,9 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	if err := tx.tx.Drop(dbi, true); err != nil {
 		return err
 	}
-	fmt.Printf("Before: %s %#v\n", name, tx.db.buckets[name])
 	cnfCopy := tx.db.buckets[name]
 	cnfCopy.DBI = NonExistingDBI
 	tx.db.buckets[name] = cnfCopy
-	fmt.Printf("After: %s %#v\n", name, tx.db.buckets[name])
 	return nil
 }
 
@@ -408,8 +415,8 @@ func (tx *lmdbTx) DropBucket(bucket string) error {
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
-func (tx *lmdbTx) ExistsBucket(name string) bool {
-	if cfg, ok := tx.db.buckets[name]; ok {
+func (tx *lmdbTx) ExistsBucket(bucket string) bool {
+	if cfg, ok := tx.db.buckets[bucket]; ok {
 		return cfg.DBI != NonExistingDBI
 	}
 	return false
