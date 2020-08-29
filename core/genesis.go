@@ -41,7 +41,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
