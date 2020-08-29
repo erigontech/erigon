@@ -480,6 +480,10 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 	return requests
 }
 
+func (hd *HeaderDownload) FlushBuffer() error {
+	return nil
+}
+
 // childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct
 // (excluding Proof Of Work validity)
 func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash, tip *Tip) (bool, Penalty) {

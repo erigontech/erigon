@@ -3,6 +3,7 @@ package headerdownload
 import (
 	"bytes"
 	"container/heap"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -186,4 +187,86 @@ func (p Penalty) String() string {
 
 func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
+}
+
+const HEADER_SER_LENGTH = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
+	256 /*Bloom*/ + 16 /*Difficulty */ + 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
+
+func SerialiseHeader(header *types.Header, buffer []byte) {
+	pos := 0
+	copy(buffer[pos:pos+32], header.ParentHash[:])
+	pos += 32
+	copy(buffer[pos:pos+32], header.UncleHash[:])
+	pos += 32
+	copy(buffer[pos:pos+20], header.Coinbase[:])
+	pos += 20
+	copy(buffer[pos:pos+32], header.Root[:])
+	pos += 32
+	copy(buffer[pos:pos+32], header.TxHash[:])
+	pos += 32
+	copy(buffer[pos:pos+32], header.ReceiptHash[:])
+	pos += 32
+	copy(buffer[pos:pos+256], header.Bloom[:])
+	pos += 256
+	if header.Difficulty == nil {
+		header.Difficulty = new(big.Int)
+	}
+	header.Difficulty.FillBytes(buffer[pos : pos+16])
+	pos += 16
+	if header.Number == nil {
+		header.Number = new(big.Int)
+	}
+	header.Number.FillBytes(buffer[pos : pos+8])
+	pos += 8
+	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.GasLimit)
+	pos += 8
+	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.GasUsed)
+	pos += 8
+	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.Time)
+	pos += 8
+	buffer[pos] = byte(len(header.Extra))
+	pos++
+	copy(buffer[pos:pos+32], header.Extra)
+	pos += 32
+	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.Nonce.Uint64())
+}
+
+func DeserialiseHeader(header *types.Header, buffer []byte) {
+	pos := 0
+	copy(header.ParentHash[:], buffer[pos:pos+32])
+	pos += 32
+	copy(header.UncleHash[:], buffer[pos:pos+32])
+	pos += 32
+	copy(header.Coinbase[:], buffer[pos:pos+20])
+	pos += 20
+	copy(header.Root[:], buffer[pos:pos+32])
+	pos += 32
+	copy(header.TxHash[:], buffer[pos:pos+32])
+	pos += 32
+	copy(header.ReceiptHash[:], buffer[pos:pos+32])
+	pos += 32
+	copy(header.Bloom[:], buffer[pos:pos+256])
+	pos += 256
+	if header.Difficulty == nil {
+		header.Difficulty = new(big.Int)
+	}
+	header.Difficulty.SetBytes(buffer[pos : pos+16])
+	pos += 16
+	if header.Number == nil {
+		header.Number = new(big.Int)
+	}
+	header.Number.SetBytes(buffer[pos : pos+8])
+	pos += 8
+	header.GasLimit = binary.BigEndian.Uint64(buffer[pos : pos+8])
+	pos += 8
+	header.GasUsed = binary.BigEndian.Uint64(buffer[pos : pos+8])
+	pos += 8
+	header.Time = binary.BigEndian.Uint64(buffer[pos : pos+8])
+	pos += 8
+	extraLen := int(buffer[pos])
+	pos++
+	header.Extra = header.Extra[:0]
+	header.Extra = append(header.Extra, buffer[pos:pos+extraLen]...)
+	pos += 32
+	header.Nonce = types.EncodeNonce(binary.BigEndian.Uint64(buffer[pos : pos+8]))
 }
