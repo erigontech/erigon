@@ -1788,11 +1788,11 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		b.SetCoinbase(common.Address{0x02})
 		b.SetDifficulty(big.NewInt(1000000))
 	}, false)
+	if err != nil {
+		t.Fatalf("error when generating chain err=%v", err)
+	}
 	if _, err := chain.InsertChain(context.TODO(), canonblocks[:tt.commitBlock]); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
-	}
-	if tt.commitBlock > 0 {
-		//chain.stateCache.TrieDB().Commit(canonblocks[tt.commitBlock-1].Root(), true, nil)
 	}
 	if _, err := chain.InsertChain(context.TODO(), canonblocks[tt.commitBlock:]); err != nil {
 		t.Fatalf("Failed to import canonical chain tail: %v", err)

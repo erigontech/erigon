@@ -86,9 +86,9 @@ func Main(ctx *cli.Context) error {
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
 		if base := ctx.String(OutputBasedir.Name); len(base) > 0 {
-			err := os.MkdirAll(base, 0755) // //rw-r--r--
-			if err != nil {
-				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %v", err))
+			err2 := os.MkdirAll(base, 0755) // //rw-r--r--
+			if err2 != nil {
+				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %v", err2))
 			}
 			baseDir = base
 		}
@@ -112,9 +112,9 @@ func Main(ctx *cli.Context) error {
 			if prevFile != nil {
 				prevFile.Close()
 			}
-			traceFile, err := os.Create(path.Join(baseDir, fmt.Sprintf("trace-%d-%v.jsonl", txIndex, txHash.String())))
-			if err != nil {
-				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err))
+			traceFile, err2 := os.Create(path.Join(baseDir, fmt.Sprintf("trace-%d-%v.jsonl", txIndex, txHash.String())))
+			if err2 != nil {
+				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
 			return vm.NewJSONLogger(logConfig, traceFile), nil

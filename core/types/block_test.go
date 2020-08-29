@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // from bcValidBlockTest.json, "SimpleTx"
@@ -99,10 +98,6 @@ func BenchmarkEncodeBlock(b *testing.B) {
 // use the testing hasher instead.
 type testHasher struct {
 	hasher hash.Hash
-}
-
-func newHasher() *testHasher {
-	return &testHasher{hasher: sha3.NewLegacyKeccak256()}
 }
 
 func (h *testHasher) Reset() {

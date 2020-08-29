@@ -431,9 +431,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 			headFastBlockGauge.Update(int64(newHeadFastBlock.NumberU64()))
 		}
 
-		head := bc.CurrentBlock().NumberU64()
-
-		return head, false /* we have nothing to wipe in turbo-geth */
+		return bc.CurrentBlock().NumberU64(), false /* we have nothing to wipe in turbo-geth */
 	}
 
 	// Rewind the header chain, deleting all block bodies until then

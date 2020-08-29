@@ -330,11 +330,15 @@ func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubke
 	// active until the remote node sends enough nodes. If the remote end doesn't have
 	// enough nodes the reply matcher will time out waiting for the second reply, but
 	// there's no need for an error in that case.
-	if err == errTimeout && rm.reply != nil {
+	if errors.Is(err, errTimeout) && rm.reply != nil {
 		err = nil
 	}
+	if err != nil {
+		return nodes, err
+	}
+
 	err = <-rm.errc
-	if err == errTimeout && rm.reply != nil {
+	if errors.Is(err, errTimeout) && rm.reply != nil {
 		err = nil
 	}
 	return nodes, err
