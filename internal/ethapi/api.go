@@ -695,7 +695,10 @@ type CallArgs struct {
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`
 	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"data"`
+	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
+	// newer name and should be preferred by clients.
+	Data  *hexutil.Bytes `json:"data"`
+	Input *hexutil.Bytes `json:"input"`
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -728,12 +731,14 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 		value.SetFromBig(args.Value.ToInt())
 	}
 
-	var data []byte
-	if args.Data != nil {
-		data = []byte(*args.Data)
+	var input []byte
+	if args.Input != nil {
+		input = *args.Input
+	} else if args.Data != nil {
+		input = *args.Data
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, data, false)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, false)
 	return msg
 }
 

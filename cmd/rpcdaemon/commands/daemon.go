@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
@@ -15,14 +16,26 @@ import (
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
+	var blockNum uint64
+	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
+		var err error
+		blockNum, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
+		if err != nil {
+			return nil, fmt.Errorf("getting latest block number: %v", err)
+		}
+	} else if number == rpc.EarliestBlockNumber {
+		blockNum = 0
+	} else {
+		blockNum = uint64(number.Int64())
+	}
 	additionalFields := make(map[string]interface{})
 
-	block := rawdb.ReadBlockByNumber(api.dbReader, uint64(number.Int64()))
+	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
 	if block == nil {
-		return nil, fmt.Errorf("block not found: %d", number.Int64())
+		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), uint64(number.Int64()))
+	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), blockNum)
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
