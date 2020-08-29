@@ -515,7 +515,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 			// Write out the pivot into the database so a rollback beyond it will
 			// reenable fast sync
-			rawdb.WriteLastPivotNumber(d.stateDB, pivot)
+			//rawdb.WriteLastPivotNumber(d.stateDB, pivot)
 		}
 	}
 	d.committed = 1

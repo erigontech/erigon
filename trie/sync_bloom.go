@@ -106,7 +106,6 @@ func (b *SyncBloom) init(database ethdb.Database) {
 	)
 	if atomic.LoadUint32(&b.closed) == 0 {
 		_ = database.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(key, val []byte) (bool, error) {
-		key := it.Key()
 			// If the database entry is a trie node, add it to the bloom
 			if len(key) == common.HashLength {
 				b.bloom.Add(syncBloomHasher(common.CopyBytes(key)))
@@ -114,7 +113,6 @@ func (b *SyncBloom) init(database ethdb.Database) {
 			}
 			return true, nil
 			// FIXME: restore or remove in Turbo-Geth
-			b.bloom.Add(syncBloomHasher(hash))
 			/*
 				// If enough time elapsed since the last iterator swap, restart
 				if time.Since(swap) > 8*time.Second {

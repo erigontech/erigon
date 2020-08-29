@@ -2054,7 +2054,6 @@ func TestBlockchainRecovery(t *testing.T) {
 	if n, err := ancient.InsertReceiptChain(blocks, receipts, uint64(3*len(blocks)/4)); err != nil {
 		t.Fatalf("failed to insert receipt %d: %v", n, err)
 	}
-	rawdb.WriteLastPivotNumber(ancientDb, blocks[len(blocks)-1].NumberU64()) // Force fast sync behavior
 	ancient.Stop()
 
 	// Destroy head fast block manually

@@ -99,9 +99,9 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 		return err
 	}
 	if noHistory {
-		return fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash)
+		return nil
 	}
-	if hash := types.DeriveSha(block.Transactions(), new(trie.Trie)); hash != header.TxHash {
+	if hash := types.DeriveSha(block.Transactions()); hash != block.Header().TxHash {
 		return nil
 	}
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {

@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 const (
@@ -623,7 +622,7 @@ func (f *BlockFetcher) loop() {
 							continue
 						}
 						if txnHash == (common.Hash{}) {
-							txnHash = types.DeriveSha(types.Transactions(task.transactions[i]), new(trie.Trie))
+							txnHash = types.DeriveSha(types.Transactions(task.transactions[i]))
 						}
 						if txnHash != announce.header.TxHash {
 							continue

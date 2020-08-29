@@ -383,10 +383,6 @@ func (bc *BlockChain) loadLastState() error {
 	log.Info("Most recent local header", "number", currentHeader.Number, "hash", currentHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(currentHeader.Time), 0)))
 	log.Info("Most recent local block", "number", currentBlock.Number(), "hash", currentBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
 
-	if pivot := rawdb.ReadLastPivotNumber(bc.db); pivot != nil {
-		log.Info("Loaded last fast-sync pivot marker", "number", *pivot)
-	}
-
 	return nil
 }
 
@@ -398,10 +394,6 @@ func (bc *BlockChain) SetHead(head uint64) error {
 
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
-
-	// Retrieve the last pivot block to short circuit rollbacks beyond it and the
-	// current freezer limit to start nuking id underflown
-	pivot := rawdb.ReadLastPivotNumber(bc.db)
 
 	updateFn := func(db rawdb.DatabaseWriter, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block

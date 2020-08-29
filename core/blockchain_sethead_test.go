@@ -1808,10 +1808,6 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	}
 	db.(freezer).Freeze(tt.freezeThreshold)
 
-	// Set the simulated pivot block
-	if tt.pivotBlock != nil {
-		rawdb.WriteLastPivotNumber(db, *tt.pivotBlock)
-	}
 	// Set the head of the chain back to the requested number
 	chain.SetHead(tt.setheadBlock)
 
