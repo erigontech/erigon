@@ -34,8 +34,8 @@ type boltTx struct {
 type boltBucket struct {
 	tx      *boltTx
 	bolt    *bolt.Bucket
-	id      int
 	nameLen uint
+	name    string
 }
 
 type boltCursor struct {
@@ -205,7 +205,7 @@ func (tx *boltTx) Yield() {
 }
 
 func (tx *boltTx) Bucket(name string) boltBucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[name].ID}
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), name: name}
 	b.bolt = tx.bolt.Bucket([]byte(name))
 	return b
 }
@@ -226,11 +226,11 @@ func (tx *boltTx) BucketSize(name string) (uint64, error) {
 }
 
 func (b boltBucket) Clear() error {
-	err := b.tx.bolt.DeleteBucket([]byte(dbutils.Buckets[b.id]))
+	err := b.tx.bolt.DeleteBucket([]byte(b.name))
 	if err != nil {
 		return err
 	}
-	_, err = b.tx.bolt.CreateBucket([]byte(dbutils.Buckets[b.id]), false)
+	_, err = b.tx.bolt.CreateBucket([]byte(b.name), false)
 	if err != nil {
 		return err
 	}

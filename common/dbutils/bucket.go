@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"sort"
 	"strings"
 
@@ -102,7 +103,8 @@ var (
 	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	IntermediateTrieHashBucket = "iTh"
+	IntermediateTrieHashBucket  = "iTh"
+	IntermediateTrieHashBucket2 = "iTh2"
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
@@ -225,21 +227,32 @@ var DeprecatedBuckets = []string{
 	PlainStateBucketOld1,
 }
 
+type CustomComparator string
+
+const (
+	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
+)
+
 var BucketsCfg = map[string]*BucketConfigItem{}
 
 type BucketConfigItem struct {
-	ID         int
-	IsDupSort  bool
-	DupToLen   int
-	DupFromLen int
+	IsDupSort        bool
+	IsDupFixed       bool
+	DBI              lmdb.DBI
+	DupToLen         int
+	DupFromLen       int
+	DupFixedSize     int
+	CustomComparator *CustomComparator
 }
 
 type dupSortConfigEntry struct {
-	Bucket    string
-	IsDupSort bool
-	ID        int
-	FromLen   int
-	ToLen     int
+	Bucket           string
+	IsDupSort        bool
+	IsDupFixed       bool
+	DupFixedSize     int
+	FromLen          int
+	ToLen            int
+	CustomComparator CustomComparator
 }
 
 var dupSortConfig = []dupSortConfigEntry{
@@ -255,6 +268,11 @@ var dupSortConfig = []dupSortConfigEntry{
 		ToLen:     28,
 		FromLen:   60,
 	},
+	{
+		Bucket:           IntermediateTrieHashBucket2,
+		IsDupSort:        true,
+		CustomComparator: DupCmpSuffix32,
+	},
 }
 
 func init() {
@@ -263,16 +281,16 @@ func init() {
 	})
 
 	for i := range Buckets {
-		BucketsCfg[Buckets[i]] = createBucketConfig(i, Buckets[i])
+		BucketsCfg[Buckets[i]] = createBucketConfig(Buckets[i])
 	}
 
 	for i := range DeprecatedBuckets {
-		BucketsCfg[DeprecatedBuckets[i]] = createBucketConfig(len(Buckets)+i, DeprecatedBuckets[i])
+		BucketsCfg[DeprecatedBuckets[i]] = createBucketConfig(DeprecatedBuckets[i])
 	}
 }
 
-func createBucketConfig(id int, name string) *BucketConfigItem {
-	cfg := &BucketConfigItem{ID: id}
+func createBucketConfig(name string) *BucketConfigItem {
+	cfg := &BucketConfigItem{}
 
 	for _, dupCfg := range dupSortConfig {
 		if dupCfg.Bucket != name {

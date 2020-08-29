@@ -25,10 +25,13 @@ var (
 	LMDBMapSize = 2 * datasize.TB
 )
 
+type BucketConfigsFunc func(defaultBuckets map[string]*dbutils.BucketConfigItem) map[string]*dbutils.BucketConfigItem
 type lmdbOpts struct {
-	path     string
-	inMem    bool
-	readOnly bool
+	path       string
+	inMem      bool
+	readOnly   bool
+	buckets    []string
+	bucketsCfg BucketConfigsFunc
 }
 
 func (opts lmdbOpts) Path(path string) lmdbOpts {
@@ -44,6 +47,20 @@ func (opts lmdbOpts) InMem() lmdbOpts {
 func (opts lmdbOpts) ReadOnly() lmdbOpts {
 	opts.readOnly = true
 	return opts
+}
+
+func (opts lmdbOpts) WithBuckets(b []string) lmdbOpts {
+	opts.buckets = b
+	return opts
+}
+
+func (opts lmdbOpts) WithBucketsConfig(f BucketConfigsFunc) lmdbOpts {
+	opts.bucketsCfg = f
+	return opts
+}
+
+var DefaultBucketConfigs = func(defaultBuckets map[string]*dbutils.BucketConfigItem) map[string]*dbutils.BucketConfigItem {
+	return defaultBuckets
 }
 
 func (opts lmdbOpts) Open() (KV, error) {
@@ -90,17 +107,17 @@ func (opts lmdbOpts) Open() (KV, error) {
 	}
 
 	db := &LmdbKV{
-		opts:    opts,
-		env:     env,
-		log:     logger,
-		wg:      &sync.WaitGroup{},
-		buckets: map[string]lmdb.DBI{},
+		opts:       opts,
+		env:        env,
+		log:        logger,
+		wg:         &sync.WaitGroup{},
+		bucketsCfg: opts.bucketsCfg(dbutils.BucketsCfg),
 	}
 
 	// Open or create buckets
 	if opts.readOnly {
 		if err := db.View(context.Background(), func(tx Tx) error {
-			for _, name := range dbutils.Buckets {
+			for _, name := range db.opts.buckets {
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
@@ -111,7 +128,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 		}
 	} else {
 		if err := db.Update(context.Background(), func(tx Tx) error {
-			for _, name := range dbutils.Buckets {
+			for _, name := range db.opts.buckets {
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
@@ -128,13 +145,13 @@ func (opts lmdbOpts) Open() (KV, error) {
 			dbi, createErr := tx.OpenDBI(name, 0)
 			if createErr != nil {
 				if lmdb.IsNotFound(createErr) {
-					db.buckets[name] = NonExistingDBI // some non-existing DBI
-					continue                          // if deprecated bucket couldn't be open - then it's deleted and it's fine
+					db.bucketsCfg[name].DBI = NonExistingDBI
+					continue // if deprecated bucket couldn't be open - then it's deleted and it's fine
 				} else {
 					return createErr
 				}
 			}
-			db.buckets[name] = dbi
+			db.bucketsCfg[name].DBI = dbi
 		}
 		return nil
 	}); err != nil {
@@ -164,13 +181,13 @@ type LmdbKV struct {
 	opts                lmdbOpts
 	env                 *lmdb.Env
 	log                 log.Logger
-	buckets             map[string]lmdb.DBI
+	bucketsCfg          map[string]*dbutils.BucketConfigItem
 	stopStaleReadsCheck context.CancelFunc
 	wg                  *sync.WaitGroup
 }
 
 func NewLMDB() lmdbOpts {
-	return lmdbOpts{}
+	return lmdbOpts{bucketsCfg: DefaultBucketConfigs, buckets: dbutils.Buckets}
 }
 
 // Close closes db
@@ -265,7 +282,11 @@ func (db *LmdbKV) Env() *lmdb.Env {
 }
 
 func (db *LmdbKV) AllDBI() map[string]lmdb.DBI {
-	return db.buckets
+	res := map[string]lmdb.DBI{}
+	for name, cfg := range db.bucketsCfg {
+		res[name] = cfg.DBI
+	}
+	return res
 }
 
 // All buckets stored as keys of un-named bucket
@@ -331,19 +352,22 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 	if !tx.db.opts.readOnly {
 		flags |= lmdb.Create
 	}
-	if dbutils.BucketsCfg[name].IsDupSort {
+	if tx.db.bucketsCfg[name].IsDupSort {
 		flags |= lmdb.DupSort
+	}
+	if tx.db.bucketsCfg[name].IsDupFixed {
+		flags |= lmdb.DupFixed
 	}
 	dbi, err := tx.tx.OpenDBI(name, flags)
 	if err != nil {
 		return err
 	}
-	tx.db.buckets[name] = dbi
+	tx.db.bucketsCfg[name].DBI = dbi
 	return nil
 }
 
 func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
-	dbi := tx.db.buckets[name]
+	dbi := tx.db.bucketsCfg[name].DBI
 	// if bucket was not open on db start, then it's may be deprecated
 	// try to open it now without `Create` flag, and if fail then nothing to drop
 	if dbi == NonExistingDBI {
@@ -359,7 +383,7 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	if err := tx.tx.Drop(dbi, true); err != nil {
 		return err
 	}
-	tx.db.buckets[name] = NonExistingDBI
+	tx.db.bucketsCfg[name].DBI = NonExistingDBI
 	return nil
 }
 
@@ -371,8 +395,8 @@ func (tx *lmdbTx) ClearBucket(bucket string) error {
 }
 
 func (tx *lmdbTx) DropBucket(name string) error {
-	for i := range dbutils.Buckets {
-		if dbutils.Buckets[i] == name {
+	for i := range tx.db.opts.buckets {
+		if tx.db.opts.buckets[i] == name {
 			return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, name)
 		}
 	}
@@ -381,7 +405,7 @@ func (tx *lmdbTx) DropBucket(name string) error {
 }
 
 func (tx *lmdbTx) ExistsBucket(name string) bool {
-	return tx.db.buckets[name] != NonExistingDBI
+	return tx.db.bucketsCfg[name].DBI != NonExistingDBI
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {
@@ -464,13 +488,12 @@ func (c *LmdbCursor) Prefetch(v uint) Cursor {
 }
 
 func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
-	dbi := tx.db.buckets[bucket]
-	cfg := dbutils.BucketsCfg[bucket]
+	cfg := tx.db.bucketsCfg[bucket]
 	if cfg.IsDupSort {
-		return tx.getDupSort(bucket, dbi, cfg, key)
+		return tx.getDupSort(bucket, cfg.DBI, cfg, key)
 	}
 
-	val, err := tx.get(dbi, key)
+	val, err := tx.get(cfg.DBI, key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil
@@ -511,7 +534,7 @@ func (tx *lmdbTx) getDupSort(bucket string, dbi lmdb.DBI, cfg *dbutils.BucketCon
 }
 
 func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.Stat(tx.db.buckets[name])
+	st, err := tx.tx.Stat(tx.db.bucketsCfg[name].DBI)
 	if err != nil {
 		return 0, err
 	}
@@ -519,7 +542,7 @@ func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
 }
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
-	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: dbutils.BucketsCfg[bucket], dbi: tx.db.buckets[bucket]}
+	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: tx.db.bucketsCfg[bucket], dbi: tx.db.bucketsCfg[bucket].DBI}
 }
 
 func (tx *lmdbTx) NoValuesCursor(bucket string) NoValuesCursor {
@@ -533,7 +556,7 @@ func (c *LmdbCursor) initCursor() error {
 	tx := c.tx
 
 	var err error
-	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName])
+	c.cursor, err = tx.tx.OpenCursor(c.tx.db.bucketsCfg[c.bucketName].DBI)
 	if err != nil {
 		panic("su-tx")
 		return err
