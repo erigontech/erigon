@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -188,26 +189,13 @@ func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uin
 	return dat, err
 }
 
-// getChangeSetByBlockNoLock returns changeset by block and dbi
-func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([]byte, error) {
+func GetChangeSetByBlock(db Getter, storage bool, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
-
-	var dat []byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(dbutils.ChangeSetByIndexBucket(storage), key)
-		if err != nil {
-			return err
-		}
-		if v != nil {
-			dat = make([]byte, len(v))
-			copy(dat, v)
-		}
-		return nil
-	})
-	if err != nil {
+	v, err := db.Get(dbutils.ChangeSetByIndexBucket(storage), key)
+	if err != nil && !errors.Is(ErrKeyNotFound, err) {
 		return nil, err
 	}
-	return dat, nil
+	return v, nil
 }
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
