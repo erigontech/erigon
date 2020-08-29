@@ -110,7 +110,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if writeReceipts {
-			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
+			rawdb.WriteReceipts(tx, block.Hash(), block.NumberU64(), receipts)
 		}
 
 		if batch.BatchSize() >= batch.IdealBatchSize() {
