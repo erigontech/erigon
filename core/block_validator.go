@@ -68,6 +68,9 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	if noHistory {
 		return nil
 	}
+	if hash := types.DeriveSha(block.Transactions()); hash != block.Header().TxHash {
+		return nil
+	}
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
 		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
 			return consensus.ErrUnknownAncestor

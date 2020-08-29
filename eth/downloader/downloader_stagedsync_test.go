@@ -57,6 +57,10 @@ func (st *stagedSyncTester) newPeer(id string, version int, chain *testChain) er
 	return st.downloader.RegisterPeer(id, version, peer)
 }
 
+func (st *stagedSyncTester) SetHead(_ uint64) error {
+	panic("should not be called")
+}
+
 // dropPeer simulates a hard peer removal from the connection pool.
 func (st *stagedSyncTester) dropPeer(id string) {
 	st.lock.Lock()

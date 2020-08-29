@@ -66,8 +66,11 @@ var (
 	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
-	blockReorgAddMeter   = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
-	blockReorgDropMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
+
+	blockReorgMeter         = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
+	blockReorgAddMeter      = metrics.NewRegisteredMeter("chain/reorg/add", nil)
+	blockReorgDropMeter     = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
+	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
 
 	blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
 	blockPrefetchInterruptMeter = metrics.NewRegisteredMeter("chain/prefetch/interrupts", nil)
@@ -105,7 +108,10 @@ const (
 	// - Version 7
 	//  The following incompatible database changes were added:
 	//    * Use freezer as the ancient database to maintain all ancient data
-	BlockChainVersion uint64 = 7
+	// - Version 8
+	//  The following incompatible database changes were added:
+	//    * New scheme for contract code in order to separate the codes and trie nodes
+	BlockChainVersion uint64 = 8
 )
 
 // CacheConfig contains the configuration values for the trie caching/pruning
@@ -125,6 +131,18 @@ type CacheConfig struct {
 	ArchiveSyncInterval uint64
 	DownloadOnly        bool
 	NoHistory           bool
+}
+
+// defaultCacheConfig are the default caching values if none are specified by the
+// user (also used during testing).
+var defaultCacheConfig = &CacheConfig{
+	Pruning:             false,
+	BlocksBeforePruning: 1024,
+	TrieCleanLimit:      256,
+	TrieDirtyLimit:      256,
+	TrieTimeLimit:       5 * time.Minute,
+	DownloadOnly:        false,
+	NoHistory:           false,
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -201,15 +219,7 @@ type BlockChain struct {
 // Processor.
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
-		cacheConfig = &CacheConfig{
-			Pruning:             false,
-			BlocksBeforePruning: 1024,
-			TrieCleanLimit:      256,
-			TrieDirtyLimit:      256,
-			TrieTimeLimit:       5 * time.Minute,
-			DownloadOnly:        false,
-			NoHistory:           false,
-		}
+		cacheConfig = defaultCacheConfig
 	}
 	if cacheConfig.ArchiveSyncInterval == 0 {
 		cacheConfig.ArchiveSyncInterval = 1024
@@ -376,31 +386,32 @@ func (bc *BlockChain) loadLastState() error {
 	return nil
 }
 
-// SetHead rewinds the local chain to a new head. In the case of headers, everything
-// above the new head will be deleted and the new one set. In the case of blocks
-// though, the head may be further rewound if block bodies are missing (non-archive
-// nodes after a fast sync).
+// SetHead rewinds the local chain to a new head. Depending on whether the node
+// was fast synced or full synced and in which state, the method will try to
+// delete minimal data from disk whilst retaining chain consistency.
 func (bc *BlockChain) SetHead(head uint64) error {
 	log.Warn("Rewinding blockchain", "target", head)
 
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	updateFn := func(db rawdb.DatabaseWriter, header *types.Header) {
+	updateFn := func(db rawdb.DatabaseWriter, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block
 		if currentBlock := bc.CurrentBlock(); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
 			newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64())
 			if newHeadBlock == nil {
+				log.Error("Gap in the chain, rewinding to genesis", "number", header.Number, "hash", header.Hash())
 				newHeadBlock = bc.genesisBlock
-			}
-			rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
+			} else {
+				rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
 
-			// Degrade the chain markers if they are explicitly reverted.
-			// In theory we should update all in-memory markers in the
-			// last step, however the direction of SetHead is from high
-			// to low, so it's safe the update in-memory markers directly.
-			bc.currentBlock.Store(newHeadBlock)
-			headBlockGauge.Update(int64(newHeadBlock.NumberU64()))
+				// Degrade the chain markers if they are explicitly reverted.
+				// In theory we should update all in-memory markers in the
+				// last step, however the direction of SetHead is from high
+				// to low, so it's safe the update in-memory markers directly.
+				bc.currentBlock.Store(newHeadBlock)
+				headBlockGauge.Update(int64(newHeadBlock.NumberU64()))
+			}
 		}
 
 		// Rewind the fast block in a simpleton way to the target head
@@ -419,6 +430,8 @@ func (bc *BlockChain) SetHead(head uint64) error {
 			bc.currentFastBlock.Store(newHeadFastBlock)
 			headFastBlockGauge.Update(int64(newHeadFastBlock.NumberU64()))
 		}
+
+		return bc.CurrentBlock().NumberU64(), false /* we have nothing to wipe in turbo-geth */
 	}
 
 	// Rewind the header chain, deleting all block bodies until then
@@ -428,7 +441,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 		if num+1 <= frozen {
 			// Truncate all relative data(header, total difficulty, body, receipt
 			// and canonical hash) from ancient store.
-			if err := bc.db.TruncateAncients(num + 1); err != nil {
+			if err := bc.db.TruncateAncients(num); err != nil {
 				log.Crit("Failed to truncate ancient data", "number", num, "err", err)
 			}
 
@@ -443,7 +456,19 @@ func (bc *BlockChain) SetHead(head uint64) error {
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
-	bc.hc.SetHead(head, updateFn, delFn)
+
+	// If SetHead was only called as a chain reparation method, try to skip
+	// touching the header chain altogether, unless the freezer is broken
+	if block := bc.CurrentBlock(); block.NumberU64() == head {
+		if target, force := updateFn(bc.db, block.Header()); force {
+			bc.hc.SetHead(target, updateFn, delFn)
+		}
+	} else {
+		// Rewind the chain to the requested head and keep going backwards until a
+		// block with a state is found or fast sync pivot is passed
+		log.Warn("Rewinding blockchain", "target", head)
+		bc.hc.SetHead(head, updateFn, delFn)
+	}
 
 	// Clear out any stale content from the caches
 	bc.receiptsCache.Purge()
@@ -774,38 +799,6 @@ const (
 	SideStatTy
 )
 
-// Rollback is designed to remove a chain of links from the database that aren't
-// certain enough to be valid.
-func (bc *BlockChain) Rollback(chain []common.Hash) {
-	bc.chainmu.Lock()
-	defer bc.chainmu.Unlock()
-
-	for i := len(chain) - 1; i >= 0; i-- {
-		hash := chain[i]
-
-		// Degrade the chain markers if they are explicitly reverted.
-		// In theory we should update all in-memory markers in the
-		// last step, however the direction of rollback is from high
-		// to low, so it's safe the update in-memory markers directly.
-		currentHeader := bc.hc.CurrentHeader()
-		if currentHeader.Hash() == hash {
-			bc.hc.SetCurrentHeader(bc.db, bc.GetHeader(currentHeader.ParentHash, currentHeader.Number.Uint64()-1))
-		}
-		if currentFastBlock := bc.CurrentFastBlock(); currentFastBlock.Hash() == hash {
-			newFastBlock := bc.GetBlock(currentFastBlock.ParentHash(), currentFastBlock.NumberU64()-1)
-			rawdb.WriteHeadFastBlockHash(bc.db, currentFastBlock.ParentHash())
-			bc.currentFastBlock.Store(newFastBlock)
-			headFastBlockGauge.Update(int64(newFastBlock.NumberU64()))
-		}
-		if currentBlock := bc.CurrentBlock(); currentBlock.Hash() == hash {
-			newBlock := bc.GetBlock(currentBlock.ParentHash(), currentBlock.NumberU64()-1)
-			rawdb.WriteHeadBlockHash(bc.db, currentBlock.ParentHash())
-			bc.currentBlock.Store(newBlock)
-			headBlockGauge.Update(int64(newBlock.NumberU64()))
-		}
-	}
-}
-
 // truncateAncient rewinds the blockchain to the specified header and deletes all
 // data in the ancient store that exceeds the specified header.
 func (bc *BlockChain) truncateAncient(head uint64) error {
@@ -987,6 +980,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	*/
 	// writeLive writes blockchain and corresponding receipt chain into active store.
 	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
+		skipPresenceCheck := false
 		batch := bc.db.NewBatch()
 		defer batch.Rollback()
 		for i, block := range blockChain {
@@ -998,9 +992,17 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			if !bc.HasHeader(block.Hash(), block.NumberU64()) {
 				return i, fmt.Errorf("containing header #%d [%x…] unknown", block.Number(), block.Hash().Bytes()[:4])
 			}
-			if bc.HasBlock(block.Hash(), block.NumberU64()) {
-				stats.ignored++
-				continue
+			if !skipPresenceCheck {
+				// Ignore if the entire data is already known
+				if bc.HasBlock(block.Hash(), block.NumberU64()) {
+					stats.ignored++
+					continue
+				} else {
+					// If block N is not present, neither are the later blocks.
+					// This should be true, but if we are mistaken, the shortcut
+					// here will only cause overwriting of some existing data
+					skipPresenceCheck = true
+				}
 			}
 			// Write all the data out into the database
 			rawdb.WriteBody(context.Background(), batch, block.Hash(), block.NumberU64(), block.Body())
@@ -1807,6 +1809,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			"drop", len(oldChain), "dropfrom", oldChain[0].Hash(), "add", len(newChain), "addfrom", newChain[0].Hash())
 		blockReorgAddMeter.Mark(int64(len(newChain)))
 		blockReorgDropMeter.Mark(int64(len(oldChain)))
+		blockReorgMeter.Mark(1)
 	} else {
 		log.Error("Impossible reorg, please file an issue", "oldnum", oldBlock.Number(), "oldhash", oldBlock.Hash(), "newnum", newBlock.Number(), "newhash", newBlock.Hash())
 	}

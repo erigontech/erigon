@@ -254,7 +254,7 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 		//header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 
 		// Header seems complete, assemble into a block and return
-		return types.NewBlock(header, txs, uncles, receipts), nil
+		return types.NewBlock(header, txs, uncles, receipts, new(trie.Trie)), nil
 	}
 }
 
