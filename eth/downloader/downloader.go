@@ -616,7 +616,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return errTx
 		})
 		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
-			fmt.Printf("Try unwind begin: canRunCycleInOneTransaction=%t, id=%d\n", canRunCycleInOneTransaction, id)
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
