@@ -26,13 +26,13 @@ func TestBucketCRUD(t *testing.T) {
 		// check thad buckets have unique DBI's
 		uniquness := map[lmdb.DBI]bool{}
 		castedKv := kv.(*LmdbKV)
-		for _, dbi := range castedKv.buckets {
-			if dbi == NonExistingDBI {
+		for _, bucketCfg := range castedKv.buckets {
+			if bucketCfg.DBI == NonExistingDBI {
 				continue
 			}
-			_, ok := uniquness[dbi]
+			_, ok := uniquness[bucketCfg.DBI]
 			require.False(ok)
-			uniquness[dbi] = true
+			uniquness[bucketCfg.DBI] = true
 		}
 
 		require.True(migrator.ExistsBucket(normalBucket))
@@ -60,13 +60,13 @@ func TestBucketCRUD(t *testing.T) {
 
 		// check thad buckets have unique DBI's
 		uniquness = map[lmdb.DBI]bool{}
-		for _, dbi := range castedKv.buckets {
-			if dbi == NonExistingDBI {
+		for _, bucketCfg := range castedKv.buckets {
+			if bucketCfg.DBI == NonExistingDBI {
 				continue
 			}
-			_, ok := uniquness[dbi]
+			_, ok := uniquness[bucketCfg.DBI]
 			require.False(ok)
-			uniquness[dbi] = true
+			uniquness[bucketCfg.DBI] = true
 		}
 		return nil
 	}); err != nil {

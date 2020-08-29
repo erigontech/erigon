@@ -181,7 +181,7 @@ var (
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsCfg - can be used to find index in sorted version of Buckets list by name
+// BucketsConfigs - can be used to find index in sorted version of Buckets list by name
 var Buckets = []string{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
@@ -233,41 +233,32 @@ const (
 	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
 )
 
-var BucketsCfg = map[string]*BucketConfigItem{}
+type BucketsCfg map[string]BucketConfigItem
+type Bucket string
 
 type BucketConfigItem struct {
-	Flags            uint
-	DBI              lmdb.DBI
-	DupToLen         int
-	DupFromLen       int
-	DupFixedSize     int
-	CustomComparator *CustomComparator
-}
-
-type dupSortConfigEntry struct {
 	Flags               uint
-	Bucket              string
+	IsDeprecated        bool
+	DBI                 lmdb.DBI
+	DupToLen            int
+	DupFromLen          int
 	DupFixedSize        int
-	FromLen             int
-	ToLen               int
+	CustomComparator    CustomComparator
 	CustomDupComparator CustomComparator
 }
 
-var dupSortConfig = []dupSortConfigEntry{
-	{
-		Bucket:  CurrentStateBucket,
-		Flags:   lmdb.DupSort,
-		ToLen:   40,
-		FromLen: 72,
+var BucketsConfigs = BucketsCfg{
+	CurrentStateBucket: {
+		Flags:      lmdb.DupSort,
+		DupToLen:   40,
+		DupFromLen: 72,
 	},
-	{
-		Bucket:  PlainStateBucket,
-		Flags:   lmdb.DupSort,
-		ToLen:   28,
-		FromLen: 60,
+	PlainStateBucket: {
+		Flags:      lmdb.DupSort,
+		DupToLen:   28,
+		DupFromLen: 60,
 	},
-	{
-		Bucket:              IntermediateTrieHashBucket2,
+	IntermediateTrieHashBucket2: {
 		Flags:               lmdb.DupSort,
 		CustomDupComparator: DupCmpSuffix32,
 	},
@@ -278,27 +269,20 @@ func init() {
 		return strings.Compare(Buckets[i], Buckets[j]) < 0
 	})
 
-	for i := range Buckets {
-		BucketsCfg[Buckets[i]] = createBucketConfig(Buckets[i])
-	}
-
-	for i := range DeprecatedBuckets {
-		BucketsCfg[DeprecatedBuckets[i]] = createBucketConfig(DeprecatedBuckets[i])
-	}
-}
-
-func createBucketConfig(name string) *BucketConfigItem {
-	cfg := &BucketConfigItem{}
-
-	for _, dupCfg := range dupSortConfig {
-		if dupCfg.Bucket != name {
-			continue
+	for _, name := range Buckets {
+		_, ok := BucketsConfigs[name]
+		if !ok {
+			BucketsConfigs[name] = BucketConfigItem{}
 		}
-
-		cfg.DupFromLen = dupCfg.FromLen
-		cfg.DupToLen = dupCfg.ToLen
-		cfg.Flags = dupCfg.Flags
 	}
 
-	return cfg
+	for _, name := range DeprecatedBuckets {
+		_, ok := BucketsConfigs[name]
+		if !ok {
+			BucketsConfigs[name] = BucketConfigItem{}
+		}
+		tmp := BucketsConfigs[name]
+		tmp.IsDeprecated = true
+		BucketsConfigs[name] = tmp
+	}
 }

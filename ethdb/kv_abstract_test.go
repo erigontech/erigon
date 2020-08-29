@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -20,20 +21,26 @@ import (
 )
 
 func TestManagedTx(t *testing.T) {
-	defaultConfig := dbutils.BucketsCfg
+	defaultConfig := dbutils.BucketsConfigs
 	defer func() {
-		dbutils.BucketsCfg = defaultConfig
+		dbutils.BucketsConfigs = defaultConfig
 	}()
 
 	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
-	dbutils.BucketsCfg[bucket1].IsDupSort = true
-	dbutils.BucketsCfg[bucket1].DupFromLen = 6
-	dbutils.BucketsCfg[bucket1].DupToLen = 4
-	dbutils.BucketsCfg[bucket2].IsDupSort = false
-
-	writeDBs, readDBs, closeAll := setupDatabases()
+	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return map[string]dbutils.BucketConfigItem{
+			bucket1: {
+				Flags:      lmdb.DupSort,
+				DupToLen:   4,
+				DupFromLen: 6,
+			},
+			bucket2: {
+				Flags: lmdb.DupSort,
+			},
+		}
+	})
 	defer closeAll()
 
 	ctx := context.Background()
@@ -83,11 +90,11 @@ func TestManagedTx(t *testing.T) {
 	}
 }
 
-func setupDatabases() (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
+func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
-		ethdb.NewBolt().InMem().MustOpen(),
-		ethdb.NewLMDB().InMem().MustOpen(),
-		ethdb.NewLMDB().InMem().MustOpen(), // for remote db
+		ethdb.NewBolt().InMem().WithBucketsConfig(f).MustOpen(),
+		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
+		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -367,7 +374,7 @@ func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 string) {
 }
 
 func TestMultipleBuckets(t *testing.T) {
-	writeDBs, readDBs, closeAll := setupDatabases()
+	writeDBs, readDBs, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
 	defer closeAll()
 
 	ctx := context.Background()
@@ -445,7 +452,7 @@ func TestMultipleBuckets(t *testing.T) {
 }
 
 func TestReadAfterPut(t *testing.T) {
-	writeDBs, _, closeAll := setupDatabases()
+	writeDBs, _, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
 	defer closeAll()
 
 	ctx := context.Background()

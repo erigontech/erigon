@@ -14,15 +14,17 @@ import (
 )
 
 type boltOpts struct {
-	Bolt *bolt.Options
-	path string
+	Bolt       *bolt.Options
+	path       string
+	bucketsCfg BucketConfigsFunc
 }
 
 type BoltKV struct {
-	opts boltOpts
-	bolt *bolt.DB
-	log  log.Logger
-	wg   *sync.WaitGroup
+	opts    boltOpts
+	bolt    *bolt.DB
+	log     log.Logger
+	wg      *sync.WaitGroup
+	buckets dbutils.BucketsCfg
 }
 
 type boltTx struct {
@@ -60,6 +62,11 @@ func (opts boltOpts) ReadOnly() boltOpts {
 	return opts
 }
 
+func (opts boltOpts) WithBucketsConfig(f BucketConfigsFunc) boltOpts {
+	opts.bucketsCfg = f
+	return opts
+}
+
 func (opts boltOpts) Path(path string) boltOpts {
 	opts.path = path
 	return opts
@@ -76,9 +83,18 @@ func (opts boltOpts) Open() (KV, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	db := &BoltKV{
+		opts:    opts,
+		bolt:    boltDB,
+		log:     log.New("bolt_db", opts.path),
+		wg:      &sync.WaitGroup{},
+		buckets: opts.bucketsCfg(dbutils.BucketsConfigs),
+	}
+
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
-			for _, name := range dbutils.Buckets {
+			for name := range db.buckets {
 				_, createErr := tx.CreateBucketIfNotExists([]byte(name), false)
 				if createErr != nil {
 					return createErr
@@ -88,13 +104,6 @@ func (opts boltOpts) Open() (KV, error) {
 		}); err != nil {
 			return nil, err
 		}
-	}
-
-	db := &BoltKV{
-		opts: opts,
-		bolt: boltDB,
-		log:  log.New("bolt_db", opts.path),
-		wg:   &sync.WaitGroup{},
 	}
 
 	return db, nil
@@ -109,9 +118,13 @@ func (opts boltOpts) MustOpen() KV {
 }
 
 func NewBolt() boltOpts {
-	o := boltOpts{Bolt: bolt.DefaultOptions}
+	o := boltOpts{Bolt: bolt.DefaultOptions, bucketsCfg: DefaultBucketConfigs}
 	o.Bolt.KeysPrefixCompressionDisable = true
 	return o
+}
+
+func (db *BoltKV) AllBuckets() dbutils.BucketsCfg {
+	return db.buckets
 }
 
 // Close closes BoltKV

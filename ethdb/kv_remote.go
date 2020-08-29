@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"net"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 type remoteOpts struct {
 	DialAddress string
 	inMemConn   *bufconn.Listener // for tests
+	bucketsCfg  BucketConfigsFunc
 }
 
 type RemoteKV struct {
@@ -36,6 +38,7 @@ type RemoteKV struct {
 	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
+	buckets  dbutils.BucketsCfg
 }
 
 type remoteTx struct {
@@ -75,6 +78,11 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
+func (opts remoteOpts) WithBucketsConfig(f BucketConfigsFunc) remoteOpts {
+	opts.bucketsCfg = f
+	return opts
+}
+
 func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	opts.inMemConn = listener
 	return opts
@@ -106,6 +114,7 @@ func (opts remoteOpts) Open() (KV, Backend, error) {
 		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
+		buckets:  opts.bucketsCfg(dbutils.BucketsConfigs),
 	}
 
 	eth := &RemoteBackend{
@@ -127,7 +136,11 @@ func (opts remoteOpts) MustOpen() (KV, Backend) {
 }
 
 func NewRemote() remoteOpts {
-	return remoteOpts{}
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs}
+}
+
+func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
+	return db.buckets
 }
 
 // Close
