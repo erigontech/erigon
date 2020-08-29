@@ -105,7 +105,11 @@ func (opts lmdbOpts) Open() (KV, error) {
 		env:     env,
 		log:     logger,
 		wg:      &sync.WaitGroup{},
-		buckets: opts.bucketsCfg(dbutils.BucketsConfigs),
+		buckets: dbutils.BucketsCfg{},
+	}
+	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	for name, cfg := range customBuckets { // copy map to avoid changing global variable
+		db.buckets[name] = cfg
 	}
 
 	// Open or create buckets
@@ -381,9 +385,11 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	if err := tx.tx.Drop(dbi, true); err != nil {
 		return err
 	}
+	fmt.Printf("Before: %s %#v\n", name, tx.db.buckets[name])
 	cnfCopy := tx.db.buckets[name]
 	cnfCopy.DBI = NonExistingDBI
 	tx.db.buckets[name] = cnfCopy
+	fmt.Printf("After: %s %#v\n", name, tx.db.buckets[name])
 	return nil
 }
 
@@ -395,17 +401,18 @@ func (tx *lmdbTx) ClearBucket(bucket string) error {
 }
 
 func (tx *lmdbTx) DropBucket(bucket string) error {
-	for name := range tx.db.buckets {
-		if name == bucket {
-			return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, name)
-		}
+	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
+		return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, bucket)
 	}
 
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
 func (tx *lmdbTx) ExistsBucket(name string) bool {
-	return tx.db.buckets[name].DBI != NonExistingDBI
+	if cfg, ok := tx.db.buckets[name]; ok {
+		return cfg.DBI != NonExistingDBI
+	}
+	return false
 }
 
 func (tx *lmdbTx) Commit(ctx context.Context) error {

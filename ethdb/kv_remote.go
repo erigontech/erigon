@@ -114,7 +114,11 @@ func (opts remoteOpts) Open() (KV, Backend, error) {
 		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
-		buckets:  opts.bucketsCfg(dbutils.BucketsConfigs),
+		buckets:  dbutils.BucketsCfg{},
+	}
+	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	for name, cfg := range customBuckets { // copy map to avoid changing global variable
+		db.buckets[name] = cfg
 	}
 
 	eth := &RemoteBackend{

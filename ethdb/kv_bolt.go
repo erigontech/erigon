@@ -89,7 +89,11 @@ func (opts boltOpts) Open() (KV, error) {
 		bolt:    boltDB,
 		log:     log.New("bolt_db", opts.path),
 		wg:      &sync.WaitGroup{},
-		buckets: opts.bucketsCfg(dbutils.BucketsConfigs),
+		buckets: dbutils.BucketsCfg{},
+	}
+	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	for name, cfg := range customBuckets { // copy map to avoid changing global variable
+		db.buckets[name] = cfg
 	}
 
 	if !opts.Bolt.ReadOnly {
