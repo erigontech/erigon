@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/urfave/cli"
 )
 
@@ -412,11 +411,7 @@ func copyDb(ctx *cli.Context) error {
 	chainConfig, chain, chainDb := utils.MakeChain(ctx, stack, false)
 	syncMode := downloader.StagedSync
 
-	var syncBloom *trie.SyncBloom
-	if syncMode == downloader.FastSync {
-		//syncBloom = trie.NewSyncBloom(uint64(ctx.GlobalInt(utils.CacheFlag.Name)/2), chainDb)
-	}
-	dl := downloader.New(0, chainDb, syncBloom, new(event.TypeMux), chainConfig, chain, nil, nil, ethdb.DefaultStorageMode)
+	dl := downloader.New(0, chainDb, new(event.TypeMux), chainConfig, chain, nil, nil, ethdb.DefaultStorageMode)
 
 	// Create a source peer to satisfy downloader requests from
 	db := ethdb.MustOpen(ctx.Args().First())
