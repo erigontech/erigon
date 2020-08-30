@@ -15,7 +15,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -388,6 +387,7 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 	}
 	h := &Heap{}
 	heap.Init(h)
+	var buffer [HeaderSerLength]byte
 	for _, fileInfo := range fileInfos {
 		f, err1 := os.Open(fileInfo.Name())
 		if err1 != nil {
@@ -395,12 +395,13 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 		}
 		r := bufio.NewReader(f)
 		var header types.Header
-		if err = rlp.Decode(r, &header); err != nil {
+		if _, err = io.ReadFull(r, buffer[:]); err != nil {
 			if !errors.Is(err, io.EOF) {
-				fmt.Printf("decoding rlp header from file: %v\n", err)
+				fmt.Printf("reading header from file: %v\n", err)
 			}
 			continue
 		}
+		DeserialiseHeader(&header, buffer[:])
 		he := HeapElem{file: f, reader: r, blockHeight: header.Number.Uint64(), header: &header}
 		heap.Push(h, he)
 	}
@@ -446,13 +447,14 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 			childDiffs[he.header.Hash()] = new(uint256.Int)
 		}
 		var header types.Header
-		if err = rlp.Decode(he.reader, &h); err == nil {
+		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
+			DeserialiseHeader(&header, buffer[:])
 			he.blockHeight = header.Number.Uint64()
 			he.header = &header
 			heap.Push(h, he)
 		} else {
 			if !errors.Is(err, io.EOF) {
-				fmt.Printf("decoding rlp header from file: %v\n", err)
+				fmt.Printf("reading header from file: %v\n", err)
 			}
 			if err = he.file.Close(); err != nil {
 				fmt.Printf("closing file: %v\n", err)
@@ -481,7 +483,21 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 }
 
 func (hd *HeaderDownload) FlushBuffer() error {
-	return nil
+	// Sort the buffer first
+	sort.Sort(BufferSorter(hd.buffer))
+	if bufferFile, err := ioutil.TempFile(hd.filesDir, "headers-buf"); err == nil {
+		if _, err = bufferFile.Write(hd.buffer); err != nil {
+			bufferFile.Close()
+			return err
+		}
+		if err = bufferFile.Close(); err != nil {
+			return err
+		}
+		hd.buffer = hd.buffer[:0]
+		return nil
+	} else {
+		return err
+	}
 }
 
 // childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct

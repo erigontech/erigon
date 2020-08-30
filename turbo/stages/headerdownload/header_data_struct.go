@@ -85,7 +85,7 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	buffer                 []*types.Header
+	buffer                 []byte
 	filesDir               string
 	currentFile            *os.File
 	currentFileWriter      io.Writer
@@ -189,8 +189,11 @@ func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
 }
 
-const HeaderSerLength = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
-	256 /*Bloom*/ + 16 /*Difficulty */ + 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
+const HeaderPreBlockHeight = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
+																256 /*Bloom*/ + 16 /*Difficulty */
+const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
+
+const HeaderSerLength = HeaderPreBlockHeight + HeaderPostBlockHeight
 
 func SerialiseHeader(header *types.Header, buffer []byte) {
 	pos := 0
@@ -269,4 +272,24 @@ func DeserialiseHeader(header *types.Header, buffer []byte) {
 	header.Extra = append(header.Extra, buffer[pos:pos+extraLen]...)
 	pos += 32
 	header.Nonce = types.EncodeNonce(binary.BigEndian.Uint64(buffer[pos : pos+8]))
+}
+
+// Wrapper for the header buffer to sort headers within by block height
+type BufferSorter []byte
+
+func (bs BufferSorter) Len() int {
+	return len(bs) / HeaderSerLength
+}
+
+func (bs BufferSorter) Less(i, j int) bool {
+	hi := binary.BigEndian.Uint64(bs[i*HeaderSerLength+HeaderPreBlockHeight:])
+	hj := binary.BigEndian.Uint64(bs[j*HeaderSerLength+HeaderPreBlockHeight:])
+	return hi < hj
+}
+
+func (bs BufferSorter) Swap(i, j int) {
+	var swapBuffer [HeaderSerLength]byte
+	copy(swapBuffer[:], bs[i*HeaderSerLength:])
+	copy(bs[i*HeaderSerLength:i*HeaderSerLength+HeaderSerLength], bs[j*HeaderSerLength:j*HeaderSerLength+HeaderSerLength])
+	copy(bs[j*HeaderSerLength:], swapBuffer[:])
 }
