@@ -117,12 +117,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			for i, receipt := range receipts {
 				storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
 			}
-			bytes, err := rlp.EncodeToBytes(storageReceipts)
-			if err != nil {
-				log.Crit("Failed to encode block receipts", "err", err)
+			var bytes []byte
+			if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
+				return fmt.Errorf("encode block receipts for block %d: %v", block.NumberU64(), err)
 			}
 			// Store the flattened receipt slice
-			if err := tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
+			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
 			}
 		}
