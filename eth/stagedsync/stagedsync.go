@@ -174,18 +174,20 @@ func (*StagedSync) Prepare(
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
 			ExecFunc: func(s *StageState, _ Unwinder) error {
-				if executionAt, err := s.ExecutionAt(tx); err != nil {
+				var executionAt uint64
+				var err error
+				if executionAt, err = s.ExecutionAt(tx); err != nil {
 					return err
-				} else {
-					return s.DoneAndUpdate(tx, executionAt)
 				}
+				return s.DoneAndUpdate(tx, executionAt)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				if executionAt, err := s.ExecutionAt(tx); err != nil {
+				var executionAt uint64
+				var err error
+				if executionAt, err = s.ExecutionAt(tx); err != nil {
 					return err
-				} else {
-					return s.DoneAndUpdate(tx, executionAt)
 				}
+				return s.DoneAndUpdate(tx, executionAt)
 			},
 		},
 	}
