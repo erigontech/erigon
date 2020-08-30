@@ -494,10 +494,10 @@ func (hd *HeaderDownload) FlushBuffer() error {
 			return err
 		}
 		hd.buffer = hd.buffer[:0]
-		return nil
 	} else {
 		return err
 	}
+	return nil
 }
 
 // childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct
