@@ -5,9 +5,7 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"math/big"
-	"os"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -85,10 +83,10 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	buffer                 []byte
-	filesDir               string
-	currentFile            *os.File
-	currentFileWriter      io.Writer
+	buffer   []byte
+	filesDir string
+	//currentFile            *os.File
+	//currentFileWriter      io.Writer
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
 	tips                   map[common.Hash]*Tip

@@ -344,6 +344,14 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	return NoPenalty, nil
 }
 
+func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
+	var serBuffer [HeaderSerLength]byte
+	for _, header := range segment.headers[start:end] {
+		SerialiseHeader(header, serBuffer[:])
+		hd.buffer = append(hd.buffer, serBuffer[:]...)
+	}
+}
+
 // Heap element for merging together header files
 type HeapElem struct {
 	file        *os.File
@@ -498,6 +506,25 @@ func (hd *HeaderDownload) FlushBuffer() error {
 		return err
 	}
 	return nil
+}
+
+// CheckInitiation looks at the first header in the given segment, and assuming
+// that it has been added as a tip, checks whether the anchor parent hash
+// associated with this tip equals to pre-set value (0x00..00 for genesis)
+func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash common.Hash) bool {
+	// Find attachment tip again
+	tip, exists := hd.tips[segment.headers[0].Hash()]
+	if !exists {
+		return false
+	}
+	if tip.anchor.hash != initialHash {
+		return false
+	}
+	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
+		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
+		return true
+	}
+	return false
 }
 
 // childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct

@@ -218,6 +218,6 @@ This is to ensure we can easily handle time outs and grow all chain segements ev
 
 ### Initiate staged sync
 Detect when to start the staged sync. Whenever a new tip is added, we check that its attribute `anchorParent` is equal to pre-configured value `0x00..00` for sync from genesis, or the hash of the last block header we have processed in the stage 1 of the staged sync. If this condition is satisfied, we take
-the attribute `totalDifficulty` of the tip and compare it to a variable `highestTotalDifficulty` (initialised to zero in the beginning). If the tip's
-`totalDifficulty` is higher than `highestTotalDifficulty`, then we set `highestTotalDifficulty` to the new value, and initiate the staged sync from
+the attribute `cumulativeDifficulty` of the tip and compare it to a variable `highestTotalDifficulty` (initialised to zero in the beginning). If the tip's
+`cumulativeDifficulty` is higher than `highestTotalDifficulty`, then we set `highestTotalDifficulty` to the new value, and initiate the staged sync from
 the tip's anchor to the tip
