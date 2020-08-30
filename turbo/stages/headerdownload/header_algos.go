@@ -389,9 +389,9 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 	h := &Heap{}
 	heap.Init(h)
 	for _, fileInfo := range fileInfos {
-		f, err := os.Open(fileInfo.Name())
-		if err != nil {
-			return fmt.Errorf("open file %s: %v", fileInfo.Name(), err)
+		f, err1 := os.Open(fileInfo.Name())
+		if err1 != nil {
+			return fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
 		}
 		r := bufio.NewReader(f)
 		var header types.Header
@@ -433,7 +433,7 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 		if parentAnchor, found := parentAnchors[he.header.ParentHash]; found {
 			parentDiff := parentDiffs[he.header.ParentHash]
 			cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
-			if err := hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff); err != nil {
+			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff); err != nil {
 				return fmt.Errorf("add header as tip: %v", err)
 			}
 		} else {

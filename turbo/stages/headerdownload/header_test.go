@@ -306,8 +306,8 @@ func TestExtendUp(t *testing.T) {
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
 	if anchor, err := hd.addHeaderAsAnchor(&h1, 256, uint256.Int{}); err == nil {
-		if err := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000)); err != nil {
-			t.Fatalf("setting up h1 (tip): %v", err)
+		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000)); err1 != nil {
+			t.Fatalf("setting up h1 (tip): %v", err1)
 		}
 	} else {
 		t.Errorf("setting up h1 (anchor): %v", err)
@@ -374,8 +374,8 @@ func TestExtendUp(t *testing.T) {
 
 	// Introduce h5 as a tip and prepend h6
 	if anchor, err := hd.addHeaderAsAnchor(&h5, 256, uint256.Int{}); err == nil {
-		if err := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000)); err != nil {
-			t.Fatalf("setting up h5 (tip): %v", err)
+		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000)); err1 != nil {
+			t.Fatalf("setting up h5 (tip): %v", err1)
 		}
 	} else {
 		t.Errorf("setting up h5 (anchor): %v", err)
@@ -400,8 +400,8 @@ func TestExtendUp(t *testing.T) {
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
 	if anchor, err := hd.addHeaderAsAnchor(&h7, 256, uint256.Int{}); err == nil {
-		if err := hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000)); err != nil {
-			t.Fatalf("setting up h7 (hard-coded tip): %v", err)
+		if err1 := hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000)); err1 != nil {
+			t.Fatalf("setting up h7 (hard-coded tip): %v", err1)
 		}
 	} else {
 		t.Fatalf("settings up h7 (anchor): %v", err)
