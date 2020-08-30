@@ -189,7 +189,7 @@ func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
 }
 
-const HEADER_SER_LENGTH = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
+const HeaderSerLength = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
 	256 /*Bloom*/ + 16 /*Difficulty */ + 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
 
 func SerialiseHeader(header *types.Header, buffer []byte) {

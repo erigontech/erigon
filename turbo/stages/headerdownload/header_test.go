@@ -451,11 +451,11 @@ func TestHeaderSerialisation(t *testing.T) {
 	}
 	header.ReceiptHash = common.HexToHash("0x5566778")
 	header.TxHash = common.HexToHash("0x894858473765654")
-	buffer := make([]byte, HEADER_SER_LENGTH)
+	buffer := make([]byte, HeaderSerLength)
 	SerialiseHeader(&header, buffer)
 	var newHeader types.Header
 	DeserialiseHeader(&newHeader, buffer)
-	newBuffer := make([]byte, HEADER_SER_LENGTH)
+	newBuffer := make([]byte, HeaderSerLength)
 	SerialiseHeader(&newHeader, newBuffer)
 	if !bytes.Equal(buffer, newBuffer) {
 		t.Errorf("header serialistion must be the same")
