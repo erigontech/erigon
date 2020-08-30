@@ -95,6 +95,18 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 	return err
 }
 
+// Append appends a single entry to the end of the bucket.
+func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
+	if metrics.Enabled {
+		defer dbPutTimer.UpdateSince(time.Now())
+	}
+
+	err := db.kv.Update(context.Background(), func(tx Tx) error {
+		return tx.Cursor(bucket).Append(key, value)
+	})
+	return err
+}
+
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	err := db.kv.Update(context.Background(), func(tx Tx) error {

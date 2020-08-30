@@ -102,6 +102,7 @@ type Database interface {
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)
 	TruncateAncients(items uint64) error
+	Append(bucket string, key, value []byte) error
 }
 
 // MinDatabase is a minimalistic version of the Database interface.

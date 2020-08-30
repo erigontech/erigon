@@ -13,12 +13,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -110,7 +112,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if writeReceipts {
-			rawdb.WriteReceipts(tx, block.Hash(), block.NumberU64(), receipts)
+			// Convert the receipts into their storage form and serialize them
+			storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
+			for i, receipt := range receipts {
+				storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
+			}
+			bytes, err := rlp.EncodeToBytes(storageReceipts)
+			if err != nil {
+				log.Crit("Failed to encode block receipts", "err", err)
+			}
+			// Store the flattened receipt slice
+			if err := tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
+				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
+			}
 		}
 
 		if batch.BatchSize() >= batch.IdealBatchSize() {

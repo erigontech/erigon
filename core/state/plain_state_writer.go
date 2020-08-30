@@ -158,7 +158,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		return err
 	}
 	key := dbutils.EncodeTimestamp(w.blockNumber)
-	if err = db.Put(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
+	if err = db.Append(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
 	storageChanges, err := w.csw.GetStorageChanges()
@@ -171,7 +171,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		if err != nil {
 			return err
 		}
-		if err = db.Put(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
+		if err = db.Append(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
 			return err
 		}
 	}
