@@ -859,7 +859,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				return err
 			}
 		} else {
-			log.Debug("adding block to staged sync prefetch",
+			log.Debug("Adding block to staged sync prefetch",
 				"number", request.Block.NumberU64,
 				"hash", request.Block.Hash().Hex(),
 			)

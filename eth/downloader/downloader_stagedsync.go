@@ -104,7 +104,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		}
 	}
 	if prefetchedHashes < hashCount {
-		log.Info("downloading block bodies", "count", hashCount-prefetchedHashes)
+		log.Info("Downloading block bodies", "count", hashCount-prefetchedHashes)
 		from := origin + 1
 		d.queue.Prepare(from, d.getMode())
 		d.queue.ScheduleBodies(from, hashes[prefetchedHashes:hashCount], headers)
@@ -127,7 +127,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 			return false, err
 		}
 	} else {
-		log.Debug("everything is prefetched, nothing to download")
+		log.Debug("Everything is prefetched, nothing to download")
 	}
 	return true, nil
 }
