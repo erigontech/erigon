@@ -2,10 +2,12 @@ package commands
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -26,6 +28,8 @@ type EthAPI interface {
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	Syncing(ctx context.Context) (interface{}, error)
+	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
+	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -76,4 +80,34 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		"currentBlock": hexutil.Uint64(currentBlock),
 		"highestBlock": hexutil.Uint64(highestBlock),
 	}, nil
+}
+
+func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
+	var blockNum uint64
+	if blockNr == rpc.LatestBlockNumber || blockNr == rpc.PendingBlockNumber {
+		var err error
+		blockNum, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
+		if err != nil {
+			return nil, fmt.Errorf("getting latest block number: %v", err)
+		}
+	} else if blockNr == rpc.EarliestBlockNumber {
+		blockNum = 0
+	} else {
+		blockNum = uint64(blockNr.Int64())
+	}
+	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %d", blockNum)
+	}
+	n := hexutil.Uint(len(block.Transactions()))
+	return &n, nil
+}
+
+func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
+	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %x", blockHash)
+	}
+	n := hexutil.Uint(len(block.Transactions()))
+	return &n, nil
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -98,9 +99,13 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	blckNum, err := hexutil.DecodeUint64(input)
+	// Try to parse it as a number
+	blckNum, err := strconv.ParseUint(input, 10, 64)
 	if err != nil {
-		return err
+		// Now try as a hex number
+		if blckNum, err = hexutil.DecodeUint64(input); err != nil {
+			return err
+		}
 	}
 	if blckNum > math.MaxInt64 {
 		return fmt.Errorf("block number larger than int64")
@@ -132,6 +137,16 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		bnh.RequireCanonical = e.RequireCanonical
 		return nil
 	}
+	// Try simple number first
+	blckNum, err := strconv.ParseUint(string(data), 10, 64)
+	if err == nil {
+		if blckNum > math.MaxInt64 {
+			return fmt.Errorf("blocknumber too high")
+		}
+		bn := BlockNumber(blckNum)
+		bnh.BlockNumber = &bn
+		return nil
+	}
 	var input string
 	err = json.Unmarshal(data, &input)
 	if err != nil {
@@ -160,8 +175,7 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 			bnh.BlockHash = &hash
 			return nil
 		} else {
-			blckNum, err := hexutil.DecodeUint64(input)
-			if err != nil {
+			if blckNum, err = hexutil.DecodeUint64(input); err != nil {
 				return err
 			}
 			if blckNum > math.MaxInt64 {
