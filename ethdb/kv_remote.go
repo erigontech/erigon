@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -28,6 +29,7 @@ import (
 type remoteOpts struct {
 	DialAddress string
 	inMemConn   *bufconn.Listener // for tests
+	bucketsCfg  BucketConfigsFunc
 }
 
 type RemoteKV struct {
@@ -36,6 +38,7 @@ type RemoteKV struct {
 	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
+	buckets  dbutils.BucketsCfg
 }
 
 type remoteTx struct {
@@ -75,6 +78,11 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
+func (opts remoteOpts) WithBucketsConfig(f BucketConfigsFunc) remoteOpts {
+	opts.bucketsCfg = f
+	return opts
+}
+
 func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	opts.inMemConn = listener
 	return opts
@@ -106,6 +114,11 @@ func (opts remoteOpts) Open() (KV, Backend, error) {
 		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
+		buckets:  dbutils.BucketsCfg{},
+	}
+	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	for name, cfg := range customBuckets { // copy map to avoid changing global variable
+		db.buckets[name] = cfg
 	}
 
 	eth := &RemoteBackend{
@@ -127,7 +140,11 @@ func (opts remoteOpts) MustOpen() (KV, Backend) {
 }
 
 func NewRemote() remoteOpts {
-	return remoteOpts{}
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs}
+}
+
+func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
+	return db.buckets
 }
 
 // Close
