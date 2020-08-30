@@ -66,7 +66,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return false, err
 	}
 
-	currentBlock, _, err := stages.GetStageProgress(api.dbReader, stages.TxPool)
+	currentBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return false, err
 	}
