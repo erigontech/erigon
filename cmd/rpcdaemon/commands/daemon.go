@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -35,7 +36,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, block.Hash(), blockNum)
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(api.dbReader, block.Hash(), blockNum))
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -58,7 +59,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx
 	}
 	number := block.NumberU64()
 
-	additionalFields["totalDifficulty"] = rawdb.ReadTd(api.dbReader, hash, number)
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(api.dbReader, block.Hash(), blockNum))
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
