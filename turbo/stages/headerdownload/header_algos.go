@@ -572,7 +572,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 }
 
 // addHardCodedTip adds a hard-coded tip for which cimulative difficulty is known and no prepend is allowed
-func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, hash common.Hash, anchor *Anchor, cumulativeDifficulty uint256.Int) error {
+func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, hash common.Hash, anchor *Anchor, cumulativeDifficulty uint256.Int) {
 	tip := &Tip{
 		anchor:               anchor,
 		cumulativeDifficulty: cumulativeDifficulty,
@@ -581,7 +581,6 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		noPrepend:            true,
 	}
 	hd.tips[hash] = tip
-	return nil
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, totalDifficulty uint256.Int) (*Anchor, error) {
@@ -606,13 +605,8 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 // (excluding Proof Of Work validity)
 func (hd *HeaderDownload) anchorParentValid(anchor *Anchor, parent *types.Header) bool {
 	if anchor.blockHeight+1 != parent.Number.Uint64() {
-		//TODO: Log the reason
 		return false
 	}
 	childDifficulty := hd.calcDifficultyFunc(anchor.timestamp, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
-	if anchor.difficulty.ToBig().Cmp(childDifficulty) != 0 {
-		//TODO: Log the reason
-		return false
-	}
-	return true
+	return anchor.difficulty.ToBig().Cmp(childDifficulty) == 0
 }

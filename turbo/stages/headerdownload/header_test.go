@@ -400,9 +400,7 @@ func TestExtendUp(t *testing.T) {
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
 	if anchor, err := hd.addHeaderAsAnchor(&h7, 256, uint256.Int{}); err == nil {
-		if err1 := hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000)); err1 != nil {
-			t.Fatalf("setting up h7 (hard-coded tip): %v", err1)
-		}
+		hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000))
 	} else {
 		t.Fatalf("settings up h7 (anchor): %v", err)
 	}
