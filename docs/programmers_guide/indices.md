@@ -126,8 +126,8 @@ LMDB in-depth
  
 Max key size: 551byte (same for key of sub-bucket)
 
-Please take a look on 'Picture 3' it illustrates the high-level idea, but LMDB stores it different way. 
-When used sub-bucket (DupSort DBI) it has no "value", it does join bytes of key and value and store it as 'key': 
+Please take a look on 'Picture 3' again - it illustrates the high-level idea, but LMDB stores it different way. 
+'Picture 4' shows - sub-bucket (DupSort DBI) has no "value", it does join bytes of key and value and store it as 'key': 
 
 ```
 // Picture 4
