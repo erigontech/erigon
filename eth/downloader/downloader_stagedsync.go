@@ -107,7 +107,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		}
 	}
 	if prefetchedHashes > 0 {
-		fmt.Println("downloaded until block", origin+uint64(prefetchedHashes))
+		log.Debug("Used prefetched bodies", "count", prefetchedHashes, "to", origin+uint64(prefetchedHashes))
 		return true, nil
 	}
 
