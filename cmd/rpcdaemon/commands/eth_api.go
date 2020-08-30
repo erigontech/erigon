@@ -52,7 +52,7 @@ func NewAPI(db ethdb.KV, dbReader ethdb.Getter, eth ethdb.Backend, gascap uint64
 }
 
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
+	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return 0, err
 	}

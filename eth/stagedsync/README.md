@@ -158,3 +158,8 @@ During this stage we start the transaction pool or update its state. For instanc
 On unwinds, we add the transactions from the blocks we unwind, back to the pool.
 
 This stage doesn't use a network connection.
+
+### Stage 12: Finish
+
+This stage sets the current block number that is then used by [RPC calls](../../cmd/rpcdaemon/Readme.md), such as [`eth_blockNumber`](../../README.md).
+
