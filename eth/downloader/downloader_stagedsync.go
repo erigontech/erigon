@@ -106,32 +106,34 @@ func (d *Downloader) SpawnBodyDownloadStage(
 			break
 		}
 	}
-	if prefetchedHashes < hashCount {
-		log.Info("Downloading block bodies", "count", hashCount-prefetchedHashes)
-		from := origin + 1 + uint64(prefetchedHashes)
-		d.queue.Prepare(from, d.getMode())
-		d.queue.ScheduleBodies(from, hashes[prefetchedHashes:hashCount], headers)
-		to := from + uint64(hashCount)
-
-		select {
-		case d.bodyWakeCh <- true:
-		case <-d.cancelCh:
-		case <-d.quitCh:
-			return false, errCanceled
-		}
-
-		// Now fetch all the bodies
-		fetchers := []func() error{
-			func() error { return d.fetchBodies(from) },
-			func() error { return d.processBodiesStage(to) },
-		}
-
-		if err := d.spawnSync(fetchers); err != nil {
-			return false, err
-		}
-	} else {
-		log.Debug("Everything is prefetched, nothing to download")
+	if prefetchedHashes > 0 {
+		fmt.Println("downloaded until block", origin+uint64(prefetchedHashes))
+		return true, nil
 	}
+
+	log.Info("Downloading block bodies", "count", hashCount)
+	from := origin + 1
+	d.queue.Prepare(from, d.getMode())
+	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
+	to := from + uint64(hashCount)
+
+	select {
+	case d.bodyWakeCh <- true:
+	case <-d.cancelCh:
+	case <-d.quitCh:
+		return false, errCanceled
+	}
+
+	// Now fetch all the bodies
+	fetchers := []func() error{
+		func() error { return d.fetchBodies(from) },
+		func() error { return d.processBodiesStage(to) },
+	}
+
+	if err := d.spawnSync(fetchers); err != nil {
+		return false, err
+	}
+
 	return true, nil
 }
 
