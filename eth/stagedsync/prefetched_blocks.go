@@ -1,24 +1,27 @@
 package stagedsync
 
 import (
-	"fmt"
-	"sync"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+
+	lru "github.com/hashicorp/golang-lru"
 )
 
 type PrefetchedBlocks struct {
-	blocks *sync.Map
+	blocks *lru.Cache
 }
 
 func NewPrefetchedBlocks() *PrefetchedBlocks {
-	return &PrefetchedBlocks{blocks: &sync.Map{}}
+	cache, err := lru.New(10000)
+	if err != nil {
+		panic("error creating prefetching cache for blocks")
+	}
+	return &PrefetchedBlocks{blocks: cache}
 }
 
-func (pb *PrefetchedBlocks) GetBlockByHash(hash common.Hash) *types.Block {
-	fmt.Println("PrefetchedBlocks.GetBlockByHash", hash.Hex())
-	if val, ok := pb.blocks.Load(hash); ok && val != nil {
+func (pb *PrefetchedBlocks) Pop(hash common.Hash) *types.Block {
+	if val, ok := pb.blocks.Get(hash); ok && val != nil {
+		pb.blocks.Remove(hash)
 		if block, ok := val.(*types.Block); ok {
 			return block
 		}
@@ -31,5 +34,5 @@ func (pb *PrefetchedBlocks) Add(b *types.Block) {
 		return
 	}
 	hash := b.Hash()
-	pb.blocks.Store(hash, b)
+	pb.blocks.ContainsOrAdd(hash, b)
 }
