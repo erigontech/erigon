@@ -14,7 +14,14 @@ import (
 
 const prof = false // whether to profile
 
-func PrepareStagedSync(
+type StagedSync struct {
+}
+
+func New() *StagedSync {
+	return &StagedSync{}
+}
+
+func (*StagedSync) Prepare(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,

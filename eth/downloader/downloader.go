@@ -168,7 +168,8 @@ type Downloader struct {
 	bodiesState    *stagedsync.StageState
 	bodiesUnwinder stagedsync.Unwinder
 
-	stagedSync *stagedsync.State
+	stagedSyncState *stagedsync.State
+	stagedSync      *stagedsync.StagedSync
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -269,6 +270,11 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, c
 	}
 	go dl.qosTuner()
 	return dl
+}
+
+// SetStagedSync sets the staged sync instance (by protocol manager)
+func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
+	d.stagedSync = stagedSync
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
@@ -582,7 +588,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			writeDB = d.stateDB
 		}
 
-		d.stagedSync, err = stagedsync.PrepareStagedSync(
+		d.stagedSyncState, err = d.stagedSync.Prepare(
 			d,
 			d.chainConfig,
 			d.blockchain,
@@ -604,7 +610,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 		// begin tx at stage right after head/body download Or at first unwind stage
 		// it's temporary solution
-		d.stagedSync.BeforeStageRun(stages.Senders, func() error {
+		d.stagedSyncState.BeforeStageRun(stages.Senders, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -614,7 +620,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.OnBeforeUnwind(func(id stages.SyncStage) error {
+		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -629,7 +635,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			tx, errTx = tx.Begin()
 			return errTx
 		})
-		d.stagedSync.BeforeStageUnwind(stages.Bodies, func() error {
+		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
@@ -641,7 +647,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return errCommit
 		})
 
-		err = d.stagedSync.Run(d.stateDB, writeDB)
+		err = d.stagedSyncState.Run(d.stateDB, writeDB)
 		if err != nil {
 			return err
 		}
