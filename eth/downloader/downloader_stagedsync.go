@@ -97,7 +97,10 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		if block := prefetchedBlocks.Pop(h); block != nil {
 			fr := fetchResultFromBlock(block)
 			execute := false
-			d.importBlockResults([]*fetchResult{fr}, execute)
+			_, err := d.importBlockResults([]*fetchResult{fr}, execute)
+			if err != nil {
+				return false, err
+			}
 			prefetchedHashes++
 		} else {
 			break
