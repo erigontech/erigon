@@ -12,7 +12,7 @@ type PrefetchedBlocks struct {
 }
 
 func NewPrefetchedBlocks() *PrefetchedBlocks {
-	cache, err := lru.New(10000)
+	cache, err := lru.New(1000)
 	if err != nil {
 		panic("error creating prefetching cache for blocks")
 	}
