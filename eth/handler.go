@@ -859,7 +859,10 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				return err
 			}
 		} else {
-			fmt.Println("IGORM: adding block to prefetch", request.Block.NumberU64(), request.Block.Hash().Hex())
+			log.Debug("adding block to staged sync prefetch",
+				"number", request.Block.NumberU64,
+				"hash", request.Block.Hash().Hex(),
+			)
 			pm.stagedSync.PrefetchedBlocks.Add(request.Block)
 		}
 
