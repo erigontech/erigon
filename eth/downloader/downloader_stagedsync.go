@@ -155,7 +155,6 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 		if len(results) == 0 {
 			return nil
 		}
-		fmt.Println("queue results")
 		lastNumber, err := d.importBlockResults(results, false /* execute */)
 		if err != nil {
 			return err
