@@ -108,7 +108,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	}
 	if prefetchedHashes < hashCount {
 		log.Info("Downloading block bodies", "count", hashCount-prefetchedHashes)
-		from := origin + 1
+		from := origin + 1 + uint64(prefetchedHashes)
 		d.queue.Prepare(from, d.getMode())
 		d.queue.ScheduleBodies(from, hashes[prefetchedHashes:hashCount], headers)
 		to := from + uint64(hashCount)
