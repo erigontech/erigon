@@ -858,6 +858,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
 				return err
 			}
+		} else {
+			fmt.Println("IGORM: adding block to prefetch", request.Block.NumberU64(), request.Block.Hash().Hex())
+			pm.stagedSync.PrefetchedBlocks.Add(request.Block)
 		}
 
 		// Assuming the block is importable by the peer, but possibly not yet done so,

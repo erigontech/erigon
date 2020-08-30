@@ -14,7 +14,12 @@ import (
 )
 
 // externsions for downloader needed for staged sync
-func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState, u stagedsync.Unwinder) (bool, error) {
+func (d *Downloader) SpawnBodyDownloadStage(
+	id string,
+	s *stagedsync.StageState,
+	u stagedsync.Unwinder,
+	prefetchedBlocks *stagedsync.PrefetchedBlocks,
+) (bool, error) {
 	d.bodiesState = s
 	d.bodiesUnwinder = u
 	defer func() {
@@ -85,28 +90,53 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		// No more bodies to download
 		return false, nil
 	}
-	from := origin + 1
-	d.queue.Prepare(from, d.getMode())
-	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
-	to := from + uint64(hashCount)
 
-	select {
-	case d.bodyWakeCh <- true:
-	case <-d.cancelCh:
-	case <-d.quitCh:
-		return false, errCanceled
+	prefetchedHashes := 0
+	for prefetchedHashes <= hashCount {
+		h := hashes[prefetchedHashes]
+		if block := prefetchedBlocks.GetBlockByHash(h); block != nil {
+			fr := fetchResultFromBlock(block)
+			execute := false
+			d.importBlockResults([]*fetchResult{fr}, execute)
+			prefetchedHashes++
+		} else {
+			break
+		}
 	}
+	fmt.Println("prefetchedHashes", prefetchedHashes, hashCount)
 
-	// Now fetch all the bodies
-	fetchers := []func() error{
-		func() error { return d.fetchBodies(from) },
-		func() error { return d.processBodiesStage(to) },
-	}
+	if prefetchedHashes < hashCount {
+		from := origin + 1
+		d.queue.Prepare(from, d.getMode())
+		d.queue.ScheduleBodies(from, hashes[prefetchedHashes:hashCount], headers)
+		to := from + uint64(hashCount)
 
-	if err := d.spawnSync(fetchers); err != nil {
-		return false, err
+		select {
+		case d.bodyWakeCh <- true:
+		case <-d.cancelCh:
+		case <-d.quitCh:
+			return false, errCanceled
+		}
+
+		// Now fetch all the bodies
+		fetchers := []func() error{
+			func() error { return d.fetchBodies(from) },
+			func() error { return d.processBodiesStage(to) },
+		}
+
+		if err := d.spawnSync(fetchers); err != nil {
+			return false, err
+		}
 	}
 	return true, nil
+}
+
+func fetchResultFromBlock(b *types.Block) *fetchResult {
+	return &fetchResult{
+		Header:       b.Header(),
+		Uncles:       b.Uncles(),
+		Transactions: b.Transactions(),
+	}
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.

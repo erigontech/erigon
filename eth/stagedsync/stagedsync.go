@@ -15,13 +15,16 @@ import (
 const prof = false // whether to profile
 
 type StagedSync struct {
+	PrefetchedBlocks *PrefetchedBlocks
 }
 
 func New() *StagedSync {
-	return &StagedSync{}
+	return &StagedSync{
+		PrefetchedBlocks: NewPrefetchedBlocks(),
+	}
 }
 
-func (*StagedSync) Prepare(
+func (stagedSync *StagedSync) Prepare(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,
@@ -64,7 +67,7 @@ func (*StagedSync) Prepare(
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnBodyDownloadStage(s, u, d, pid)
+				return spawnBodyDownloadStage(s, u, d, pid, stagedSync.PrefetchedBlocks)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindBodyDownloadStage(u, db)
