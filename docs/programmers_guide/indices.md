@@ -200,6 +200,10 @@ It means in 1 db call you can Get/Put up to 4Kb of sub-bucket keys.
 TurboGeth
 ---------
 
+This article target is to show tricky concepts on simple examples. 
+Real way how TurboGeth stores accounts value and accounts history is a bit different and described [here](./db_walkthrough.MD#bucket-history-of-accounts)    
+ 
+
 `kv_abstract.go` - has abstraction over LMDB library. It has different cursor types:
 - Cursor - provides only simple methods which are used for normal (not DupSort buckets)
 - DupSortCursor - provides methods to iterate over DupSort buckets  
