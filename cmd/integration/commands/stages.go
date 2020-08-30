@@ -2,9 +2,10 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -359,7 +360,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	if err != nil {
 		panic(err)
 	}
-	st, err := stagedsync.PrepareStagedSync(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
+	st, err := stagedsync.New().Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
