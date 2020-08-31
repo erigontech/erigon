@@ -3,12 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
 	"path"
 	"sync"
 	"text/tabwriter"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -139,6 +140,7 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		dbutils.PlainAccountChangeSetBucket,
 		dbutils.PlainStorageChangeSetBucket,
 		dbutils.PlainContractCodeBucket,
+		dbutils.BlockReceiptsPrefix,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	); err != nil {
