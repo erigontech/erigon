@@ -815,6 +815,18 @@ func (c *LmdbCursor) Current() ([]byte, []byte, error) {
 		}
 		return []byte{}, nil, err
 	}
+
+	b := c.bucketCfg
+	if b.AutoDupSortKeysConversion && len(k) == b.DupToLen {
+		keyPart := b.DupFromLen - b.DupToLen
+		k = append(k, v[:keyPart]...)
+		v = v[keyPart:]
+	}
+
+	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
+		k, v = nil, nil
+	}
+
 	return k, v, nil
 }
 

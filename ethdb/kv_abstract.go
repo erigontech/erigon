@@ -57,7 +57,7 @@ type Cursor interface {
 	Put(key, value []byte) error
 	//PutNoOverwrite(key, value []byte) error
 	// Reserve()
-	Current() ([]byte, []byte, error)
+	//Current() ([]byte, []byte, error)
 
 	//DeleteCurrent() error
 	Delete(key []byte) error
