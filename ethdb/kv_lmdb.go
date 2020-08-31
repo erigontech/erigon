@@ -1036,6 +1036,10 @@ func (c *LmdbDupSortCursor) initCursor() error {
 		return fmt.Errorf("class LmdbDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
 	}
 
+	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
+		return fmt.Errorf("class LmdbDupSortCursor can be used only if bucket created with flag lmdb.DupSort")
+	}
+
 	return c.LmdbCursor.initCursor()
 }
 
@@ -1198,6 +1202,18 @@ func (c *LmdbCursor) CountDuplicates() (uint64, error) {
 
 type LmdbDupFixedCursor struct {
 	*LmdbDupSortCursor
+}
+
+func (c *LmdbDupFixedCursor) initCursor() error {
+	if c.c != nil {
+		return nil
+	}
+
+	if c.bucketCfg.Flags&lmdb.DupFixed == 0 {
+		return fmt.Errorf("class LmdbDupSortCursor can be used only if bucket created with flag lmdb.DupSort")
+	}
+
+	return c.LmdbCursor.initCursor()
 }
 
 func (c *LmdbDupFixedCursor) GetMulti() ([]byte, error) {
