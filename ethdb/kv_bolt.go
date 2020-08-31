@@ -292,7 +292,15 @@ func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
 }
 
-func (tx *boltTx) NoValuesCursor(bucket string) CursorNoValues {
+func (tx *boltTx) CursorDupSort(bucket string) CursorDupSort {
+	panic("not supported")
+}
+
+func (tx *boltTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("not supported")
+}
+
+func (tx *boltTx) CursorNoValues(bucket string) CursorNoValues {
 	return &noValuesBoltCursor{boltCursor: tx.Cursor(bucket).(*boltCursor)}
 }
 

@@ -1039,7 +1039,7 @@ func (c *LmdbDupSortCursor) initCursor() error {
 	}
 
 	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("LmdbDupSortCursor class can't be used with AutoDupSortKeysConversion buckets")
+		return fmt.Errorf("class LmdbDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
 	}
 
 	return c.LmdbCursor.initCursor()

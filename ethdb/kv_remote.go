@@ -245,7 +245,15 @@ func (tx *remoteTx) Cursor(bucket string) Cursor {
 	return c
 }
 
-func (tx *remoteTx) NoValuesCursor(bucket string) CursorNoValues {
+func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
+	panic("not supported")
+}
+
+func (tx *remoteTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("not supported")
+}
+
+func (tx *remoteTx) CursorNoValues(bucket string) CursorNoValues {
 	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
