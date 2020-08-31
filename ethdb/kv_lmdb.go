@@ -595,6 +595,9 @@ func (c *LmdbCursor) initCursor() error {
 	if c.c != nil {
 		return nil
 	}
+	if c.bucketCfg.AutoDupSortKeysConversion == false && c.bucketCfg.Flags&lmdb.DupSort != 0 {
+		return fmt.Errorf("class LmdbCursor can work with DupSort buckets only if they have enabled AutoDupSortKeysConversion property")
+	}
 	tx := c.tx
 
 	var err error
@@ -925,30 +928,37 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 		}
 	}
 
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return c.putDupSort(key, value)
-	}
+	b := c.bucketCfg
+	if b.AutoDupSortKeysConversion {
+		from, to := b.DupFromLen, b.DupToLen
+		if len(key) != from && len(key) >= to {
+			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
+		}
 
-	return c.put(key, value)
-}
+		if len(key) == from {
+			value = append(key[to:], value...)
+			key = key[:to]
+			_, v, err := c.getBothRange(key, value[:from-to])
+			if err != nil { // if key not found, or found another one - then just insert
+				if lmdb.IsNotFound(err) {
+					return c.put(key, value)
+				}
+				return err
+			}
 
-func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
+			if bytes.Equal(v[:from-to], value[:from-to]) {
+				if len(v) == len(value) { // in DupSort case lmdb.Current works only with values of same length
+					return c.putCurrent(key, value)
+				}
+				err = c.delCurrent()
+				if err != nil {
+					return err
+				}
+			}
 		}
 	}
 
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		value = append(key[b.DupToLen:], value...)
-		key = key[:b.DupToLen]
-	}
-
-	return c.putCurrent(key, value)
+	return c.put(key, value)
 }
 
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
@@ -970,30 +980,46 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		return c.putCurrent(key, value)
 	}
 
-	newValue := make([]byte, 0, from-to+len(value))
-	newValue = append(append(newValue, key[to:]...), value...)
-
+	value = append(key[to:], value...)
 	key = key[:to]
-	_, v, err := c.getBothRange(key, newValue[:from-to])
+	_, v, err := c.getBothRange(key, value[:from-to])
 	if err != nil { // if key not found, or found another one - then just insert
 		if lmdb.IsNotFound(err) {
-			return c.put(key, newValue)
+			return c.put(key, value)
 		}
 		return err
 	}
 
-	if bytes.Equal(v[:from-to], newValue[:from-to]) {
-		if len(v) == len(newValue) { // in DupSort case lmdb.Current works only with values of same length
-			return c.putCurrent(key, newValue)
+	if bytes.Equal(v[:from-to], value[:from-to]) {
+		if len(v) == len(value) { // in DupSort case lmdb.Current works only with values of same length
+			return c.putCurrent(key, value)
 		}
 		err = c.delCurrent()
 		if err != nil {
 			return err
 		}
-		return c.put(key, newValue)
+		return c.put(key, value)
 	}
 
-	return c.put(key, newValue)
+	return c.put(key, value)
+}
+func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	b := c.bucketCfg
+	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
+		value = append(key[b.DupToLen:], value...)
+		key = key[:b.DupToLen]
+	}
+
+	return c.putCurrent(key, value)
 }
 
 func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
@@ -1043,19 +1069,20 @@ func (c *LmdbCursor) Append(key []byte, value []byte) error {
 		}
 	}
 	b := c.bucketCfg
-	from, to := b.DupFromLen, b.DupToLen
 	if b.AutoDupSortKeysConversion {
+		from, to := b.DupFromLen, b.DupToLen
 		if len(key) != from && len(key) >= to {
 			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
 		}
 
 		if len(key) == from {
-			newValue := make([]byte, 0, from-to+len(value))
-			newValue = append(append(newValue, key[to:]...), value...)
+			value = append(key[to:], value...)
 			key = key[:to]
-			return c.appendDup(key, newValue)
 		}
-		return c.append(key, value)
+	}
+
+	if b.Flags&lmdb.DupSort != 0 {
+		return c.appendDup(key, value)
 	}
 	return c.append(key, value)
 }
@@ -1232,6 +1259,7 @@ func (c *LmdbCursor) AppendDup(key []byte, value []byte) error {
 			return err
 		}
 	}
+
 	return c.appendDup(key, value)
 }
 
