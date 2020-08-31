@@ -304,6 +304,10 @@ func (c *boltCursor) SeekExact(key []byte) (val []byte, err error) {
 	return c.bucket.Get(key)
 }
 
+func (c *boltCursor) Current() ([]byte, []byte, error) {
+	panic("not supported")
+}
+
 func (c *boltCursor) First() (k, v []byte, err error) {
 	if len(c.prefix) == 0 {
 		k, v = c.bolt.First()

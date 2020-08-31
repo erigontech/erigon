@@ -249,6 +249,10 @@ func (tx *remoteTx) NoValuesCursor(bucket string) NoValuesCursor {
 	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
+func (c *remoteCursor) Current() ([]byte, []byte, error) {
+	panic("not supported")
+}
+
 func (c *remoteCursor) Put(key []byte, value []byte) error {
 	panic("not supported")
 }
