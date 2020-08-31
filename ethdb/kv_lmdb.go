@@ -912,7 +912,7 @@ func (c *LmdbCursor) PutNoOverwrite(key []byte, value []byte) error {
 	}
 
 	if c.bucketCfg.AutoDupSortKeysConversion {
-		return c.putDupSort(key, value)
+		panic("not implemented")
 	}
 
 	return c.putNoOverwrite(key, value)
@@ -930,32 +930,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
-		from, to := b.DupFromLen, b.DupToLen
-		if len(key) != from && len(key) >= to {
-			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
-		}
-
-		if len(key) == from {
-			value = append(key[to:], value...)
-			key = key[:to]
-			_, v, err := c.getBothRange(key, value[:from-to])
-			if err != nil { // if key not found, or found another one - then just insert
-				if lmdb.IsNotFound(err) {
-					return c.put(key, value)
-				}
-				return err
-			}
-
-			if bytes.Equal(v[:from-to], value[:from-to]) {
-				if len(v) == len(value) { // in DupSort case lmdb.Current works only with values of same length
-					return c.putCurrent(key, value)
-				}
-				err = c.delCurrent()
-				if err != nil {
-					return err
-				}
-			}
-		}
+		c.putDupSort(key, value)
 	}
 
 	return c.put(key, value)
