@@ -26,7 +26,6 @@ type Tx interface {
 	Cursor(bucket string) Cursor
 	CursorDupSort(bucket string) CursorDupSort
 	CursorDupFixed(bucket string) CursorDupFixed
-	CursorNoValues(bucket string) CursorNoValues
 	Get(bucket string, key []byte) (val []byte, err error)
 
 	Commit(ctx context.Context) error
@@ -111,12 +110,6 @@ type CursorDupFixed interface {
 	// The cursor's bucket must be DupFixed and DupSort.
 	PutMulti(key []byte, page []byte, stride int) error
 	// ReserveMulti()
-}
-
-type CursorNoValues interface {
-	First() ([]byte, uint32, error)
-	Seek(seek []byte) ([]byte, uint32, error)
-	Next() ([]byte, uint32, error)
 }
 
 type HasStats interface {

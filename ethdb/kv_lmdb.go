@@ -554,10 +554,6 @@ func (tx *lmdbTx) CursorDupFixed(bucket string) CursorDupFixed {
 	return &LmdbDupFixedCursor{LmdbDupSortCursor: basicCursor}
 }
 
-func (tx *lmdbTx) CursorNoValues(bucket string) CursorNoValues {
-	return &lmdbNoValuesCursor{LmdbCursor: tx.Cursor(bucket).(*LmdbCursor)}
-}
-
 // methods here help to see better pprof picture
 func (c *LmdbCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, lmdb.Set) }
 func (c *LmdbCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, lmdb.GetCurrent) }
@@ -1324,28 +1320,4 @@ func (c *LmdbDupFixedCursor) PutMulti(key []byte, page []byte, stride int) error
 	}
 
 	return c.c.PutMulti(key, page, stride, 0)
-}
-
-type lmdbNoValuesCursor struct {
-	*LmdbCursor
-}
-
-func (c *lmdbNoValuesCursor) First() (k []byte, v uint32, err error) {
-	return c.Seek(c.prefix)
-}
-
-func (c *lmdbNoValuesCursor) Seek(seek []byte) (k []byte, vSize uint32, err error) {
-	k, v, err := c.LmdbCursor.Seek(seek)
-	if err != nil {
-		return []byte{}, 0, err
-	}
-	return k, uint32(len(v)), err
-}
-
-func (c *lmdbNoValuesCursor) Next() (k []byte, vSize uint32, err error) {
-	k, v, err := c.LmdbCursor.Next()
-	if err != nil {
-		return []byte{}, 0, err
-	}
-	return k, uint32(len(v)), err
 }

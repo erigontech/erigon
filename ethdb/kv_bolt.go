@@ -48,10 +48,6 @@ type boltCursor struct {
 	bolt *bolt.Cursor
 }
 
-type noValuesBoltCursor struct {
-	*boltCursor
-}
-
 func (opts boltOpts) InMem() boltOpts {
 	opts.Bolt.MemOnly = true
 	return opts
@@ -300,10 +296,6 @@ func (tx *boltTx) CursorDupFixed(bucket string) CursorDupFixed {
 	panic("not supported")
 }
 
-func (tx *boltTx) CursorNoValues(bucket string) CursorNoValues {
-	return &noValuesBoltCursor{boltCursor: tx.Cursor(bucket).(*boltCursor)}
-}
-
 func (b boltBucket) Cursor() Cursor {
 	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }
@@ -385,52 +377,4 @@ func (c *boltCursor) Put(key []byte, value []byte) error {
 
 func (c *boltCursor) Append(key []byte, value []byte) error {
 	return c.Put(key, value)
-}
-
-func (c *noValuesBoltCursor) First() (k []byte, vSize uint32, err error) {
-	var v []byte
-	if len(c.prefix) == 0 {
-		k, v = c.bolt.First()
-		return k, uint32(len(v)), nil
-	}
-
-	k, v = c.bolt.Seek(c.prefix)
-	if !bytes.HasPrefix(k, c.prefix) {
-		return nil, 0, nil
-	}
-	return k, uint32(len(v)), nil
-}
-
-func (c *noValuesBoltCursor) Seek(seek []byte) (k []byte, vSize uint32, err error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, 0, c.ctx.Err() // on error key should be != nil
-	default:
-	}
-
-	var v []byte
-	k, v = c.bolt.Seek(seek)
-	if c.prefix != nil {
-		if !bytes.HasPrefix(k, c.prefix) {
-			return nil, 0, nil
-		}
-	}
-	return k, uint32(len(v)), nil
-}
-
-func (c *noValuesBoltCursor) Next() (k []byte, vSize uint32, err error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, 0, c.ctx.Err()
-	default:
-	}
-
-	var v []byte
-	k, v = c.bolt.Next()
-	if c.prefix != nil {
-		if !bytes.HasPrefix(k, c.prefix) {
-			return nil, 0, nil
-		}
-	}
-	return k, uint32(len(v)), nil
 }
