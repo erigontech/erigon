@@ -81,7 +81,7 @@ type stEnvMarshaling struct {
 // Apply applies a set of transactions to a pre-state
 func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	txs types.Transactions, miningReward int64,
-	getTracerFn func(txIndex int) (tracer vm.Tracer, err error)) (ethdb.KV, *ExecutionResult, error) {
+	getTracerFn func(txIndex int, txHash common.Hash) (tracer vm.Tracer, err error)) (ethdb.KV, *ExecutionResult, error) {
 
 	// Capture errors for BLOCKHASH operation, if we haven't been supplied the
 	// required blockhashes
@@ -138,7 +138,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 			rejectedTxs = append(rejectedTxs, i)
 			continue
 		}
-		tracer, err := getTracerFn(txIndex)
+		tracer, err := getTracerFn(txIndex, tx.Hash())
 		if err != nil {
 			return nil, nil, err
 		}

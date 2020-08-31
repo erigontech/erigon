@@ -74,11 +74,12 @@ func TestCalcDifficulty(t *testing.T) {
 
 	for name, test := range tests {
 		number := new(big.Int).Sub(test.CurrentBlocknumber, big.NewInt(1))
-		diff := CalcDifficulty(config, test.CurrentTimestamp, &types.Header{
-			Number:     number,
-			Time:       test.ParentTimestamp,
-			Difficulty: test.ParentDifficulty,
-		})
+		diff := CalcDifficulty(config, test.CurrentTimestamp,
+			test.ParentTimestamp,
+			test.ParentDifficulty,
+			number,
+			types.EmptyUncleHash,
+		)
 		if diff.Cmp(test.CurrentDifficulty) != 0 {
 			t.Error(name, "failed. Expected", test.CurrentDifficulty, "and calculated", diff)
 		}

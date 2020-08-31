@@ -14,7 +14,17 @@ import (
 
 const prof = false // whether to profile
 
-func PrepareStagedSync(
+type StagedSync struct {
+	PrefetchedBlocks *PrefetchedBlocks
+}
+
+func New() *StagedSync {
+	return &StagedSync{
+		PrefetchedBlocks: NewPrefetchedBlocks(),
+	}
+}
+
+func (stagedSync *StagedSync) Prepare(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,
@@ -57,7 +67,7 @@ func PrepareStagedSync(
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return spawnBodyDownloadStage(s, u, d, pid)
+				return spawnBodyDownloadStage(s, u, d, pid, stagedSync.PrefetchedBlocks)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindBodyDownloadStage(u, db)
@@ -161,6 +171,26 @@ func PrepareStagedSync(
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return unwindTxPool(u, s, tx, txPool, quitCh)
+			},
+		},
+		{
+			ID:          stages.Finish,
+			Description: "Final: update current block for the RPC API",
+			ExecFunc: func(s *StageState, _ Unwinder) error {
+				var executionAt uint64
+				var err error
+				if executionAt, err = s.ExecutionAt(tx); err != nil {
+					return err
+				}
+				return s.DoneAndUpdate(tx, executionAt)
+			},
+			UnwindFunc: func(u *UnwindState, s *StageState) error {
+				var executionAt uint64
+				var err error
+				if executionAt, err = s.ExecutionAt(tx); err != nil {
+					return err
+				}
+				return s.DoneAndUpdate(tx, executionAt)
 			},
 		},
 	}

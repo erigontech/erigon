@@ -254,7 +254,7 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 		//header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 
 		// Header seems complete, assemble into a block and return
-		return types.NewBlock(header, txs, uncles, receipts), nil
+		return types.NewBlock(header, txs, uncles, receipts, new(trie.Trie)), nil
 	}
 }
 
@@ -266,8 +266,8 @@ func (e *NoRewardEngine) SealHash(header *types.Header) common.Hash {
 	return e.inner.SealHash(header)
 }
 
-func (e *NoRewardEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
-	return e.inner.CalcDifficulty(chain, time, parent)
+func (e *NoRewardEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	return e.inner.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash)
 }
 
 func (e *NoRewardEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {

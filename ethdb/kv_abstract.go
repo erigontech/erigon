@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 var (
@@ -18,6 +19,7 @@ type KV interface {
 	Close()
 
 	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
+	AllBuckets() dbutils.BucketsCfg
 }
 
 type Tx interface {

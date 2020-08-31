@@ -1,5 +1,5 @@
 Database Walkthrough
-==============================
+====================
 
 This document attempts to explain how Turbo-Geth organises its persistent data in its database,
 how this organisation is different from go-ethereum, the project from which it is derived.
@@ -9,7 +9,7 @@ produced by the code available in turbo-geth, and the code which currently resid
 of go-ethereum, but there is an intention to feed it upstream, if there is interest.
 
 Genesis in Turbo-Geth
-------------------------------
+---------------------
 For the genesis block, we generate 3 different private keys and construct Ethereum addresses from them.
 Then, we endow one of the accounts with 9 ETH, and two others with 0.2 and 0.3 ETH, respectively.
 This is how the initial state trie looks like:
@@ -32,18 +32,12 @@ what turbo-geth would persist after generating such a genesis block:
 
 ![genesis_db](changes_0.dot.gd.png)
 
-The database is organised in buckets (or some of you may be more used to the term "tables"). The first bucket
-contains "Preimages". By preimage here we mean the reverse of the `Keccak256` function. Lets zoom into it
+The database is organised in buckets (or some of you may be more used to the term "tables"). 
 
-![genesis_db_preimages](changes_0_secure-key-_11.dot.gd.png)
+Bucket "Receipts"
+-----------------
 
-If you now look closely at the
-keys stored in this bucket (the strings of coloured boxes with digits in them, on the left of the connecting lines),
-and compare them with the paths you have to walk top to bottom to our accounts in the genesis state, you will see that they
-match. And the corresponding values (the strings of coloured boxes on the right of the connecting lines) are the
-account addresses - they are 40 nibbles, or 20 bytes long.
-
-The next bucket, "Receipts", records the list of transaction receipts for each block:
+Records the list of transaction receipts for each block:
 
 ![genesis_db_receipts](changes_0_r_10.dot.gd.png)
 
@@ -51,7 +45,8 @@ The first 8 bytes of the key (or 16 nibbles, equaling to 0s here) encode the blo
 The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there were
 no transactions in the Genesis block, therefore, we have RLP encoding of an empty list, `0xC0`.
 
-Next bucket is "History Of Accounts":
+Bucket "History Of Accounts"
+----------------------------
 
 ![genesis_db_history_of_accounts](changes_0_hAT_9.dot.gd.png)
 
@@ -68,7 +63,10 @@ three accounts in questions did not exist prior to the block 0.
 **WARNING** The layout of this bucket might change very soon, and it will only contain the
 timeseries of block numbers in which particular account has changed.
 
-Next bucket is "Headers", it records information about block headers from various angles.
+Bucket "Headers"
+----------------
+
+it records information about block headers from various angles.
 
 ![genesis_db_headers](changes_0_h_8.dot.gd.png)
 
@@ -82,7 +80,8 @@ suffix `0x6E`, which is ASCII code for `n`. These records allow for the lookup o
 number. They are also called "canonical header" records, because there might be multiple headers for given
 block number, and only one of them is deemed "canonical" at a time.
 
-Next bucket is "Block Bodies":
+Bucket "Block Bodies"
+---------------------
 
 ![genesis_db_block_bodies](changes_0_b_6.dot.gd.png)
 
@@ -106,12 +105,18 @@ The values record the block/header hash of the last header, receipt or block cha
 from its peers in the network. The value in "Last Fast" bucket is not really used at the moment, because turbo-geth
 does not support Fast Sync.
 
-Next bucket, "Header Numbers", is a mapping of 32-byte header/block hashes to the corresponding block numbers (encoded
+Bucket "Header Numbers"
+-----------------------
+
+Is a mapping of 32-byte header/block hashes to the corresponding block numbers (encoded
 in 8 bytes):
 
 ![genesis_db_header_numbers](changes_0_H_2.dot.gd.png)
 
-Bucket "Change Sets" records the history of changes in accounts and contract storage. But, unlike in "History of Accounts"
+Bucket "Change Sets"
+--------------------
+ 
+Records the history of changes in accounts and contract storage. But, unlike in "History of Accounts"
 and "History of Storage" (this bucket will appear later), where keys are derived from accounts' addresses
 (key = address hash + block number), in the "Change Sets" bucket, keys are derived from the block numbers:
 
@@ -137,7 +142,8 @@ as well as linear-time merge of multiple changesets.
 In our example, all values are empty strings, therefore we see 3 zero offsets (24 white boxes with zeros in them).
 5. Values themselves. In our example, they are empty, so this 5th part is not present.
 
-The next bucket is "Accounts":
+Bucket "Accounts"
+-----------------
 
 ![genesis_db_accounts](changes_0_AT_0.dot.gd.png)
 
@@ -322,13 +328,13 @@ Type "help", "copyright", "credits" or "license" for more information.
 Which is 0.001 ETH that is exactly how much has been sent to the recipient address, meaning that this account represent the recipient of the transaction.
 
 Block 1 in go-ethereum
-------------------------------
+----------------------
 
 Now we will create the same Transaction for go-ethereum.
 
 ![geth_block1_db](geth_changes_1.dot.gd.png)
 
-The buckets "Preimages", "Receipts", "Headers", "Config", "Last Header", "Last Fast", "Last Block", all look identical
+The buckets "Receipts", "Headers", "Config", "Last Header", "Last Fast", "Last Block", all look identical
 to those in the turbo-geth database. We will walk through the ones that are different.
 
 In the bucket "Block Bodies", the value is slightly different:

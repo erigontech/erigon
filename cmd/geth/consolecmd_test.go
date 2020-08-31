@@ -43,7 +43,7 @@ func TestConsoleWelcome(t *testing.T) {
 	// Start a geth console, make sure it's cleaned up and terminate the console
 	geth := runGeth(t,
 		"--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
-		"--etherbase", coinbase,
+		"--miner.etherbase", coinbase,
 		"console")
 
 	// Gather all the infos the welcome message needs to contain
@@ -88,7 +88,7 @@ func TestIPCAttachWelcome(t *testing.T) {
 	// list of ipc modules and shh is included there.
 	geth := runGeth(t,
 		"--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
-		"--etherbase", coinbase, "--ipcpath", ipc)
+		"--miner.etherbase", coinbase, "--ipcpath", ipc)
 
 	defer func() {
 		geth.Interrupt()
@@ -106,7 +106,7 @@ func TestHTTPAttachWelcome(t *testing.T) {
 	port := strconv.Itoa(trulyRandInt(1024, 65536)) // Yeah, sometimes this will fail, sorry :P
 	geth := runGeth(t,
 		"--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
-		"--etherbase", coinbase, "--http", "--http.port", port)
+		"--miner.etherbase", coinbase, "--http", "--http.port", port)
 	defer func() {
 		geth.Interrupt()
 		geth.ExpectExit()
@@ -124,7 +124,7 @@ func TestWSAttachWelcome(t *testing.T) {
 
 	geth := runGeth(t,
 		"--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
-		"--etherbase", coinbase, "--ws", "--ws.port", port)
+		"--miner.etherbase", coinbase, "--ws", "--ws.port", port)
 	defer func() {
 		geth.Interrupt()
 		geth.ExpectExit()

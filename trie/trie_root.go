@@ -182,8 +182,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		return nil
 	}
 
-	isIH, _ = keyIsBeforeOrEqual(l.ihK, l.k)
-	if l.ihK == nil && l.k == nil {
+	if l.ihK == nil && l.k == nil { // loop termination
 		l.itemPresent = true
 		l.itemType = CutoffStreamItem
 		l.accountKey = nil
@@ -193,6 +192,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		return nil
 	}
 
+	isIH, _ = keyIsBeforeOrEqual(l.ihK, l.k)
 	if !isIH {
 		// skip wrong incarnation
 		if len(l.k) > common.HashLength && !bytes.HasPrefix(l.k, l.accAddrHashWithInc[:]) {

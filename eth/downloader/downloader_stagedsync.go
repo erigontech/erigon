@@ -14,7 +14,12 @@ import (
 )
 
 // externsions for downloader needed for staged sync
-func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState, u stagedsync.Unwinder) (bool, error) {
+func (d *Downloader) SpawnBodyDownloadStage(
+	id string,
+	s *stagedsync.StageState,
+	u stagedsync.Unwinder,
+	prefetchedBlocks *stagedsync.PrefetchedBlocks,
+) (bool, error) {
 	d.bodiesState = s
 	d.bodiesUnwinder = u
 	defer func() {
@@ -85,6 +90,28 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 		// No more bodies to download
 		return false, nil
 	}
+
+	prefetchedHashes := 0
+	for prefetchedHashes < hashCount {
+		h := hashes[prefetchedHashes]
+		if block := prefetchedBlocks.Pop(h); block != nil {
+			fr := fetchResultFromBlock(block)
+			execute := false
+			_, err := d.importBlockResults([]*fetchResult{fr}, execute)
+			if err != nil {
+				return false, err
+			}
+			prefetchedHashes++
+		} else {
+			break
+		}
+	}
+	if prefetchedHashes > 0 {
+		log.Debug("Used prefetched bodies", "count", prefetchedHashes, "to", origin+uint64(prefetchedHashes))
+		return true, nil
+	}
+
+	log.Info("Downloading block bodies", "count", hashCount)
 	from := origin + 1
 	d.queue.Prepare(from, d.getMode())
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
@@ -106,7 +133,16 @@ func (d *Downloader) SpawnBodyDownloadStage(id string, s *stagedsync.StageState,
 	if err := d.spawnSync(fetchers); err != nil {
 		return false, err
 	}
+
 	return true, nil
+}
+
+func fetchResultFromBlock(b *types.Block) *fetchResult {
+	return &fetchResult{
+		Header:       b.Header(),
+		Uncles:       b.Uncles(),
+		Transactions: b.Transactions(),
+	}
 }
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.

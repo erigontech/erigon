@@ -25,7 +25,6 @@ require (
 	github.com/emicklei/dot v0.11.0
 	github.com/ethereum/evmc/v7 v7.3.0
 	github.com/fatih/color v1.7.0
-	github.com/fjl/memsize v0.0.0-20180418122429-ca190fb6ffbc
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
 	github.com/gin-gonic/gin v1.6.2
 	github.com/go-ole/go-ole v1.2.4 // indirect
@@ -46,7 +45,7 @@ require (
 	github.com/karalabe/usb v0.0.0-20190919080040-51dc0efba356
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
-	github.com/ledgerwatch/lmdb-go v1.13.0
+	github.com/ledgerwatch/lmdb-go v1.13.1-0.20200829020305-221d50cfedab
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.2
@@ -64,8 +63,6 @@ require (
 	github.com/shirou/gopsutil v2.20.5+incompatible
 	github.com/spf13/cobra v1.0.0
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
-	github.com/steakknife/bloomfilter v0.0.0-20180922174646-6819c0d2a570
-	github.com/steakknife/hamming v0.0.0-20180906055917-c99c65617cd3 // indirect
 	github.com/stretchr/testify v1.6.1
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
@@ -78,7 +75,7 @@ require (
 	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
-	google.golang.org/grpc v1.30.0
+	google.golang.org/grpc v1.30.1
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce

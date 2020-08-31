@@ -3,6 +3,9 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"time"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -16,8 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
-	"math/big"
-	"time"
 )
 
 const callTimeout = 5 * time.Second

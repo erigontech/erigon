@@ -107,7 +107,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				return err
 			}
 
-			dbAccountChanges, err := historyDb.GetChangeSetByBlock(false /* storage */, blockNum)
+			dbAccountChanges, err := ethdb.GetChangeSetByBlock(historyDb, false /* storage */, blockNum)
 			if err != nil {
 				return err
 			}
@@ -142,7 +142,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				}
 			}
 
-			dbStorageChanges, err := historyDb.GetChangeSetByBlock(true /* storage */, blockNum)
+			dbStorageChanges, err := ethdb.GetChangeSetByBlock(historyDb, true /* storage */, blockNum)
 			if err != nil {
 				return err
 			}

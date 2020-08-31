@@ -176,7 +176,8 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		panic("block time out of range")
 	}
 	chainreader := &fakeChainReader{config: b.config}
-	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, b.parent.Header())
+	parent := b.parent.Header()
+	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -316,7 +317,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(dbCopy)
 		stateWriter := state.NewDbStateWriter(dbCopy, parent.Number().Uint64()+uint64(i)+1)
-		plainStateWriter := state.NewPlainStateWriter(dbCopy, parent.Number().Uint64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(dbCopy, nil, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter, plainStateWriter)
 		if err != nil {
@@ -342,12 +343,13 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Root:       common.Hash{},
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
-		Difficulty: engine.CalcDifficulty(chain, time, &types.Header{
-			Number:     parent.Number(),
-			Time:       time - 10,
-			Difficulty: parent.Difficulty(),
-			UncleHash:  parent.UncleHash(),
-		}),
+		Difficulty: engine.CalcDifficulty(chain, time,
+			time-10,
+			parent.Difficulty(),
+			parent.Number(),
+			parent.Hash(),
+			parent.UncleHash(),
+		),
 
 		GasLimit: CalcGasLimit(parent, 100*params.TxGas, 1000*params.TxGasContractCreation),
 		Number:   number,
