@@ -112,10 +112,8 @@ for k, v := cursor.Seek(key); k != nil; k, v = cursor.Next() {
 Iterate over bucket with sub-buckets: 
 ```
 cursor := transaction.OpenCursor(bucketName)
-for k1, _ := cursor.First(); k1 != nil; k1, _ = cursor.Next() {
-    for k, v := cursor.FirstInSubBucket(); k != nil; k, v = cursor.NextInSubBucket() {
-        // logic works with 'k1', 'k' and 'v' variables
-    } 
+for k, _ := cursor.SeekDup(subBucketName, keyInSubBucket); k != nil; k, _ = cursor.Next() {
+    // logic works with 'k1', 'k' and 'v' variables
 } 
 ```
 
