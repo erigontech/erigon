@@ -107,8 +107,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 			return fmt.Errorf("could not start RPC api: %w", err)
 		}
 	}
-	extapiURL := fmt.Sprintf("%s", httpEndpoint)
-	log.Info("HTTP endpoint opened", "url", extapiURL, "ws", cfg.WebsocketEnabled)
+	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled)
 
 	defer func() {
 		listener.Close()
