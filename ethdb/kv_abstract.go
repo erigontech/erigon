@@ -48,12 +48,39 @@ type Cursor interface {
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
 	SeekExact(key []byte) ([]byte, error)
-	Next() ([]byte, []byte, error)
+	Next() ([]byte, []byte, error) // Next - returns next key/value (can iterate over DupSort key/values automatically)
 	Last() ([]byte, []byte, error)
 
 	Put(key []byte, value []byte) error
+	// PutNoOverride() error
+	// Reserve()
+	// Current()
+
 	Delete(key []byte) error
 	Append(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
+}
+
+type CursorDupSort interface {
+	Cursor
+
+	SeekBothExact()
+	SeekBothRange()
+	FirstDup()
+	NextDup()   // NextDup - iterate only over duplicates of current key
+	NextNoDup() // NextNoDup - iterate with skipping all duplicates
+	LastDup()
+
+	PutIfNoDup()      // Store the key-value pair only if key is not present
+	CountDuplicates() // Count returns the number of duplicates for the current key. See mdb_cursor_count
+}
+
+type CursorDupFixed interface {
+	CursorDupSort
+
+	GetMulti()
+	NextMulti()
+	PutMulti()
+	// ReserveMulti()
 }
 
 type NoValuesCursor interface {

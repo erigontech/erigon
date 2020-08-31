@@ -755,17 +755,12 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 func (c *LmdbCursor) nextDupSort() (k, v []byte, err error) {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
-	k, v, err = c.cursor.Get(nil, nil, lmdb.NextDup)
-	if err != nil && lmdb.IsNotFound(err) {
-		k, v, err = c.cursor.Get(nil, nil, lmdb.Next)
-		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return nil, nil, nil
-			}
-			return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Next(): %w", err)
+	k, v, err = c.cursor.Get(nil, nil, lmdb.Next)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil, nil
 		}
-	} else if err != nil {
-		return nil, nil, err
+		return []byte{}, nil, fmt.Errorf("failed LmdbKV cursor.Next(): %w", err)
 	}
 	if len(k) == to {
 		k = append(k, v[:from-to]...)
