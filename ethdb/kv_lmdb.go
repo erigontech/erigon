@@ -595,7 +595,7 @@ func (c *LmdbCursor) initCursor() error {
 	if c.c != nil {
 		return nil
 	}
-	if c.bucketCfg.AutoDupSortKeysConversion == false && c.bucketCfg.Flags&lmdb.DupSort != 0 {
+	if !c.bucketCfg.AutoDupSortKeysConversion && c.bucketCfg.Flags&lmdb.DupSort != 0 {
 		return fmt.Errorf("class LmdbCursor can work with DupSort buckets only if they have enabled AutoDupSortKeysConversion property")
 	}
 	tx := c.tx
