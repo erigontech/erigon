@@ -24,7 +24,9 @@ type KV interface {
 
 type Tx interface {
 	Cursor(bucket string) Cursor
-	NoValuesCursor(bucket string) NoValuesCursor
+	CursorDupSort(bucket string) CursorDupSort
+	CursorDupFixed(bucket string) CursorDupFixed
+	CursorNoValues(bucket string) CursorNoValues
 	Get(bucket string, key []byte) (val []byte, err error)
 
 	Commit(ctx context.Context) error
@@ -63,27 +65,38 @@ type Cursor interface {
 type CursorDupSort interface {
 	Cursor
 
-	SeekBothExact()
-	SeekBothRange()
-	FirstDup()
-	NextDup()   // NextDup - iterate only over duplicates of current key
-	NextNoDup() // NextNoDup - iterate with skipping all duplicates
-	LastDup()
+	SeekBothExact(key, value []byte) ([]byte, []byte, error)
+	SeekBothRange(key, value []byte) ([]byte, []byte, error)
+	FirstDup() ([]byte, error)
+	NextDup() ([]byte, []byte, error)   // NextDup - iterate only over duplicates of current key
+	NextNoDup() ([]byte, []byte, error) // NextNoDup - iterate with skipping all duplicates
+	LastDup() ([]byte, error)
 
-	PutIfNoDup()      // Store the key-value pair only if key is not present
-	CountDuplicates() // Count returns the number of duplicates for the current key. See mdb_cursor_count
+	CountDuplicates() (uint64, error)         // Count returns the number of duplicates for the current key. See mdb_cursor_count
+	AppendDup(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
+
+	//PutIfNoDup()      // Store the key-value pair only if key is not present
 }
 
 type CursorDupFixed interface {
 	CursorDupSort
 
-	GetMulti()
-	NextMulti()
-	PutMulti()
+	// GetMulti - return up to a page of duplicate data items from current cursor position
+	// After return - move cursor to prepare for #MDB_NEXT_MULTIPLE
+	// See also lmdb.WrapMulti
+	GetMulti() ([]byte, error)
+	// NextMulti - return up to a page of duplicate data items from next cursor position
+	// After return - move cursor to prepare for #MDB_NEXT_MULTIPLE
+	// See also lmdb.WrapMulti
+	NextMulti() ([]byte, []byte, error)
+	// PutMulti store multiple contiguous data elements in a single request.
+	// Panics if len(page) is not a multiple of stride.
+	// The cursor's bucket must be DupFixed and DupSort.
+	PutMulti(key []byte, page []byte, stride int) error
 	// ReserveMulti()
 }
 
-type NoValuesCursor interface {
+type CursorNoValues interface {
 	First() ([]byte, uint32, error)
 	Seek(seek []byte) ([]byte, uint32, error)
 	Next() ([]byte, uint32, error)

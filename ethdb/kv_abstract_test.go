@@ -248,7 +248,7 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 string) {
 		k, _, err = c.Seek([]byte{99})
 		assert.NoError(err)
 		assert.Nil(k)
-		c2 := tx.NoValuesCursor(bucket1)
+		c2 := tx.CursorNoValues(bucket1)
 
 		k, _, err = c2.First()
 		assert.NoError(err)

@@ -292,7 +292,7 @@ func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
 }
 
-func (tx *boltTx) NoValuesCursor(bucket string) NoValuesCursor {
+func (tx *boltTx) NoValuesCursor(bucket string) CursorNoValues {
 	return &noValuesBoltCursor{boltCursor: tx.Cursor(bucket).(*boltCursor)}
 }
 

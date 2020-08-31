@@ -245,7 +245,7 @@ func (tx *remoteTx) Cursor(bucket string) Cursor {
 	return c
 }
 
-func (tx *remoteTx) NoValuesCursor(bucket string) NoValuesCursor {
+func (tx *remoteTx) NoValuesCursor(bucket string) CursorNoValues {
 	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
