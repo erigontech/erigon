@@ -57,9 +57,22 @@ type Cursor interface {
 	Put(key, value []byte) error
 	//PutNoOverwrite(key, value []byte) error
 	// Reserve()
-	//Current() ([]byte, []byte, error)
 
-	//DeleteCurrent() error
+	// PutCurrent - replace the item at the current cursor position.
+	//	The key parameter must still be provided, and must match it.
+	//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
+	//	sort into the same place. This is intended to be used when the
+	//	new data is the same size as the old. Otherwise it will simply
+	//	perform a delete of the old record followed by an insert.
+	PutCurrent(key, value []byte) error
+	// Current() ([]byte, []byte, error)
+
+	// DeleteCurrent This function deletes the key/data pair to which the cursor refers.
+	// This does not invalidate the cursor, so operations such as MDB_NEXT
+	// can still be used on it.
+	// Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
+	// this operation.
+	DeleteCurrent() error
 	Delete(key []byte) error
 	Append(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
 }
@@ -75,6 +88,7 @@ type CursorDupSort interface {
 	LastDup() ([]byte, error)
 
 	CountDuplicates() (uint64, error)  // Count returns the number of duplicates for the current key. See mdb_cursor_count
+	DeleteCurrentDuplicates() error    // Delete all of the data items for the current key
 	AppendDup(key, value []byte) error // Returns error if provided data not sorted or has duplicates
 
 	//PutIfNoDup()      // Store the key-value pair only if key is not present

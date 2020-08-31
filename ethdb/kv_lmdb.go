@@ -560,6 +560,7 @@ func (tx *lmdbTx) CursorNoValues(bucket string) CursorNoValues {
 
 // methods here help to see better pprof picture
 func (c *LmdbCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, lmdb.Set) }
+func (c *LmdbCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, lmdb.GetCurrent) }
 func (c *LmdbCursor) first() ([]byte, []byte, error)       { return c.c.Get(nil, nil, lmdb.First) }
 func (c *LmdbCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.Next) }
 func (c *LmdbCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, lmdb.NextDup) }
@@ -569,6 +570,7 @@ func (c *LmdbCursor) prevDup() ([]byte, []byte, error)     { return c.c.Get(nil,
 func (c *LmdbCursor) prevNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, lmdb.PrevNoDup) }
 func (c *LmdbCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.Last) }
 func (c *LmdbCursor) delCurrent() error                    { return c.c.Del(0) }
+func (c *LmdbCursor) delNoDupData() error                  { return c.c.Del(lmdb.NoDupData) }
 func (c *LmdbCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
 func (c *LmdbCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, lmdb.Current) }
 func (c *LmdbCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, lmdb.NoOverwrite) }
@@ -808,7 +810,7 @@ func (c *LmdbCursor) Current() ([]byte, []byte, error) {
 		}
 	}
 
-	k, v, err := c.c.Get(nil, nil, lmdb.GetCurrent)
+	k, v, err := c.getCurrent()
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
@@ -852,6 +854,11 @@ func (c *LmdbCursor) Delete(key []byte) error {
 	return c.delCurrent()
 }
 
+// DeleteCurrent This function deletes the key/data pair to which the cursor refers.
+// This does not invalidate the cursor, so operations such as MDB_NEXT
+// can still be used on it.
+// Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
+// this operation.
 func (c *LmdbCursor) DeleteCurrent() error {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
@@ -936,6 +943,12 @@ func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
 		if err := c.initCursor(); err != nil {
 			return err
 		}
+	}
+
+	b := c.bucketCfg
+	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
+		value = append(key[b.DupToLen:], value...)
+		key = key[:b.DupToLen]
 	}
 
 	return c.putCurrent(key, value)
@@ -1225,8 +1238,27 @@ func (c *LmdbCursor) AppendDup(key []byte, value []byte) error {
 	return c.appendDup(key, value)
 }
 
+func (c *LmdbDupSortCursor) PutNoDupData(key, value []byte) error {
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+	return c.putNoDupData(key, value)
+}
+
+// DeleteCurrentDuplicates - delete all of the data items for the current key.
+func (c *LmdbDupSortCursor) DeleteCurrentDuplicates() error {
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+	return c.delNoDupData()
+}
+
 // Count returns the number of duplicates for the current key. See mdb_cursor_count
-func (c *LmdbCursor) CountDuplicates() (uint64, error) {
+func (c *LmdbDupSortCursor) CountDuplicates() (uint64, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return 0, err
