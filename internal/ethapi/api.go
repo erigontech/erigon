@@ -77,22 +77,22 @@ func (s *PublicEthereumAPI) ProtocolVersion() hexutil.Uint {
 // - highestBlock:  block number of the highest block header this node has received from peers
 // - pulledStates:  number of state entries processed until now
 // - knownStates:   number of known state entries that still need to be pulled
-func (s *PublicEthereumAPI) Syncing() (interface{}, error) {
-	progress := s.b.Downloader().Progress()
-
-	// Return not syncing if the synchronisation already completed
-	if progress.CurrentBlock >= progress.HighestBlock {
-		return false, nil
-	}
-	// Otherwise gather the block sync stats
-	return map[string]interface{}{
-		"startingBlock": hexutil.Uint64(progress.StartingBlock),
-		"currentBlock":  hexutil.Uint64(progress.CurrentBlock),
-		"highestBlock":  hexutil.Uint64(progress.HighestBlock),
-		"pulledStates":  hexutil.Uint64(progress.PulledStates),
-		"knownStates":   hexutil.Uint64(progress.KnownStates),
-	}, nil
-}
+//func (s *PublicEthereumAPI) Syncing() (interface{}, error) {
+//	progress := s.b.Downloader().Progress()
+//
+//	// Return not syncing if the synchronisation already completed
+//	if progress.CurrentBlock >= progress.HighestBlock {
+//		return false, nil
+//	}
+//	// Otherwise gather the block sync stats
+//	return map[string]hexutil.Uint64{
+//		"startingBlock": hexutil.Uint64(progress.StartingBlock),
+//		"currentBlock":  hexutil.Uint64(progress.CurrentBlock),
+//		"highestBlock":  hexutil.Uint64(progress.HighestBlock),
+//		"pulledStates":  hexutil.Uint64(progress.PulledStates),
+//		"knownStates":   hexutil.Uint64(progress.KnownStates),
+//	}, nil
+//}
 
 // PublicTxPoolAPI offers and API for the transaction pool. It only operates on data that is non confidential.
 type PublicTxPoolAPI struct {
@@ -695,7 +695,10 @@ type CallArgs struct {
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`
 	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"data"`
+	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
+	// newer name and should be preferred by clients.
+	Data  *hexutil.Bytes `json:"data"`
+	Input *hexutil.Bytes `json:"input"`
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -728,12 +731,14 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 		value.SetFromBig(args.Value.ToInt())
 	}
 
-	var data []byte
-	if args.Data != nil {
-		data = []byte(*args.Data)
+	var input []byte
+	if args.Input != nil {
+		input = *args.Input
+	} else if args.Data != nil {
+		input = *args.Data
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, data, false)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, false)
 	return msg
 }
 

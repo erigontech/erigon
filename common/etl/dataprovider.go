@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -31,6 +32,16 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 	if b.Len() == 0 {
 		return nil, nil
 	}
+	// if we are going to create files in the system temp dir, we don't need any
+	// subfolders.
+	if datadir != "" {
+		// the folder name stays the same and shared between ETL runs, so we don't need to remove it.
+		// it actually can make debugging more tricky in case we leak some open files.
+		datadir = path.Join(datadir, "etl-temp")
+		if err := os.MkdirAll(datadir, 0755); err != nil {
+			return nil, err
+		}
+	}
 	bufferFile, err := ioutil.TempFile(datadir, "tg-sync-sortable-buf")
 	if err != nil {
 		return nil, err
@@ -46,7 +57,6 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 		runtime.ReadMemStats(&m)
 		log.Info(
 			"Flushed buffer file",
-			"current key", makeCurrentKeyStr(currentKey),
 			"name", bufferFile.Name(),
 			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	}()

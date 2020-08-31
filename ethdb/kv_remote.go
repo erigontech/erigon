@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -28,6 +29,7 @@ import (
 type remoteOpts struct {
 	DialAddress string
 	inMemConn   *bufconn.Listener // for tests
+	bucketsCfg  BucketConfigsFunc
 }
 
 type RemoteKV struct {
@@ -36,6 +38,7 @@ type RemoteKV struct {
 	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
+	buckets  dbutils.BucketsCfg
 }
 
 type remoteTx struct {
@@ -75,6 +78,11 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
+func (opts remoteOpts) WithBucketsConfig(f BucketConfigsFunc) remoteOpts {
+	opts.bucketsCfg = f
+	return opts
+}
+
 func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	opts.inMemConn = listener
 	return opts
@@ -106,6 +114,11 @@ func (opts remoteOpts) Open() (KV, Backend, error) {
 		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
+		buckets:  dbutils.BucketsCfg{},
+	}
+	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	for name, cfg := range customBuckets { // copy map to avoid changing global variable
+		db.buckets[name] = cfg
 	}
 
 	eth := &RemoteBackend{
@@ -127,7 +140,11 @@ func (opts remoteOpts) MustOpen() (KV, Backend) {
 }
 
 func NewRemote() remoteOpts {
-	return remoteOpts{}
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs}
+}
+
+func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
+	return db.buckets
 }
 
 // Close
@@ -149,10 +166,6 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 	return sizeReply.Size, nil
-}
-
-func (db *RemoteKV) IdealBatchSize() int {
-	panic("not supported")
 }
 
 func (db *RemoteKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
@@ -188,18 +201,9 @@ func (c *remoteCursor) Prefix(v []byte) Cursor {
 	return c
 }
 
-func (c *remoteCursor) MatchBits(n uint) Cursor {
-	panic("not implemented yet")
-}
-
 func (c *remoteCursor) Prefetch(v uint) Cursor {
 	c.prefetch = uint32(v)
 	return c
-}
-
-func (c *remoteCursor) NoValues() NoValuesCursor {
-	//c.remote = c.remote.NoValues()
-	return &remoteNoValuesCursor{remoteCursor: c}
 }
 
 func (tx *remoteTx) BucketSize(name string) (uint64, error) {
@@ -239,6 +243,10 @@ func (tx *remoteTx) Cursor(bucket string) Cursor {
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket}
 	tx.cursors = append(tx.cursors, c)
 	return c
+}
+
+func (tx *remoteTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
 func (c *remoteCursor) Put(key []byte, value []byte) error {
@@ -308,38 +316,6 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 
 func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
-}
-
-func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }
 
 func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {

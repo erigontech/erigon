@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -103,6 +104,7 @@ var (
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket = "iTh"
+	//IntermediateTrieHashBucket2 = "iTh2"
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
@@ -184,7 +186,7 @@ var (
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsCfg - can be used to find index in sorted version of Buckets list by name
+// BucketsConfigs - can be used to find index in sorted version of Buckets list by name
 var Buckets = []string{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
@@ -230,36 +232,41 @@ var DeprecatedBuckets = []string{
 	PlainStateBucketOld1,
 }
 
-var BucketsCfg = map[string]*BucketConfigItem{}
+type CustomComparator string
+
+const (
+	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
+)
+
+type BucketsCfg map[string]BucketConfigItem
+type Bucket string
 
 type BucketConfigItem struct {
-	ID         int
-	IsDupSort  bool
-	DupToLen   int
-	DupFromLen int
+	Flags               uint
+	IsDeprecated        bool
+	DBI                 lmdb.DBI
+	DupToLen            int
+	DupFromLen          int
+	DupFixedSize        int
+	CustomComparator    CustomComparator
+	CustomDupComparator CustomComparator
 }
 
-type dupSortConfigEntry struct {
-	Bucket    string
-	IsDupSort bool
-	ID        int
-	FromLen   int
-	ToLen     int
-}
-
-var dupSortConfig = []dupSortConfigEntry{
-	{
-		Bucket:    CurrentStateBucket,
-		IsDupSort: true,
-		ToLen:     40,
-		FromLen:   72,
+var BucketsConfigs = BucketsCfg{
+	CurrentStateBucket: {
+		Flags:      lmdb.DupSort,
+		DupToLen:   40,
+		DupFromLen: 72,
 	},
-	{
-		Bucket:    PlainStateBucket,
-		IsDupSort: true,
-		ToLen:     28,
-		FromLen:   60,
+	PlainStateBucket: {
+		Flags:      lmdb.DupSort,
+		DupToLen:   28,
+		DupFromLen: 60,
 	},
+	//IntermediateTrieHashBucket2: {
+	//	Flags:               lmdb.DupSort,
+	//	CustomDupComparator: DupCmpSuffix32,
+	//},
 }
 
 func init() {
@@ -267,27 +274,20 @@ func init() {
 		return strings.Compare(Buckets[i], Buckets[j]) < 0
 	})
 
-	for i := range Buckets {
-		BucketsCfg[Buckets[i]] = createBucketConfig(i, Buckets[i])
-	}
-
-	for i := range DeprecatedBuckets {
-		BucketsCfg[DeprecatedBuckets[i]] = createBucketConfig(len(Buckets)+i, DeprecatedBuckets[i])
-	}
-}
-
-func createBucketConfig(id int, name string) *BucketConfigItem {
-	cfg := &BucketConfigItem{ID: id}
-
-	for _, dupCfg := range dupSortConfig {
-		if dupCfg.Bucket != name {
-			continue
+	for _, name := range Buckets {
+		_, ok := BucketsConfigs[name]
+		if !ok {
+			BucketsConfigs[name] = BucketConfigItem{}
 		}
-
-		cfg.DupFromLen = dupCfg.FromLen
-		cfg.DupToLen = dupCfg.ToLen
-		cfg.IsDupSort = dupCfg.IsDupSort
 	}
 
-	return cfg
+	for _, name := range DeprecatedBuckets {
+		_, ok := BucketsConfigs[name]
+		if !ok {
+			BucketsConfigs[name] = BucketConfigItem{}
+		}
+		tmp := BucketsConfigs[name]
+		tmp.IsDeprecated = true
+		BucketsConfigs[name] = tmp
+	}
 }

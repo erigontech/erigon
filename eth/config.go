@@ -51,24 +51,22 @@ var DefaultLightGPOConfig = gasprice.Config{
 var DefaultConfig = Config{
 	SyncMode: downloader.StagedSync,
 	Ethash: ethash.Config{
-		CacheDir:         "ethash",
 		CachesInMem:      2,
-		CachesOnDisk:     3,
 		CachesLockMmap:   false,
 		DatasetsInMem:    1,
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:          1,
-	LightPeers:         100,
-	UltraLightFraction: 75,
-	DatabaseCache:      512,
-	TrieCleanCache:     256,
+	NetworkID:               1,
+	LightPeers:              100,
+	UltraLightFraction:      75,
+	DatabaseCache:           512,
+	TrieCleanCache:          256,
 	TrieCleanCacheJournal:   "triecache",
 	TrieCleanCacheRejournal: 60 * time.Minute,
-	TrieDirtyCache:     256,
-	TrieTimeout:        60 * time.Minute,
-	StorageMode:        ethdb.DefaultStorageMode,
+	TrieDirtyCache:          256,
+	TrieTimeout:             60 * time.Minute,
+	StorageMode:             ethdb.DefaultStorageMode,
 	Miner: miner.Config{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -89,16 +87,19 @@ func init() {
 		}
 	}
 	if runtime.GOOS == "darwin" {
-		DefaultConfig.Ethash.DatasetDir = filepath.Join(home, "Library", "Ethash")
+		DefaultConfig.Ethash.DatasetDir = filepath.Join(home, "Library", "tg-ethash")
 	} else if runtime.GOOS == "windows" {
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
-			DefaultConfig.Ethash.DatasetDir = filepath.Join(localappdata, "Ethash")
+			DefaultConfig.Ethash.DatasetDir = filepath.Join(localappdata, "tg-thash")
 		} else {
-			DefaultConfig.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "Ethash")
+			DefaultConfig.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "tg-ethash")
 		}
 	} else {
-		DefaultConfig.Ethash.DatasetDir = filepath.Join(home, ".ethash")
+		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
+			DefaultConfig.Ethash.DatasetDir = filepath.Join(xdgDataDir, "tg-ethash")
+		}
+		DefaultConfig.Ethash.DatasetDir = filepath.Join(home, ".local/share/tg-ethash")
 	}
 }
 

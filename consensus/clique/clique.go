@@ -657,8 +657,8 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
-	snap, err := c.snapshot(chain, parent.Number.Uint64(), parent.Hash(), nil)
+func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _, parentNumber *big.Int, parentHash, _ common.Hash) *big.Int {
+	snap, err := c.snapshot(chain, parentNumber.Uint64(), parentHash, nil)
 	if err != nil {
 		return nil
 	}

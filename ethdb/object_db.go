@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -138,10 +140,6 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 
 // Get returns the value for a given key if it's present.
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
-	if metrics.EnabledExpensive {
-		defer dbGetTimer.UpdateSince(time.Now())
-	}
-
 	var dat []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
 		v, err := tx.Get(bucket, key)
@@ -202,26 +200,13 @@ func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uin
 	return dat, err
 }
 
-// getChangeSetByBlockNoLock returns changeset by block and dbi
-func (db *ObjectDatabase) GetChangeSetByBlock(storage bool, timestamp uint64) ([]byte, error) {
+func GetChangeSetByBlock(db Getter, storage bool, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
-
-	var dat []byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(dbutils.ChangeSetByIndexBucket(true /* plain */, storage), key)
-		if err != nil {
-			return err
-		}
-		if v != nil {
-			dat = make([]byte, len(v))
-			copy(dat, v)
-		}
-		return nil
-	})
-	if err != nil {
+	v, err := db.Get(dbutils.ChangeSetByIndexBucket(storage), key)
+	if err != nil && !errors.Is(ErrKeyNotFound, err) {
 		return nil, err
 	}
-	return dat, nil
+	return v, nil
 }
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
@@ -311,7 +296,7 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 		for _, name := range dbutils.Buckets {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
-			return tx.Cursor(name).Walk(func(k, _ []byte) (bool, error) {
+			return ForEach(tx.Cursor(name), func(k, _ []byte) (bool, error) {
 				var kCopy = make([]byte, len(k))
 				copy(kCopy, k)
 				keys = append(append(keys, nameCopy), kCopy)
@@ -345,7 +330,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 			name := name
 			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
 				newBucketToWrite := writeTx.Cursor(name)
-				return readTx.Cursor(name).Walk(func(k, v []byte) (bool, error) {
+				return ForEach(readTx.Cursor(name), func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 						return false, err
 					}
@@ -372,7 +357,7 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 }
 
 func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
-	batch := &TxDb{db: db, cursors: map[string]*LmdbCursor{}}
+	batch := &TxDb{db: db}
 	if err := batch.begin(nil); err != nil {
 		panic(err)
 	}
@@ -381,7 +366,7 @@ func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *ObjectDatabase) IdealBatchSize() int {
-	return db.kv.IdealBatchSize()
+	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
@@ -393,4 +378,81 @@ func (db *ObjectDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+// Type which expecting sequence of triplets: dbi, key, value, ....
+// It sorts entries by dbi name, then inside dbi clusters sort by keys
+type MultiPutTuples [][]byte
+
+func (t MultiPutTuples) Len() int { return len(t) / 3 }
+
+func (t MultiPutTuples) Less(i, j int) bool {
+	i3, j3 := i*3, j*3
+	cmp := bytes.Compare(t[i3], t[j3])
+	if cmp == -1 {
+		return true
+	}
+	if cmp == 0 {
+		return bytes.Compare(t[i3+1], t[j3+1]) == -1
+	}
+	return false
+}
+
+func (t MultiPutTuples) Swap(i, j int) {
+	i3, j3 := i*3, j*3
+	t[i3], t[j3] = t[j3], t[i3]
+	t[i3+1], t[j3+1] = t[j3+1], t[i3+1]
+	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
+}
+
+func Get(db KV, bucket string, key []byte) ([]byte, error) {
+	// Retrieve the key and increment the miss counter if not found
+	var dat []byte
+	err := db.View(context.Background(), func(tx Tx) error {
+		v, err := tx.Get(bucket, key)
+		if err != nil {
+			return err
+		}
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, err
+}
+
+func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byte, err error) {
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(accNoRoot); err != nil {
+		return nil, err
+	}
+	acc.Root = common.BytesToHash(root)
+	accWithRoot = make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(accWithRoot)
+	return accWithRoot, nil
+}
+
+func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
+	fixedbytes = (fixedbits + 7) / 8
+	shiftbits := fixedbits & 7
+	mask = byte(0xff)
+	if shiftbits != 0 {
+		mask = 0xff << (8 - shiftbits)
+	}
+	return fixedbytes, mask
+}
+
+func InspectDatabase(db Database) error {
+	// FIXME: implement in Turbo-Geth
+	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
+	return errNotSupported
+}
+
+func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
+	// FIXME: implement freezer in Turbo-Geth
+	return db, nil
 }

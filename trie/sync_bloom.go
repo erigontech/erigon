@@ -16,6 +16,7 @@
 
 package trie
 
+/*
 import (
 	"encoding/binary"
 	"fmt"
@@ -42,8 +43,8 @@ var (
 )
 
 // syncBloomHasher is a wrapper around a byte blob to satisfy the interface API
-// requirements of the bloom library used. It's used to convert a trie hash into
-// a 64 bit mini hash.
+// requirements of the bloom library used. It's used to convert a trie hash or
+// contract code hash into a 64 bit mini hash.
 type syncBloomHasher []byte
 
 func (f syncBloomHasher) Write(p []byte) (n int, err error) { panic("not implemented") }
@@ -54,9 +55,9 @@ func (f syncBloomHasher) Size() int                         { return 8 }
 func (f syncBloomHasher) Sum64() uint64                     { return binary.BigEndian.Uint64(f) }
 
 // SyncBloom is a bloom filter used during fast sync to quickly decide if a trie
-// node already exists on disk or not. It self populates from the provided disk
-// database on creation in a background thread and will only start returning live
-// results once that's finished.
+// node or contract code already exists on disk or not. It self populates from the
+// provided disk database on creation in a background thread and will only start
+// returning live results once that's finished.
 type SyncBloom struct {
 	bloom  *bloomfilter.Filter
 	inited uint32
@@ -113,18 +114,16 @@ func (b *SyncBloom) init(database ethdb.Database) {
 			}
 			return true, nil
 			// FIXME: restore or remove in Turbo-Geth
-			/*
-				// If enough time elapsed since the last iterator swap, restart
-				if time.Since(swap) > 8*time.Second {
-					key := common.CopyBytes(it.Key())
-
-					it.Release()
-					it = database.NewIteratorWithStart(key)
-
-					log.Info("Initializing fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))
-					swap = time.Now()
-				}
-			*/
+			// If enough time elapsed since the last iterator swap, restart
+			//if time.Since(swap) > 8*time.Second {
+			//	key := common.CopyBytes(it.Key())
+			//
+			//	it.Release()
+			//	it = database.NewIteratorWithStart(key)
+			//
+			//	log.Info("Initializing fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))
+			//	swap = time.Now()
+			//}
 		})
 	}
 
@@ -209,3 +208,5 @@ func (b *SyncBloom) errorRate() float64 {
 
 	return math.Pow(1.0-math.Exp((-k)*(n+0.5)/(m-1)), k)
 }
+
+*/

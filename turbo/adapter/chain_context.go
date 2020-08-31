@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"math/big"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -8,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"math/big"
 )
 
 type chainContext struct {
@@ -53,7 +54,7 @@ func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainHeaderReader, 
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
-func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
+func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 	panic("must not be called")
 }
 func (c *powEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {

@@ -36,12 +36,13 @@ if cmd == "stats":
         b = env.open_db(bucket.encode(), create=False)
         with env.begin(write=False) as txn:
             stat = txn.stat(b)
-            data["name"].append(bucket)
-            data["size"].append(stat['psize'] * (stat['branch_pages'] + stat['leaf_pages'] + stat['overflow_pages']))
-
-    df = pd.DataFrame.from_dict(data)
-    fig = px.pie(df, values='size', names='name', title='Buckets size')
-    fig.show()
+            size = stat['psize'] * (stat['branch_pages'] + stat['leaf_pages'] + stat['overflow_pages'])
+            print("%s: %dMb" % (bucket, size/1024/1024))
+#             data["name"].append(bucket)
+#             data["size"].append(stat['psize'] * (stat['branch_pages'] + stat['leaf_pages'] + stat['overflow_pages']))
+#     df = pd.DataFrame.from_dict(data)
+#     fig = px.pie(df, values='size', names='name', title='Buckets size')
+#     fig.show()
 elif cmd == "gas_limits":
     StartedWhenBlockNumber = chain.lastBlockNumber(env)
 

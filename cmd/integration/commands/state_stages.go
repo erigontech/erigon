@@ -85,10 +85,20 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	bc, st, progress := newSync(ch, db, changeSetHook)
+	tx, errBegin := db.Begin()
+	if errBegin != nil {
+		return errBegin
+	}
+	defer tx.Rollback()
+
+	bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 
-	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.TxPool)
+	if err := tx.CommitAndBegin(); err != nil {
+		return err
+	}
+
+	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
@@ -104,6 +114,10 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		default:
 		}
 
+		if err := tx.CommitAndBegin(); err != nil {
+			return err
+		}
+
 		// All stages forward to `execStage + unwindEvery` block
 		execToBlock := progress(stages.Execution).BlockNumber + unwindEvery
 		if execToBlock > stopAt {
@@ -113,18 +127,18 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, db, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
 		})
 
-		if err := st.Run(db); err != nil {
+		if err := st.Run(db, tx); err != nil {
 			return err
 		}
 
 		for blockN := range expectedAccountChanges {
-			if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
+			if err := checkChangeSet(tx, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 				return err
 			}
 			delete(expectedAccountChanges, blockN)
@@ -139,7 +153,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		execStage := progress(stages.Execution)
 		to := execStage.BlockNumber - unwind
 
-		if err := st.UnwindTo(to, db); err != nil {
+		if err := st.UnwindTo(to, tx); err != nil {
 			return err
 		}
 	}
@@ -147,8 +161,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	return nil
 }
 
-func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
-	dbAccountChanges, err := db.GetChangeSetByBlock(false /* storage */, blockNum)
+func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
+	dbAccountChanges, err := ethdb.GetChangeSetByBlock(db, false /* storage */, blockNum)
 	if err != nil {
 		return err
 	}
@@ -171,7 +185,7 @@ func checkChangeSet(db *ethdb.ObjectDatabase, blockNum uint64, expectedAccountCh
 		return fmt.Errorf("check change set failed")
 	}
 
-	dbStorageChanges, err := db.GetChangeSetByBlock(true /* storage */, blockNum)
+	dbStorageChanges, err := ethdb.GetChangeSetByBlock(db, true /* storage */, blockNum)
 	if err != nil {
 		return err
 	}

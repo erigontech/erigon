@@ -59,18 +59,18 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
 	t := time.Now()
-	if subTries, err := loader.LoadSubTries(); err == nil {
+	if hash, err := loader.CalcTrieRoot(db); err == nil {
 		generationIHTook := time.Since(t)
-		if subTries.Hashes[0] != expectedRootHash {
-			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], expectedRootHash)
+		if hash != expectedRootHash {
+			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 		}
 		log.Debug("Collection finished",
-			"root hash", subTries.Hashes[0].Hex(),
+			"root hash", hash.Hex(),
 			"gen IH", generationIHTook,
 		)
 	} else {
@@ -215,26 +215,38 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewFlatDbSubTrieLoader()
+	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
-	subTries, err := loader.LoadSubTries()
+	hash, err := loader.CalcTrieRoot(db)
 	if err != nil {
 		return err
 	}
 	generationIHTook := time.Since(t)
-	if subTries.Hashes[0] != expectedRootHash {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], expectedRootHash)
+	if hash != expectedRootHash {
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
 	log.Info("Collection finished",
-		"root hash", subTries.Hashes[0].Hex(),
+		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
 
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collector.Load(db,
+		dbutils.IntermediateTrieHashBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
+		},
+	); err != nil {
 		return err
 	}
 	return nil
@@ -283,25 +295,37 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		trie.CompressNibbles(keyHex, &k)
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
-	loader := trie.NewFlatDbSubTrieLoader()
+	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(db, unfurl, trie.NewRetainList(0), hashCollector, [][]byte{nil}, []int{0}, false); err != nil {
+	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
-	subTries, err := loader.LoadSubTries()
+	hash, err := loader.CalcTrieRoot(db)
 	if err != nil {
 		return err
 	}
 	generationIHTook := time.Since(t)
-	if subTries.Hashes[0] != expectedRootHash {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", subTries.Hashes[0], expectedRootHash)
+	if hash != expectedRootHash {
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
 	log.Info("Collection finished",
-		"root hash", subTries.Hashes[0].Hex(),
+		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collector.Load(db,
+		dbutils.IntermediateTrieHashBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k)}
+			},
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
+		},
+	); err != nil {
 		return err
 	}
 	return nil

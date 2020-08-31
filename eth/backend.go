@@ -20,6 +20,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/torrent"
 	"math/big"
 	"os"
@@ -355,9 +356,7 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		return ethash.NewShared()
 	default:
 		engine := ethash.New(ethash.Config{
-			CacheDir:         stack.ResolvePath(config.CacheDir),
 			CachesInMem:      config.CachesInMem,
-			CachesOnDisk:     config.CachesOnDisk,
 			CachesLockMmap:   config.CachesLockMmap,
 			DatasetDir:       config.DatasetDir,
 			DatasetsInMem:    config.DatasetsInMem,
@@ -600,9 +599,12 @@ func (s *Ethereum) IsListening() bool                  { return true } // Always
 func (s *Ethereum) EthVersion() int                    { return int(ProtocolVersions[0]) }
 func (s *Ethereum) NetVersion() (uint64, error)        { return s.networkID, nil }
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.protocolManager.downloader }
-func (s *Ethereum) Synced() bool                       { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
-func (s *Ethereum) ArchiveMode() bool                  { return !s.config.Pruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
+func (s *Ethereum) SyncProgress() ethereum.SyncProgress {
+	return s.protocolManager.downloader.Progress()
+}
+func (s *Ethereum) Synced() bool                     { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
+func (s *Ethereum) ArchiveMode() bool                { return !s.config.Pruning }
+func (s *Ethereum) BloomIndexer() *core.ChainIndexer { return s.bloomIndexer }
 
 // Protocols returns all the currently configured
 // network protocols to start.

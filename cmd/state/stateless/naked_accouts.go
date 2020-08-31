@@ -108,7 +108,7 @@ func accountsReadWrites(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewDbState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		statedb.SetTracer(at)
 		signer := types.MakeSigner(chainConfig, block.Number())

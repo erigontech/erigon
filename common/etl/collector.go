@@ -96,25 +96,35 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		}
 	}
 
-	batch, err := db.Begin()
-	if err != nil {
-		return err
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 	}
-	defer batch.Rollback()
 
-	state := &bucketState{batch, bucket, args.Quit}
+	state := &bucketState{tx, bucket, args.Quit}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
 	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
 		var errLast error
-		lastKey, _, errLast = batch.Last(bucket)
+		lastKey, _, errLast = tx.Last(bucket)
 		if errLast != nil {
 			return errLast
 		}
 	}
 	var canUseAppend bool
 
-	putTimer := time.Now()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	i := 0
 	loadNextFunc := func(originalK, k, v []byte) error {
 		if i == 0 {
@@ -122,35 +132,38 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
-		if i%1_000_000 == 0 && time.Since(putTimer) > 30*time.Second {
-			putTimer = time.Now()
+
+		select {
+		default:
+		case <-logEvery.C:
+			logArs := []interface{}{"into", bucket}
+			if args.LogDetailsLoad != nil {
+				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
+			} else {
+				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+			}
+
 			runtime.ReadMemStats(&m)
-			log.Info(
-				"Loading into bucket",
-				"bucket", bucket,
-				"size", common.StorageSize(batch.BatchSize()),
-				"keys", fmt.Sprintf("%.1fM", float64(i)/1_000_000),
-				"use append", canUseAppend,
-				"current key", makeCurrentKeyStr(originalK),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			log.Info("ETL [2/2] Loading", logArs...)
 		}
 
 		if canUseAppend && len(v) == 0 {
 			return nil // nothing to delete after end of bucket
 		}
 		if len(v) == 0 {
-			if err := batch.Delete(bucket, k); err != nil {
+			if err := tx.Delete(bucket, k); err != nil {
 				return err
 			}
 			return nil
 		}
 		if canUseAppend {
-			if err := batch.(*ethdb.TxDb).Append(bucket, k, v); err != nil {
+			if err := tx.(*ethdb.TxDb).Append(bucket, k, v); err != nil {
 				return err
 			}
 			return nil
 		}
-		if err := batch.Put(bucket, k, v); err != nil {
+		if err := tx.Put(bucket, k, v); err != nil {
 			return err
 		}
 		return nil
@@ -175,13 +188,15 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 	}
 	// Final commit
 	if args.OnLoadCommit != nil {
-		if err := args.OnLoadCommit(batch, []byte{}, true); err != nil {
+		if err := args.OnLoadCommit(tx, []byte{}, true); err != nil {
 			return err
 		}
 	}
 	commitTimer := time.Now()
-	if _, err := batch.Commit(); err != nil {
-		return err
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	commitTook := time.Since(commitTimer)
 
@@ -190,7 +205,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		"Committed batch",
 		"bucket", bucket,
 		"commit", commitTook,
-		"size", common.StorageSize(batch.BatchSize()),
+		"records", i,
 		"current key", makeCurrentKeyStr(nil),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 

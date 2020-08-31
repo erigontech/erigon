@@ -112,6 +112,58 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 }
 
+// Copy creates a deep, independent copy of the state.
+// Snapshots of the copied state cannot be applied to the copy.
+func (sdb *IntraBlockState) Copy() *IntraBlockState {
+	// Copy all the basic fields, initialize the memory ones
+	ibs := &IntraBlockState{
+		stateReader:       sdb.stateReader,
+		stateObjects:      make(map[common.Address]*stateObject, len(sdb.journal.dirties)),
+		stateObjectsDirty: make(map[common.Address]struct{}, len(sdb.journal.dirties)),
+		nilAccounts:       make(map[common.Address]struct{}),
+		refund:            sdb.refund,
+		logs:              make(map[common.Hash][]*types.Log, len(sdb.logs)),
+		logSize:           sdb.logSize,
+		preimages:         make(map[common.Hash][]byte, len(sdb.preimages)),
+		journal:           newJournal(),
+	}
+	// Copy the dirty states, logs, and preimages
+	for addr := range sdb.journal.dirties {
+		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
+		// and in the Finalise-method, there is a case where an object is in the journal but not
+		// in the stateObjects: OOG after touch on ripeMD prior to Byzantium. Thus, we need to check for
+		// nil
+		if object, exist := sdb.stateObjects[addr]; exist {
+			// Even though the original object is dirty, we are not copying the journal,
+			// so we need to make sure that anyside effect the journal would have caused
+			// during a commit (or similar op) is already applied to the copy.
+			ibs.stateObjects[addr] = object.deepCopy(ibs)
+			ibs.stateObjectsDirty[addr] = struct{}{} // Mark the copy dirty to force internal (code/state) commits
+		}
+	}
+	// Above, we don't copy the actual journal. This means that if the copy is copied, the
+	// loop above will be a no-op, since the copy's journal is empty.
+	// Thus, here we iterate over stateObjects, to enable copies of copies
+	for addr := range sdb.stateObjectsDirty {
+		if _, exist := ibs.stateObjects[addr]; !exist {
+			ibs.stateObjects[addr] = sdb.stateObjects[addr].deepCopy(ibs)
+		}
+		ibs.stateObjectsDirty[addr] = struct{}{}
+	}
+	for hash, logs := range sdb.logs {
+		cpy := make([]*types.Log, len(logs))
+		for i, l := range logs {
+			cpy[i] = new(types.Log)
+			*cpy[i] = *l
+		}
+		ibs.logs[hash] = cpy
+	}
+	for hash, preimage := range sdb.preimages {
+		ibs.preimages[hash] = preimage
+	}
+	return ibs
+}
+
 func (sdb *IntraBlockState) SetTracer(tracer StateTracer) {
 	sdb.Lock()
 	defer sdb.Unlock()
