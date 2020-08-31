@@ -722,12 +722,6 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 }
 
 func (c *LmdbCursor) Next() (k, v []byte, err error) {
-	select {
-	case <-c.ctx.Done():
-		return []byte{}, nil, c.ctx.Err()
-	default:
-	}
-
 	if c.cursor == nil {
 		if err = c.initCursor(); err != nil {
 			log.Error("init cursor", "err", err)
@@ -755,6 +749,23 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 		k, v = nil, nil
 	}
 
+	return k, v, nil
+}
+
+func (c *LmdbCursor) Current() ([]byte, []byte, error) {
+	if c.cursor == nil {
+		if err := c.initCursor(); err != nil {
+			return []byte{}, nil, err
+		}
+	}
+
+	k, v, err := c.cursor.Get(nil, nil, lmdb.GetCurrent)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		return []byte{}, nil, err
+	}
 	return k, v, nil
 }
 

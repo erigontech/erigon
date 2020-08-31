@@ -333,7 +333,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 // CalcTrieRoot - spawn 2 cursors (IntermediateHashes and HashedState)
 // Wrap IntermediateHashes cursor to IH class - this class will return only keys which passed RetainDecider check
 // If RetainDecider check not passed, then such key must be deleted - HashCollector receiving nil for such key.
-func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database) (common.Hash, error) {
+func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{}) (common.Hash, error) {
 	var (
 		tx ethdb.Tx
 		kv ethdb.KV
@@ -377,6 +377,10 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database) (common.Hash, error) 
 	defer logEvery.Stop()
 
 	for l.itemType != CutoffStreamItem {
+		if err := common.Stopped(quit); err != nil {
+			return EmptyRoot, err
+		}
+
 		for !l.itemPresent {
 			if err := l.iteration(c, ih, false /* first */); err != nil {
 				return EmptyRoot, err

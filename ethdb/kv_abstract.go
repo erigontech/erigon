@@ -54,7 +54,7 @@ type Cursor interface {
 	Put(key []byte, value []byte) error
 	// PutNoOverride() error
 	// Reserve()
-	// Current()
+	Current() ([]byte, []byte, error)
 
 	Delete(key []byte) error
 	Append(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates

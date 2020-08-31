@@ -64,7 +64,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		return err
 	}
 	t := time.Now()
-	if hash, err := loader.CalcTrieRoot(db); err == nil {
+	if hash, err := loader.CalcTrieRoot(db, quit); err == nil {
 		generationIHTook := time.Since(t)
 		if hash != expectedRootHash {
 			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
@@ -221,7 +221,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		return err
 	}
 	t := time.Now()
-	hash, err := loader.CalcTrieRoot(db)
+	hash, err := loader.CalcTrieRoot(db, quit)
 	if err != nil {
 		return err
 	}
@@ -301,7 +301,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		return err
 	}
 	t := time.Now()
-	hash, err := loader.CalcTrieRoot(db)
+	hash, err := loader.CalcTrieRoot(db, quit)
 	if err != nil {
 		return err
 	}
