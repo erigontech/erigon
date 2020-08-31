@@ -122,7 +122,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				return fmt.Errorf("encode block receipts for block %d: %v", block.NumberU64(), err)
 			}
 			// Store the flattened receipt slice
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
+			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
 			}
 		}
