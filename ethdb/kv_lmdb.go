@@ -930,7 +930,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
-		c.putDupSort(key, value)
+		return c.putDupSort(key, value)
 	}
 
 	return c.put(key, value)
