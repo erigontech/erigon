@@ -288,10 +288,6 @@ func (b boltBucket) Delete(key []byte) error {
 	return b.bolt.Delete(key)
 }
 
-func (c *boltCursor) DeleteCurrent() error {
-	panic("not supported")
-}
-
 func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
 }
@@ -312,16 +308,15 @@ func (b boltBucket) Cursor() Cursor {
 	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }
 
-func (c *boltCursor) Prev() ([]byte, []byte, error) {
-	panic("not implemented")
-}
+func (c *boltCursor) Prev() ([]byte, []byte, error)                 { panic("not implemented") }
+func (c *boltCursor) DeleteCurrent() error                          { panic("not supported") }
+func (c *boltCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
+func (c *boltCursor) Current() ([]byte, []byte, error)              { panic("not supported") }
+func (c *boltCursor) Last() (k, v []byte, err error)                { panic("not implemented yet") }
+func (c *boltCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not implemented yet") }
 
 func (c *boltCursor) SeekExact(key []byte) (val []byte, err error) {
 	return c.bucket.Get(key)
-}
-
-func (c *boltCursor) Current() ([]byte, []byte, error) {
-	panic("not supported")
 }
 
 func (c *boltCursor) First() (k, v []byte, err error) {
@@ -368,10 +363,6 @@ func (c *boltCursor) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (c *boltCursor) Last() (k, v []byte, err error) {
-	panic("not implemented yet")
-}
-
 func (c *boltCursor) Delete(key []byte) error {
 	select {
 	case <-c.ctx.Done():
@@ -380,10 +371,6 @@ func (c *boltCursor) Delete(key []byte) error {
 	}
 
 	return c.bolt.Delete2(key)
-}
-
-func (c *boltCursor) PutNoOverwrite(key []byte, value []byte) error {
-	panic("not implemented yet")
 }
 
 func (c *boltCursor) Put(key []byte, value []byte) error {

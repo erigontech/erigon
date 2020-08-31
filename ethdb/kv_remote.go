@@ -261,29 +261,13 @@ func (tx *remoteTx) CursorNoValues(bucket string) CursorNoValues {
 	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
-func (c *remoteCursor) Current() ([]byte, []byte, error) {
-	panic("not supported")
-}
-
-func (c *remoteCursor) Put(key []byte, value []byte) error {
-	panic("not supported")
-}
-
-func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error {
-	panic("not supported")
-}
-
-func (c *remoteCursor) Append(key []byte, value []byte) error {
-	panic("not supported")
-}
-
-func (c *remoteCursor) Delete(key []byte) error {
-	panic("not supported")
-}
-
-func (c *remoteCursor) DeleteCurrent() error {
-	panic("not supported")
-}
+func (c *remoteCursor) Current() ([]byte, []byte, error)              { panic("not supported") }
+func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
+func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
+func (c *remoteCursor) Delete(key []byte) error                       { panic("not supported") }
+func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
