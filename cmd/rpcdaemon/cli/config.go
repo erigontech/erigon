@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -23,6 +24,7 @@ type Flags struct {
 	API               []string
 	Gascap            uint64
 	MaxTraces         uint64
+	WebsocketEnabled  bool
 }
 
 var rootCmd = &cobra.Command{
@@ -53,6 +55,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth"}, "API's offered over the HTTP-RPC interface")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
+	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
 
 	return rootCmd, cfg
 }
@@ -91,13 +94,21 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 	handler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
-
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
-	if err != nil {
-		return fmt.Errorf("could not start RPC api: %w", err)
+	var listener *http.Server
+	var err error
+	if cfg.WebsocketEnabled {
+		listener, _, err = node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, srv.WebsocketHandler([]string{"*"}))
+		if err != nil {
+			return fmt.Errorf("could not start Websocket: %w", err)
+		}
+	} else {
+		listener, _, err = node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
+		if err != nil {
+			return fmt.Errorf("could not start RPC api: %w", err)
+		}
 	}
-	extapiURL := fmt.Sprintf("http://%s", httpEndpoint)
-	log.Info("HTTP endpoint opened", "url", extapiURL)
+	extapiURL := fmt.Sprintf("%s", httpEndpoint)
+	log.Info("HTTP endpoint opened", "url", extapiURL, "ws", cfg.WebsocketEnabled)
 
 	defer func() {
 		listener.Close()
