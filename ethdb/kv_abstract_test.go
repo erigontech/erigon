@@ -32,9 +32,10 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return map[string]dbutils.BucketConfigItem{
 			bucket1: {
-				Flags:      lmdb.DupSort,
-				DupToLen:   4,
-				DupFromLen: 6,
+				Flags:                     lmdb.DupSort,
+				AutoDupSortKeysConversion: true,
+				DupToLen:                  4,
+				DupFromLen:                6,
 			},
 			bucket2: {
 				Flags: 0,
@@ -143,7 +144,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.Equal(1, counter)
 
 		counter = 0
-		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(k, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		}); err != nil {
