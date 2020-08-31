@@ -122,7 +122,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				return fmt.Errorf("encode block receipts for block %d: %v", block.NumberU64(), err)
 			}
 			// Store the flattened receipt slice
-			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
+			if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
 			}
 		}
@@ -204,8 +204,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	rewindFunc := ethdb.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
-	accountChangeSetBucket := dbutils.PlainAccountChangeSetBucket
-	storageChangeSetBucket := dbutils.PlainStorageChangeSetBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 	deleteAccountFunc := deleteAccountPlain
 	writeAccountFunc := writeAccountPlain
@@ -246,30 +244,29 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
-		if err = deleteChangeSets(batch, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
-			return err
+	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
+			return false, fmt.Errorf("unwind Execution: delete account changesets: %v", err1)
 		}
-		if writeReceipts {
-			blockHash := rawdb.ReadCanonicalHash(batch, i)
-			rawdb.DeleteReceipts(batch, blockHash, i)
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("unwind Execution: walking account changesets: %v", err)
+	}
+	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
+			return false, fmt.Errorf("unwind Execution: delete storage changesets: %v", err1)
 		}
-
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Executed blocks:",
-				"currentBlock", i,
-				"batch", common.StorageSize(batch.BatchSize()),
-				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys),
-				"numGC", int(m.NumGC))
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("unwind Execution: walking storage changesets: %v", err)
+	}
+	if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err1 != nil {
+			return false, fmt.Errorf("unwind Execution: delete receipts: %v", err1)
 		}
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("unwind Execution: walking receipts: %v", err)
 	}
 
 	if err = u.Done(batch); err != nil {
