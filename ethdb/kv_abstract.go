@@ -55,7 +55,7 @@ type Cursor interface {
 	Last() ([]byte, []byte, error)
 
 	Put(key, value []byte) error
-	//PutNoOverwrite(key, value []byte) error
+	// PutNoOverwrite(key, value []byte) error
 	// Reserve()
 
 	// PutCurrent - replace the item at the current cursor position.
@@ -65,7 +65,8 @@ type Cursor interface {
 	//	new data is the same size as the old. Otherwise it will simply
 	//	perform a delete of the old record followed by an insert.
 	PutCurrent(key, value []byte) error
-	// Current() ([]byte, []byte, error)
+	// Current - return key/data at current cursor position
+	Current() ([]byte, []byte, error)
 
 	// DeleteCurrent This function deletes the key/data pair to which the cursor refers.
 	// This does not invalidate the cursor, so operations such as MDB_NEXT

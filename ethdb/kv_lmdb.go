@@ -803,6 +803,7 @@ func (c *LmdbCursor) Prev() (k, v []byte, err error) {
 	return k, v, nil
 }
 
+// Current - return key/data at current cursor position
 func (c *LmdbCursor) Current() ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
