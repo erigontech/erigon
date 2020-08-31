@@ -59,6 +59,7 @@ type Cursor interface {
 	// Reserve()
 	Current() ([]byte, []byte, error)
 
+	DeleteCurrent() error
 	Delete(key []byte) error
 	Append(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
 }

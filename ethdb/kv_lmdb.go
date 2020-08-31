@@ -817,12 +817,6 @@ func (c *LmdbCursor) Current() ([]byte, []byte, error) {
 }
 
 func (c *LmdbCursor) Delete(key []byte) error {
-	select {
-	case <-c.ctx.Done():
-		return c.ctx.Err()
-	default:
-	}
-
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return err
@@ -839,6 +833,16 @@ func (c *LmdbCursor) Delete(key []byte) error {
 			return nil
 		}
 		return err
+	}
+
+	return c.delCurrent()
+}
+
+func (c *LmdbCursor) DeleteCurrent() error {
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
 	}
 
 	return c.delCurrent()

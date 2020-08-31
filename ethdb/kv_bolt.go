@@ -288,6 +288,10 @@ func (b boltBucket) Delete(key []byte) error {
 	return b.bolt.Delete(key)
 }
 
+func (c *boltCursor) DeleteCurrent() error {
+	panic("not supported")
+}
+
 func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
 }

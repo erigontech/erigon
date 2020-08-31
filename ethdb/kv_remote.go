@@ -277,6 +277,10 @@ func (c *remoteCursor) Delete(key []byte) error {
 	panic("not supported")
 }
 
+func (c *remoteCursor) DeleteCurrent() error {
+	panic("not supported")
+}
+
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
 }
