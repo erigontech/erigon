@@ -74,9 +74,6 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 
-		t.Run("NoValues iterator "+msg, func(t *testing.T) {
-			testNoValuesIterator(t, db, bucket1)
-		})
 		t.Run("ctx cancel "+msg, func(t *testing.T) {
 			t.Skip("probably need enable after go 1.4")
 			testCtxCancel(t, db, bucket1)
@@ -202,65 +199,6 @@ func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 string) {
 		}
 	}); err != nil {
 		assert.True(errors.Is(context.DeadlineExceeded, err))
-	}
-}
-
-func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 string) {
-	assert, ctx := assert.New(t), context.Background()
-
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(bucket1)
-
-		k, _, err := c.First()
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 2}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 1}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{1}, k)
-		k, _, err = c.Seek([]byte{0, 1})
-		assert.NoError(err)
-		assert.Equal([]byte{1}, k)
-		k, _, err = c.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal([]byte{2}, k)
-		k, _, err = c.Seek([]byte{99})
-		assert.NoError(err)
-		assert.Nil(k)
-
-		k, _, err = c.First()
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
-		k, _, err = c.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal([]byte{2}, k)
-		k, _, err = c.Seek([]byte{99})
-		assert.NoError(err)
-		assert.Nil(k)
-
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal([]byte{2}, k)
-		k, _, err = c.Seek([]byte{99})
-		assert.NoError(err)
-		assert.Nil(k)
-
-		return nil
-	}); err != nil {
-		assert.NoError(err)
 	}
 }
 
