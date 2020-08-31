@@ -734,7 +734,7 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 		}
 	}
 
-	k, v, err = c.cursor.Get(nil, nil, lmdb.Next)
+	k, v, err = c.next()
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil, nil
@@ -755,20 +755,6 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 		k, v = nil, nil
 	}
 
-	return k, v, nil
-}
-
-func (c *LmdbCursor) nextDupSort() (k, v []byte, err error) {
-	b := c.bucketCfg
-	from, to := b.DupFromLen, b.DupToLen
-	if len(k) == to {
-		k = append(k, v[:from-to]...)
-		v = v[from-to:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 	return k, v, nil
 }
 
