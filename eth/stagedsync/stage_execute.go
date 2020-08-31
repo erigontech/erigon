@@ -244,7 +244,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	if err = stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+	if err = stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
 			return false, fmt.Errorf("unwind Execution: delete account changesets: %v", err1)
 		}
@@ -252,7 +252,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}); err != nil {
 		return fmt.Errorf("unwind Execution: walking account changesets: %v", err)
 	}
-	if err = stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+	if err = stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
 			return false, fmt.Errorf("unwind Execution: delete storage changesets: %v", err1)
 		}
