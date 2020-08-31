@@ -54,12 +54,12 @@ type Cursor interface {
 	Prev() ([]byte, []byte, error)
 	Last() ([]byte, []byte, error)
 
-	Put(key []byte, value []byte) error
-	// PutNoOverride() error
+	Put(key, value []byte) error
+	//PutNoOverwrite(key, value []byte) error
 	// Reserve()
 	Current() ([]byte, []byte, error)
 
-	DeleteCurrent() error
+	//DeleteCurrent() error
 	Delete(key []byte) error
 	Append(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
 }
@@ -74,8 +74,8 @@ type CursorDupSort interface {
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - iterate with skipping all duplicates
 	LastDup() ([]byte, error)
 
-	CountDuplicates() (uint64, error)         // Count returns the number of duplicates for the current key. See mdb_cursor_count
-	AppendDup(key []byte, value []byte) error // Returns error if provided data not sorted or has duplicates
+	CountDuplicates() (uint64, error)  // Count returns the number of duplicates for the current key. See mdb_cursor_count
+	AppendDup(key, value []byte) error // Returns error if provided data not sorted or has duplicates
 
 	//PutIfNoDup()      // Store the key-value pair only if key is not present
 }

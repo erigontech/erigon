@@ -571,6 +571,8 @@ func (c *LmdbCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil,
 func (c *LmdbCursor) delCurrent() error                    { return c.c.Del(0) }
 func (c *LmdbCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
 func (c *LmdbCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, lmdb.Current) }
+func (c *LmdbCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, lmdb.NoOverwrite) }
+func (c *LmdbCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, lmdb.NoDupData) }
 func (c *LmdbCursor) append(k, v []byte) error             { return c.c.Put(k, v, lmdb.Append) }
 func (c *LmdbCursor) appendDup(k, v []byte) error          { return c.c.Put(k, v, lmdb.AppendDup) }
 func (c *LmdbCursor) getBoth(k, v []byte) ([]byte, []byte, error) {
@@ -878,6 +880,23 @@ func (c *LmdbCursor) deleteDupSort(key []byte) error {
 	}
 
 	return c.delCurrent()
+}
+
+func (c *LmdbCursor) PutNoOverwrite(key []byte, value []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
+	}
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	if c.bucketCfg.AutoDupSortKeysConversion {
+		return c.putDupSort(key, value)
+	}
+
+	return c.putNoOverwrite(key, value)
 }
 
 func (c *LmdbCursor) Put(key []byte, value []byte) error {

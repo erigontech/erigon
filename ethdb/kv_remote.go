@@ -269,6 +269,10 @@ func (c *remoteCursor) Put(key []byte, value []byte) error {
 	panic("not supported")
 }
 
+func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error {
+	panic("not supported")
+}
+
 func (c *remoteCursor) Append(key []byte, value []byte) error {
 	panic("not supported")
 }

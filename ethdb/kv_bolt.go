@@ -382,6 +382,10 @@ func (c *boltCursor) Delete(key []byte) error {
 	return c.bolt.Delete2(key)
 }
 
+func (c *boltCursor) PutNoOverwrite(key []byte, value []byte) error {
+	panic("not implemented yet")
+}
+
 func (c *boltCursor) Put(key []byte, value []byte) error {
 	select {
 	case <-c.ctx.Done():
