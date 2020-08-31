@@ -1032,7 +1032,7 @@ func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
 
 // Append - speedy feature of lmdb which is not part of KV interface.
 // Cast your cursor to *LmdbCursor to use this method.
-// Danger: if provided data will not sorted (or bucket have old records which mess with new in sorting manner) - db will corrupt.
+// Return error - if provided data will not sorted (or bucket have old records which mess with new in sorting manner).
 func (c *LmdbCursor) Append(key []byte, value []byte) error {
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
