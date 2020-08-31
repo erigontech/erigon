@@ -239,6 +239,10 @@ func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
 	return v, nil
 }
 
+func (c *remoteCursor) Prev() ([]byte, []byte, error) {
+	panic("not implemented")
+}
+
 func (tx *remoteTx) Cursor(bucket string) Cursor {
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket}
 	tx.cursors = append(tx.cursors, c)

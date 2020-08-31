@@ -308,6 +308,10 @@ func (b boltBucket) Cursor() Cursor {
 	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }
 
+func (c *boltCursor) Prev() ([]byte, []byte, error) {
+	panic("not implemented")
+}
+
 func (c *boltCursor) SeekExact(key []byte) (val []byte, err error) {
 	return c.bucket.Get(key)
 }

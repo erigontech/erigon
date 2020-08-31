@@ -51,6 +51,7 @@ type Cursor interface {
 	Seek(seek []byte) ([]byte, []byte, error)
 	SeekExact(key []byte) ([]byte, error)
 	Next() ([]byte, []byte, error) // Next - returns next key/value (can iterate over DupSort key/values automatically)
+	Prev() ([]byte, []byte, error)
 	Last() ([]byte, []byte, error)
 
 	Put(key []byte, value []byte) error
