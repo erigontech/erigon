@@ -31,7 +31,10 @@ func generateFakeBlocks(from, to int) (*types.Header, []*types.Header) {
 		difficulty := ethash.CalcDifficulty(
 			params.AllEthashProtocolChanges,
 			time,
-			parent,
+			parent.Time,
+			parent.Difficulty,
+			parent.Number,
+			parent.UncleHash,
 		)
 
 		header := &types.Header{

@@ -176,7 +176,8 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		panic("block time out of range")
 	}
 	chainreader := &fakeChainReader{config: b.config}
-	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, b.parent.Header())
+	parent := b.parent.Header()
+	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -342,12 +343,13 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Root:       common.Hash{},
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
-		Difficulty: engine.CalcDifficulty(chain, time, &types.Header{
-			Number:     parent.Number(),
-			Time:       time - 10,
-			Difficulty: parent.Difficulty(),
-			UncleHash:  parent.UncleHash(),
-		}),
+		Difficulty: engine.CalcDifficulty(chain, time,
+			time-10,
+			parent.Difficulty(),
+			parent.Number(),
+			parent.Hash(),
+			parent.UncleHash(),
+		),
 
 		GasLimit: CalcGasLimit(parent, 100*params.TxGas, 1000*params.TxGasContractCreation),
 		Number:   number,
