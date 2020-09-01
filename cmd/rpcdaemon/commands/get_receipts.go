@@ -109,11 +109,16 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit ethereum.FilterQuery) ([]*
 		filter = NewBlockFilter(*crit.BlockHash, crit.Addresses, crit.Topics)
 	} else {
 		// Convert the RPC block numbers into internal representations
-		begin := rpc.LatestBlockNumber.Int64()
+		latest, err := getLatestBlockNumber(api.dbReader)
+		if err != nil {
+			return nil, err
+		}
+
+		begin := int64(latest)
 		if crit.FromBlock != nil {
 			begin = crit.FromBlock.Int64()
 		}
-		end := rpc.LatestBlockNumber.Int64()
+		end := int64(latest)
 		if crit.ToBlock != nil {
 			end = crit.ToBlock.Int64()
 		}
@@ -240,24 +245,21 @@ func (f *Filter) Logs(ctx context.Context, api *APIImpl) ([]*types.Log, error) {
 	}
 
 	// Figure out the limits of the filter range
-	// FIXME: read latest block number
-	header, _ := api.GetHeaderByNumber(ctx, rpc.LatestBlockNumber)
-	if header == nil {
-		return nil, nil
+	latest, err := getLatestBlockNumber(api.dbReader)
+	if err != nil {
+		return nil, err
 	}
-	head := header.Number.Uint64()
 
 	if f.begin == -1 {
-		f.begin = int64(head)
+		f.begin = int64(latest)
 	}
 	end := uint64(f.end)
 	if f.end == -1 {
-		end = head
+		end = latest
 	}
 
 	// Gather all indexed logs, and finish with non indexed ones
 	var logs []*types.Log
-	var err error
 	size, sections, _ := api.ethBackend.BloomStatus()
 
 	if indexed := sections * size; indexed > uint64(f.begin) {

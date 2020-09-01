@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -18,17 +17,9 @@ import (
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	var blockNum uint64
-	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
-		var err error
-		blockNum, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
-		if err != nil {
-			return nil, fmt.Errorf("getting latest block number: %v", err)
-		}
-	} else if number == rpc.EarliestBlockNumber {
-		blockNum = 0
-	} else {
-		blockNum = uint64(number.Int64())
+	blockNum, err := getBlockNumber(number, api.dbReader)
+	if err != nil {
+		return nil, err
 	}
 	additionalFields := make(map[string]interface{})
 

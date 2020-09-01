@@ -84,18 +84,11 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 }
 
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	var blockNum uint64
-	if blockNr == rpc.LatestBlockNumber || blockNr == rpc.PendingBlockNumber {
-		var err error
-		blockNum, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
-		if err != nil {
-			return nil, fmt.Errorf("getting latest block number: %v", err)
-		}
-	} else if blockNr == rpc.EarliestBlockNumber {
-		blockNum = 0
-	} else {
-		blockNum = uint64(blockNr.Int64())
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
 	}
+
 	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
