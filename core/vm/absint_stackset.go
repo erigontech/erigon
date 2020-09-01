@@ -454,14 +454,17 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 			jumpDest := stack.values[0]
 			if jumpDest.kind == TopValue {
 				isBadJump = true
+				cfg.BadJumpImprecision = true
 			} else if jumpDest.kind == ConcreteValue {
 				if jumpDest.value.IsUint64() {
 					pc1 := int(jumpDest.value.Uint64())
 
-					if pc1 >= len(cfg.Program.Stmts) {
+					if pc1 >= len(cfg.Program.Stmts) || cfg.Program.Stmts[pc1].operation == nil {
 						isBadJump = true
+						cfg.BadJumpInvalidOpcode = true
 					} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
 						isBadJump = true
+						cfg.BadJumpInvalidJumpDest = true
 					} else {
 						edges = append(edges, edge{pc0, stmt, pc1, true})
 					}
@@ -599,6 +602,11 @@ type Cfg struct {
 	PrevEdgeMap      map[int]map[int]bool
 	D                map[int]*astate
 	LowCoverage      bool
+
+	BadJumpImprecision 		bool
+	BadJumpInvalidOp   		bool
+	BadJumpInvalidJumpDest 	bool
+	BadJumpInvalidOpcode	bool
 }
 
 type CfgCoverageStats struct {

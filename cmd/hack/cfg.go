@@ -46,11 +46,11 @@ func testCfgCodes(chaindata string) error {
 		numProgramsAnalyzed := 0
 		numUnresolved := 0
 		numLowCoverage := 0
+		numImprecision := 0
+		numInvalidOpcode := 0
+		numInvalidJumpDest := 0
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			numProgramsAnalyzed++
-			if numProgramsAnalyzed < 2370 {
-				continue
-			}
 			if err != nil {
 				return err
 			}
@@ -65,8 +65,6 @@ func testCfgCodes(chaindata string) error {
 			}
 			if cfg.Panic {
 				numPanic++
-				fmt.Printf("%v\n", cfg.Program.GetCodeHex())
-				cfg.PrintAnlyState()
 				break
 			}
 			if cfg.AnlyCounterLimit {
@@ -81,9 +79,17 @@ func testCfgCodes(chaindata string) error {
 			if cfg.LowCoverage {
 				numLowCoverage++
 			}
-
+			if cfg.BadJumpImprecision {
+				numImprecision++
+			}
+			if cfg.BadJumpInvalidOp {
+				numInvalidOpcode++
+			}
+			if cfg.BadJumpInvalidJumpDest {
+				numInvalidJumpDest++
+			}
 			if numPrograms % 10 == 0 {
-				fmt.Printf("Pass=%v Analyzed=%v PassRate=%v Total=%v Panic=%v CounterLimit=%v ShortStack=%v Unresolved=%v DeadCode=%v\n",
+				fmt.Printf("Pass=%v Analyzed=%v PassRate=%v Total=%v Panic=%v CounterLimit=%v ShortStack=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v\n",
 					numPass,
 					numProgramsAnalyzed,
 					percent(numPass,numProgramsAnalyzed),
@@ -92,6 +98,9 @@ func testCfgCodes(chaindata string) error {
 					numAnlyCounterLimit,
 					percent(numShortStack,numProgramsAnalyzed),
 					percent(numUnresolved,numProgramsAnalyzed),
+					percent(numImprecision,numProgramsAnalyzed),
+					percent(numInvalidOpcode,numProgramsAnalyzed),
+					percent(numInvalidJumpDest,numProgramsAnalyzed),
 					percent(numLowCoverage,numProgramsAnalyzed))
 			}
 		}
@@ -108,10 +117,10 @@ func percent(n int, d int) string {
 }
 
 func testGenCfg() {
-//	_ = testCfgCodes("codes")
-//	if false {
-//		return
-//	}
+	_ = testCfgCodes("codes")
+	if false {
+		return
+	}
 
 	args := os.Args
 	if len(args) == 4 {
@@ -325,9 +334,9 @@ func runCfgAnly(testName string, code string) {
 	contract.Code = decoded
 	var cfg *vm.Cfg
 	cfg, err = vm.GenCfg(contract, 0, 64)
-	//cfg.PrintAnlyState()
+	cfg.PrintAnlyState()
 	if !cfg.Valid || err != nil {
-		fmt.Printf("Test failed: %v %v\n", testName, err)
+		fmt.Printf("Test failed: %v %v\n", testName, err, )
 	} else {
 		fmt.Printf("Test passed: %v Covered=%v Instructions=%v Uncovered=%v Epilogue=%v\n",
 			testName,
