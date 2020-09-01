@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bufio"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/emicklei/dot"
@@ -23,19 +24,21 @@ const (
 //////////////////////////
 
 // stmt is the representation of an executable instruction - extension of an opcode
-type astmt struct {
+type Astmt struct {
 	inferredAsData bool
 	ends           bool
 	isBlockEntry   bool
 	isBlockExit    bool
+	covered        bool
 	opcode         OpCode
 	operation      *operation
 	pc             int
 	numBytes       int
 	value          uint256.Int
+	epilogue       bool
 }
 
-func (stmt *astmt) String() string {
+func (stmt *Astmt) String() string {
 	ends := ""
 	if stmt.ends {
 		ends = "ends"
@@ -43,23 +46,29 @@ func (stmt *astmt) String() string {
 	return fmt.Sprintf("%v %v %v", stmt.opcode, ends, stmt.operation.isPush)
 }
 
-type program struct {
-	contract    *Contract
-	stmts       []*astmt
-	blocks      []*block
-	entry2block map[int]*block
-	exit2block  map[int]*block
+type Program struct {
+	Contract    *Contract
+	Stmts       []*Astmt
+	Blocks      []*Block
+	Entry2block map[int]*Block
+	Exit2block  map[int]*Block
 }
 
-func toProgram(contract *Contract) *program {
+func (program *Program) GetCodeHex() string {
+	dst := make([]byte, hex.EncodedLen(len(program.Contract.Code)))
+	hex.Encode(dst, program.Contract.Code)
+	return fmt.Sprintf("%s", dst)
+}
+
+func toProgram(contract *Contract) *Program {
 	jt := newIstanbulInstructionSet()
 
-	program := &program{contract: contract}
+	program := &Program{Contract: contract}
 
 	codeLen := len(contract.Code)
 	inferIsData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
-		stmt := astmt{}
+		stmt := Astmt{}
 		stmt.pc = pc
 		stmt.inferredAsData = inferIsData[pc]
 
@@ -93,24 +102,24 @@ func toProgram(contract *Contract) *program {
 			stmt.numBytes = 1
 		}
 
-		program.stmts = append(program.stmts, &stmt)
-		if pc != len(program.stmts)-1 {
+		program.Stmts = append(program.Stmts, &stmt)
+		if pc != len(program.Stmts)-1 {
 			panic("Invalid length")
 		}
 	}
 
-	for pc, stmt := range program.stmts {
+	for pc, stmt := range program.Stmts {
 		if !stmt.inferredAsData {
 			if pc == 0 {
 				stmt.isBlockEntry = true
 			} else if stmt.opcode == JUMPDEST {
 				stmt.isBlockEntry = true
-			} else if stmt.opcode == JUMPI && pc < len(program.stmts)-1 {
-				entry := program.stmts[pc+1]
+			} else if stmt.opcode == JUMPI && pc < len(program.Stmts)-1 {
+				entry := program.Stmts[pc+1]
 				entry.isBlockEntry = true
 			}
 
-			if pc == len(program.stmts)-1 {
+			if pc == len(program.Stmts)-1 {
 				stmt.isBlockExit = true
 			} else if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 				stmt.isBlockExit = true
@@ -118,34 +127,54 @@ func toProgram(contract *Contract) *program {
 		}
 	}
 
-	program.entry2block = make(map[int]*block)
-	program.exit2block = make(map[int]*block)
+	program.Entry2block = make(map[int]*Block)
+	program.Exit2block = make(map[int]*Block)
 
-	for entrypc, entry := range program.stmts {
+	for entrypc, entry := range program.Stmts {
 		if entry.isBlockEntry {
-			block := &block{entrypc: entrypc, stmts: make([]*astmt, 0)}
-			program.blocks = append(program.blocks, block)
-			for i := entrypc; i < len(program.stmts); i++ {
-				block.stmts = append(block.stmts, program.stmts[i])
-				if program.stmts[i].isBlockExit {
+			block := &Block{Entrypc: entrypc, Stmts: make([]*Astmt, 0)}
+			program.Blocks = append(program.Blocks, block)
+			for i := entrypc; i < len(program.Stmts); i++ {
+				block.Stmts = append(block.Stmts, program.Stmts[i])
+				if program.Stmts[i].isBlockExit {
 					break
 				}
 			}
 
-			if len(block.stmts) > 0 {
-				block.exitpc = block.stmts[len(block.stmts)-1].pc
+			if len(block.Stmts) > 0 {
+				block.Exitpc = block.Stmts[len(block.Stmts)-1].pc
 			}
 
-			program.entry2block[block.entrypc] = block
-			program.exit2block[block.exitpc] = block
+			program.Entry2block[block.Entrypc] = block
+			program.Exit2block[block.Exitpc] = block
 		}
 	}
+
+	/*
+	epilogue := []byte{0xa1, 0x65, 0x62, 0x7a, 0x7a, 0x72}
+
+	for i := 0; i < len(program.Stmts) - len(epilogue) + 1; i++ {
+		match := true
+		for e := 0; e < len(epilogue); e++ {
+			if byte(program.Stmts[i+e].opcode) != epilogue[e] {
+				match = false
+				break
+			}
+		}
+		if match {
+			for j := i; j < len(program.Stmts); j++ {
+				program.Stmts[j].inferredAsData = true
+				program.Stmts[j].epilogue = true
+			}
+			break
+		}
+	}*/
 
 	return program
 }
 
 /*
-func printStmts(stmts []*astmt) {
+func printStmts(stmts []*Astmt) {
 	for i, stmt := range stmts {
 		fmt.Printf("%v %v\n", i, stmt)
 	}
@@ -155,7 +184,7 @@ func printStmts(stmts []*astmt) {
 
 type edge struct {
 	pc0    int
-	stmt   *astmt
+	stmt   *Astmt
 	pc1    int
 	isJump bool
 }
@@ -399,21 +428,22 @@ func (state *astate) Add(stack *astack) {
 type ResolveResult struct {
 	edges    []edge
 	resolved bool
-	badJump  *astmt
 }
 
 // resolve analyses given executable instruction at given program counter in the context of given state
 // It either concludes that the execution of the instruction may result in a jump to an unpredictable
 // destination (in this case, attrubute resolved will be false), or returns one (for a non-JUMPI) or two (for JUMPI)
 // edges that contain program counters of destinations where the executions can possibly come next
-func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
-	stmt := program.stmts[pc0]
+func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
+	st0 := cfg.D[pc0]
+
+	stmt := cfg.Program.Stmts[pc0]
 
 	if stmt.ends {
-		return ResolveResult{resolved: true}
+		return nil, nil
 	}
 
-	codeLen := len(program.contract.Code)
+	codeLen := len(cfg.Program.Contract.Code)
 
 	var edges []edge
 	isBadJump := false
@@ -428,7 +458,9 @@ func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 				if jumpDest.value.IsUint64() {
 					pc1 := int(jumpDest.value.Uint64())
 
-					if program.stmts[pc1].opcode != JUMPDEST {
+					if pc1 >= len(cfg.Program.Stmts) {
+						isBadJump = true
+					} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
 						isBadJump = true
 					} else {
 						edges = append(edges, edge{pc0, stmt, pc1, true})
@@ -447,11 +479,25 @@ func resolve(program *program, pc0 int, st0 *astate) ResolveResult {
 		}
 	}
 
-	if isBadJump {
-		return ResolveResult{edges: edges, resolved: false, badJump: stmt}
+	for _, e := range edges {
+		if cfg.PrevEdgeMap[e.pc1] == nil {
+			cfg.PrevEdgeMap[e.pc1] = make(map[int]bool)
+		}
+		cfg.PrevEdgeMap[e.pc1][e.pc0] = true
+
+		cfg.Program.Stmts[e.pc0].covered = true
+		cfg.Program.Stmts[e.pc1].covered = true
 	}
 
-	return ResolveResult{edges: edges, resolved: true, badJump: nil}
+	if isBadJump {
+		cfg.BadJumps[stmt.pc] = true
+		cfg.Unresolved = true
+		cfg.checkRep()
+		return edges, errors.New("unresolvable jumps found")
+	}
+
+	cfg.checkRep()
+	return edges, nil
 }
 
 func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
@@ -534,19 +580,88 @@ func Lub(st0 *astate, st1 *astate) *astate {
 	return newState
 }
 
-type block struct {
-	entrypc int
-	exitpc  int
-	stmts   []*astmt
+type Block struct {
+	Entrypc int
+	Exitpc  int
+	Stmts   []*Astmt
 }
 
-func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[int]*astate, badJumps map[int]bool) {
+
+type Cfg struct {
+	Valid            bool
+	Panic            bool
+	Unresolved       bool
+	ShortStack       bool
+	AnlyCounterLimit bool
+	AnlyCounter      int
+	Program          *Program
+	BadJumps         map[int]bool
+	PrevEdgeMap      map[int]map[int]bool
+	D                map[int]*astate
+	LowCoverage      bool
+}
+
+type CfgCoverageStats struct {
+	Covered				int
+	Uncovered			int
+	Instructions		int
+	Coverage            int
+	Epilogue		    int
+}
+
+func (cfg *Cfg) checkRep() {
+
+	for pc1, pc0s := range cfg.PrevEdgeMap {
+		for pc0 := range pc0s {
+			s := cfg.Program.Stmts[pc0]
+			if s.ends {
+				msg := fmt.Sprintf("Halt has successor: %v -> %v", pc0, pc1)
+				panic(msg)
+			}
+		}
+	}
+}
+
+
+func (cfg *Cfg) GetCoverageStats() CfgCoverageStats {
+	stats := CfgCoverageStats{}
+	firstUncovered := -1
+	for pc, stmt := range cfg.Program.Stmts {
+		if !stmt.inferredAsData {
+			if stmt.covered {
+				stats.Covered++
+			} else {
+				if firstUncovered < 0 {
+					firstUncovered = pc
+				}
+			}
+			stats.Instructions++
+		}
+	}
+
+	stats.Epilogue = 0
+	for i := len(cfg.Program.Stmts) - 1; i >= 0; i-- {
+		stmt := cfg.Program.Stmts[i]
+		if !stmt.inferredAsData {
+			if cfg.Program.Stmts[i].covered {
+				break
+			}
+			stats.Epilogue++
+		}
+	}
+
+	stats.Uncovered = stats.Instructions - stats.Covered
+	stats.Coverage = stats.Covered * 100 / stats.Instructions
+	return stats
+}
+
+func (cfg *Cfg) PrintAnlyState() {
 	//	es := make([]edge, len(edges))
 	//	copy(es, edges)
 	//	sortEdges(es)
 
 	var badJumpList []string
-	for pc, stmt := range program.stmts {
+	for pc, stmt := range cfg.Program.Stmts {
 		if stmt.inferredAsData {
 			//fmt.Printf("data: %v\n", stmt.inferredAsData)
 			continue
@@ -564,18 +679,18 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 		}
 
 		pc0s := make([]string, 0)
-		for pc0 := range prevEdgeMap[pc] {
+		for pc0 := range cfg.PrevEdgeMap[pc] {
 			pc0s = append(pc0s, strconv.Itoa(pc0))
 		}
 
-		if badJumps[pc] {
-			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(false))
+		if cfg.BadJumps[pc] {
+			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(cfg.D[pc].anlyCounter), aurora.Cyan(cfg.D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), cfg.D[pc].String(false))
 			fmt.Print(out)
 			badJumpList = append(badJumpList, out)
-		} else if prevEdgeMap[pc] != nil {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), D[pc].String(true))
+		} else if cfg.PrevEdgeMap[pc] != nil {
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(cfg.D[pc].anlyCounter), aurora.Cyan(cfg.D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), cfg.D[pc].String(true))
 		} else {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", aurora.Blue(D[pc].anlyCounter), aurora.Cyan(D[pc].worklistLen), aurora.Yellow(pc), valueStr)
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", aurora.Blue(cfg.D[pc].anlyCounter), aurora.Cyan(cfg.D[pc].worklistLen), aurora.Yellow(pc), valueStr)
 		}
 	}
 
@@ -585,21 +700,21 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 	}
 
 	g := dot.NewGraph(dot.Directed)
-	block2node := make(map[*block]*dot.Node)
-	for _, block := range program.blocks {
-		n := g.Node(fmt.Sprintf("%v\n%v", block.entrypc, block.exitpc)).Box()
+	block2node := make(map[*Block]*dot.Node)
+	for _, block := range cfg.Program.Blocks {
+		n := g.Node(fmt.Sprintf("%v\n%v", block.Entrypc, block.Exitpc)).Box()
 		block2node[block] = &n
 	}
 
-	for pc1 := range prevEdgeMap {
-		for pc0 := range prevEdgeMap[pc1] {
-			block1 := program.entry2block[pc1]
+	for pc1 := range cfg.PrevEdgeMap {
+		for pc0 := range cfg.PrevEdgeMap[pc1] {
+			block1 := cfg.Program.Entry2block[pc1]
 
 			if block1 == nil {
 				continue
 			}
 
-			block0 := program.exit2block[pc0]
+			block0 := cfg.Program.Exit2block[pc0]
 			if block0 == nil {
 				continue
 			}
@@ -627,90 +742,65 @@ func printAnlyState(program *program, prevEdgeMap map[int]map[int]bool, D map[in
 	_ = w.Flush()
 }
 
-func check(program *program, prevEdgeMap map[int]map[int]bool) {
-
-	for pc1, pc0s := range prevEdgeMap {
-		for pc0 := range pc0s {
-			s := program.stmts[pc0]
-			if s.ends {
-				msg := fmt.Sprintf("Halt has successor: %v -> %v", pc0, pc1)
-				panic(msg)
+func pushNewEdges(workList []edge, edges []edge) []edge {
+	for _, e := range edges {
+		inWorkList := false
+		for _, w := range workList {
+			if w.pc0 == e.pc0 && w.pc1 == e.pc1 {
+				inWorkList = true
 			}
 		}
+		if !inWorkList {
+			head := []edge{e}
+			workList = append(head, workList...)
+		}
 	}
+	return workList
 }
 
-type Cfg struct {
-	FinalEdges 			[]edge
-	ReachableEdges 		[]edge
-	AnlyCounter 		int
-
-	Valid      			bool
-	Panic      			bool
-	Unresolved 			bool
-	ShortStack 			bool
-	AnlyCounterLimit 	bool
-
-	BadJumps 			map[int]bool
-}
-
-func (cfg *Cfg) PrintStats() {
-	fmt.Printf("\n# of unreachable edges: %v\n", len(cfg.FinalEdges)-len(cfg.ReachableEdges))
-	fmt.Printf("\n# of total edges: %v\n", len(cfg.FinalEdges))
-}
 
 func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, err error) {
-	defer func() {
+	/*defer func() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
 			err = errors.New("internal panic")
 			cfg.Panic = true
 		}
-	}()
+	}()*/
 
-	cfg = &Cfg{BadJumps: make(map[int]bool)}
 	program := toProgram(contract)
+	cfg = &Cfg{BadJumps: make(map[int]bool)}
+	cfg.Program = program
+	cfg.PrevEdgeMap = make(map[int]map[int]bool)
 
 	startPC := 0
-	codeLen := len(program.contract.Code)
-	D := make(map[int]*astate)
+	codeLen := len(program.Contract.Code)
+	cfg.D = make(map[int]*astate)
 	for pc := 0; pc < codeLen; pc++ {
-		D[pc] = emptyState(astackLen)
+		cfg.D[pc] = emptyState(astackLen)
 	}
-	D[startPC] = botState(astackLen)
-
-	prevEdgeMap := make(map[int]map[int]bool)
+	cfg.D[startPC] = botState(astackLen)
 
 	var workList []edge
-	{
-		resolution := resolve(program, startPC, D[startPC])
-		if !resolution.resolved {
-			cfg.Unresolved = true
-			return cfg, errors.New("unresolvable jumps found")
-		}
 
-		for _, e := range resolution.edges {
-			if prevEdgeMap[e.pc1] == nil {
-				prevEdgeMap[e.pc1] = make(map[int]bool)
-			}
-			prevEdgeMap[e.pc1][e.pc0] = true
-		}
-		workList = resolution.edges
+	edgesR1, errR1 := resolve(cfg, startPC)
+	if errR1 != nil {
+		return cfg, errR1
 	}
-
-	check(program, prevEdgeMap)
+	workList = pushNewEdges(workList, edgesR1)
 
 	for len(workList) > 0 {
 		if anlyCounterLimit > 0 && cfg.AnlyCounter > anlyCounterLimit {
 			cfg.AnlyCounterLimit = true
 			return cfg, errors.New("reached analysis counter limit")
 		}
-		//sortEdges(workList)
+
 		var e edge
 		e, workList = workList[0], workList[1:]
 
-		preDpc0 := D[e.pc0]
-		preDpc1 := D[e.pc1]
+		preDpc0 := cfg.D[e.pc0]
+		preDpc1 := cfg.D[e.pc1]
+
 		post1, err := post(cfg, preDpc0, e)
 		if err != nil {
 			return cfg, err
@@ -718,61 +808,35 @@ func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, 
 
 		if !Leq(post1, preDpc1) {
 			postDpc1 := Lub(post1, preDpc1)
-			D[e.pc1] = postDpc1
+			cfg.D[e.pc1] = postDpc1
 
-			resolution := resolve(program, e.pc1, D[e.pc1])
-
-			if !resolution.resolved {
-				cfg.BadJumps[resolution.badJump.pc] = true
-				cfg.Unresolved = true
-				return cfg, errors.New("unresolvable jumps found")
-			} else {
-				for _, e := range resolution.edges {
-					inWorkList := false
-					for _, w := range workList {
-						if w.pc0 == e.pc0 && w.pc1 == e.pc1 {
-							inWorkList = true
-						}
-					}
-					if !inWorkList {
-						head := []edge{e}
-						workList = append(head, workList...)
-					}
-				}
-
-				if prevEdgeMap[e.pc1] == nil {
-					prevEdgeMap[e.pc1] = make(map[int]bool)
-				}
-				prevEdgeMap[e.pc1][e.pc0] = true
+			edgesR2, errR2 := resolve(cfg, e.pc1)
+			if errR2 != nil {
+				return cfg, errR2
 			}
+			workList = pushNewEdges(workList, edgesR2)
 		}
-		decp1Copy := D[e.pc1]
+
+		decp1Copy := cfg.D[e.pc1]
 		decp1Copy.anlyCounter = cfg.AnlyCounter
 		decp1Copy.worklistLen = len(workList)
-		D[e.pc1] = decp1Copy
+		cfg.D[e.pc1] = decp1Copy
 		cfg.AnlyCounter++
 
-		check(program, prevEdgeMap)
+		cfg.checkRep()
 	}
-
-	var finalEdges []edge
-	for pc := 0; pc < codeLen; pc++ {
-		resolution := resolve(program, pc, D[pc])
-		if !resolution.resolved {
-			cfg.BadJumps[resolution.badJump.pc] = true
-		}
-		finalEdges = append(finalEdges, resolution.edges...)
-	}
-
-	cfg.ReachableEdges = getEntryReachableEdges(0, finalEdges)
-	cfg.FinalEdges = finalEdges
 
 	if len(cfg.BadJumps) > 0 {
 		cfg.Unresolved = true
 		return cfg, errors.New("unresolvable jumps found")
 	}
 
-	cfg.Valid = true
+	cov := cfg.GetCoverageStats()
+	if cov.Uncovered > cov.Epilogue {
+		cfg.LowCoverage = true
+		return cfg, errors.New("low coverage")
+	}
 
+	cfg.Valid = true
 	return cfg, nil
 }
