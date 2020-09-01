@@ -64,7 +64,7 @@ func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainHeaderReader, 
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
-func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
+func (c *powEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _, _ uint64, _, _ *big.Int, _, _ common.Hash) *big.Int {
 	panic("must not be called")
 }
 func (c *powEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {
@@ -121,7 +121,7 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 	if err != nil {
 		return nil, err
 	}
-	enc, err := state.GetAsOf(r.db, false /* plain */, false /* storage */, addrHash[:], r.blockNr+1)
+	enc, err := state.GetAsOf(r.db, false /* storage */, addrHash[:], r.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -150,7 +150,7 @@ func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation ui
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := state.GetAsOf(r.db, false /* plain */, true /* storage */, compositeKey, r.blockNr+1)
+	enc, err := state.GetAsOf(r.db, true /* storage */, compositeKey, r.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}

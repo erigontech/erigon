@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -589,77 +588,6 @@ func trieChart() {
 	check(err)
 }
 
-func execToBlock(chaindata string, block uint64, fromScratch bool) {
-	state.MaxTrieCacheSize = 100 * 1024
-	blockDb := ethdb.MustOpen(chaindata)
-	defer blockDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
-	defer bcb.Stop()
-	if fromScratch {
-		os.Remove("statedb")
-	}
-	stateDB := ethdb.MustOpen("statedb")
-	defer stateDB.Close()
-
-	//_, _, _, err = core.SetupGenesisBlock(stateDB, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlock(stateDB, nil, false /* history */, true /* overwrite */)
-	check(err)
-	bcTxCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(stateDB, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, bcTxCacher)
-	check(err)
-	defer bc.Stop()
-	tds, err := bc.GetTrieDbState()
-	check(err)
-
-	importedBn := tds.GetBlockNr()
-	if importedBn == 0 {
-		importedBn = 1
-	}
-
-	//bc.SetNoHistory(true)
-	blocks := types.Blocks{}
-	var lastBlock *types.Block
-
-	now := time.Now()
-
-Loop:
-	for i := importedBn; i <= block; i++ {
-		lastBlock = bcb.GetBlockByNumber(i)
-		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 1000 || i == block {
-			_, err = bc.InsertChain(context.Background(), blocks)
-			if err != nil {
-				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
-				// Try to insert blocks one by one to keep the latest state
-				for j := 0; j < len(blocks); j++ {
-					if _, err1 := bc.InsertChain(context.Background(), blocks[j:j+1]); err1 != nil {
-						log.Error("Could not insert block", "error", err1)
-						break Loop
-					}
-				}
-				break
-			}
-			blocks = types.Blocks{}
-		}
-		if i%10000 == 0 {
-			fmt.Printf("Inserted %dK, %s \n", i/1000, time.Since(now))
-		}
-	}
-
-	root := tds.LastRoot()
-	fmt.Printf("Root hash: %x\n", root)
-	fmt.Printf("Last block root hash: %x\n", lastBlock.Root())
-	filename := fmt.Sprintf("right_%d.txt", lastBlock.NumberU64())
-	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		tds.PrintTrie(f)
-	}
-}
-
 func extractTrie(block int) {
 	stateDb := ethdb.MustOpen("statedb")
 	defer stateDb.Close()
@@ -885,7 +813,8 @@ func printFullNodeRLPs() {
 func testDifficulty() {
 	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, false /* history */)
 	check(err)
-	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisBlock.Header())
+	genesisHeader := genesisBlock.Header()
+	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisHeader.Time, genesisHeader.Difficulty, genesisHeader.Number, genesisHeader.UncleHash)
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
 }
 
@@ -1140,7 +1069,8 @@ func dumpStorage() {
 	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Cursor(dbutils.StorageHistoryBucket).Walk(func(k, v []byte) (bool, error) {
+		c := tx.Cursor(dbutils.StorageHistoryBucket)
+		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 			fmt.Printf("%x %x\n", k, v)
 			return true, nil
 		})
@@ -1242,6 +1172,7 @@ type Receiver struct {
 	currentIdx      int
 }
 
+func (r *Receiver) Root() common.Hash { panic("don't call me") }
 func (r *Receiver) Receive(
 	itemType trie.StreamItem,
 	accountKey []byte,
@@ -1679,6 +1610,72 @@ func supply(chaindata string) error {
 	return nil
 }
 
+func extractCode(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	destDb := ethdb.MustOpen("codes")
+	defer destDb.Close()
+	return destDb.KV().Update(context.Background(), func(tx1 ethdb.Tx) error {
+		c1 := tx1.Cursor(dbutils.PlainContractCodeBucket)
+		return db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+			c := tx.Cursor(dbutils.PlainContractCodeBucket)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if err = c1.Append(k, v); err != nil {
+					return err
+				}
+			}
+			c1 = tx1.Cursor(dbutils.CodeBucket)
+			c = tx.Cursor(dbutils.CodeBucket)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if err = c1.Append(k, v); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
+func iterateOverCode(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	var contractKeyTotalLength int
+	var contractValTotalLength int
+	var codeHashTotalLength int
+	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.PlainContractCodeBucket)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			contractKeyTotalLength += len(k)
+			contractValTotalLength += len(v)
+		}
+		c = tx.Cursor(dbutils.CodeBucket)
+		// This is a mapping of CodeHash => Byte code
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			codeHashTotalLength += len(k)
+			codeTotalLength += len(v)
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1700,6 +1697,9 @@ func main() {
 	//db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	//check(err)
 	//defer db.Close()
+	if *action == "cfg" {
+		testGenCfg()
+	}
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
 	}
@@ -1737,9 +1737,6 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	//printBranches(uint64(*block))
-	if *action == "execToBlock" {
-		execToBlock(*chaindata, uint64(*block), false)
-	}
 	//extractTrie(*block)
 	//repair()
 	if *action == "readAccount" {
@@ -1808,6 +1805,16 @@ func main() {
 	}
 	if *action == "supply" {
 		if err := supply(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractCode" {
+		if err := extractCode(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "iterateOverCode" {
+		if err := iterateOverCode(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

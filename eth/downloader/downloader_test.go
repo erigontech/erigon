@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -61,6 +62,7 @@ type downloadTester struct {
 	stateDb *ethdb.ObjectDatabase // Database used by the tester for syncing from peers
 	peerDb  *ethdb.ObjectDatabase // Database of the peers containing all data
 	peers   map[string]*downloadTesterPeer
+	engine  consensus.Engine
 
 	ownHashes   []common.Hash                  // Hash chain belonging to the tester
 	ownHeaders  map[common.Hash]*types.Header  // Headers belonging to the tester
@@ -93,13 +95,14 @@ func newTester() *downloadTester {
 		ancientBlocks:   map[common.Hash]*types.Block{testGenesis.Hash(): testGenesis},
 		ancientReceipts: map[common.Hash]types.Receipts{testGenesis.Hash(): nil},
 		ancientChainTd:  map[common.Hash]*big.Int{testGenesis.Hash(): testGenesis.Difficulty()},
+		engine:          ethash.NewFaker(),
 	}
 	tester.stateDb = ethdb.NewMemDatabase()
 	err := tester.stateDb.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(testGenesis.NumberU64(), testGenesis.Root()), []byte{0x00})
 	if err != nil {
 		panic(err)
 	}
-	tester.downloader = New(uint64(FullSync), tester.stateDb, nil /* syncBloom */, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 
@@ -363,25 +366,52 @@ func (dl *downloadTester) InsertReceiptChain(blocks types.Blocks, receipts []typ
 	return len(blocks), nil
 }
 
-// Rollback removes some recently added elements from the chain.
-func (dl *downloadTester) Rollback(hashes []common.Hash) {
+// SetHead rewinds the local chain to a new head.
+func (dl *downloadTester) SetHead(head uint64) error {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 
-	for i := len(hashes) - 1; i >= 0; i-- {
-		if dl.ownHashes[len(dl.ownHashes)-1] == hashes[i] {
-			dl.ownHashes = dl.ownHashes[:len(dl.ownHashes)-1]
+	// Find the hash of the head to reset to
+	var hash common.Hash
+	for h, header := range dl.ownHeaders {
+		if header.Number.Uint64() == head {
+			hash = h
 		}
-		delete(dl.ownChainTd, hashes[i])
-		delete(dl.ownHeaders, hashes[i])
-		delete(dl.ownReceipts, hashes[i])
-		delete(dl.ownBlocks, hashes[i])
-
-		delete(dl.ancientChainTd, hashes[i])
-		delete(dl.ancientHeaders, hashes[i])
-		delete(dl.ancientReceipts, hashes[i])
-		delete(dl.ancientBlocks, hashes[i])
 	}
+	for h, header := range dl.ancientHeaders {
+		if header.Number.Uint64() == head {
+			hash = h
+		}
+	}
+	if hash == (common.Hash{}) {
+		return fmt.Errorf("unknown head to set: %d", head)
+	}
+	// Find the offset in the header chain
+	var offset int
+	for o, h := range dl.ownHashes {
+		if h == hash {
+			offset = o
+			break
+		}
+	}
+	// Remove all the hashes and associated data afterwards
+	for i := offset + 1; i < len(dl.ownHashes); i++ {
+		delete(dl.ownChainTd, dl.ownHashes[i])
+		delete(dl.ownHeaders, dl.ownHashes[i])
+		delete(dl.ownReceipts, dl.ownHashes[i])
+		delete(dl.ownBlocks, dl.ownHashes[i])
+
+		delete(dl.ancientChainTd, dl.ownHashes[i])
+		delete(dl.ancientHeaders, dl.ownHashes[i])
+		delete(dl.ancientReceipts, dl.ownHashes[i])
+		delete(dl.ancientBlocks, dl.ownHashes[i])
+	}
+	dl.ownHashes = dl.ownHashes[:offset+1]
+	return nil
+}
+
+// Rollback removes some recently added elements from the chain.
+func (dl *downloadTester) Rollback(hashes []common.Hash) {
 }
 
 func (dl *downloadTester) NotifyHeightKnownBlock(_ uint64) {}
@@ -410,7 +440,7 @@ func (dl *downloadTester) GetBlockByNumber(number uint64) *types.Block {
 }
 
 func (dl *downloadTester) Engine() consensus.Engine {
-	panic("not implemented and should not be called")
+	return dl.engine
 }
 
 func (dl *downloadTester) GetHeader(common.Hash, uint64) *types.Header {

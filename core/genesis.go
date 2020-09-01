@@ -320,11 +320,7 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 	tds.SetBlockNr(0)
 
 	var blockWriter state.WriterWithChangeSets
-	if UsePlainStateExecution {
-		blockWriter = tds.PlainStateWriter()
-	} else {
-		blockWriter = tds.DbStateWriter()
-	}
+	blockWriter = tds.PlainStateWriter()
 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
@@ -337,6 +333,12 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 	if history {
 		if err := blockWriter.WriteHistory(); err != nil {
 			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		}
+	}
+	if !UsePlainStateExecution {
+		blockWriter = tds.DbStateWriter()
+		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 		}
 	}
 

@@ -61,7 +61,7 @@ func hashedWriterGen(db ethdb.Database) stateWriterGen {
 
 func plainWriterGen(db ethdb.Database) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewPlainStateWriter(db, blockNum)
+		return state.NewPlainStateWriter(db, nil, blockNum)
 	}
 }
 func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
@@ -130,12 +130,12 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 					t.Fatal(err)
 				}
 			}
-			if blockNumber >= from {
-				if err := blockWriter.WriteChangeSets(); err != nil {
-					t.Fatal(err)
-				}
-			}
 			testAccounts[i] = newAcc
+		}
+		if blockNumber >= from {
+			if err := blockWriter.WriteChangeSets(); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 }

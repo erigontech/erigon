@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -98,6 +99,14 @@ func (m *mutation) Put(bucket string, key []byte, value []byte) error {
 	return nil
 }
 
+func (m *mutation) Append(bucket string, key []byte, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.puts.set(bucket, key, value)
+	return nil
+}
+
 func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -116,7 +125,7 @@ func (m *mutation) BatchSize() int {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (m *mutation) IdealBatchSize() int {
-	return m.db.IdealBatchSize()
+	return int(512 * datasize.MB)
 }
 
 // WARNING: Merged mem/DB walk is not implemented
@@ -138,11 +147,16 @@ func (m *mutation) Delete(bucket string, key []byte) error {
 	return nil
 }
 
+func (m *mutation) CommitAndBegin() error {
+	_, err := m.Commit()
+	return err
+}
+
 func (m *mutation) Commit() (uint64, error) {
 	if metrics.Enabled {
-		if m.puts.Size() >= m.db.IdealBatchSize() {
+		if m.puts.Size() >= m.IdealBatchSize() {
 			defer dbCommitBigBatchTimer.UpdateSince(time.Now())
-		} else if m.puts.Len() < m.db.IdealBatchSize()/4 {
+		} else if m.puts.Len() < m.IdealBatchSize()/4 {
 			defer dbCommitSmallBatchTimer.UpdateSince(time.Now())
 		}
 	}

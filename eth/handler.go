@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -77,6 +78,7 @@ type ProtocolManager struct {
 	chaindb     *ethdb.ObjectDatabase
 	maxPeers    int
 
+	stagedSync   *stagedsync.StagedSync
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
 	txFetcher    *fetcher.TxFetcher
@@ -118,6 +120,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		chaindb:     chaindb,
 		peers:       newPeerSet(),
 		whitelist:   whitelist,
+		stagedSync:  stagedsync.New(),
 		mode:        mode,
 		txsyncCh:    make(chan *txsync),
 		quitSync:    make(chan struct{}),
@@ -174,8 +177,9 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	if manager.downloader != nil {
 		manager.downloader.Cancel()
 	}
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
+	manager.downloader.SetStagedSync(manager.stagedSync)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
@@ -854,6 +858,12 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
 				return err
 			}
+		} else {
+			log.Debug("Adding block to staged sync prefetch",
+				"number", request.Block.NumberU64,
+				"hash", request.Block.Hash().Hex(),
+			)
+			pm.stagedSync.PrefetchedBlocks.Add(request.Block)
 		}
 
 		// Assuming the block is importable by the peer, but possibly not yet done so,

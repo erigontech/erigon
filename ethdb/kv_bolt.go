@@ -14,15 +14,17 @@ import (
 )
 
 type boltOpts struct {
-	Bolt *bolt.Options
-	path string
+	Bolt       *bolt.Options
+	path       string
+	bucketsCfg BucketConfigsFunc
 }
 
 type BoltKV struct {
-	opts boltOpts
-	bolt *bolt.DB
-	log  log.Logger
-	wg   *sync.WaitGroup
+	opts    boltOpts
+	bolt    *bolt.DB
+	log     log.Logger
+	wg      *sync.WaitGroup
+	buckets dbutils.BucketsCfg
 }
 
 type boltTx struct {
@@ -34,8 +36,8 @@ type boltTx struct {
 type boltBucket struct {
 	tx      *boltTx
 	bolt    *bolt.Bucket
-	id      int
 	nameLen uint
+	name    string
 }
 
 type boltCursor struct {
@@ -60,6 +62,11 @@ func (opts boltOpts) ReadOnly() boltOpts {
 	return opts
 }
 
+func (opts boltOpts) WithBucketsConfig(f BucketConfigsFunc) boltOpts {
+	opts.bucketsCfg = f
+	return opts
+}
+
 func (opts boltOpts) Path(path string) boltOpts {
 	opts.path = path
 	return opts
@@ -76,9 +83,22 @@ func (opts boltOpts) Open() (KV, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	db := &BoltKV{
+		opts:    opts,
+		bolt:    boltDB,
+		log:     log.New("bolt_db", opts.path),
+		wg:      &sync.WaitGroup{},
+		buckets: dbutils.BucketsCfg{},
+	}
+	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	for name, cfg := range customBuckets { // copy map to avoid changing global variable
+		db.buckets[name] = cfg
+	}
+
 	if !opts.Bolt.ReadOnly {
 		if err := boltDB.Update(func(tx *bolt.Tx) error {
-			for _, name := range dbutils.Buckets {
+			for name := range db.buckets {
 				_, createErr := tx.CreateBucketIfNotExists([]byte(name), false)
 				if createErr != nil {
 					return createErr
@@ -88,13 +108,6 @@ func (opts boltOpts) Open() (KV, error) {
 		}); err != nil {
 			return nil, err
 		}
-	}
-
-	db := &BoltKV{
-		opts: opts,
-		bolt: boltDB,
-		log:  log.New("bolt_db", opts.path),
-		wg:   &sync.WaitGroup{},
 	}
 
 	return db, nil
@@ -109,9 +122,13 @@ func (opts boltOpts) MustOpen() KV {
 }
 
 func NewBolt() boltOpts {
-	o := boltOpts{Bolt: bolt.DefaultOptions}
+	o := boltOpts{Bolt: bolt.DefaultOptions, bucketsCfg: DefaultBucketConfigs}
 	o.Bolt.KeysPrefixCompressionDisable = true
 	return o
+}
+
+func (db *BoltKV) AllBuckets() dbutils.BucketsCfg {
+	return db.buckets
 }
 
 // Close closes BoltKV
@@ -146,10 +163,6 @@ func (db *BoltKV) BucketsStat(_ context.Context) (map[string]common.StorageBucke
 		}
 	}
 	return res, nil
-}
-
-func (db *BoltKV) IdealBatchSize() int {
-	return 50 * 1024 * 1024 // 50 Mb
 }
 
 func (db *BoltKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
@@ -209,7 +222,7 @@ func (tx *boltTx) Yield() {
 }
 
 func (tx *boltTx) Bucket(name string) boltBucket {
-	b := boltBucket{tx: tx, nameLen: uint(len(name)), id: dbutils.BucketsCfg[name].ID}
+	b := boltBucket{tx: tx, nameLen: uint(len(name)), name: name}
 	b.bolt = tx.bolt.Bucket([]byte(name))
 	return b
 }
@@ -219,17 +232,9 @@ func (c *boltCursor) Prefix(v []byte) Cursor {
 	return c
 }
 
-func (c *boltCursor) MatchBits(n uint) Cursor {
-	panic("not implemented yet")
-}
-
 func (c *boltCursor) Prefetch(v uint) Cursor {
 	// nothing to do
 	return c
-}
-
-func (c *boltCursor) NoValues() NoValuesCursor {
-	return &noValuesBoltCursor{boltCursor: c}
 }
 
 func (tx *boltTx) BucketSize(name string) (uint64, error) {
@@ -238,11 +243,11 @@ func (tx *boltTx) BucketSize(name string) (uint64, error) {
 }
 
 func (b boltBucket) Clear() error {
-	err := b.tx.bolt.DeleteBucket([]byte(dbutils.Buckets[b.id]))
+	err := b.tx.bolt.DeleteBucket([]byte(b.name))
 	if err != nil {
 		return err
 	}
-	_, err = b.tx.bolt.CreateBucket([]byte(dbutils.Buckets[b.id]), false)
+	_, err = b.tx.bolt.CreateBucket([]byte(b.name), false)
 	if err != nil {
 		return err
 	}
@@ -285,6 +290,10 @@ func (b boltBucket) Delete(key []byte) error {
 
 func (tx *boltTx) Cursor(bucket string) Cursor {
 	return tx.Bucket(bucket).Cursor()
+}
+
+func (tx *boltTx) NoValuesCursor(bucket string) NoValuesCursor {
+	return &noValuesBoltCursor{boltCursor: tx.Cursor(bucket).(*boltCursor)}
 }
 
 func (b boltBucket) Cursor() Cursor {
@@ -365,38 +374,6 @@ func (c *boltCursor) Put(key []byte, value []byte) error {
 
 func (c *boltCursor) Append(key []byte, value []byte) error {
 	return c.Put(key, value)
-}
-
-func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
-	for k, vSize, err := c.First(); k != nil; k, vSize, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }
 
 func (c *noValuesBoltCursor) First() (k []byte, vSize uint32, err error) {

@@ -195,7 +195,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	// Create Ethereum Service
 	config := &eth.Config{Genesis: genesis}
 	config.Ethash.PowMode = ethash.ModeFake
-		config.Pruning = false
+	config.Pruning = false
 	ethservice, err := eth.New(n, config)
 	if err != nil {
 		t.Fatalf("can't create new ethereum service: %v", err)

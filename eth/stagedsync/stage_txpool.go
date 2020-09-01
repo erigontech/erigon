@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
+func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -42,7 +42,7 @@ func spawnTxPool(s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, poo
 	return s.DoneAndUpdate(db, to)
 }
 
-func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, to)
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
@@ -106,7 +106,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.Objec
 	return nil
 }
 
-func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool *core.TxPool, quitCh <-chan struct{}) error {
+func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *core.TxPool, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -122,12 +122,11 @@ func unwindTxPool(u *UnwindState, s *StageState, db *ethdb.ObjectDatabase, pool 
 	return nil
 }
 
-func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectDatabase, quitCh <-chan struct{}) error {
+func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
 	headHash := rawdb.ReadCanonicalHash(db, from)
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)
-	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
@@ -138,20 +137,19 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 		if !dbutils.CheckCanonicalKey(k) {
 			return true, nil
 		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
 
-		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
+		if blockNumber > to {
 			return false, nil
 		}
 
-		copy(canonical[currentHeaderIdx][:], v)
-		currentHeaderIdx++
+		copy(canonical[blockNumber-from-1][:], v)
 		return true, nil
 	}); err != nil {
 		return err
 	}
 	log.Info("unwind TxPoolUpdate: Reading canonical hashes complete", "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
-	sendersIdx := uint64(0)
 	if err := db.Walk(dbutils.Senders, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
@@ -171,8 +169,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db *ethdb.ObjectData
 		for i := 0; i < len(sendersArray); i++ {
 			copy(sendersArray[i][:], v[i*common.AddressLength:])
 		}
-		senders[sendersIdx] = sendersArray
-		sendersIdx++
+		senders[blockNumber-from-1] = sendersArray
 		return true, nil
 	}); err != nil {
 		log.Error("TxPoolUpdate: walking over sender", "error", err)

@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 	"runtime"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -15,6 +16,10 @@ type State struct {
 	stages       []*Stage
 	unwindOrder  []*Stage
 	currentStage uint
+
+	beforeStageRun    map[stages.SyncStage]func() error
+	onBeforeUnwind    func(stages.SyncStage) error
+	beforeStageUnwind map[stages.SyncStage]func() error
 }
 
 func (s *State) Len() int {
@@ -73,16 +78,18 @@ func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 	return nil, fmt.Errorf("stage not found with id: %v", id)
 }
 
-func NewState(stages []*Stage) *State {
+func NewState(stagesList []*Stage) *State {
 	return &State{
-		stages:       stages,
-		currentStage: 0,
-		unwindStack:  NewPersistentUnwindStack(),
+		stages:            stagesList,
+		currentStage:      0,
+		unwindStack:       NewPersistentUnwindStack(),
+		beforeStageRun:    make(map[stages.SyncStage]func() error),
+		beforeStageUnwind: make(map[stages.SyncStage]func() error),
 	}
 }
 
 func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
-	for _, stage := range s.stages {
+	for _, stage := range s.unwindOrder {
 		if err := s.unwindStack.AddFromDB(db, stage.ID); err != nil {
 			return err
 		}
@@ -98,17 +105,36 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 	return &StageState{s, stage, blockNum, stageData}, nil
 }
 
-func (s *State) Run(db ethdb.GetterPutter) error {
+func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
-				if err := s.UnwindStage(unwind, db); err != nil {
+				if s.onBeforeUnwind != nil {
+					if err := s.onBeforeUnwind(unwind.Stage); err != nil {
+						return err
+					}
+				}
+				if hook, ok := s.beforeStageUnwind[unwind.Stage]; ok {
+					if err := hook(); err != nil {
+						return err
+					}
+				}
+				if err := s.UnwindStage(unwind, db, tx); err != nil {
 					return err
 				}
+			}
+			if err := s.SetCurrentStage(0); err != nil {
+				return err
 			}
 		}
 
 		index, stage := s.CurrentStage()
+
+		if hook, ok := s.beforeStageRun[stage.ID]; ok {
+			if err := hook(); err != nil {
+				return err
+			}
+		}
 
 		if stage.Disabled {
 			message := fmt.Sprintf(
@@ -125,7 +151,7 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db); err != nil {
+		if err := s.runStage(stage, db, tx); err != nil {
 			return err
 		}
 	}
@@ -135,21 +161,17 @@ func (s *State) Run(db ethdb.GetterPutter) error {
 	return nil
 }
 
-func (s *State) RunStage(id stages.SyncStage, db ethdb.Getter) error {
-	stage, err := s.StageByID(id)
-	if err != nil {
-		return err
+func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
+	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		db = tx
 	}
-	return s.runStage(stage, db)
-}
-
-func (s *State) runStage(stage *Stage, db ethdb.Getter) error {
 	stageState, err := s.StageState(stage.ID, db)
 	if err != nil {
 		return err
 	}
 	index, stage := s.CurrentStage()
 
+	start := time.Now()
 	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
 	log.Info(message)
 
@@ -158,11 +180,17 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter) error {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("%s DONE!", message))
+	if time.Since(start) > 30*time.Second {
+		log.Info(fmt.Sprintf("%s DONE!", message))
+	}
 	return nil
 }
 
-func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
+func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
+	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		db = tx
+	}
+	start := time.Now()
 	log.Info("Unwinding...", "stage", string(stages.DBKeys[unwind.Stage]))
 	stage, err := s.StageByID(unwind.Stage)
 	if err != nil {
@@ -189,10 +217,9 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter) error {
 		return err
 	}
 
-	if err := s.SetCurrentStage(stage.ID); err != nil {
-		return err
+	if time.Since(start) > 30*time.Second {
+		log.Info("Unwinding... DONE!")
 	}
-	log.Info("Unwinding... DONE!")
 	return nil
 }
 
@@ -213,4 +240,16 @@ func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 			s.stages[i].ExecFunc = f
 		}
 	}
+}
+
+func (s *State) BeforeStageRun(id stages.SyncStage, f func() error) {
+	s.beforeStageRun[id] = f
+}
+
+func (s *State) BeforeStageUnwind(id stages.SyncStage, f func() error) {
+	s.beforeStageUnwind[id] = f
+}
+
+func (s *State) OnBeforeUnwind(f func(id stages.SyncStage) error) {
+	s.onBeforeUnwind = f
 }

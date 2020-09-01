@@ -13,12 +13,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -58,11 +60,21 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	batch := stateDB.NewBatch()
-	//batch, err := stateDB.Begin()
-	//if err != nil {
-	//	return err
-	//}
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = stateDB.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = stateDB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	batch := tx.NewBatch()
 	defer batch.Rollback()
 
 	engine := chainContext.Engine()
@@ -79,19 +91,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		stageProgress = blockNum
 
-		blockHash := rawdb.ReadCanonicalHash(batch, blockNum)
-		block := rawdb.ReadBlock(batch, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(tx, blockNum)
+		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(batch, blockHash, blockNum)
+		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
 		stateReader = state.NewPlainStateReader(batch)
-		stateWriter = state.NewPlainStateWriter(batch, blockNum)
+		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
@@ -100,15 +112,32 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if writeReceipts {
-			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
+			// Convert the receipts into their storage form and serialize them
+			storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
+			for i, receipt := range receipts {
+				storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
+			}
+			var bytes []byte
+			if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
+				return fmt.Errorf("encode block receipts for block %d: %v", block.NumberU64(), err)
+			}
+			// Store the flattened receipt slice
+			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
+				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
+			}
 		}
 
 		if batch.BatchSize() >= batch.IdealBatchSize() {
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			if _, err = batch.Commit(); err != nil {
+			if err = batch.CommitAndBegin(); err != nil {
 				return err
+			}
+			if !useExternalTx {
+				if err = tx.CommitAndBegin(); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -138,6 +167,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
 	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	log.Info("Completed on", "block", stageProgress)
 	s.Done()
 	return nil
@@ -149,7 +183,7 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	runtime.ReadMemStats(&m)
 	log.Info("Executed blocks:",
 		"currentBlock", now,
-		"speed (blk/second)", speed,
+		"blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
@@ -170,8 +204,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	rewindFunc := ethdb.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
-	accountChangeSetBucket := dbutils.PlainAccountChangeSetBucket
-	storageChangeSetBucket := dbutils.PlainStorageChangeSetBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 	deleteAccountFunc := deleteAccountPlain
 	writeAccountFunc := writeAccountPlain
@@ -212,29 +244,30 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	for i := s.BlockNumber; i > u.UnwindPoint; i-- {
-		if err = deleteChangeSets(batch, i, accountChangeSetBucket, storageChangeSetBucket); err != nil {
-			return err
+	if err = stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
+			return false, fmt.Errorf("unwind Execution: delete account changesets: %v", err1)
 		}
-		if writeReceipts {
-			blockHash := rawdb.ReadCanonicalHash(batch, i)
-			rawdb.DeleteReceipts(batch, blockHash, i)
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("unwind Execution: walking account changesets: %v", err)
+	}
+	if err = stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
+			return false, fmt.Errorf("unwind Execution: delete storage changesets: %v", err1)
 		}
-
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Executed blocks:",
-				"currentBlock", i,
-				"batch", common.StorageSize(batch.BatchSize()),
-				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys),
-				"numGC", int(m.NumGC))
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("unwind Execution: walking storage changesets: %v", err)
+	}
+	if writeReceipts {
+		if err = stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+			if err1 := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err1 != nil {
+				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err1)
+			}
+			return true, nil
+		}); err != nil {
+			return fmt.Errorf("unwind Execution: walking receipts: %v", err)
 		}
 	}
 

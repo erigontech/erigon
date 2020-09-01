@@ -320,13 +320,28 @@ func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubke
 		}
 		return true, nreceived >= bucketSize
 	})
-	if _, err := t.send(toaddr, toid, &v4wire.Findnode{
+	_, err := t.send(toaddr, toid, &v4wire.Findnode{
 		Target:     target,
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
-	}); err != nil {
-		return nil, err
+	})
+
+	// Ensure that callers don't see a timeout if the node actually responded. Since
+	// findnode can receive more than one neighbors response, the reply matcher will be
+	// active until the remote node sends enough nodes. If the remote end doesn't have
+	// enough nodes the reply matcher will time out waiting for the second reply, but
+	// there's no need for an error in that case.
+	if errors.Is(err, errTimeout) && rm.reply != nil {
+		err = nil
 	}
-	return nodes, <-rm.errc
+	if err != nil {
+		return nodes, err
+	}
+
+	err = <-rm.errc
+	if errors.Is(err, errTimeout) && rm.reply != nil {
+		err = nil
+	}
+	return nodes, err
 }
 
 // RequestENR sends enrRequest to the given node and waits for a response.
@@ -459,9 +474,9 @@ func (t *UDPv4) loop() {
 				if p.from == r.from && p.ptype == r.data.Kind() && p.ip.Equal(r.ip) {
 					ok, requestDone := p.callback(r.data)
 					matched = matched || ok
+					p.reply = r.data
 					// Remove the matcher if callback indicates that all replies have been received.
 					if requestDone {
-						p.reply = r.data
 						p.errc <- nil
 						plist.Remove(el)
 					}
@@ -724,9 +739,7 @@ func (t *UDPv4) handleFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 
 	// Determine closest nodes.
 	target := enode.ID(crypto.Keccak256Hash(req.Target[:]))
-	t.tab.mutex.Lock()
-	closest := t.tab.closest(target, bucketSize, true).entries
-	t.tab.mutex.Unlock()
+	closest := t.tab.findnodeByID(target, bucketSize, true).entries
 
 	// Send neighbors in chunks with at most maxNeighbors per packet
 	// to stay below the packet size limit.

@@ -2,9 +2,11 @@ package rpchelper
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
@@ -13,10 +15,19 @@ import (
 func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.DatabaseReader) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
-
 	hash, ok := blockNrOrHash.Hash()
 	if !ok {
-		blockNumber = uint64(blockNrOrHash.BlockNumber.Int64())
+		number := *blockNrOrHash.BlockNumber
+		if number == rpc.LatestBlockNumber {
+			blockNumber, _, err = stages.GetStageProgress(dbReader, stages.Execution)
+			if err != nil {
+				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %v", err)
+			}
+		} else if number == rpc.PendingBlockNumber || number == rpc.EarliestBlockNumber {
+			return 0, common.Hash{}, fmt.Errorf("pending and earliest blocks are not supported")
+		} else {
+			blockNumber = uint64(number.Int64())
+		}
 		hash, err = GetHashByNumber(blockNumber, blockNrOrHash.RequireCanonical, dbReader)
 		if err != nil {
 			return 0, common.Hash{}, err

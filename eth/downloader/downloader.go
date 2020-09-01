@@ -34,12 +34,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var (
@@ -114,8 +114,8 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB    *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
-	stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
+	stateDB *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
+	//stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
 
 	// Statistics
 	syncStatsChainOrigin uint64       // Origin block number where syncing started at
@@ -168,7 +168,8 @@ type Downloader struct {
 	bodiesState    *stagedsync.StageState
 	bodiesUnwinder stagedsync.Unwinder
 
-	stagedSync *stagedsync.State
+	stagedSyncState *stagedsync.State
+	stagedSync      *stagedsync.StagedSync
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -188,8 +189,8 @@ type LightChain interface {
 	// InsertHeaderChain inserts a batch of headers into the local chain.
 	InsertHeaderChain([]*types.Header, int) (int, error)
 
-	// Rollback removes a few recently added elements from the local chain.
-	Rollback([]common.Hash)
+	// SetHead rewinds the local chain to a new head.
+	SetHead(uint64) error
 }
 
 // BlockChain encapsulates functions required to sync a (full or fast) blockchain.
@@ -242,7 +243,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.SyncBloom, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -269,6 +270,11 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, stateBloom *trie.Sync
 	}
 	go dl.qosTuner()
 	return dl
+}
+
+// SetStagedSync sets the staged sync instance (by protocol manager)
+func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
+	d.stagedSync = stagedSync
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
@@ -399,9 +405,9 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 	// If we are already full syncing, but have a fast-sync bloom filter laying
 	// around, make sure it doesn't use memory any more. This is a special case
 	// when the user attempts to fast sync a new empty network.
-	if mode == FullSync && d.stateBloom != nil {
-		d.stateBloom.Close()
-	}
+	//if mode == FullSync && d.stateBloom != nil {
+	//	d.stateBloom.Close()
+	//}
 	// Reset the queue, peer set and wake channels to clean any internal leftover state
 	d.queue.Reset(blockCacheItems)
 	d.peers.Reset()
@@ -503,6 +509,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if pivot <= origin {
 				origin = pivot - 1
 			}
+			// Write out the pivot into the database so a rollback beyond it will
+			// reenable fast sync
+			//rawdb.WriteLastPivotNumber(d.stateDB, pivot)
 		}
 	}
 	d.committed = 1
@@ -530,6 +539,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			d.ancientLimit = height - fullMaxForkAncestry - 1
 		}
 		frozen, _ := d.stateDB.Ancients() // Ignore the error here since light client can also hit here.
+
 		// If a part of blockchain data has already been written into active store,
 		// disable the ancient style insertion explicitly.
 		if origin >= frozen && frozen != 0 {
@@ -540,11 +550,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 		// Rewind the ancient store and blockchain if reorg happens.
 		if origin+1 < frozen {
-			var hashes []common.Hash
-			for i := origin + 1; i < d.lightchain.CurrentHeader().Number.Uint64(); i++ {
-				hashes = append(hashes, rawdb.ReadCanonicalHash(d.stateDB, i))
+			if err := d.lightchain.SetHead(origin + 1); err != nil {
+				return err
 			}
-			d.lightchain.Rollback(hashes)
 		}
 	}
 	// Initiate the sync using a concurrent header and content retrieval algorithm
@@ -559,12 +567,34 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
-		d.stagedSync, err = stagedsync.PrepareStagedSync(
+		hashStateStageProgress, _, err := stages.GetStageProgress(d.stateDB, stages.HashState) // because later stages can be disabled
+		if err != nil {
+			return err
+		}
+
+		canRunCycleInOneTransaction := height-origin < 32 && height-hashStateStageProgress < 32
+
+		var writeDB ethdb.Database // on this variable will run sync cycle.
+
+		// create empty TxDb object, it's not usable before .Begin() call which will use this object
+		// It allows inject tx object to stages now, define rollback now,
+		// but call .Begin() after hearer/body download stages
+		var tx ethdb.DbWithPendingMutations
+		if canRunCycleInOneTransaction {
+			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
+			defer tx.Rollback()
+			writeDB = tx
+		} else {
+			writeDB = d.stateDB
+		}
+
+		d.stagedSyncState, err = d.stagedSync.Prepare(
 			d,
 			d.chainConfig,
 			d.blockchain,
 			d.blockchain.GetVMConfig(),
 			d.stateDB,
+			writeDB,
 			p.id,
 			d.storageMode,
 			d.datadir,
@@ -577,7 +607,61 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return err
 		}
-		return d.stagedSync.Run(d.stateDB)
+
+		// begin tx at stage right after head/body download Or at first unwind stage
+		// it's temporary solution
+		d.stagedSyncState.BeforeStageRun(stages.Senders, func() error {
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+
+			var errTx error
+			log.Debug("Begin tx")
+			tx, errTx = tx.Begin()
+			return errTx
+		})
+		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+			if id <= stages.Bodies || id > stages.TxPool {
+				return nil
+			}
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+				return nil
+			}
+			var errTx error
+			log.Debug("Begin tx")
+			tx, errTx = tx.Begin()
+			return errTx
+		})
+		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {
+			if !canRunCycleInOneTransaction {
+				return nil
+			}
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+			log.Info("Commit blocks")
+			_, errCommit := tx.Commit()
+			return errCommit
+		})
+
+		err = d.stagedSyncState.Run(d.stateDB, writeDB)
+		if err != nil {
+			return err
+		}
+		if canRunCycleInOneTransaction {
+			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+				return nil
+			}
+
+			log.Info("Commit blocks")
+			_, errTx := tx.Commit()
+			return errTx
+		}
+
+		return nil
 	}
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
@@ -646,9 +730,9 @@ func (d *Downloader) Terminate() {
 	d.quitLock.Lock()
 	common.SafeClose(d.quitCh)
 
-	if d.stateBloom != nil {
-		d.stateBloom.Close()
-	}
+	//if d.stateBloom != nil {
+	//	d.stateBloom.Close()
+	//}
 
 	d.quitLock.Unlock()
 
@@ -1457,35 +1541,34 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
 	// Keep a count of uncertain headers to roll back
 	var (
-		rollback    []*types.Header
+		rollback    uint64 // Zero means no rollback (fine as you can't unroll the genesis)
 		rollbackErr error
 		mode        = d.getMode()
 	)
-	defer func() {
-		if len(rollback) > 0 {
-			// Flatten the headers and roll them back
-			hashes := make([]common.Hash, len(rollback))
-			for i, header := range rollback {
-				hashes[i] = header.Hash()
+	if mode != StagedSync {
+		defer func() {
+			if rollback > 0 {
+				lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
+				if mode != LightSync && mode != StagedSync {
+					lastFastBlock = d.blockchain.CurrentFastBlock().Number()
+					lastBlock = d.blockchain.CurrentBlock().Number()
+				}
+				if err := d.lightchain.SetHead(rollback - 1); err != nil { // -1 to target the parent of the first uncertain block
+					// We're already unwinding the stack, only print the error to make it more visible
+					log.Error("Failed to roll back chain segment", "head", rollback-1, "err", err)
+				}
+				curFastBlock, curBlock := common.Big0, common.Big0
+				if mode != LightSync && mode != StagedSync {
+					curFastBlock = d.blockchain.CurrentFastBlock().Number()
+					curBlock = d.blockchain.CurrentBlock().Number()
+				}
+				log.Warn("Rolled back chain segment",
+					"header", fmt.Sprintf("%d->%d", lastHeader, d.lightchain.CurrentHeader().Number),
+					"fast", fmt.Sprintf("%d->%d", lastFastBlock, curFastBlock),
+					"block", fmt.Sprintf("%d->%d", lastBlock, curBlock), "reason", rollbackErr)
 			}
-			lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
-			if mode != LightSync && mode != StagedSync {
-				lastFastBlock = d.blockchain.CurrentFastBlock().Number()
-				lastBlock = d.blockchain.CurrentBlock().Number()
-			}
-			d.lightchain.Rollback(hashes)
-			curFastBlock, curBlock := common.Big0, common.Big0
-			if mode != LightSync && mode != StagedSync {
-				curFastBlock = d.blockchain.CurrentFastBlock().Number()
-				curBlock = d.blockchain.CurrentBlock().Number()
-			}
-			log.Warn("Rolled back headers", "count", len(hashes),
-				"header", fmt.Sprintf("%d->%d", lastHeader, d.lightchain.CurrentHeader().Number),
-				"fast", fmt.Sprintf("%d->%d", lastFastBlock, curFastBlock),
-				"block", fmt.Sprintf("%d->%d", lastBlock, curBlock), "reason", rollbackErr)
-		}
-	}()
-
+		}()
+	}
 	// Wait for batches of headers to process
 	gotHeaders := false
 
@@ -1525,6 +1608,10 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						return errStallingPeer
 					}
 				}
+				if mode != StagedSync {
+					// Disable any rollback and return
+					rollback = 0
+				}
 				// If fast or light syncing, ensure promised headers are indeed delivered. This is
 				// needed to detect scenarios where an attacker feeds a bad pivot and then bails out
 				// of delivering the post-pivot blocks that would flag the invalid content.
@@ -1538,8 +1625,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						return errStallingPeer
 					}
 				}
-				// Disable any rollback and return
-				rollback = nil
 				return nil
 			}
 			// Otherwise split the chunk of headers into batches and process them
@@ -1555,15 +1640,9 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					limit = len(headers)
 				}
 				chunk := headers[:limit]
+
 				// In case of header only syncing, validate the chunk immediately
 				if mode == FastSync || mode == LightSync || mode == StagedSync {
-					// Collect the yet unknown headers to mark them as uncertain
-					unknown := make([]*types.Header, 0, len(chunk))
-					for _, header := range chunk {
-						if !d.lightchain.HasHeader(header.Hash(), header.Number.Uint64()) {
-							unknown = append(unknown, header)
-						}
-					}
 					// If we're importing pure headers, verify based on their recentness
 					frequency := fsHeaderCheckFrequency
 					if chunk[len(chunk)-1].Number.Uint64()+uint64(fsHeaderForceVerify) > pivot {
@@ -1589,19 +1668,23 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
-					if err != nil {
+					if mode != StagedSync && err != nil {
 						// If some headers were inserted, add them too to the rollback list
-						if n > 0 {
-							rollback = append(rollback, chunk[:n]...)
+						if n > 0 && rollback == 0 {
+							rollback = chunk[0].Number.Uint64()
 						}
 						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 						return fmt.Errorf("%w: %v", errInvalidChain, err)
 					}
 
-					// All verifications passed, store newly found uncertain headers
-					rollback = append(rollback, unknown...)
-					if len(rollback) > fsHeaderSafetyNet {
-						rollback = append(rollback[:0], rollback[len(rollback)-fsHeaderSafetyNet:]...)
+					// All verifications passed, track all headers within the alloted limits
+					if mode != StagedSync {
+						head := chunk[len(chunk)-1].Number.Uint64()
+						if head-rollback > uint64(fsHeaderSafetyNet) {
+							rollback = head - uint64(fsHeaderSafetyNet)
+						} else {
+							rollback = 1
+						}
 					}
 				}
 				// Unless we're doing light chains, schedule the headers for associated content retrieval
@@ -1750,9 +1833,9 @@ func (d *Downloader) commitPivotBlock(result *fetchResult) error {
 	// a rollback after committing the pivot and restarting fast sync, we don't end
 	// up using a nil bloom. Empty bloom is fine, it just returns that it does not
 	// have the info we need, so reach down to the database instead.
-	if d.stateBloom != nil {
-		d.stateBloom.Close()
-	}
+	//if d.stateBloom != nil {
+	//	d.stateBloom.Close()
+	//}
 	return nil
 }
 

@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -76,11 +77,22 @@ func Main(ctx *cli.Context) error {
 	log.Root().SetHandler(glogger)
 
 	var (
-		err    error
-		tracer vm.Tracer
+		err     error
+		tracer  vm.Tracer
+		baseDir = ""
 	)
-	var getTracer func(txIndex int) (vm.Tracer, error)
+	var getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error)
 
+	// If user specified a basedir, make sure it exists
+	if ctx.IsSet(OutputBasedir.Name) {
+		if base := ctx.String(OutputBasedir.Name); len(base) > 0 {
+			err2 := os.MkdirAll(base, 0755) // //rw-r--r--
+			if err2 != nil {
+				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %v", err2))
+			}
+			baseDir = base
+		}
+	}
 	if ctx.Bool(TraceFlag.Name) {
 		// Configure the EVM logger
 		logConfig := &vm.LogConfig{
@@ -96,19 +108,19 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int) (vm.Tracer, error) {
+		getTracer = func(txIndex int, txHash common.Hash) (vm.Tracer, error) {
 			if prevFile != nil {
 				prevFile.Close()
 			}
-			traceFile, err1 := os.Create(fmt.Sprintf("trace-%d.jsonl", txIndex))
-			if err1 != nil {
-				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err1))
+			traceFile, err2 := os.Create(path.Join(baseDir, fmt.Sprintf("trace-%d-%v.jsonl", txIndex, txHash.String())))
+			if err2 != nil {
+				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
 			return vm.NewJSONLogger(logConfig, traceFile), nil
 		}
 	} else {
-		getTracer = func(txIndex int) (tracer vm.Tracer, err error) {
+		getTracer = func(txIndex int, txHash common.Hash) (tracer vm.Tracer, err error) {
 			return nil, nil
 		}
 	}
@@ -201,8 +213,7 @@ func Main(ctx *cli.Context) error {
 	dumper := state.NewDumper(db, 0)
 
 	dumper.DumpToCollector(collector, false, false, false, nil, -1) //nolint:errcheck
-
-	return dispatchOutput(ctx, result, collector)
+	return dispatchOutput(ctx, baseDir, result, collector)
 
 }
 
@@ -229,12 +240,12 @@ func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 }
 
 // saveFile marshalls the object to the given file
-func saveFile(filename string, data interface{}) error {
+func saveFile(baseDir, filename string, data interface{}) error {
 	b, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
-	if err = ioutil.WriteFile(filename, b, 0600); err != nil {
+	if err = ioutil.WriteFile(path.Join(baseDir, filename), b, 0600); err != nil {
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
 	return nil
@@ -242,26 +253,26 @@ func saveFile(filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, result *ExecutionResult, alloc Alloc) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *ExecutionResult, alloc Alloc) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
-	dispatch := func(fName, name string, obj interface{}) error {
+	dispatch := func(baseDir, fName, name string, obj interface{}) error {
 		switch fName {
 		case "stdout":
 			stdOutObject[name] = obj
 		case "stderr":
 			stdErrObject[name] = obj
 		default: // save to file
-			if err := saveFile(fName, obj); err != nil {
+			if err := saveFile(baseDir, fName, obj); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if err := dispatch(ctx.String(OutputAllocFlag.Name), "alloc", alloc); err != nil {
+	if err := dispatch(baseDir, ctx.String(OutputAllocFlag.Name), "alloc", alloc); err != nil {
 		return err
 	}
-	if err := dispatch(ctx.String(OutputResultFlag.Name), "result", result); err != nil {
+	if err := dispatch(baseDir, ctx.String(OutputResultFlag.Name), "result", result); err != nil {
 		return err
 	}
 	if len(stdOutObject) > 0 {

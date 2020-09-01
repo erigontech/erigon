@@ -35,12 +35,12 @@ message EtherbaseRequest {
 }
 
 message EtherbaseReply {
-    bytes hash = 1;
+  bytes hash = 1;
 }
 
 message NetVersionRequest {
 }
 
 message NetVersionReply {
-    uint64 id = 1;
+  uint64 id = 1;
 }
