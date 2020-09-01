@@ -33,7 +33,6 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		hash=rawdb.ReadCanonicalHash(db, i)
 		header=rawdb.ReadHeaderRLP(db,hash, i)
 		tuples=append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
-		fmt.Println(i, hash.String())
 		if len(tuples) >= chunkFile {
 			log.Info("Commited","block", i)
 			_, err:=sndb.MultiPut(tuples...)

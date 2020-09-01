@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"sync"
 )
@@ -13,8 +14,21 @@ var (
 	_ KV = &SnapshotKV{}
 	_ BucketMigrator = &snapshotTX{}
 	_ Tx = &snapshotTX{}
+	_ Tx = &lazyTx{}
 	_ Cursor = &snapshotCursor{}
 )
+
+func (v *lazyTx) NoValuesCursor(bucket string) NoValuesCursor {
+	panic("implement me")
+}
+
+func (s *snapshotTX) NoValuesCursor(bucket string) NoValuesCursor {
+	panic("implement me")
+}
+
+func (s *SnapshotKV) AllBuckets() dbutils.BucketsCfg {
+	panic("implement me")
+}
 
 func (s *snapshotTX) DropBucket(bucket string) error {
 	db,ok:=s.dbTX.(BucketMigrator)
@@ -243,10 +257,6 @@ func (v *lazyTx) BucketSize(bucket string) (uint64, error) {
 		return 0, err
 	}
 	return tx.BucketSize(bucket)
-}
-
-func (s *SnapshotKV) IdealBatchSize() int {
-	return s.db.IdealBatchSize()
 }
 
 

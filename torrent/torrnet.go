@@ -1,7 +1,9 @@
 package torrent
 
 import (
+	"errors"
 	"fmt"
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -10,7 +12,10 @@ import (
 	"time"
 )
 
-
+const (
+	DefaultChunkSizeDefaultChunkSize = 16*1024
+	LmdbFilename = "data.mdb"
+)
 
 func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client  {
 	torrentConfig :=torrent.NewDefaultClientConfig()
@@ -20,7 +25,7 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client  
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug=true
-	//torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err!=nil {
 		log.Error("Fail to start torrnet client", "err",err)
@@ -39,7 +44,7 @@ type Client struct {
 }
 
 func (c *Client) DownloadHeadersSnapshot() error  {
-	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/"+HeadersSnapshotName+"_pc")
+	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+HeadersSnapshotName)
 	if err!=nil {
 		return err
 	}
@@ -77,6 +82,91 @@ func (c *Client) DownloadHeadersSnapshot() error  {
 	dwn:
 	for {
 		if t.Info().TotalLength()-t.BytesCompleted()==0 {
+			fmt.Println("Complete!!!!!!!!!!!!!!!!!!", time.Since(tt2))
+			break dwn
+		} else {
+			fmt.Println(t.BytesMissing(),t.BytesCompleted(), t.Info().TotalLength(), time.Since(tt2), t.PeerConns())
+			time.Sleep(time.Second*2)
+		}
+
+	}
+	return nil
+}
+
+func (c *Client) AddTorrent(snapshotName, snapshotHash string) error  {
+	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+snapshotName)
+	if err!=nil {
+		return err
+	}
+	t, _, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
+		Trackers:   Trackers,
+		InfoHash:    metainfo.NewHashFromHex(snapshotHash),
+		DisplayName: snapshotName,
+		ChunkSize:   DefaultChunkSizeDefaultChunkSize,
+		Storage: storage.NewFileWithCompletion(c.datadir+"/"+snapshotName,pc),
+	})
+	if err!=nil {
+		return err
+	}
+	t.VerifyData()
+	t.DisallowDataDownload()
+	return nil
+}
+
+func (c *Client) WaitGetInfo(hash string) error  {
+	t, ok:=c.cli.Torrent(metainfo.NewHashFromHex(hash))
+	if !ok {
+		return errors.New("not existing torrent")
+	}
+	t.AllowDataDownload()
+	//for i:=range t.Files() {
+	//	//t.Files()[i].
+	//}
+	return nil
+}
+
+func (c *Client) DownloadBodiesSnapshot() error  {
+	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+BodiesSnapshotName)
+	if err!=nil {
+		return err
+	}
+	t, new, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
+		Trackers:   Trackers,
+		InfoHash:    metainfo.NewHashFromHex(BlocksSnapshotHash),
+		DisplayName: BodiesSnapshotName,
+		ChunkSize:   DefaultChunkSizeDefaultChunkSize,
+		Storage: storage.NewFileWithCompletion(c.datadir+"/"+BodiesSnapshotName,pc),
+	})
+	peerID:=c.cli.PeerID()
+	fmt.Println(common.Bytes2Hex(peerID[:]),new)
+	if err!=nil {
+		return err
+	}
+	tm:=time.Now()
+
+	gi:
+	for {
+		select {
+		case <-t.GotInfo():
+			fmt.Println("got info!!!!!!!!!!!!",time.Since(tm))
+			break gi
+		default:
+			fmt.Println("Wait get info", time.Since(tm), t.PeerConns())
+			time.Sleep(time.Minute)
+		}
+	}
+	t.AllowDataDownload()
+	for i:=range t.Files() {
+		t.Files()[i].Download()
+	}
+
+	go func() {
+		c.cli.WaitAll()
+	}()
+	tt2:=time.Now()
+	dwn:
+	for {
+		if t.Info().TotalLength()-t.BytesCompleted()==0 {
 			fmt.Println("Complete!!!!!!!!!!!!!!!!!!")
 			break dwn
 		} else {
@@ -94,9 +184,11 @@ const (
 	BodiesSnapshotName = "bodies"
 	StateSnapshotName = "state"
 	ReceiptsSnapshotName = "receipts"
-	HeadersSnapshotHash = "ab00bf8bc8d159151b35a9c62c6a5c6512187829"
+	//HeadersSnapshotHash = "ab00bf8bc8d159151b35a9c62c6a5c6512187829"
+	BlocksSnapshotHash = "0fc6f416651385df347fe05eefae1c26469585a2"
+	HeadersSnapshotHash = "7f50f7458715169d98e6dc2f02e2bf52098a3307" //11kk block
+	//HeadersSnapshotHash = "420e1299b98d391b38a9caa849c4c574ca1d53b3" //11kk block 16k
 	//HeadersSnapshotHash = "f291a6986efbc5894840a0fd97e30c5dd38ba4c5"
-	BlocksSnapshotHash = "9e329198eba80cec81052533745f0484a281d300"
 )
 
 

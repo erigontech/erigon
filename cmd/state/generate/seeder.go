@@ -15,8 +15,9 @@ import (
 
 func Seed(pathes []string) error {
 	cfg:=torrent.NewDefaultClientConfig()
+	cfg.DataDir = "/media/b00ris/nvme/snapshots/"
 	if len(pathes) ==  0 {
-		cfg.DataDir = "/media/b00ris/nvme/snapshots/"
+		//cfg.DataDir = "/media/b00ris/nvme/snapshots/"
 		pathes=[]string{
 			cfg.DataDir+"headers3/",
 			//cfg.DataDir+"bodies/",
@@ -45,7 +46,7 @@ func Seed(pathes []string) error {
 			AnnounceList: trnt.Trackers,
 		}
 
-		info := metainfo.Info{PieceLength: 16  * 1024}
+		info := metainfo.Info{PieceLength: 1024  * 1024}
 		fmt.Println("BuildFromFilePath")
 		if _, err := os.Stat(v); os.IsNotExist(err) {
 			fmt.Println(err)

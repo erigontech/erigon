@@ -143,6 +143,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
+	//torrentCli:=torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
+	//t
+
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
@@ -236,7 +239,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist, config.SnapshotMode); err != nil {
+	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)

@@ -360,7 +360,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	if err != nil {
 		panic(err)
 	}
-	st, err := stagedsync.New().Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook, ethdb.SnapshotMode{})
+	st, err := stagedsync.New().Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}

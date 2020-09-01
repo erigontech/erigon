@@ -19,7 +19,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/torrent"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -412,7 +411,7 @@ func copyDb(ctx *cli.Context) error {
 	chainConfig, chain, chainDb := utils.MakeChain(ctx, stack, false)
 	syncMode := downloader.StagedSync
 
-	dl := downloader.New(0, chainDb, new(event.TypeMux), chainConfig, chain, nil, nil, ethdb.DefaultStorageMode, torrent.SnapshotMode{})
+	dl := downloader.New(0, chainDb, new(event.TypeMux), chainConfig, chain, nil, nil, ethdb.DefaultStorageMode)
 
 	// Create a source peer to satisfy downloader requests from
 	db := ethdb.MustOpen(ctx.Args().First())

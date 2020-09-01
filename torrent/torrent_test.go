@@ -27,11 +27,25 @@ var (
 
 func TestTorrent(t *testing.T) {
 	path:=os.TempDir()+"/trnt_test"
-	//os.RemoveAll(path)
+	os.RemoveAll(path)
+	os.RemoveAll(path+"_pc")
 	cli:=New(path, SnapshotMode{
 		Headers: true,
 	}, true)
 	err:=cli.DownloadHeadersSnapshot()
+	if err!=nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTorrentBodies(t *testing.T) {
+	path:=os.TempDir()+"/trnt_test2"
+	//os.RemoveAll(path)
+	//os.RemoveAll(path+"_pc")
+	cli:=New(path, SnapshotMode{
+		Bodies: true,
+	}, true)
+	err:=cli.DownloadBodiesSnapshot()
 	if err!=nil {
 		t.Fatal(err)
 	}

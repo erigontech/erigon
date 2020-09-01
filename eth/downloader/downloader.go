@@ -246,7 +246,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, snm torrent.SnapshotMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -270,7 +270,6 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, c
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
 		storageMode:   sm,
-		snapshotMode:   snm,
 	}
 	go dl.qosTuner()
 	return dl
@@ -631,7 +630,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			nil,
-			d.snapshotMode,
 		)
 		if err != nil {
 			return err
