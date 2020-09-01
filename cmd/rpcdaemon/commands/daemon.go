@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
@@ -30,6 +32,30 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		}
 	}
 	return response, err
+}
+
+func (api *APIImpl) GetBlockByHash(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
+	header := rawdb.ReadHeaderByNumber(api.dbReader, uint64(number.Int64()))
+
+	return api.GetBlockByNumber(ctx, rpc.BlockNumber(header.Number.Int64()), fullTx)
+}
+
+func (api *APIImpl) GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error) {
+	header := rawdb.ReadHeaderByNumber(api.dbReader, uint64(number.Int64()))
+	if header == nil {
+		return nil, fmt.Errorf("block header not found: %d", number.Int64())
+	}
+
+	return header, nil
+}
+
+func (api *APIImpl) GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error) {
+	header := rawdb.ReadHeaderByHash(api.dbReader, hash)
+	if header == nil {
+		return nil, fmt.Errorf("block header not found: %s", hash.String())
+	}
+
+	return header, nil
 }
 
 func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.API) []rpc.API {
