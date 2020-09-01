@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 
@@ -29,7 +30,9 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 
 	cc := adapter.NewChainContext(db)
 	bc := adapter.NewBlockGetter(db)
-	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, params.MainnetChainConfig, cc, db.(ethdb.HasKV).KV(), hash, 0)
+	genesisHash := rawdb.ReadBlockByNumber(db, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(db, genesisHash)
+	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, db.(ethdb.HasKV).KV(), hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +44,7 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 
 		header := rawdb.ReadHeader(db, hash, *number)
-		receipt, err := core.ApplyTransaction(params.MainnetChainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{})
+		receipt, err := core.ApplyTransaction(chainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
@@ -56,8 +59,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.L
 	if number == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
+	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 
-	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, hash)
+	receipts, err := GetReceipts(ctx, api.dbReader, chainConfig, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
@@ -75,7 +80,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	receipts, err := GetReceipts(ctx, api.dbReader, params.MainnetChainConfig, blockHash)
+	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+
+	receipts, err := GetReceipts(ctx, api.dbReader, chainConfig, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
