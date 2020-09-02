@@ -89,24 +89,34 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+
 	srv := rpc.NewServer()
 	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
-	handler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
-	var listener *http.Server
+
 	var err error
+
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
+	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
-		listener, _, err = node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, srv.WebsocketHandler([]string{"*"}))
-		if err != nil {
-			return fmt.Errorf("could not start Websocket: %w", err)
-		}
-	} else {
-		listener, _, err = node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
-		if err != nil {
-			return fmt.Errorf("could not start RPC api: %w", err)
-		}
+		wsHandler = srv.WebsocketHandler([]string{"*"})
 	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		if cfg.WebsocketEnabled && r.Method == "GET" {
+			wsHandler.ServeHTTP(w, r)
+		}
+		httpHandler.ServeHTTP(w, r)
+	})
+
+	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
+
+	if err != nil {
+		return fmt.Errorf("could not start RPC api: %w", err)
+	}
+
 	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled)
 
 	defer func() {
