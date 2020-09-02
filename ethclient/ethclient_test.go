@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // Verify that Client implements the ethereum interfaces.
@@ -72,8 +71,8 @@ func TestToFilterArg(t *testing.T) {
 			"without BlockHash",
 			ethereum.FilterQuery{
 				Addresses: addresses,
-				FromBlock: rpc.NewRPCBlockNumber(1),
-				ToBlock:   rpc.NewRPCBlockNumber(2),
+				FromBlock: big.NewInt(1),
+				ToBlock:   big.NewInt(2),
 				Topics:    [][]common.Hash{},
 			},
 			map[string]interface{}{
@@ -102,8 +101,8 @@ func TestToFilterArg(t *testing.T) {
 			"with negative fromBlock and negative toBlock",
 			ethereum.FilterQuery{
 				Addresses: addresses,
-				FromBlock: rpc.NewRPCBlockNumber(-1),
-				ToBlock:   rpc.NewRPCBlockNumber(-1),
+				FromBlock: big.NewInt(-1),
+				ToBlock:   big.NewInt(-1),
 				Topics:    [][]common.Hash{},
 			},
 			map[string]interface{}{
@@ -133,7 +132,7 @@ func TestToFilterArg(t *testing.T) {
 			ethereum.FilterQuery{
 				Addresses: addresses,
 				BlockHash: &blockHash,
-				FromBlock: rpc.NewRPCBlockNumber(1),
+				FromBlock: big.NewInt(1),
 				Topics:    [][]common.Hash{},
 			},
 			nil,
@@ -144,7 +143,7 @@ func TestToFilterArg(t *testing.T) {
 			ethereum.FilterQuery{
 				Addresses: addresses,
 				BlockHash: &blockHash,
-				ToBlock:   rpc.NewRPCBlockNumber(1),
+				ToBlock:   big.NewInt(1),
 				Topics:    [][]common.Hash{},
 			},
 			nil,
@@ -155,8 +154,8 @@ func TestToFilterArg(t *testing.T) {
 			ethereum.FilterQuery{
 				Addresses: addresses,
 				BlockHash: &blockHash,
-				FromBlock: rpc.NewRPCBlockNumber(1),
-				ToBlock:   rpc.NewRPCBlockNumber(2),
+				FromBlock: big.NewInt(1),
+				ToBlock:   big.NewInt(2),
 				Topics:    [][]common.Hash{},
 			},
 			nil,
