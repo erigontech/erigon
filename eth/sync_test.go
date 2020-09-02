@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -65,11 +64,3 @@ func testFastSyncDisabling(t *testing.T, protocol int) {
 		t.Fatalf("fast sync not disabled after successful synchronisation")
 	}
 }
-
-func TestName(t *testing.T) {
-	var a int8 = -2
-	b:=byte(a)+byte(255)
-	fmt.Println(a, b)
-	fmt.Println(int(b)-255)
-}
-

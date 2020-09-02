@@ -1,7 +1,9 @@
 package generate
 
 import (
+	"errors"
 	"fmt"
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -14,20 +16,25 @@ import (
 )
 
 func Seed(pathes []string) error {
-	cfg:=torrent.NewDefaultClientConfig()
-	cfg.DataDir = "/media/b00ris/nvme/snapshots/"
-	if len(pathes) ==  0 {
-		//cfg.DataDir = "/media/b00ris/nvme/snapshots/"
-		pathes=[]string{
-			cfg.DataDir+"headers3/",
-			//cfg.DataDir+"bodies/",
-			//cfg.DataDir+"state/",
-			//cfg.DataDir+"receipts/",
-		}
+	if len(pathes) !=1 {
+		return errors.New("you must provide snapshots dir")
 	}
-	cfg.Seed=true
-	cfg.NoDHT=true
+	cfg:=torrent.NewDefaultClientConfig()
+	cfg.NoDHT=false
 	cfg.DisableTrackers=false
+	cfg.Seed=true
+	cfg.Debug=false
+	cfg.Logger=cfg.Logger.FilterLevel(lg.Info)
+
+	cfg.DataDir = pathes[0]
+	cfg.DataDir = "/media/b00ris/nvme/snapshots"
+
+	pathes=[]string{
+		cfg.DataDir+"/headers_11/",
+		cfg.DataDir+"/bodies_11/",
+		//cfg.DataDir+"state/",
+		//cfg.DataDir+"receipts/",
+	}
 
 	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
 	cl,err:=torrent.NewClient(cfg)
@@ -60,6 +67,7 @@ func Seed(pathes []string) error {
 		}
 		mi.InfoBytes, err = bencode.Marshal(info)
 		fmt.Println("AddTorrent")
+		fmt.Println("info", common.Bytes2Hex(mi.InfoBytes))
 		torrents[i],err = cl.AddTorrent(mi)
 		if err!=nil {
 			return err

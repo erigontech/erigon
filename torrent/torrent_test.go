@@ -2,11 +2,12 @@ package torrent
 
 import (
 	"fmt"
-	"github.com/anacrolix/log"
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/require"
 	"os"
@@ -27,11 +28,12 @@ var (
 
 
 func TestTorrent(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+
 	path:=os.TempDir()+"/trnt_test"
 	kv:=ethdb.NewLMDB().Path(path+"/lmdb").MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
 	os.RemoveAll(path)
-	os.RemoveAll(path+"_pc")
 	cli:=New(path, SnapshotMode{
 		Headers: true,
 	}, true)
@@ -358,7 +360,7 @@ func TestName5(t *testing.T) {
 
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir=dd1
-	cfg.Logger=cfg.Logger.FilterLevel(log.Info)
+	cfg.Logger=cfg.Logger.FilterLevel(lg.Info)
 	cfg.NoDHT = false
 	cfg.DisableTrackers = false
 	cfg.Seed = true

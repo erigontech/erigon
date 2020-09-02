@@ -24,10 +24,10 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client  
 	torrentConfig.ListenPort=0
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.NoDHT = true
+	//torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
-	torrentConfig.Debug=true
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
+	//torrentConfig.Debug=true
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Error)
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err!=nil {
 		log.Error("Fail to start torrnet client", "err",err)
@@ -64,8 +64,7 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 		Storage: storage.NewFileWithCompletion(c.datadir+"/"+HeadersSnapshotName,pc),
 		InfoBytes:   infoBytes,
 	})
-	peerID:=c.cli.PeerID()
-	fmt.Println(common.Bytes2Hex(peerID[:]),new)
+
 	if err!=nil {
 		return err
 	}
@@ -75,10 +74,10 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 	for {
 		select {
 		case <-t.GotInfo():
-			fmt.Println("got info!!!!!!!!!!!!",time.Since(tm))
+			log.Info("Snapshot information collected", "t", time.Since(tm))
 			break gi
 		default:
-			fmt.Println("Wait get info", time.Since(tm), t.PeerConns())
+			log.Info("Collecting snapshot info", "t", time.Since(tm))
 			time.Sleep(time.Second*10)
 		}
 	}
@@ -88,18 +87,18 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 	}
 	t.AllowDataDownload()
 	t.DownloadAll()
-	go func() {
-		c.cli.WaitAll()
-	}()
+
 	tt2:=time.Now()
 	dwn:
 	for {
 		if t.Info().TotalLength()-t.BytesCompleted()==0 {
-			fmt.Println("Complete!!!!!!!!!!!!!!!!!!", time.Since(tt2))
+			log.Info("Dowloaded", "t",time.Since(tt2))
+			//fmt.Println("Complete!!!!!!!!!!!!!!!!!!", time.Since(tt2),  t.Info().TotalLength(), t.BytesCompleted())
 			break dwn
 		} else {
-			fmt.Println(t.BytesMissing(),t.BytesCompleted(), t.Info().TotalLength(), time.Since(tt2), t.PeerConns())
-			time.Sleep(time.Second*2)
+			stats:=t.Stats()
+			log.Info("Downloading snapshot", "%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),  "seeders", stats.ConnectedSeeders)
+			time.Sleep(time.Second*10)
 		}
 
 	}
@@ -199,13 +198,14 @@ const (
 	ReceiptsSnapshotName = "receipts"
 	//HeadersSnapshotHash = "ab00bf8bc8d159151b35a9c62c6a5c6512187829"
 	BlocksSnapshotHash = "0fc6f416651385df347fe05eefae1c26469585a2"
-	HeadersSnapshotHash = "7f50f7458715169d98e6dc2f02e2bf52098a3307" //11kk block
+	HeadersSnapshotHash = "7f50f7458715169d98e6dc2f02e2bf52098a3307" //11kk block 1mb block
 	//HeadersSnapshotHash = "420e1299b98d391b38a9caa849c4c574ca1d53b3" //11kk block 16k
 	//HeadersSnapshotHash = "f291a6986efbc5894840a0fd97e30c5dd38ba4c5"
 )
 
 
-
+//omplete!!!!!!!!!!!!!!!!!!
+//--- PASS: TestTorrentBodies (15997.60s)
 var Trackers = [][]string{{
 	"udp://tracker.openbittorrent.com:80",
 	"udp://tracker.openbittorrent.com:80",
