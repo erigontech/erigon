@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // SignerFn is a signer function callback when a contract requires a method to
@@ -280,10 +279,10 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]int
 	config := ethereum.FilterQuery{
 		Addresses: []common.Address{c.address},
 		Topics:    topics,
-		FromBlock: rpc.NewRPCBlockNumber(int(opts.Start)),
+		FromBlock: new(big.Int).SetUint64(opts.Start),
 	}
 	if opts.End != nil {
-		config.ToBlock = rpc.NewRPCBlockNumber(int(*opts.End))
+		config.ToBlock = new(big.Int).SetUint64(*opts.End)
 	}
 	/* TODO(karalabe): Replace the rest of the method below with this when supported
 	sub, err := c.filterer.SubscribeFilterLogs(ensureContext(opts.Context), config, logs)
@@ -331,7 +330,7 @@ func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]inter
 		Topics:    topics,
 	}
 	if opts.Start != nil {
-		config.FromBlock = rpc.NewRPCBlockNumber(int(*opts.Start))
+		config.FromBlock = new(big.Int).SetUint64(*opts.Start)
 	}
 	sub, err := c.filterer.SubscribeFilterLogs(ensureContext(opts.Context), config, logs)
 	if err != nil {
