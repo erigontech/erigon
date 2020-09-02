@@ -83,6 +83,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	logBlock := stageProgress
+	var warmup = true
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -98,6 +99,15 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
+
+		if warmup {
+			if err := stateDB.Walk(dbutils.PlainStateBucket, nil, 0, func(_, _ []byte) (bool, error) {
+				return true, nil
+			}); err != nil {
+				return err
+			}
+			warmup = false
+		}
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
@@ -139,6 +149,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return err
 				}
 			}
+			warmup = true
 		}
 
 		if prof {
