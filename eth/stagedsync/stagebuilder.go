@@ -27,6 +27,7 @@ type StageParameters struct {
 	poolStart        func() error
 	changeSetHook    ChangeSetHook
 	prefetchedBlocks *PrefetchedBlocks
+	hdd              bool
 }
 
 type StageBuilder struct {
@@ -127,7 +128,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.tx, world.chainConfig, world.chainContext, world.vmConfig, 0 /* limit (meaning no limit) */, world.quitCh, world.storageMode.Receipts, world.changeSetHook)
+						return SpawnExecuteBlocksStage(s, world.tx, world.chainConfig, world.chainContext, world.vmConfig, 0 /* limit (meaning no limit) */, world.quitCh, world.storageMode.Receipts, world.hdd, world.changeSetHook)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindExecutionStage(u, s, world.tx, world.storageMode.Receipts)
