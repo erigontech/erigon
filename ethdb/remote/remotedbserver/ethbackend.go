@@ -12,7 +12,7 @@ import (
 )
 
 type EthBackendServer struct {
-	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
+	remote.UnstableETHBACKENDService // must be embedded to have forward compatible implementations.
 
 	eth core.Backend
 }

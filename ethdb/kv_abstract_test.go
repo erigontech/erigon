@@ -108,7 +108,12 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[2]))
+		kvSrv := remotedbserver.NewKvServer(writeDBs[2])
+		kvService := &remote.KVService{
+			Seek: kvSrv.Seek,
+		}
+
+		remote.RegisterKVService(grpcServer, kvService)
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}

@@ -22,7 +22,7 @@ import (
 const MaxTxTTL = time.Minute
 
 type KvServer struct {
-	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
+	remote.UnstableKVService // must be embedded to have forward compatible implementations.
 
 	kv ethdb.KV
 }
@@ -35,9 +35,24 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
 		return
 	}
 
-	kvSrv := NewKvServer(kv)
-	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth)
+	kvServer := NewKvServer(kv)
+	kvSrv := &remote.KVService{
+		Seek: kvServer.Seek,
+	}
+
+	dbServer := NewDBServer(kv)
+	dbSrv := &remote.DBService{
+		Size:       dbServer.Size,
+		BucketSize: dbServer.BucketSize,
+	}
+
+	ethServer := NewEthBackendServer(eth)
+	ethBackendSrv := &remote.ETHBACKENDService{
+		Add:         ethServer.Add,
+		Etherbase:   ethServer.Etherbase,
+		NetVersion:  ethServer.NetVersion,
+		BloomStatus: ethServer.BloomStatus,
+	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -57,9 +72,9 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	)
-	remote.RegisterKVServer(grpcServer, kvSrv)
-	remote.RegisterDBServer(grpcServer, dbSrv)
-	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
+	remote.RegisterKVService(grpcServer, kvSrv)
+	remote.RegisterDBService(grpcServer, dbSrv)
+	remote.RegisterETHBACKENDService(grpcServer, ethBackendSrv)
 
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)

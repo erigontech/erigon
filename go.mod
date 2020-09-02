@@ -77,7 +77,7 @@ require (
 	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
-	google.golang.org/grpc v1.30.1
+	google.golang.org/grpc v1.33.0-dev
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200902070140-9a132e444fbe // indirect
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
