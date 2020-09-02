@@ -82,6 +82,10 @@ integration:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
+headers:
+	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers 
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 test: semantics/z3/build/libz3.a
 	$(GOTEST)
