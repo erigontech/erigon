@@ -33,7 +33,7 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, toBlock uint64, quit <-chan struct{}, writeReceipts bool, changeSetHook ChangeSetHook) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, toBlock uint64, quit <-chan struct{}, writeReceipts bool, hdd bool, changeSetHook ChangeSetHook) error {
 	prevStageProgress, _, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -83,7 +83,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	logBlock := stageProgress
-	var warmup = true
+	// Warmup only works for HDD sync, and for long ranges
+	var warmup = hdd && (to-s.BlockNumber) > 30000
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -108,8 +109,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return false, nil
 				}
 				count++
-				if count%1000000 == 0 {
-					log.Info("Warmed up", "M keys", count/1000000)
+				if count%10000000 == 0 {
+					log.Info("Warmed up", "keys", count)
 				}
 				return true, nil
 			}); err != nil {
@@ -159,7 +160,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return err
 				}
 			}
-			warmup = true
+			warmup = hdd && (to-blockNum) > 30000
 		}
 
 		if prof {
