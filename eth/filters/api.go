@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -502,11 +501,11 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 		args.BlockHash = raw.BlockHash
 	} else {
 		if raw.FromBlock != nil {
-			args.FromBlock = big.NewInt(raw.FromBlock.Int64())
+			args.FromBlock = rpc.NewRPCBlockNumber(int(raw.FromBlock.Int64()))
 		}
 
 		if raw.ToBlock != nil {
-			args.ToBlock = big.NewInt(raw.ToBlock.Int64())
+			args.ToBlock = rpc.NewRPCBlockNumber(int(raw.ToBlock.Int64()))
 		}
 	}
 

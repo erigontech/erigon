@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 
-	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -14,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -105,7 +105,7 @@ func newFilter(addresses []common.Address, topics [][]common.Hash) *Filter {
 }
 
 // GetLogs returns logs matching the given argument that are stored within the state.
-func (api *APIImpl) GetLogs(ctx context.Context, crit ethereum.FilterQuery) ([]*types.Log, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
 	var filter *Filter
 	if crit.BlockHash != nil {
 		// Block filter requested, construct a single-shot filter
@@ -125,7 +125,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit ethereum.FilterQuery) ([]*
 		if crit.ToBlock != nil {
 			end = crit.ToBlock.Int64()
 		}
-		// Construct the range filter
+
+		if begin > end {
+			return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", begin, end)
+		}
+
 		filter = NewRangeFilter(begin, end, crit.Addresses, crit.Topics)
 	}
 	// Run the filter and return all the logs

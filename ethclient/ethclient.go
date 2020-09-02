@@ -292,6 +292,18 @@ func toBlockNumArg(number *big.Int) string {
 	return hexutil.EncodeBig(number)
 }
 
+
+func toBlockNum(number *rpc.BlockNumber) string {
+	if number == nil {
+		return "latest"
+	}
+	pending := big.NewInt(-1)
+	if number.Int64() == pending.Int64() {
+		return "pending"
+	}
+	return hexutil.EncodeUint64(uint64(number.Int64()))
+}
+
 type rpcProgress struct {
 	StartingBlock hexutil.Uint64
 	CurrentBlock  hexutil.Uint64
@@ -414,9 +426,9 @@ func toFilterArg(q ethereum.FilterQuery) (interface{}, error) {
 		if q.FromBlock == nil {
 			arg["fromBlock"] = "0x0"
 		} else {
-			arg["fromBlock"] = toBlockNumArg(q.FromBlock)
+			arg["fromBlock"] = toBlockNum(q.FromBlock)
 		}
-		arg["toBlock"] = toBlockNumArg(q.ToBlock)
+		arg["toBlock"] = toBlockNum(q.ToBlock)
 	}
 	return arg, nil
 }
