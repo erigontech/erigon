@@ -8,6 +8,8 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"time"
 )
@@ -43,17 +45,24 @@ type Client struct {
 	datadir string
 }
 
-func (c *Client) DownloadHeadersSnapshot() error  {
+func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+HeadersSnapshotName)
 	if err!=nil {
 		return err
 	}
+	infoBytes,err:=db.Get(dbutils.DatabaseInfoBucket, []byte(HeadersSnapshotName+"_info"))
+	if err!=nil && err!=ethdb.ErrKeyNotFound {
+		return err
+	}
+	fmt.Println("Info bytes", common.Bytes2Hex(infoBytes))
+
 	t, new, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
 		Trackers:   Trackers,
 		InfoHash:    metainfo.NewHashFromHex(HeadersSnapshotHash),
 		DisplayName: HeadersSnapshotName,
 		ChunkSize:   16*1024,
 		Storage: storage.NewFileWithCompletion(c.datadir+"/"+HeadersSnapshotName,pc),
+		InfoBytes:   infoBytes,
 	})
 	peerID:=c.cli.PeerID()
 	fmt.Println(common.Bytes2Hex(peerID[:]),new)
@@ -72,6 +81,10 @@ func (c *Client) DownloadHeadersSnapshot() error  {
 			fmt.Println("Wait get info", time.Since(tm), t.PeerConns())
 			time.Sleep(time.Second*10)
 		}
+	}
+	err=db.Put(dbutils.DatabaseInfoBucket, []byte(HeadersSnapshotName+"_info"), t.Metainfo().InfoBytes)
+	if err!=nil {
+		return err
 	}
 	t.AllowDataDownload()
 	t.DownloadAll()

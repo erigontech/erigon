@@ -7,6 +7,7 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/require"
 	"os"
 	"os/signal"
@@ -27,12 +28,14 @@ var (
 
 func TestTorrent(t *testing.T) {
 	path:=os.TempDir()+"/trnt_test"
+	kv:=ethdb.NewLMDB().Path(path+"/lmdb").MustOpen()
+	db:=ethdb.NewObjectDatabase(kv)
 	os.RemoveAll(path)
 	os.RemoveAll(path+"_pc")
 	cli:=New(path, SnapshotMode{
 		Headers: true,
 	}, true)
-	err:=cli.DownloadHeadersSnapshot()
+	err:=cli.DownloadHeadersSnapshot(db)
 	if err!=nil {
 		t.Fatal(err)
 	}
