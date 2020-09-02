@@ -34,6 +34,7 @@ func (stagedSync *StagedSync) Prepare(
 	pid string,
 	storageMode ethdb.StorageMode,
 	datadir string,
+	hdd bool,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	txPool *core.TxPool,
@@ -58,6 +59,7 @@ func (stagedSync *StagedSync) Prepare(
 			txPool:           txPool,
 			poolStart:        poolStart,
 			changeSetHook:    changeSetHook,
+			hdd:              hdd,
 			prefetchedBlocks: stagedSync.PrefetchedBlocks,
 		},
 	)
