@@ -50,7 +50,7 @@ func init() {
 	fsHeaderContCheck = 50 * time.Millisecond
 	fullMaxForkAncestry = 10000
 	lightMaxForkAncestry = 10000
-	blockCacheItems = 1024
+	blockCacheMaxItems = 1024
 	fsHeaderContCheck = 500 * time.Millisecond
 }
 
@@ -559,7 +559,7 @@ func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.peerDb.Close()
 
 	// Create a small enough block chain to download
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 	tester.newPeer("peer", protocol, chain)
 
 	// Synchronise with the peer and make sure all relevant data was retrieved
@@ -621,8 +621,8 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 			}
 			tester.lock.Unlock()
 
-			if cached == blockCacheItems ||
-				cached == blockCacheItems-reorgProtHeaderDelay ||
+			if cached == blockCacheMaxItems ||
+				cached == blockCacheMaxItems-reorgProtHeaderDelay ||
 				retrieved+cached+frozen == targetBlocks+1 ||
 				retrieved+cached+frozen == targetBlocks+1-reorgProtHeaderDelay {
 				break
@@ -633,8 +633,8 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 		tester.lock.RLock()
 		retrieved = len(tester.ownBlocks)
 		tester.lock.RUnlock()
-		if cached != blockCacheItems && cached != blockCacheItems-reorgProtHeaderDelay && retrieved+cached+frozen != targetBlocks+1 && retrieved+cached+frozen != targetBlocks+1-reorgProtHeaderDelay {
-			t.Fatalf("block count mismatch: have %v, want %v (owned %v, blocked %v, target %v)", cached, blockCacheItems, retrieved, frozen, targetBlocks+1)
+		if cached != blockCacheMaxItems && cached != blockCacheMaxItems-reorgProtHeaderDelay && retrieved+cached+frozen != targetBlocks+1 && retrieved+cached+frozen != targetBlocks+1-reorgProtHeaderDelay {
+			t.Fatalf("block count mismatch: have %v, want %v (owned %v, blocked %v, target %v)", cached, blockCacheMaxItems, retrieved, frozen, targetBlocks+1)
 		}
 
 		// Permit the blocked blocks to import
@@ -843,7 +843,7 @@ func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.peerDb.Close()
 
 	// Create a small enough block chain to download
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 
 	// Create peers of every type
 	assert.NoError(t, tester.newPeer("peer 64", 64, chain))
@@ -921,7 +921,7 @@ func testMissingHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 	defer tester.peerDb.Close()
 
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 	brokenChain := chain.shorten(chain.len())
 	delete(brokenChain.headerm, brokenChain.chain[brokenChain.len()/2])
 	tester.newPeer("attack", protocol, brokenChain)
@@ -947,7 +947,7 @@ func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 	defer tester.peerDb.Close()
 
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 
 	// Attempt a full sync with an attacker feeding shifted headers
 	brokenChain := chain.shorten(chain.len())
@@ -1128,7 +1128,7 @@ func testSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 
 	// Set a sync init hook to catch progress changes
 	starting := make(chan struct{})
@@ -1344,7 +1344,7 @@ func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 
 	// Set a sync init hook to catch progress changes
 	starting := make(chan struct{})
