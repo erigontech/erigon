@@ -588,8 +588,6 @@ func ReadBlockByHash(db DatabaseReader, hash common.Hash) *types.Block {
 	return ReadBlock(db, hash, *number)
 }
 
-
-
 func ReadHeaderByNumber(db DatabaseReader, number uint64) *types.Header {
 	hash := ReadCanonicalHash(db, number)
 	if hash == (common.Hash{}) {

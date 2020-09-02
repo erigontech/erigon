@@ -139,7 +139,7 @@ func NewRangeFilter(begin, end int64, addresses []common.Address, topics [][]com
 	// Flatten the address and topic filter clauses into a single bloombits filter
 	// system. Since the bloombits are not positional, nil topics are permitted,
 	// which get flattened into a nil byte slice.
-	var filters [][][]byte
+	filters := make([][][]byte, 0, len(addresses))
 	if len(addresses) > 0 {
 		filter := make([][]byte, len(addresses))
 		for i, address := range addresses {
@@ -338,7 +338,7 @@ func (f *Filter) checkMatches(ctx context.Context, header *types.Header, api *AP
 	if err != nil {
 		return nil, err
 	}
-	var unfiltered []*types.Log
+	unfiltered := make([]*types.Log, 0, len(logsList))
 	for _, logs := range logsList {
 		unfiltered = append(unfiltered, logs...)
 	}

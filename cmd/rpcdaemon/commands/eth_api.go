@@ -2,8 +2,8 @@ package commands
 
 import (
 	"context"
-	ethereum "github.com/ledgerwatch/turbo-geth"
 	"fmt"
+	ethereum "github.com/ledgerwatch/turbo-geth"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
