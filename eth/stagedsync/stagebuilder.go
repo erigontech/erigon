@@ -19,6 +19,7 @@ type StageParameters struct {
 	db               ethdb.Database
 	tx               ethdb.Database
 	pid              string
+	hdd              bool
 	storageMode      ethdb.StorageMode
 	datadir          string
 	quitCh           <-chan struct{}
@@ -27,7 +28,6 @@ type StageParameters struct {
 	poolStart        func() error
 	changeSetHook    ChangeSetHook
 	prefetchedBlocks *PrefetchedBlocks
-	hdd              bool
 }
 
 type StageBuilder struct {
