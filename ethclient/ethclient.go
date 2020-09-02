@@ -292,7 +292,6 @@ func toBlockNumArg(number *big.Int) string {
 	return hexutil.EncodeBig(number)
 }
 
-
 func toBlockNum(number *rpc.BlockNumber) string {
 	if number == nil {
 		return "latest"
