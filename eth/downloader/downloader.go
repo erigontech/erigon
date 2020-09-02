@@ -21,7 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -160,7 +160,7 @@ type Downloader struct {
 	receiptFetchHook func([]*types.Header) // Method to call upon starting a receipt fetch
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
-	storageMode ethdb.StorageMode
+	storageMode  ethdb.StorageMode
 	snapshotMode torrent.SnapshotMode
 
 	datadir     string

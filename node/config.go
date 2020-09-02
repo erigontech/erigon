@@ -19,7 +19,7 @@ package node
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -181,8 +181,8 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	// Whether to use BoltDB or LMDB.
-	LMDB bool
-	Bolt bool
+	LMDB         bool
+	Bolt         bool
 	SnapshotMode torrent.SnapshotMode
 
 

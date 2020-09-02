@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"reflect"

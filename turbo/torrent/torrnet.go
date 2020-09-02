@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	lg "github.com/anacrolix/log"
@@ -19,7 +20,7 @@ const (
 	LmdbFilename = "data.mdb"
 )
 
-func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client  {
+func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client {
 	torrentConfig :=torrent.NewDefaultClientConfig()
 	torrentConfig.ListenPort=0
 	torrentConfig.Seed = seeding
@@ -40,13 +41,13 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client  
 }
 
 type Client struct {
-	cli *torrent.Client
-	snMode SnapshotMode
+	cli     *torrent.Client
+	snMode  SnapshotMode
 	datadir string
 }
 
 func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
-	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+HeadersSnapshotName)
+	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+ HeadersSnapshotName)
 	if err!=nil {
 		return err
 	}
@@ -56,12 +57,12 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 	}
 	fmt.Println("Info bytes", common.Bytes2Hex(infoBytes))
 
-	t, new, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
-		Trackers:   Trackers,
+	t, _, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
+		Trackers:    Trackers,
 		InfoHash:    metainfo.NewHashFromHex(HeadersSnapshotHash),
 		DisplayName: HeadersSnapshotName,
 		ChunkSize:   16*1024,
-		Storage: storage.NewFileWithCompletion(c.datadir+"/"+HeadersSnapshotName,pc),
+		Storage:     storage.NewFileWithCompletion(c.datadir+"/"+HeadersSnapshotName,pc),
 		InfoBytes:   infoBytes,
 	})
 
@@ -105,20 +106,28 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 	return nil
 }
 
-func (c *Client) AddTorrent(snapshotName, snapshotHash string) error  {
+func (c *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotName, snapshotHash string) error  {
 	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+snapshotName)
 	if err!=nil {
 		return err
 	}
 	t, _, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
-		Trackers:   Trackers,
+		Trackers:    Trackers,
 		InfoHash:    metainfo.NewHashFromHex(snapshotHash),
 		DisplayName: snapshotName,
 		ChunkSize:   DefaultChunkSizeDefaultChunkSize,
-		Storage: storage.NewFileWithCompletion(c.datadir+"/"+snapshotName,pc),
+		Storage:     storage.NewFileWithCompletion(c.datadir+"/"+snapshotName,pc),
 	})
 	if err!=nil {
 		return err
+	}
+
+	select {
+		case <-t.GotInfo():
+			log.Info("Init", "snapshot", snapshotName)
+		case <-ctx.Done():
+			log.Warn("Init failure", "snapshot", snapshotName, "err", ctx.Err())
+			return ctx.Err()
 	}
 	t.VerifyData()
 	t.DisallowDataDownload()
@@ -138,16 +147,16 @@ func (c *Client) WaitGetInfo(hash string) error  {
 }
 
 func (c *Client) DownloadBodiesSnapshot() error  {
-	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+BodiesSnapshotName)
+	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+ BodiesSnapshotName)
 	if err!=nil {
 		return err
 	}
 	t, new, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
-		Trackers:   Trackers,
+		Trackers:    Trackers,
 		InfoHash:    metainfo.NewHashFromHex(BlocksSnapshotHash),
 		DisplayName: BodiesSnapshotName,
 		ChunkSize:   DefaultChunkSizeDefaultChunkSize,
-		Storage: storage.NewFileWithCompletion(c.datadir+"/"+BodiesSnapshotName,pc),
+		Storage:     storage.NewFileWithCompletion(c.datadir+"/"+BodiesSnapshotName,pc),
 	})
 	peerID:=c.cli.PeerID()
 	fmt.Println(common.Bytes2Hex(peerID[:]),new)
@@ -190,18 +199,6 @@ func (c *Client) DownloadBodiesSnapshot() error  {
 	return nil
 }
 
-//only for mainnet
-const (
-	HeadersSnapshotName = "headers"
-	BodiesSnapshotName = "bodies"
-	StateSnapshotName = "state"
-	ReceiptsSnapshotName = "receipts"
-	//HeadersSnapshotHash = "ab00bf8bc8d159151b35a9c62c6a5c6512187829"
-	BlocksSnapshotHash = "0fc6f416651385df347fe05eefae1c26469585a2"
-	HeadersSnapshotHash = "7f50f7458715169d98e6dc2f02e2bf52098a3307" //11kk block 1mb block
-	//HeadersSnapshotHash = "420e1299b98d391b38a9caa849c4c574ca1d53b3" //11kk block 16k
-	//HeadersSnapshotHash = "f291a6986efbc5894840a0fd97e30c5dd38ba4c5"
-)
 
 
 //omplete!!!!!!!!!!!!!!!!!!

@@ -20,7 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"io"
 	"io/ioutil"
 	"math/big"

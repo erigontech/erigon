@@ -9,7 +9,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/torrent"
+	trnt "github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"os"
 	"os/signal"
 	"time"
@@ -49,7 +49,7 @@ func Seed(pathes []string) error {
 		fmt.Println("i", i)
 		mi := &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
-			CreatedBy: "turbogeth",
+			CreatedBy:    "turbogeth",
 			AnnounceList: trnt.Trackers,
 		}
 

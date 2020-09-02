@@ -7,8 +7,8 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/stretchr/testify/require"
 	"os"
 	"os/signal"
@@ -34,7 +34,7 @@ func TestTorrent(t *testing.T) {
 	kv:=ethdb.NewLMDB().Path(path+"/lmdb").MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
 	os.RemoveAll(path)
-	cli:=New(path, SnapshotMode{
+	cli:= New(path, SnapshotMode{
 		Headers: true,
 	}, true)
 	err:=cli.DownloadHeadersSnapshot(db)
@@ -47,7 +47,7 @@ func TestTorrentBodies(t *testing.T) {
 	path:=os.TempDir()+"/trnt_test2"
 	//os.RemoveAll(path)
 	//os.RemoveAll(path+"_pc")
-	cli:=New(path, SnapshotMode{
+	cli:= New(path, SnapshotMode{
 		Bodies: true,
 	}, true)
 	err:=cli.DownloadBodiesSnapshot()
@@ -69,8 +69,8 @@ func TestNameLeech(t *testing.T) {
 	}
 
 	tr, new, err:=leecher.AddTorrentSpec(&torrent.TorrentSpec{
-		Trackers: Trackers,
-		InfoHash: hash,
+		Trackers:    Trackers,
+		InfoHash:    hash,
 		DisplayName: "test",
 	})
 	if err!=nil {
@@ -175,7 +175,7 @@ func TestName(t *testing.T) {
 
 	time.Sleep(time.Second)
 	fmt.Println("make magnet+")
-	magnet:=makeMagnet(t, c, "/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir", "eln.zip")
+	magnet:= makeMagnet(t, c, "/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trndir", "eln.zip")
 	fmt.Println("make magnet-")
 	//mi := metainfo.MetaInfo{
 	//	//AnnounceList: builtinAnnounceList,
@@ -397,7 +397,7 @@ func makeMagnet(t *testing.T, cl *torrent.Client, dir string, name string) strin
 
 	mi := metainfo.MetaInfo{}
 	mi.SetDefaults()
-	mi.AnnounceList=builtinAnnounceList
+	mi.AnnounceList= builtinAnnounceList
 	info := metainfo.Info{PieceLength: 256 * 1024}
 	err := info.BuildFromFilePath(filepath.Join(dir, name))
 	require.NoError(t, err)

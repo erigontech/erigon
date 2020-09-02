@@ -17,7 +17,7 @@
 package eth
 
 import (
-	"github.com/ledgerwatch/turbo-geth/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"os/user"
@@ -122,8 +122,8 @@ type Config struct {
 	NoPrefetch    bool   // Whether to disable prefetching and only load state on demand
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
-	StorageMode ethdb.StorageMode
-	SnapshotMode torrent.SnapshotMode
+	StorageMode     ethdb.StorageMode
+	SnapshotMode    torrent.SnapshotMode
 	SnapshotSeeding bool
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply

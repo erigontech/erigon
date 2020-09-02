@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -561,7 +561,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	var snapshotOpts []ethdb.SnapshotUsageOpt
 	if n.config.SnapshotMode.Headers {
 		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
-			Path: n.config.ResolvePath(name+torrent.HeadersSnapshotName),
+			Path: n.config.ResolvePath(name+ torrent.HeadersSnapshotName),
 			ForBuckets: map[string]struct{}{
 				dbutils.HeaderPrefix: {},
 				dbutils.DatabaseInfoBucket: {},
@@ -570,7 +570,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	}
 	if n.config.SnapshotMode.Bodies {
 		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
-			Path: n.config.ResolvePath(name+torrent.BodiesSnapshotName),
+			Path: n.config.ResolvePath(name+ torrent.BodiesSnapshotName),
 			ForBuckets: map[string]struct{}{
 				dbutils.BlockBodyPrefix: {},
 				dbutils.DatabaseInfoBucket: {},
@@ -579,7 +579,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	}
 	if n.config.SnapshotMode.State {
 		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
-			Path: n.config.ResolvePath(name+torrent.StateSnapshotName),
+			Path: n.config.ResolvePath(name+ torrent.StateSnapshotName),
 			ForBuckets: map[string]struct{}{
 				dbutils.CurrentStateBucket: {},
 				dbutils.PlainStateBucket: {},
@@ -589,7 +589,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	}
 	if n.config.SnapshotMode.Receipts {
 		snapshotOpts=append(snapshotOpts, ethdb.SnapshotUsageOpt{
-			Path: n.config.ResolvePath(name+torrent.ReceiptsSnapshotName),
+			Path: n.config.ResolvePath(name+ torrent.ReceiptsSnapshotName),
 			ForBuckets: map[string]struct{}{
 				dbutils.BlockReceiptsPrefix: {},
 				dbutils.DatabaseInfoBucket: {},
