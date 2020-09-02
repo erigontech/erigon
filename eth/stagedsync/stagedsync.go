@@ -34,6 +34,7 @@ func (stagedSync *StagedSync) Prepare(
 	pid string,
 	storageMode ethdb.StorageMode,
 	datadir string,
+	hdd bool,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	txPool *core.TxPool,
@@ -101,7 +102,7 @@ func (stagedSync *StagedSync) Prepare(
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			ExecFunc: func(s *StageState, u Unwinder) error {
-				return SpawnExecuteBlocksStage(s, tx, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, storageMode.Receipts, changeSetHook)
+				return SpawnExecuteBlocksStage(s, tx, chainConfig, chainContext, vmConfig, 0 /* limit (meaning no limit) */, quitCh, storageMode.Receipts, hdd, changeSetHook)
 			},
 			UnwindFunc: func(u *UnwindState, s *StageState) error {
 				return UnwindExecutionStage(u, s, tx, storageMode.Receipts)

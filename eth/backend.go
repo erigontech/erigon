@@ -20,13 +20,14 @@ package eth
 import (
 	"errors"
 	"fmt"
-	ethereum "github.com/ledgerwatch/turbo-geth"
 	"math/big"
 	"os"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	ethereum "github.com/ledgerwatch/turbo-geth"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -118,7 +119,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		config.TrieDirtyCache = 0
 	}
-	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
 	// Assemble the Ethereum object
 	var chainDb *ethdb.ObjectDatabase
@@ -238,6 +238,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.protocolManager.SetDataDir(stack.Config().DataDir)
+	eth.protocolManager.SetHdd(config.Hdd)
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {
