@@ -104,7 +104,8 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.WebsocketEnabled {
+
+		if cfg.WebsocketEnabled && r.Method == "GET" {
 			wsHandler.ServeHTTP(w, r)
 		}
 		httpHandler.ServeHTTP(w, r)
