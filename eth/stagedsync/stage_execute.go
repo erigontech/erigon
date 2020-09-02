@@ -101,12 +101,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		block.Body().SendersToTxs(senders)
 
 		if warmup {
+			log.Info("Running a warmup...")
+			count := 0
 			if err := stateDB.Walk(dbutils.PlainStateBucket, nil, 0, func(_, _ []byte) (bool, error) {
+				count++
+				if count%1000000 == 0 {
+					log.Info("Warmed up", "M keys", count/1000000)
+				}
 				return true, nil
 			}); err != nil {
 				return err
 			}
 			warmup = false
+			log.Info("Warm up done.")
 		}
 
 		var stateReader state.StateReader
