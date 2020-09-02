@@ -69,11 +69,6 @@ type jsonWriter interface {
 
 type BlockNumber int64
 
-func NewRPCBlockNumber(n int) *BlockNumber {
-	num := BlockNumber(n)
-	return &num
-}
-
 const (
 	PendingBlockNumber  = BlockNumber(-2)
 	LatestBlockNumber   = BlockNumber(-1)
