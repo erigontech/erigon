@@ -34,8 +34,7 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 
 	cc := adapter.NewChainContext(db)
 	bc := adapter.NewBlockGetter(db)
-	genesisHash := rawdb.ReadBlockByNumber(db, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(db, genesisHash)
+	chainConfig := getChainConfig(db)
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, db.(ethdb.HasKV).KV(), hash, 0)
 	if err != nil {
 		return nil, err
@@ -124,10 +123,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		end := int64(latest)
 		if crit.ToBlock != nil {
 			end = crit.ToBlock.Int64()
-		}
-
-		if begin > end {
-			return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", begin, end)
 		}
 
 		filter = NewRangeFilter(begin, end, crit.Addresses, crit.Topics)
@@ -356,7 +351,8 @@ func (f *Filter) checkMatches(ctx context.Context, header *types.Header, api *AP
 	if len(logs) > 0 {
 		// We have matching logs, check if we need to resolve full logs via the light client
 		if logs[0].TxHash == (common.Hash{}) {
-			receipts := rawdb.ReadReceipts(api.dbReader, header.Hash(), header.Number.Uint64(), params.MainnetChainConfig)
+			chainConfig := getChainConfig(api.dbReader)
+			receipts := rawdb.ReadReceipts(api.dbReader, header.Hash(), header.Number.Uint64(), chainConfig)
 			unfiltered = unfiltered[:0]
 			for _, receipt := range receipts {
 				unfiltered = append(unfiltered, receipt.Logs...)
