@@ -55,9 +55,7 @@ type Program struct {
 }
 
 func (program *Program) GetCodeHex() string {
-	dst := make([]byte, hex.EncodedLen(len(program.Contract.Code)))
-	hex.Encode(dst, program.Contract.Code)
-	return fmt.Sprintf("%s", dst)
+	return hex.EncodeToString(program.Contract.Code)
 }
 
 func toProgram(contract *Contract) *Program {
