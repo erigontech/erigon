@@ -120,7 +120,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		chaindb:     chaindb,
 		peers:       newPeerSet(),
 		whitelist:   whitelist,
-		stagedSync:  stagedsync.New(),
+		stagedSync:  stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder()),
 		mode:        mode,
 		txsyncCh:    make(chan *txsync),
 		quitSync:    make(chan struct{}),
