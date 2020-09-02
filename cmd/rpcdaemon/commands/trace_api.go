@@ -50,7 +50,6 @@ func NewTraceAPI(db ethdb.KV, dbReader ethdb.Getter, maxTraces uint64) *TraceAPI
 func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
 	addrBytes := addr.Bytes()
 	ca := tx.Cursor(dbutils.AccountsHistoryBucket).Prefix(addrBytes)
-	cs := tx.Cursor(dbutils.StorageHistoryBucket).Prefix(addrBytes)
 	var blockNumbers []uint64
 
 	for k, v, err := ca.First(); k != nil; k, v, err = ca.Next() {
