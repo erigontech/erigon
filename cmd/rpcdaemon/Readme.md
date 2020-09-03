@@ -37,3 +37,5 @@ It should return something like this (depending on how far your turbo-geth node 
 ### For Developers
 
 **Code generation**: `go.mod` stores right version of generators, use `mage grpc` to install it and generate code.
+
+`protoc` version not managed but recommended version is 3.*, [install instruction](https://grpc.io/docs/protoc-installation/)
