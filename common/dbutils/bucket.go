@@ -108,6 +108,7 @@ var (
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
+	SnapshotInfoBucket = "SNINFO"
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = "DatabaseVersion"
@@ -222,6 +223,7 @@ var Buckets = []string{
 	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
+	SnapshotInfoBucket,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

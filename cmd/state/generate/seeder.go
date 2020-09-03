@@ -53,7 +53,7 @@ func Seed(pathes []string) error {
 			AnnounceList: trnt.Trackers,
 		}
 
-		info := metainfo.Info{PieceLength: 1024  * 1024}
+		info := metainfo.Info{PieceLength: trnt.DefaultChunkSize}
 		fmt.Println("BuildFromFilePath")
 		if _, err := os.Stat(v); os.IsNotExist(err) {
 			fmt.Println(err)
@@ -68,7 +68,14 @@ func Seed(pathes []string) error {
 		mi.InfoBytes, err = bencode.Marshal(info)
 		fmt.Println("AddTorrent")
 		fmt.Println("info", common.Bytes2Hex(mi.InfoBytes))
-		torrents[i],err = cl.AddTorrent(mi)
+
+		torrents[i],_,err = cl.AddTorrentSpec(&torrent.TorrentSpec{
+			Trackers:trnt.Trackers,
+			InfoHash: mi.HashInfoBytes(),
+			InfoBytes: mi.InfoBytes,
+			//DisplayName: mi.
+			ChunkSize: trnt.DefaultChunkSize,
+		})
 		if err!=nil {
 			return err
 		}

@@ -143,6 +143,22 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
+	fmt.Println("-------------------------------------------------------------")
+	fmt.Println(config.SyncMode, config.SnapshotMode.ToString(), config.NetworkID)
+	fmt.Println("-------------------------------------------------------------")
+	var torrentClient *torrent.Client
+	if config.SyncMode==downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID==params.MainnetChainConfig.ChainID.Uint64() {
+		//panic(stack.Config().ResolvePath("snapshots"))
+
+		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
+		err:=torrentClient.Run(chainDb)
+		if err!=nil {
+			return nil, err
+		}
+		panic(config.SnapshotMode.ToString())
+	}
+	_=torrentClient
+
 	//torrentCli:=torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
 	//t
 
@@ -283,14 +299,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, id)
 	}
-	fmt.Println("-------------------------------------------------------------")
-	fmt.Println(config.SyncMode, config.SnapshotMode.ToString(), config.NetworkID)
-	fmt.Println("-------------------------------------------------------------")
-	if config.SyncMode==downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID==params.MainnetChainConfig.ChainID.Uint64() {
-		panic(stack.Config().ResolvePath("snapshots"))
 
-		eth.torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
-	}
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())

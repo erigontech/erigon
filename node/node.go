@@ -601,10 +601,10 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 		db = ethdb.NewMemDatabase()
 	} else if n.config.Bolt {
 		log.Info("Opening Database (Bolt)")
-		db, err = ethdb.Open(n.config.ResolvePath(name + "_bolt"),snapshotOpts...)
+		db, err = ethdb.Open(n.config.ResolvePath(name + "_bolt"))
 	} else {
 		log.Info("Opening Database (LMDB)")
-		db, err = ethdb.Open(n.config.ResolvePath(name),snapshotOpts...)
+		db, err = ethdb.Open(n.config.ResolvePath(name))
 	}
 
 	if err != nil {

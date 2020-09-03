@@ -26,8 +26,26 @@ var (
 )
 
 
+func TestTorrentAddTorrent(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	path:=os.TempDir()+"/trnt_test3"
+	os.RemoveAll(path)
 
-func TestTorrent(t *testing.T) {
+	kv:=ethdb.NewLMDB().Path(path+"/lmdb").MustOpen()
+	db:=ethdb.NewObjectDatabase(kv)
+
+	cli:= New(path, SnapshotMode{
+		Headers: true,
+	}, true)
+	err:=cli.Run(db)
+	if err!=nil {
+		t.Fatal(err)
+	}
+}
+
+
+
+func   TestTorrent(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 
 	path:=os.TempDir()+"/trnt_test"
@@ -47,10 +65,12 @@ func TestTorrentBodies(t *testing.T) {
 	path:=os.TempDir()+"/trnt_test2"
 	//os.RemoveAll(path)
 	//os.RemoveAll(path+"_pc")
+	kv:=ethdb.NewLMDB().Path(path+"/lmdb").MustOpen()
+	db:=ethdb.NewObjectDatabase(kv)
 	cli:= New(path, SnapshotMode{
 		Bodies: true,
 	}, true)
-	err:=cli.DownloadBodiesSnapshot()
+	err:=cli.DownloadBodiesSnapshot(db)
 	if err!=nil {
 		t.Fatal(err)
 	}

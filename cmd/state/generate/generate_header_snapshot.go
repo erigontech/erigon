@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"time"
@@ -78,7 +79,7 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	}
 
 	//mi.AnnounceList=builtinAnnounceList
-	info := metainfo.Info{PieceLength: 256 * 1024}
+	info := metainfo.Info{PieceLength: torrent.DefaultChunkSize}
 	err = info.BuildFromFilePath(snapshotPath)
 	if err!=nil {
 		log.Warn("BuildFromFilePath", "err", err)
