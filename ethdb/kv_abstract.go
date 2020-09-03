@@ -70,6 +70,7 @@ type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+	BloomStatus() (uint64, uint64, common.Hash)
 }
 
 type DbProvider uint8
