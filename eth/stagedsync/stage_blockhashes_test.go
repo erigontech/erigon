@@ -25,7 +25,7 @@ func TestBlockHashStage(t *testing.T) {
 
 	_, _, err := InsertHeaderChain(db, headers, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)
-	err = SpawnBlockHashStage(&StageState{}, db, nil)
+	err = SpawnBlockHashStage(&StageState{}, db, "", nil)
 	assert.NoError(t, err)
 	for _, h := range headers {
 		n := rawdb.ReadHeaderNumber(db, h.Hash())
