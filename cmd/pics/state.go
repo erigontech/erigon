@@ -8,8 +8,10 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -73,7 +75,7 @@ func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
 	if err := f.Close(); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -104,7 +106,7 @@ func keyTape(t *trie.Trie, number int) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -112,22 +114,22 @@ func keyTape(t *trie.Trie, number int) error {
 }
 
 var bucketLabels = map[string]string{
-	dbutils.PreimagePrefix:              "Preimages",
-	dbutils.BlockReceiptsPrefix:         "Receipts",
-	dbutils.AccountsHistoryBucket:       "History of Accounts",
-	dbutils.HeaderPrefix:                "Headers",
-	dbutils.ConfigPrefix:                "Config",
+	dbutils.BlockReceiptsPrefix:   "Receipts",
+	dbutils.AccountsHistoryBucket: "History Of Accounts",
+	dbutils.HeaderPrefix:          "Headers",
+	//dbutils.ConfigPrefix:                "Config",
 	dbutils.BlockBodyPrefix:             "Block Bodies",
 	dbutils.HeaderNumberPrefix:          "Header Numbers",
 	dbutils.AccountChangeSetBucket:      "Account Change Sets",
 	dbutils.StorageChangeSetBucket:      "Storage Change Sets",
 	dbutils.CurrentStateBucket:          "Current State",
 	dbutils.TxLookupPrefix:              "Transaction Index",
-	dbutils.StorageHistoryBucket:        "History of Storage",
-	dbutils.CodeBucket:                  "Code of Contracts",
+	dbutils.StorageHistoryBucket:        "History Of Storage",
+	dbutils.CodeBucket:                  "Code Of Contracts",
 	dbutils.Senders:                     "Senders",
 	dbutils.SyncStageProgress:           "Sync Progress",
-	dbutils.PlainStateBucket:            "PlainState",
+	dbutils.PlainStateBucket:            "Plain State",
+	dbutils.CurrentStateBucket:          "Hashed State",
 	dbutils.IntermediateTrieHashBucket:  "Intermediate Hashes",
 	dbutils.SyncStageUnwind:             "Unwind",
 	dbutils.PlainAccountChangeSetBucket: "Account Changes",
@@ -154,7 +156,7 @@ func hexPalette() error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -175,7 +177,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 
 	if err = second.View(context.Background(), func(readTx ethdb.Tx) error {
 		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
-			for _, bucketName := range dbutils.Buckets {
+			for bucketName := range bucketLabels {
 				bucketName := bucketName
 				c := readTx.Cursor(bucketName)
 				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
@@ -199,7 +201,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 					var f1 *os.File
 					var ok bool
 					if f1, ok = perBucketFiles[bucketName]; !ok {
-						f1, err = os.Create(fmt.Sprintf("changes_%d_%s_%d.dot", number, bucketName, len(perBucketFiles)))
+						f1, err = os.Create(fmt.Sprintf("changes_%d_%s.dot", number, strings.ReplaceAll(bucketLabels[bucketName], " ", "")))
 						if err != nil {
 							return false, err
 						}
@@ -276,7 +278,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 	if err := f.Close(); err != nil {
 		return err
 	}
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -287,12 +289,16 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 		if err := f1.Close(); err != nil {
 			return err
 		}
-		cmd := exec.Command("dot", "-Tpng:gd", "-O", f1.Name())
+		cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("error: %v, output: %s\n", err, output)
 		}
 	}
 	return nil
+}
+
+func dot2png(dotFileName string) string {
+	return strings.TrimSuffix(dotFileName, filepath.Ext(dotFileName)) + ".png"
 }
 
 func initialState1() error {
